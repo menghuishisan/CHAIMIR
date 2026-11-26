@@ -1,13 +1,4 @@
-// sim service_preview 文件实现上架前的隔离预览任务:审核四项门禁中两项动态校验的唯一生产者。
-//
-// 为什么必须有这个任务:approve 要求 metadata_validation、static_scan、determinism_check、
-// worker_preview 四项全为 passed。前两项由上传流程写入,后两项只能由隔离容器执行后回写 ——
-// 没有生产者的话教师提交的包会永久停在待审,管理员点"通过并上架"必然被 41005 拒,
-// 而界面提示的"退回给作者修改"对作者是无从下手的:缺的两项不是作者能提供的东西。
-// 审核链路必须闭合,不允许只有门禁没有执行者(见 docs/04-仿真可视化引擎/06-业务流程与状态机.md §4)。
-//
-// 预览与生产运行共用同一套隔离设施:"跑起来看效果对不对"本身就需要一个能安全执行第三方代码
-// 的地方,那个地方就是容器,不为审核另建一套。
+// 仿真包的确定性校验与样例帧生产；预览和正式运行共用隔离设施。
 package sim
 
 import (
@@ -35,12 +26,16 @@ func (s *Service) RunPackagePreviewOnce(ctx context.Context) error {
 	if !ok || batchSize <= 0 {
 		return apperr.ErrSimPackageQueryFailed
 	}
+	leaseDuration := time.Duration(s.previewLeaseDurationMs) * time.Millisecond
+	if leaseDuration < 3*time.Second {
+		return apperr.ErrSimPackageQueryFailed
+	}
 	var pending []Package
 	leaseToken, err := pkgcrypto.RandomToken(48)
 	if err != nil {
 		return apperr.ErrSimPackageQueryFailed.WithCause(err)
 	}
-	leaseUntil := time.Now().Add(time.Duration(s.previewLeaseDurationMs) * time.Millisecond)
+	leaseUntil := time.Now().Add(leaseDuration)
 	maxAttempts, ok := intx.Int32(s.previewMaxAttempts)
 	if !ok || maxAttempts <= 0 {
 		return apperr.ErrSimPackageQueryFailed
@@ -61,11 +56,75 @@ func (s *Service) RunPackagePreviewOnce(ctx context.Context) error {
 		return err
 	}
 	for _, pkg := range pending {
-		if err := s.previewPackageOnce(ctx, pkg); err != nil {
+		if err := s.previewPackageWithLease(ctx, pkg, leaseDuration); err != nil {
 			logging.ErrorContext(ctx, "sim package preview failed", err.Error(), slog.Int64("package_id", pkg.ID), slog.String("code", pkg.Code), slog.String("version", pkg.Version))
 		}
 	}
 	return nil
+}
+
+// previewPackageWithLease 验证并持续续租后才启动可能创建长时隔离环境的预览。
+func (s *Service) previewPackageWithLease(ctx context.Context, pkg Package, leaseDuration time.Duration) error {
+	renewed, err := s.renewPreviewLease(ctx, pkg, leaseDuration)
+	if err != nil {
+		return apperr.ErrSimReviewStateInvalid.WithCause(err)
+	}
+	if !renewed {
+		return nil
+	}
+	executionCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan struct{})
+	lost := make(chan struct{}, 1)
+	go s.renewPreviewLeaseUntilDone(executionCtx, pkg, leaseDuration, done, lost, cancel)
+	err = s.previewPackageOnce(executionCtx, pkg)
+	close(done)
+	select {
+	case <-lost:
+		return nil
+	default:
+		return err
+	}
+}
+
+// renewPreviewLeaseUntilDone 按租约三分之一且最长 30 秒的周期续租。
+func (s *Service) renewPreviewLeaseUntilDone(ctx context.Context, pkg Package, leaseDuration time.Duration, done <-chan struct{}, lost chan<- struct{}, cancel context.CancelFunc) {
+	interval := max(time.Second, min(leaseDuration/3, 30*time.Second))
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			renewed, err := s.renewPreviewLease(ctx, pkg, leaseDuration)
+			if err == nil && renewed {
+				continue
+			}
+			if err != nil {
+				logging.ErrorContext(ctx, "sim package preview lease renewal failed", err.Error(), slog.Int64("package_id", pkg.ID), slog.String("code", pkg.Code), slog.String("version", pkg.Version))
+			}
+			select {
+			case lost <- struct{}{}:
+			default:
+			}
+			cancel()
+			return
+		}
+	}
+}
+
+// renewPreviewLease 仅允许当前令牌延长未过期的预览租约。
+func (s *Service) renewPreviewLease(ctx context.Context, pkg Package, leaseDuration time.Duration) (bool, error) {
+	var renewed bool
+	err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		renewed, err = tx.RenewPreviewLease(ctx, pkg.PreviewReviewID, pkg.ID, pkg.PreviewLeaseToken, time.Now().Add(leaseDuration))
+		return err
+	})
+	return renewed, err
 }
 
 // previewPackageOnce 对单个待审包执行隔离预览并回写报告。
@@ -77,11 +136,12 @@ func (s *Service) previewPackageOnce(ctx context.Context, pkg Package) error {
 	if adapter == nil {
 		return s.handlePreviewInfrastructureFailure(ctx, pkg, apperr.ErrSimBackendComputeUnavailable.WithCause(fmt.Errorf("仿真包 %s@%s 绑定的执行能力 %q 未注册", pkg.Code, pkg.Version, pkg.BackendAdapter)))
 	}
-	bundle, err := s.loadBundleForPreview(ctx, pkg)
+	runID := s.ids.Generate()
+	bundle, err := s.loadBundleForPreview(ctx, pkg, runID)
 	if err != nil {
 		return s.handlePreviewInfrastructureFailure(ctx, pkg, err)
 	}
-	result, previewErr := adapter.Preview(ctx, pkg, bundle, s.previewFrameCount)
+	result, previewErr := adapter.Preview(ctx, pkg, runID, bundle, s.previewFrameCount)
 	if previewErr != nil {
 		return s.handlePreviewInfrastructureFailure(ctx, pkg, previewErr)
 	}
@@ -159,11 +219,12 @@ func boundedValidationMessage(message string) string {
 }
 
 // loadBundleForPreview 取出待审包的归档正文,交隔离容器装配。
-func (s *Service) loadBundleForPreview(ctx context.Context, pkg Package) (*ExecutionBundle, error) {
+func (s *Service) loadBundleForPreview(ctx context.Context, pkg Package, runID int64) (*ExecutionBundle, error) {
 	return s.loadBundleForExecution(ctx, SessionWithPackage{
-		Session:    Session{ID: pkg.ID},
-		BundleKey:  pkg.BundleKey,
-		BundleHash: pkg.BundleHash,
-		Entry:      pkg.Entry,
+		Session:        Session{ID: runID},
+		BundleKey:      pkg.BundleKey,
+		BundleHash:     pkg.BundleHash,
+		Entry:          pkg.Entry,
+		BackendAdapter: pkg.BackendAdapter,
 	})
 }

@@ -1,4 +1,3 @@
-// sandbox service_runtime 文件实现运行时、镜像、工具和配额管理编排。
 package sandbox
 
 import (
@@ -33,23 +32,12 @@ func (s *Service) RegisterRuntime(ctx context.Context, req RuntimeRequest) (Runt
 	applyBuiltinCapabilityDefault(&req, spec)
 	var runtime Runtime
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		previous, previousErr := tx.GetRuntimeByCode(ctx, req.Code)
-		hasPrevious := previousErr == nil
-		if previousErr != nil && !errors.Is(previousErr, pgx.ErrNoRows) {
-			return apperr.ErrSandboxRuntimePersistFailed.WithCause(previousErr)
-		}
-		if hasPrevious {
-			// 注册接口按 code 幂等时仍锁定现有行,避免并发更新基于同一份旧自检状态互相覆盖。
-			previous, previousErr = tx.GetRuntimeByIDForUpdate(ctx, previous.ID)
-			if previousErr != nil {
-				return apperr.ErrSandboxRuntimePersistFailed.WithCause(previousErr)
-			}
-		}
-		selftestStatus, selftestDetail, executionChanged, err := runtimeStateForUpsert(previous, hasPrevious, &req, spec)
+		previous, err := tx.GetOrCreateRuntimeForUpdate(ctx, s.ids.Generate(), req, spec)
 		if err != nil {
 			return apperr.ErrSandboxRuntimePersistFailed.WithCause(err)
 		}
-		runtime, err = tx.UpsertRuntime(ctx, s.ids.Generate(), req, spec, selftestStatus, selftestDetail)
+		selftestStatus, selftestDetail, executionChanged := runtimeStateForUpdate(previous, &req, spec)
+		runtime, err = tx.UpdateRuntime(ctx, previous.ID, req, spec, selftestStatus, selftestDetail)
 		if err != nil {
 			return apperr.ErrSandboxRuntimePersistFailed.WithCause(err)
 		}
@@ -65,32 +53,18 @@ func (s *Service) RegisterRuntime(ctx context.Context, req RuntimeRequest) (Runt
 	return runtime, s.writeAuditFromContext(ctx, 0, "sandbox.runtime.upsert", "runtime", runtime.ID, map[string]any{"code": runtime.Code})
 }
 
-// runtimeStateForUpsert 只在实际执行契约变化时重置自检,展示字段更新不会破坏已验证状态。
-func runtimeStateForUpsert(previous Runtime, hasPrevious bool, req *RuntimeRequest, spec AdapterSpec) (int16, []byte, bool, error) {
-	if req == nil {
-		return 0, nil, false, fmt.Errorf("运行时请求不能为空")
-	}
-	if !hasPrevious {
-		if req.Status == 0 {
-			req.Status = RuntimeStatusOnboarding
-		}
-		return RuntimeSelftestPending, []byte(`{}`), false, nil
-	}
+func runtimeStateForUpdate(previous Runtime, req *RuntimeRequest, spec AdapterSpec) (int16, []byte, bool) {
 	executionChanged := runtimeExecutionContractChanged(previous, *req, spec)
 	if req.Status == 0 {
 		req.Status = previous.Status
 	}
 	if !executionChanged {
-		return previous.SelftestStatus, append([]byte(nil), previous.SelftestDetail...), false, nil
+		return previous.SelftestStatus, append([]byte(nil), previous.SelftestDetail...), false
 	}
 	if req.Status != RuntimeStatusDisabled {
 		req.Status = RuntimeStatusOnboarding
 	}
-	detail, err := jsonBytes(map[string]any{"result": "pending", "reason": "runtime_execution_contract_changed"})
-	if err != nil {
-		return 0, nil, false, err
-	}
-	return RuntimeSelftestPending, detail, true, nil
+	return RuntimeSelftestPending, []byte(`{"result":"pending","reason":"runtime_execution_contract_changed"}`), true
 }
 
 // runtimeExecutionContractChanged 比较会影响沙箱启动、链能力或工具兼容性的字段,名称和状态不属于执行契约。
@@ -124,11 +98,8 @@ func (s *Service) UpdateRuntime(ctx context.Context, runtimeID int64, req Runtim
 		if strings.TrimSpace(req.Code) != existing.Code {
 			return apperr.ErrSandboxRuntimeUpdateInvalid
 		}
-		selftestStatus, selftestDetail, executionChanged, err := runtimeStateForUpsert(existing, true, &req, spec)
-		if err != nil {
-			return apperr.ErrSandboxRuntimePersistFailed.WithCause(err)
-		}
-		runtime, err = tx.UpsertRuntime(ctx, runtimeID, req, spec, selftestStatus, selftestDetail)
+		selftestStatus, selftestDetail, executionChanged := runtimeStateForUpdate(existing, &req, spec)
+		runtime, err = tx.UpdateRuntime(ctx, runtimeID, req, spec, selftestStatus, selftestDetail)
 		if err != nil {
 			return apperr.ErrSandboxRuntimePersistFailed.WithCause(err)
 		}
@@ -213,7 +184,7 @@ func (s *Service) RegisterRuntimeImage(ctx context.Context, runtimeID int64, req
 	return image, s.writeAuditFromContext(ctx, 0, "sandbox.image.register", "runtime_image", image.ID, map[string]any{"image_url": image.ImageURL})
 }
 
-// DisableRuntimeImage 停用运行时镜像并删除预拉取 DaemonSet,避免停用镜像继续留在节点预拉取闭环。
+// DisableRuntimeImage 先撤销镜像准入和预拉取证明，再清理资源；清理失败可重试。
 func (s *Service) DisableRuntimeImage(ctx context.Context, runtimeID, imageID int64) (RuntimeImage, error) {
 	if runtimeID <= 0 || imageID <= 0 {
 		return RuntimeImage{}, apperr.ErrSandboxImageDisableParamInvalid
@@ -221,21 +192,11 @@ func (s *Service) DisableRuntimeImage(ctx context.Context, runtimeID, imageID in
 	var image RuntimeImage
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
-		image, err = tx.GetRuntimeImageByID(ctx, runtimeID, imageID)
+		image, err = tx.GetRuntimeImageByIDForUpdate(ctx, runtimeID, imageID)
 		if err != nil {
 			return apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
 		}
-		return nil
-	}); err != nil {
-		return RuntimeImage{}, err
-	}
-	if err := s.orchestrator.DeletePrepullDaemonSet(ctx, image); err != nil {
-		return RuntimeImage{}, apperr.ErrSandboxImageDisableFailed.WithCause(err)
-	}
-	var disabled RuntimeImage
-	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		var err error
-		disabled, err = tx.DisableRuntimeImage(ctx, runtimeID, imageID)
+		image, err = tx.DisableRuntimeImage(ctx, runtimeID, imageID)
 		if err != nil {
 			return apperr.ErrSandboxImageDisableFailed.WithCause(err)
 		}
@@ -246,7 +207,14 @@ func (s *Service) DisableRuntimeImage(ctx context.Context, runtimeID, imageID in
 	}); err != nil {
 		return RuntimeImage{}, err
 	}
-	return disabled, s.writeAuditFromContext(ctx, 0, "sandbox.image.disable", "runtime_image", imageID, map[string]any{"runtime_id": runtimeID})
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+	defer cancel()
+	cleanupErr := s.orchestrator.DeletePrepullDaemonSet(cleanupCtx, image)
+	auditErr := s.writeAuditFromContext(cleanupCtx, 0, "sandbox.image.disable", "runtime_image", imageID, map[string]any{"runtime_id": runtimeID})
+	if err := errors.Join(cleanupErr, auditErr); err != nil {
+		return RuntimeImage{}, apperr.ErrSandboxImageDisableFailed.WithCause(err)
+	}
+	return image, nil
 }
 
 // ListRuntimeImages 查询指定运行时的镜像版本列表。
@@ -277,7 +245,7 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 		return RuntimeSelftestResponse{}, apperr.ErrSandboxSelftestRecycleConfigInvalid
 	}
 	attemptID := ids.Format(s.ids.Generate())
-	startingDetail, err := jsonBytes(map[string]any{"result": "running", "stage": "selftest", "attempt_id": attemptID})
+	startingDetail, err := jsonBytes(runtimeSelftestStoredDetail{Result: "running", Stage: "selftest", AttemptID: attemptID})
 	if err != nil {
 		return RuntimeSelftestResponse{}, apperr.ErrSandboxSelftestFailed.WithCause(err)
 	}
@@ -289,7 +257,7 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 		if txErr != nil {
 			return apperr.ErrSandboxRuntimeNotFound.WithCause(txErr)
 		}
-		if !canRunRuntimeSelftest(runtime.Status) {
+		if !canPrepareRuntime(runtime.Status) {
 			return apperr.ErrSandboxRuntimeUnavailable
 		}
 		images, listErr := tx.ListRuntimeImages(ctx, runtimeID)
@@ -301,6 +269,16 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 		if !selected {
 			return apperr.ErrSandboxRuntimeUnavailable
 		}
+		image, txErr = tx.GetRuntimeImageByIDForUpdate(ctx, runtimeID, image.ID)
+		if txErr != nil {
+			return apperr.ErrSandboxRuntimeImageNotFound.WithCause(txErr)
+		}
+		if image.Status != RuntimeImageStatusAvailable {
+			return apperr.ErrSandboxRuntimeUnavailable
+		}
+		if err := validatePlanImagesCurrentlyAdmitted(s.cfg, runtime, image, nil, nil); err != nil {
+			return err
+		}
 		_, txErr = tx.StartRuntimeSelftest(ctx, runtimeID, startingDetail)
 		if txErr != nil {
 			return apperr.ErrSandboxSelftestFailed.WithCause(txErr)
@@ -309,8 +287,8 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 	}); err != nil {
 		return RuntimeSelftestResponse{}, err
 	}
-	// 自检计划沿用正式沙箱的实例化 Pod 拓扑,确保 workspace、链动作和私有侧车的执行目标与实际 Pod 名一致。
-	runtime.AdapterSpec = MaterializeRuntimeTopology(runtime.Code, runtime.AdapterSpec)
+	instance := boundedSandboxName(runtime.Code, 63)
+	runtime.AdapterSpec = MaterializeRuntimeTopology(instance, runtime.AdapterSpec)
 	selftestID := s.ids.Generate()
 	sb := Sandbox{
 		ID:             selftestID,
@@ -320,7 +298,7 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 		Status:         SandboxStatusCreating,
 		OwnerAccountID: 0,
 	}
-	plan := CreateSandboxPlan{Sandbox: sb, WorkspaceRuntimeInstance: runtime.Code, Runtimes: []RuntimePlan{{InstanceCode: runtime.Code, Runtime: runtime, Image: image}}}
+	plan := CreateSandboxPlan{Sandbox: sb, WorkspaceRuntimeInstance: instance, Runtimes: []RuntimePlan{{InstanceCode: instance, Runtime: runtime, Image: image}}}
 	ctx = logging.WithAttrs(ctx, slog.Int64("runtime_id", runtimeID), slog.Int64("sandbox_id", sb.ID), slog.String("namespace", sb.Namespace), slog.String("attempt_id", attemptID))
 	operationCtx, operationCancel := asyncPersistenceContext(ctx, timeDurationSeconds(s.cfg.SelftestTimeoutSeconds))
 	defer operationCancel()
@@ -342,7 +320,13 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 		}
 		return nil
 	}
-	err = runStage("prepare", "", 0, func() error { return s.orchestrator.CreateSandboxResources(operationCtx, plan) })
+	err = runStage("prepare", "", 0, func() error {
+		archives, err := s.prepareRuntimeInitArchives(operationCtx, sb, plan.Runtimes)
+		if err != nil {
+			return err
+		}
+		return s.orchestrator.CreateSandboxResources(operationCtx, plan, archives)
+	})
 	if err == nil {
 		// 私有执行目标必须真实支持清理命令,不能用旧工作区镜像的普通自检代替。
 		err = runStage("workspace", workspaceExecTarget(runtime), 0, func() error { return s.cleanWorkspaceBeforeAccess(operationCtx, sb, runtime) })
@@ -367,8 +351,7 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 		err = runStage("capability", runtimeExecTarget(runtime), 0, func() error { return s.runRuntimeCapabilitySelftest(operationCtx, plan) })
 	}
 	operationCancel()
-	cleanupBase := logging.WithAttrs(context.WithoutCancel(ctx), logging.AttrsFromContext(ctx)...)
-	cleanupCtx, cleanupCancel := context.WithTimeout(cleanupBase, timeDurationSeconds(s.cfg.SelftestRecycleTimeoutSeconds))
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), timeDurationSeconds(s.cfg.SelftestRecycleTimeoutSeconds))
 	defer cleanupCancel()
 	cleanupStarted := time.Now()
 	cleanupErr := s.orchestrator.DestroySandboxResources(cleanupCtx, sb)
@@ -384,44 +367,42 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 		}
 		err = errors.Join(err, fmt.Errorf("回收运行时自检资源失败: %w", cleanupErr))
 	}
-	status, runtimeStatus := runtimeSelftestStatuses(runtime, err)
-	detail, encodeErr := jsonBytes(map[string]any{"result": "passed", "attempt_id": attemptID})
-	if encodeErr != nil {
-		return RuntimeSelftestResponse{}, apperr.ErrSandboxSelftestFailed.WithCause(encodeErr)
-	}
-	if err == nil && runtimeStatus == RuntimeStatusOnboarding {
-		detail, encodeErr = jsonBytes(map[string]any{
-			"result":     "passed",
-			"stage":      "node-selftest",
-			"reason":     "运行时节点可启动,但尚未声明平台标准链能力",
-			"attempt_id": attemptID,
-		})
-		if encodeErr != nil {
-			return RuntimeSelftestResponse{}, apperr.ErrSandboxSelftestFailed.WithCause(encodeErr)
-		}
-	}
-	if err != nil {
-		logging.ErrorContext(operationCtx, "sandbox runtime selftest failed", apperr.ErrSandboxSelftestFailed.WithCause(err).LogString(), slog.Int64("tenant_id", 0), slog.Int64("runtime_id", runtimeID), slog.Int64("sandbox_id", sb.ID), slog.String("namespace", sb.Namespace))
-		detail, encodeErr = jsonBytes(map[string]any{"result": "failed", "stage": failureStage, "trace_id": traceIDFromLogContext(operationCtx), "attempt_id": attemptID})
-		if encodeErr != nil {
-			return RuntimeSelftestResponse{}, apperr.ErrSandboxSelftestFailed.WithCause(encodeErr)
-		}
-	}
+	status, runtimeStatus := RuntimeSelftestPassed, RuntimeStatusAvailable
 	persistCtx, persistCancel := asyncPersistenceContext(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
 	defer persistCancel()
 	var updated Runtime
 	persistStarted := time.Now()
 	updateErr := s.store.PlatformTx(persistCtx, func(ctx context.Context, tx TxStore) error {
-		var finishErr error
-		updated, finishErr = tx.FinishRuntimeSelftest(ctx, runtimeID, attemptID, status, runtimeStatus, detail)
-		if finishErr != nil {
-			return apperr.ErrSandboxSelftestFailed.WithCause(finishErr)
+		// 与启动和运行时更新保持同一锁序，镜像停用不能与通过结论交错提交。
+		if _, lockErr := tx.GetRuntimeByIDForUpdate(ctx, runtimeID); lockErr != nil {
+			return lockErr
 		}
-		return nil
+		currentImage, lockErr := tx.GetRuntimeImageByIDForUpdate(ctx, runtimeID, image.ID)
+		if lockErr != nil {
+			return lockErr
+		}
+		if currentImage.Status != RuntimeImageStatusAvailable {
+			if err == nil {
+				failureStage = "prepare"
+			}
+			err = errors.Join(err, apperr.ErrSandboxRuntimeUnavailable)
+		}
+		detail := runtimeSelftestStoredDetail{Result: "passed", AttemptID: attemptID}
+		if err != nil {
+			status, runtimeStatus = RuntimeSelftestFailed, RuntimeStatusOnboarding
+			detail.Result, detail.Stage, detail.TraceID = "failed", failureStage, response.TraceFromContext(ctx)
+			logging.ErrorContext(ctx, "sandbox runtime selftest failed", apperr.ErrSandboxSelftestFailed.WithCause(err).LogString(), slog.Int64("tenant_id", 0))
+		}
+		rawDetail, encodeErr := jsonBytes(detail)
+		if encodeErr != nil {
+			return encodeErr
+		}
+		updated, lockErr = tx.FinishRuntimeSelftest(ctx, runtimeID, attemptID, status, runtimeStatus, rawDetail)
+		return lockErr
 	})
 	logPlatformSelftestStage(persistCtx, "persist", persistStarted, updateErr)
 	if updateErr != nil {
-		return RuntimeSelftestResponse{}, updateErr
+		return RuntimeSelftestResponse{}, apperr.ErrSandboxSelftestFailed.WithCause(errors.Join(err, updateErr))
 	}
 	if auditErr := s.writeAuditFromContext(persistCtx, 0, "sandbox.runtime.selftest", "runtime", runtimeID, map[string]any{"status": status, "attempt_id": attemptID}); auditErr != nil {
 		return RuntimeSelftestResponse{}, auditErr
@@ -466,16 +447,7 @@ func runtimeSelftestCommands(runtime Runtime) []struct {
 	}
 }
 
-// runtimeSelftestStatuses 只根据基础工作负载自检结果决定运行时是否可部署；原生链动作由 adapter_level 单独控制。
-func runtimeSelftestStatuses(runtime Runtime, selftestErr error) (int16, int16) {
-	if selftestErr != nil {
-		return RuntimeSelftestFailed, RuntimeStatusOnboarding
-	}
-	return RuntimeSelftestPassed, RuntimeStatusAvailable
-}
-
-// selectRuntimeSelftestImage 选择已启用且有不可变证明的版本;创世状态由运行时自己的启动契约处理,
-// 不能把仅适用于少数预烘焙 runtime 的 genesis_baked 字段当成所有 runtime 的自检门禁。
+// 创世状态由各运行时的启动契约处理，不以 genesis_baked 作为通用自检门禁。
 func selectRuntimeSelftestImage(images []RuntimeImage) (RuntimeImage, bool) {
 	for _, image := range images {
 		if image.Status != RuntimeImageStatusAvailable {
@@ -486,19 +458,9 @@ func selectRuntimeSelftestImage(images []RuntimeImage) (RuntimeImage, bool) {
 	return RuntimeImage{}, false
 }
 
-// canRunRuntimeSelftest 只允许接入中或已可用运行时执行自检,停用状态不能被旧自检重新启用。
-func canRunRuntimeSelftest(status int16) bool {
+// canPrepareRuntime 只允许接入中或已可用运行时准备镜像、执行接入自检。
+func canPrepareRuntime(status int16) bool {
 	return status == RuntimeStatusOnboarding || status == RuntimeStatusAvailable
-}
-
-// traceIDFromLogContext 从统一日志上下文读取 trace_id,用于持久状态只暴露报障编号。
-func traceIDFromLogContext(ctx context.Context) string {
-	for _, attr := range logging.AttrsFromContext(ctx) {
-		if attr.Key == "trace_id" {
-			return attr.Value.String()
-		}
-	}
-	return ""
 }
 
 // runtimeSelftestStoredDetail 描述服务端持久化的自检明细,并发写回字段不能下发给平台界面。
@@ -525,7 +487,7 @@ func runtimeSelftestPublicDetail(raw json.RawMessage) (RuntimeSelftestDetail, er
 	}, nil
 }
 
-// runRuntimeCapabilitySelftest 用标准 L2 能力执行 reset/deploy/query/reset 自检闭环。
+// runRuntimeCapabilitySelftest 验证原生部署、可选交易、查询及重置后的能力恢复。
 func (s *Service) runRuntimeCapabilitySelftest(ctx context.Context, plan CreateSandboxPlan) error {
 	sb, runtime := plan.Sandbox, workspaceRuntimeForPlan(plan)
 	if runtime.AdapterLevel < RuntimeAdapterLevelStandard && strings.TrimSpace(runtime.CapabilityImpl) == "" && strings.TrimSpace(runtime.PluginRef) == "" {
@@ -559,7 +521,7 @@ func (s *Service) runRuntimeCapabilitySelftest(ctx context.Context, plan CreateS
 	if _, err := cap.Query(ctx, sb, runtime, strings.TrimSpace(target)); err != nil {
 		return err
 	}
-	return s.resetRuntimeForPlan(ctx, plan, cap)
+	return s.resetRuntimeForPlan(ctx, plan, plan.WorkspaceRuntimeInstance, cap)
 }
 
 // waitRuntimeCapabilityReady 在既有 Pod 就绪窗口内等待声明的只读查询能力，
@@ -595,13 +557,36 @@ func (s *Service) waitRuntimeCapabilityReady(ctx context.Context, cap ChainCapab
 	}
 }
 
-// resetRuntimeForPlan 根据运行时契约选择控制面重建或生态原生 reset 命令。
-func (s *Service) resetRuntimeForPlan(ctx context.Context, plan CreateSandboxPlan, cap ChainCapability) error {
-	runtime := workspaceRuntimeForPlan(plan)
-	if strings.TrimSpace(runtime.AdapterSpec.CapabilityCommands.ResetStrategy) == "recreate_runtime" {
-		return s.orchestrator.ResetSandboxRuntime(ctx, plan)
+func (s *Service) resetRuntimeForPlan(ctx context.Context, plan CreateSandboxPlan, instance string, cap ChainCapability) error {
+	selected, ok := plan.RuntimeInstance(instance)
+	if !ok {
+		return apperr.ErrSandboxContractRequestInvalid
 	}
-	return cap.Reset(ctx, plan.Sandbox, runtime)
+	runtime := selected.Runtime
+	target, ok := runtime.AdapterSpec.Selftest["query_target"].(string)
+	if !ok || strings.TrimSpace(target) == "" {
+		return apperr.ErrSandboxSelftestSpecInvalid
+	}
+	if s.cfg.ReadyTimeoutSeconds <= 0 || s.cfg.ReadyPollIntervalSeconds <= 0 || s.cfg.ChainRPCTimeoutSeconds <= 0 {
+		return apperr.ErrSandboxSelftestRecycleConfigInvalid
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(runtime.AdapterSpec.CapabilityCommands.ResetStrategy) == "recreate_runtime" {
+		archives, err := s.prepareRuntimeInitArchives(ctx, plan.Sandbox, []RuntimePlan{selected})
+		if err != nil {
+			return err
+		}
+		if err := s.orchestrator.ResetSandboxRuntime(ctx, plan, selected.InstanceCode, archives); err != nil {
+			return err
+		}
+	} else if err := cap.Reset(ctx, plan.Sandbox, runtime); err != nil {
+		return err
+	}
+	return s.waitRuntimeCapabilityReady(ctx, cap, plan.Sandbox, runtime, strings.TrimSpace(target))
 }
 
 // GetRuntimeSelftest 查询运行时接入即测结果。
@@ -627,7 +612,7 @@ func (s *Service) GetRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 	return RuntimeSelftestResponse{RuntimeID: ids.ID(runtime.ID), SelftestStatus: runtime.SelftestStatus, RuntimeStatus: runtime.Status, Detail: publicDetail}, nil
 }
 
-// PrepullRuntimeImage 按已发布组合摘要触发闭包预拉取并以真实节点状态更新数据库。
+// PrepullRuntimeImage 按冻结组合摘要触发闭包预拉取并以真实节点状态更新数据库。
 func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID int64, compositionDigest string) (PrepullResponse, error) {
 	return s.prepullRuntimeImage(ctx, runtimeID, imageID, compositionDigest, false)
 }
@@ -641,7 +626,6 @@ func (s *Service) prepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 		return PrepullResponse{}, apperr.ErrSandboxImagePrepullParamInvalid
 	}
 	attemptID := ids.Format(s.ids.Generate())
-	var runtime Runtime
 	var image RuntimeImage
 	var snapshot contracts.SandboxCompositionSnapshot
 	var prepullSpecs []PrepullImageSpec
@@ -654,11 +638,7 @@ func (s *Service) prepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 		if err != nil {
 			return apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
 		}
-		runtime, err = tx.GetRuntimeByID(ctx, runtimeID)
-		if err != nil {
-			return apperr.ErrSandboxRuntimeNotFound.WithCause(err)
-		}
-		rawSnapshot, err := tx.GetPublishedCompositionSnapshot(ctx, compositionDigest)
+		rawSnapshot, err := tx.GetCompositionSnapshot(ctx, compositionDigest)
 		if err != nil {
 			return apperr.ErrSandboxImagePrepullParamInvalid.WithCause(err)
 		}
@@ -669,18 +649,18 @@ func (s *Service) prepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 		if err != nil || canonicalDigest != compositionDigest {
 			return apperr.ErrSandboxImagePrepullParamInvalid
 		}
+		if _, err := s.loadSnapshotPlan(ctx, tx, snapshot, false); err != nil {
+			return err
+		}
 		matched := false
 		for _, frozen := range snapshot.Runtimes {
-			if frozen.RuntimeID == runtimeID && frozen.ImageID == imageID && frozen.ImageURL == image.ImageURL && frozen.ImageVersion == image.Version {
+			if frozen.RuntimeID == runtimeID && frozen.ImageID == imageID {
 				matched = true
 				break
 			}
 		}
 		if !matched {
 			return apperr.ErrSandboxRuntimeImageNotFound
-		}
-		if !canPrepullRuntime(runtime.Status) || image.Status != RuntimeImageStatusAvailable {
-			return apperr.ErrSandboxRuntimeUnavailable
 		}
 		prepullSpecs, err = prepullImageSpecsForSnapshot(snapshot)
 		if err != nil {
@@ -741,23 +721,42 @@ func (s *Service) prepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 		status = ImagePrepullFailed
 		logging.ErrorContext(operationCtx, "sandbox image prepull failed", logging.SanitizeError(err.Error()), slog.Int64("tenant_id", 0), slog.Int64("runtime_id", runtimeID), slog.Int64("image_id", imageID), slog.String("daemonset", result.DaemonSet), slog.String("attempt_id", attemptID))
 	}
-	stage := "succeeded"
-	if err != nil {
-		stage = "failed"
-	}
-	detail, encodeErr := prepullAttemptDetail(stage, attemptID, result, imageURLs, err)
-	if encodeErr != nil {
-		return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(encodeErr)
-	}
 	// 执行超时也必须能回写失败；持久化仍受该尝试的原始总截止时间约束。
 	persistCtx, persistCancel := context.WithDeadline(context.WithoutCancel(ctx), attempt.StartedAt.Add(timeDurationSeconds(s.cfg.PrepullTimeoutSeconds)+timeDurationSeconds(s.cfg.ReadyTimeoutSeconds)))
 	defer persistCancel()
+	imageDisabled := false
 	if updateErr := s.store.PlatformTx(persistCtx, func(ctx context.Context, tx TxStore) error {
+		current, readErr := tx.GetRuntimeImageByIDForUpdate(ctx, runtimeID, imageID)
+		if readErr != nil {
+			return readErr
+		}
+		imageDisabled = current.Status == RuntimeImageStatusDisabled
+		if imageDisabled {
+			return apperr.ErrSandboxRuntimeUnavailable
+		}
+		if _, admissionErr := s.loadSnapshotPlan(ctx, tx, snapshot, false); admissionErr != nil {
+			err = errors.Join(err, admissionErr)
+			status = ImagePrepullFailed
+			logging.ErrorContext(ctx, "sandbox composition admission revoked during prepull", apperr.ErrSandboxImagePrepullFailed.WithCause(admissionErr).LogString(), slog.Int64("runtime_id", runtimeID), slog.Int64("image_id", imageID), slog.String("composition_digest", compositionDigest))
+		}
+		stage := "succeeded"
+		if err != nil {
+			stage = "failed"
+		}
+		detail, encodeErr := prepullAttemptDetail(stage, attemptID, result, imageURLs, err)
+		if encodeErr != nil {
+			return encodeErr
+		}
 		var updateErr error
 		attempt, updateErr = tx.FinishCompositionPrepull(ctx, imageID, compositionDigest, attemptID, status, result.DaemonSet, result.DesiredNodes, result.ReadyNodes, detail)
 		return updateErr
 	}); updateErr != nil {
-		return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(errors.Join(err, updateErr))
+		var cleanupErr error
+		if imageDisabled {
+			// 停用禁止新尝试；旧执行者可能在停用清理后才完成 K8s 创建。
+			cleanupErr = s.orchestrator.DeletePrepullDaemonSet(persistCtx, image)
+		}
+		return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(errors.Join(err, updateErr, cleanupErr))
 	}
 	if auditErr := s.auditCompositionPrepull(persistCtx, runtimeID, attempt, systemAudit, false); auditErr != nil {
 		return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(errors.Join(err, auditErr))
@@ -816,16 +815,29 @@ func (s *Service) auditCompositionPrepull(ctx context.Context, runtimeID int64, 
 	return s.writeAuditFromContext(ctx, 0, "sandbox.image.prepull", "runtime_image", attempt.RuntimeImageID, detail)
 }
 
-// PrepullPlatformComposition 为最终平台组合的全部 runtime 镜像建立真实预拉取证明。
-// 预拉取输入只读取已发布组合快照,不会重新从当前工具目录推导闭包。
-func (s *Service) PrepullPlatformComposition(ctx context.Context, compositionDigest string) error {
+// PrepareCompositions 按冻结摘要准备完整镜像闭包,重复摘要只执行一次。
+func (s *Service) PrepareCompositions(ctx context.Context, compositionDigests []string) error {
+	digests, err := uniqueCompositionDigests(compositionDigests)
+	if err != nil {
+		return apperr.ErrSandboxImagePrepullParamInvalid.WithCause(err)
+	}
+	for _, digest := range digests {
+		if err := s.prepullComposition(ctx, digest); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// prepullComposition 只从冻结快照重建闭包,不读取当前工具目录。
+func (s *Service) prepullComposition(ctx context.Context, compositionDigest string) error {
 	compositionDigest = strings.TrimSpace(compositionDigest)
 	if compositionDigest == "" {
 		return apperr.ErrSandboxImagePrepullParamInvalid
 	}
 	var snapshot contracts.SandboxCompositionSnapshot
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		raw, err := tx.GetPublishedCompositionSnapshot(ctx, compositionDigest)
+		raw, err := tx.GetCompositionSnapshot(ctx, compositionDigest)
 		if err != nil {
 			return apperr.ErrSandboxImagePrepullParamInvalid.WithCause(err)
 		}
@@ -857,6 +869,24 @@ func (s *Service) PrepullPlatformComposition(ctx context.Context, compositionDig
 	return nil
 }
 
+// uniqueCompositionDigests trims and deduplicates a batch while preserving its first-seen order.
+func uniqueCompositionDigests(values []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		digest := strings.TrimSpace(value)
+		if digest == "" {
+			return nil, fmt.Errorf("组合摘要不能为空")
+		}
+		if _, exists := seen[digest]; exists {
+			continue
+		}
+		seen[digest] = struct{}{}
+		unique = append(unique, digest)
+	}
+	return unique, nil
+}
+
 // prepullAttemptDetail 统一记录一次预拉取尝试的闭包、节点状态与脱敏失败原因。
 func prepullAttemptDetail(stage, attemptID string, result PrepullResult, imageURLs []string, cause error) ([]byte, error) {
 	detail := map[string]any{
@@ -874,67 +904,20 @@ func prepullAttemptDetail(stage, attemptID string, result PrepullResult, imageUR
 	return jsonBytes(detail)
 }
 
-// canPrepullRuntime 判断运行时是否允许进入镜像预拉取阶段。
-// 接入中的运行时必须先完成预拉取才能执行首次自检,已可用运行时允许刷新镜像,停用运行时禁止继续准备。
-func canPrepullRuntime(status int16) bool {
-	return status == RuntimeStatusOnboarding || status == RuntimeStatusAvailable
-}
-
-// prepullSpecCollector 按镜像、自检命令与常驻用途去重,保证真实预拉取与变更比较使用同一套闭包规则。
-type prepullSpecCollector struct {
-	seen  map[string]int
-	specs []PrepullImageSpec
-}
-
-// newPrepullSpecCollector 创建保持声明顺序的预拉取集合收集器。
-func newPrepullSpecCollector(capacity int) *prepullSpecCollector {
-	return &prepullSpecCollector{seen: make(map[string]int), specs: make([]PrepullImageSpec, 0, capacity)}
-}
-
-// add 合并同镜像、同命令、同用途的临时目录,并要求每个真实镜像都带受控自检命令。
-func (c *prepullSpecCollector) add(imageURL string, command []string, hold bool, mounts []workload.EphemeralMountSpec) error {
-	imageURL = strings.TrimSpace(imageURL)
-	if imageURL == "" {
-		return nil
-	}
-	command = compactCommand(command)
-	if len(command) == 0 {
-		return fmt.Errorf("预拉取镜像 %s 缺少自检命令", imageURL)
-	}
-	key := prepullImageSpecKey(imageURL, command, hold)
-	if index, exists := c.seen[key]; exists {
-		c.specs[index].EphemeralMounts = mergePrepullEphemeralMounts(c.specs[index].EphemeralMounts, mounts)
-		return nil
-	}
-	c.seen[key] = len(c.specs)
-	c.specs = append(c.specs, PrepullImageSpec{
-		ImageURL:        imageURL,
-		Command:         command,
-		Hold:            hold,
-		EphemeralMounts: mergePrepullEphemeralMounts(nil, mounts),
-	})
-	return nil
-}
-
 // prepullImageSpecsForSnapshot 从不可变组合快照重建预拉取闭包,不读取当前工具目录,避免发布后目录变化污染运行环境。
 func prepullImageSpecsForSnapshot(snapshot contracts.SandboxCompositionSnapshot) ([]PrepullImageSpec, error) {
-	collector := newPrepullSpecCollector(len(snapshot.Runtimes) + len(snapshot.Components) + len(snapshot.PrivateSidecars))
+	specs := make([]PrepullImageSpec, 0, len(snapshot.Runtimes)+len(snapshot.Components)+len(snapshot.PrivateSidecars))
 	for _, frozen := range snapshot.Runtimes {
 		var adapter AdapterSpec
 		if err := jsonx.DecodeStrictKnownFields(frozen.AdapterSpec, &adapter); err != nil {
 			return nil, fmt.Errorf("运行时 %s 适配器快照无效: %w", frozen.InstanceCode, err)
 		}
 		runtime := Runtime{Code: frozen.Code, Eco: frozen.Eco, AdapterSpec: adapter}
-		image := RuntimeImage{ID: frozen.ImageID, RuntimeID: frozen.RuntimeID, ImageURL: frozen.ImageURL, Version: frozen.ImageVersion, Status: RuntimeImageStatusAvailable, GenesisBaked: true}
-		runtimeSpecs, err := prepull.RuntimeImageSpecs(image.ImageURL, runtimePrepullDefinition(runtime))
+		runtimeSpecs, err := prepull.RuntimeImageSpecs(frozen.ImageURL, runtimePrepullDefinition(runtime))
 		if err != nil {
 			return nil, err
 		}
-		for _, spec := range runtimeSpecs {
-			if err := collector.add(spec.ImageURL, spec.Command, spec.Hold, spec.EphemeralMounts); err != nil {
-				return nil, err
-			}
-		}
+		specs = append(specs, runtimeSpecs...)
 	}
 	for _, component := range snapshot.Components {
 		var resourceSpec ToolResourceSpec
@@ -942,51 +925,37 @@ func prepullImageSpecsForSnapshot(snapshot contracts.SandboxCompositionSnapshot)
 			return nil, fmt.Errorf("组件 %s 工作负载快照无效: %w", component.Code, err)
 		}
 		for _, workloadComponent := range resourceSpec.Components {
-			command := workloadComponent.PrepullCommand
-			if len(command) == 0 {
-				command = resourceSpec.PrepullCommand
-			}
-			if err := collector.add(workloadComponent.ImageURL, command, workloadComponent.PrepullHold, workloadComponent.EphemeralMounts); err != nil {
-				return nil, err
-			}
+			specs = append(specs, PrepullImageSpec{ImageURL: workloadComponent.ImageURL, Command: workloadComponent.PrepullCommand, Hold: workloadComponent.PrepullHold, EphemeralMounts: workloadComponent.EphemeralMounts})
 		}
 	}
 	for _, sidecar := range snapshot.PrivateSidecars {
-		if err := collector.add(sidecar.ImageURL, sidecar.PrepullCommand, sidecar.PrepullHold, privateSidecarEphemeralMounts(sidecar.EphemeralMounts)); err != nil {
-			return nil, fmt.Errorf("判题私有 sidecar %s 预拉取声明无效: %w", sidecar.Name, err)
-		}
+		specs = append(specs, PrepullImageSpec{ImageURL: sidecar.ImageURL, Command: sidecar.PrepullCommand, Hold: sidecar.PrepullHold, EphemeralMounts: privateSidecarEphemeralMounts(sidecar.EphemeralMounts)})
+	}
+	specs, err := prepull.Collect(specs)
+	if err != nil {
+		return nil, err
 	}
 	expectedSpecs := make([]PrepullImageSpec, 0, len(snapshot.ImageClosure))
-	closureURLs := make(map[string]struct{}, len(snapshot.ImageClosure))
 	for _, item := range snapshot.ImageClosure {
 		url := strings.TrimSpace(item.ImageURL)
 		if url == "" {
 			return nil, fmt.Errorf("组合闭包包含空镜像地址")
 		}
-		if len(compactCommand(item.PrepullCommand)) == 0 {
-			return nil, fmt.Errorf("组合闭包镜像 %s 缺少预拉取命令", url)
-		}
-		closureURLs[url] = struct{}{}
 		mounts := make([]workload.EphemeralMountSpec, 0, len(item.EphemeralMounts))
 		for _, mount := range item.EphemeralMounts {
 			mounts = append(mounts, workload.EphemeralMountSpec{Name: mount.Name, MountPath: mount.MountPath})
 		}
 		expectedSpecs = append(expectedSpecs, PrepullImageSpec{ImageURL: url, Command: item.PrepullCommand, Hold: item.PrepullHold, EphemeralMounts: mounts})
 	}
-	if !equivalentPrepullSpecs(collector.specs, expectedSpecs) {
+	expectedSpecs, err = prepull.Collect(expectedSpecs)
+	if err != nil {
+		return nil, err
+	}
+	if !prepull.Equivalent(specs, expectedSpecs) {
 		return nil, fmt.Errorf("组合闭包中的预拉取命令、保持用途或临时挂载与工作负载不一致")
 	}
-	actualURLs := prepullImageURLs(collector.specs)
-	if len(closureURLs) != len(actualURLs) {
-		return nil, fmt.Errorf("组合镜像闭包与适配器工作负载不一致")
-	}
-	for _, url := range actualURLs {
-		if _, ok := closureURLs[url]; !ok {
-			return nil, fmt.Errorf("组合闭包缺少工作负载镜像 %s", url)
-		}
-	}
 	holdCount := 0
-	for _, spec := range collector.specs {
+	for _, spec := range specs {
 		if spec.Hold {
 			holdCount++
 		}
@@ -994,7 +963,7 @@ func prepullImageSpecsForSnapshot(snapshot contracts.SandboxCompositionSnapshot)
 	if holdCount != 1 {
 		return nil, fmt.Errorf("组合预拉取闭包必须且只能包含一个保持容器,实际为 %d 个", holdCount)
 	}
-	return collector.specs, nil
+	return specs, nil
 }
 
 // privateSidecarEphemeralMounts 将跨模块判题 sidecar 的临时目录投影为预拉取声明。
@@ -1022,45 +991,6 @@ func runtimePrepullDefinition(runtime Runtime) prepull.RuntimeDefinition {
 	}
 }
 
-// equivalentPrepullSpecs 忽略声明顺序比较闭包;镜像、命令、常驻用途和挂载内容仍必须完全一致。
-func equivalentPrepullSpecs(left, right []PrepullImageSpec) bool {
-	return prepull.Equivalent(left, right)
-}
-
-// prepullImageSpecKey 保持同镜像在不同自检命令和常驻用途下独立去重。
-func prepullImageSpecKey(imageURL string, command []string, hold bool) string {
-	return fmt.Sprintf("%s\x00%s\x00%t", imageURL, strings.Join(compactCommand(command), "\x00"), hold)
-}
-
-// mergePrepullEphemeralMounts 合并同镜像声明的预拉取临时目录,保留 manifest 首次出现顺序。
-func mergePrepullEphemeralMounts(base, extra []workload.EphemeralMountSpec) []workload.EphemeralMountSpec {
-	if len(base) == 0 && len(extra) == 0 {
-		return nil
-	}
-	var out []workload.EphemeralMountSpec
-	seen := map[string]struct{}{}
-	add := func(mount workload.EphemeralMountSpec) {
-		name := strings.TrimSpace(mount.Name)
-		mountPath := strings.TrimSpace(mount.MountPath)
-		if name == "" || mountPath == "" {
-			return
-		}
-		key := name + "\x00" + mountPath
-		if _, exists := seen[key]; exists {
-			return
-		}
-		seen[key] = struct{}{}
-		out = append(out, workload.EphemeralMountSpec{Name: name, MountPath: mountPath})
-	}
-	for _, mount := range base {
-		add(mount)
-	}
-	for _, mount := range extra {
-		add(mount)
-	}
-	return out
-}
-
 // prepullImageURLs 提取预拉取响应和审计使用的不可变镜像 URL 列表。
 func prepullImageURLs(specs []PrepullImageSpec) []string {
 	out := make([]string, 0, len(specs))
@@ -1075,17 +1005,6 @@ func prepullImageURLs(specs []PrepullImageSpec) []string {
 		}
 		seen[imageURL] = struct{}{}
 		out = append(out, imageURL)
-	}
-	return out
-}
-
-// compactCommand 清理命令数组中的空白,保持 manifest 声明顺序。
-func compactCommand(command []string) []string {
-	out := make([]string, 0, len(command))
-	for _, part := range command {
-		if trimmed := strings.TrimSpace(part); trimmed != "" {
-			out = append(out, trimmed)
-		}
 	}
 	return out
 }
@@ -1128,17 +1047,15 @@ func (s *Service) RegisterTool(ctx context.Context, req ToolRequest) (Tool, erro
 	}
 	var tool Tool
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		previous, previousErr := tx.GetToolByCode(ctx, req.Code)
-		hasPrevious := previousErr == nil
-		if previousErr != nil && !errors.Is(previousErr, pgx.ErrNoRows) {
-			return apperr.ErrSandboxToolPersistFailed.WithCause(previousErr)
-		}
-		var err error
-		tool, err = tx.UpsertTool(ctx, s.ids.Generate(), req, spec)
+		previous, err := tx.GetOrCreateToolForUpdate(ctx, s.ids.Generate(), req, spec)
 		if err != nil {
 			return apperr.ErrSandboxToolPersistFailed.WithCause(err)
 		}
-		if err := invalidateToolAffectedRuntimePrepull(ctx, tx, previous, hasPrevious, tool); err != nil {
+		tool, err = tx.UpdateTool(ctx, previous.ID, req, spec)
+		if err != nil {
+			return apperr.ErrSandboxToolPersistFailed.WithCause(err)
+		}
+		if err := invalidateToolAffectedRuntimePrepull(ctx, tx, previous, tool); err != nil {
 			return apperr.ErrSandboxToolPersistFailed.WithCause(err)
 		}
 		return nil
@@ -1148,12 +1065,12 @@ func (s *Service) RegisterTool(ctx context.Context, req ToolRequest) (Tool, erro
 	return tool, s.writeAuditFromContext(ctx, 0, "sandbox.tool.upsert", "tool", tool.ID, map[string]any{"code": tool.Code})
 }
 
-// invalidateToolAffectedRuntimePrepull 工具执行契约变化会影响所有引用它的已发布组合,统一撤销各运行时的组合证明。
-func invalidateToolAffectedRuntimePrepull(ctx context.Context, tx TxStore, previous Tool, hasPrevious bool, current Tool) error {
+// invalidateToolAffectedRuntimePrepull 工具执行契约变化会影响所有引用它的冻结组合,统一撤销各运行时的组合证明。
+func invalidateToolAffectedRuntimePrepull(ctx context.Context, tx TxStore, previous, current Tool) error {
 	if !toolHasPrepullWorkload(previous) && !toolHasPrepullWorkload(current) {
 		return nil
 	}
-	if hasPrevious && previous.Kind == current.Kind && previous.Status == current.Status && reflect.DeepEqual(previous.ResourceSpec, current.ResourceSpec) {
+	if previous.Kind == current.Kind && previous.Status == current.Status && reflect.DeepEqual(previous.ResourceSpec, current.ResourceSpec) {
 		return nil
 	}
 	runtimes, err := tx.ListRuntimes(ctx)
@@ -1178,7 +1095,7 @@ func toolHasPrepullWorkload(tool Tool) bool {
 	return false
 }
 
-// invalidateRuntimePrepull 写入可审计的失效原因并统一把运行时镜像版本重置为待预拉取。
+// invalidateRuntimePrepull 撤销运行时自身镜像及引用它的组合证明，保留失效原因。
 func invalidateRuntimePrepull(ctx context.Context, tx TxStore, runtimeID int64, reason, subject string) error {
 	detail, err := jsonBytes(map[string]any{
 		"stage":   "invalidated",
@@ -1251,7 +1168,7 @@ func (s *Service) UpsertQuota(ctx context.Context, quota TenantQuota) (TenantQuo
 
 // applyBuiltinCapabilityDefault 为声明式 L2 命令运行时补齐内置能力实现键,避免 capability_impl 与清单重复配置。
 func applyBuiltinCapabilityDefault(req *RuntimeRequest, spec AdapterSpec) {
-	if req == nil || strings.TrimSpace(req.CapabilityImpl) != "" || strings.TrimSpace(req.PluginRef) != "" {
+	if req == nil || runtimeCapabilityKey(req.AdapterLevel, req.CapabilityImpl, req.PluginRef) != "" {
 		return
 	}
 	if hasCapabilityCommands(spec.CapabilityCommands) {

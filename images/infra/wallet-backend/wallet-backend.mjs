@@ -7,8 +7,9 @@ import Fastify from "fastify";
 
 const port = requiredPositiveInteger("CHAIMIR_IMAGE_PORT");
 const httpTimeoutSeconds = requiredPositiveInteger("CHAIMIR_HTTP_TIMEOUT_SECONDS");
-const sessionSecret = requireConfig("CHAIMIR_WALLET_SESSION_SECRET", process.env.CHAIMIR_WALLET_SESSION_SECRET);
+const sessionSecret = requiredSecret("CHAIMIR_WALLET_SESSION_SECRET");
 const maxSkewSeconds = requiredPositiveInteger("CHAIMIR_IMAGE_SERVICE_AUTH_MAX_SKEW_SECONDS");
+const maxNonces = requiredPositiveInteger("CHAIMIR_IMAGE_SERVICE_AUTH_MAX_NONCES");
 const bodyLimit = requiredPositiveInteger("CHAIMIR_MAX_BODY_BYTES");
 const challengeTtlSeconds = requiredPositiveInteger("CHAIMIR_WALLET_CHALLENGE_TTL_SECONDS");
 const maxChallenges = requiredPositiveInteger("CHAIMIR_WALLET_MAX_CHALLENGES");
@@ -25,7 +26,13 @@ function requireConfig(name, value) {
 
 function requiredPositiveInteger(name) {
   const value = Number(requireConfig(name, process.env[name]));
-  if (!Number.isInteger(value) || value <= 0) throw new Error(`${name} must be a positive integer`);
+  if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${name} must be a positive safe integer`);
+  return value;
+}
+
+function requiredSecret(name) {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required`);
   return value;
 }
 
@@ -61,14 +68,10 @@ function pruneExpired(now) {
     }
   }
   for (const [nonce, timestamp] of seenNonces.entries()) {
-    if (Math.abs(now - timestamp) > maxSkewSeconds) {
+    if (now - timestamp > maxSkewSeconds) {
       seenNonces.delete(nonce);
       changed = true;
     }
-  }
-  while (seenNonces.size > 4096) {
-    seenNonces.delete(seenNonces.keys().next().value);
-    changed = true;
   }
   return changed;
 }
@@ -83,7 +86,7 @@ function stateDocument() {
 }
 
 async function persistState() {
-  persistQueue = persistQueue.then(async () => {
+  const write = async () => {
     const parent = statePath.slice(0, statePath.lastIndexOf("/"));
     await fs.mkdir(parent, { recursive: true, mode: 0o700 });
     const temporaryPath = `${statePath}.${process.pid}.${crypto.randomBytes(8).toString("hex")}.tmp`;
@@ -91,10 +94,15 @@ async function persistState() {
       await fs.writeFile(temporaryPath, JSON.stringify(stateDocument()), { encoding: "utf8", mode: 0o600 });
       await fs.rename(temporaryPath, statePath);
     } catch (error) {
-      await fs.rm(temporaryPath, { force: true }).catch(() => {});
+      try {
+        await fs.rm(temporaryPath, { force: true });
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], "wallet state write and cleanup failed");
+      }
       throw error;
     }
-  });
+  };
+  persistQueue = persistQueue.then(write, write);
   return persistQueue;
 }
 
@@ -105,9 +113,9 @@ function validateState(value) {
     if (!allowedDomains.has(record.domain) || ethers.getAddress(record.address) !== record.address || record.expiresAt <= record.issuedAt || record.challenge.length > 4096) throw new Error("wallet challenge state is invalid");
   }
   for (const item of value.service_nonces) {
-    if (!item || typeof item.nonce !== "string" || item.nonce.length < 16 || !Number.isInteger(item.timestamp)) throw new Error("wallet service nonce state is invalid");
+    if (!item || typeof item.nonce !== "string" || !/^[A-Za-z0-9_-]{16,128}$/.test(item.nonce) || !Number.isSafeInteger(item.timestamp)) throw new Error("wallet service nonce state is invalid");
   }
-  if (value.challenges.length > maxChallenges || value.service_nonces.length > 4096) throw new Error("wallet state capacity exceeded");
+  if (value.challenges.length > maxChallenges || value.service_nonces.length > maxNonces) throw new Error("wallet state capacity exceeded");
 }
 
 async function loadState() {
@@ -133,13 +141,13 @@ async function verifyServiceSignature(request, reply) {
   const nonce = String(request.headers["x-chaimir-nonce"] || "");
   const signature = String(request.headers["x-chaimir-signature"] || "");
   const now = Math.floor(Date.now() / 1000);
-  const changed = pruneExpired(now);
-  if (changed) await persistState();
-  if (!Number.isInteger(timestamp) || Math.abs(now - timestamp) > maxSkewSeconds || !nonce || seenNonces.has(nonce)) return reply.code(401).send({ error: "unauthorized" });
+  pruneExpired(now);
+  if (!Number.isSafeInteger(timestamp) || Math.abs(now - timestamp) > maxSkewSeconds || !/^[A-Za-z0-9_-]{16,128}$/.test(nonce) || seenNonces.has(nonce)) return reply.code(401).send({ error: "unauthorized" });
   const bodyHash = crypto.createHash("sha256").update(JSON.stringify(request.body ?? null)).digest("hex");
   const canonical = [request.method, request.url, timestamp, nonce, bodyHash].join("\n");
   const expected = crypto.createHmac("sha256", sessionSecret).update(canonical).digest("hex");
   if (!timingSafeEqualHex(signature, expected)) return reply.code(401).send({ error: "unauthorized" });
+  if (seenNonces.size >= maxNonces) return reply.code(503).send({ error: "authentication_capacity_exceeded" });
   seenNonces.set(nonce, timestamp);
   await persistState();
 }

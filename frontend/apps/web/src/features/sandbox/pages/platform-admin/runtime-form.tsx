@@ -1,6 +1,6 @@
 // 运行时登记表单：用字段级控件编辑受控声明，页面不接收或解析原始 JSON。
 
-import { useCallback, useId, useMemo, useState } from 'react'
+import { useId, useState } from 'react'
 import {
   RuntimeAdapterLevel,
   RuntimeStatus,
@@ -28,7 +28,15 @@ import {
 import { api } from '../../../../app/api'
 import { FormGroup } from '../../../../components/FormGroup'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
+import { CommandArgvFields } from '../../components/CommandArgvFields'
 import { runtimeStatusLabel } from '../../../../utils/labels/sandbox'
+import {
+  stringArray,
+  numberText,
+  recordOrEmpty,
+  stringValue,
+  validCommand,
+} from '../../dynamicSpec'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import {
   RuntimeContainerAccessFields,
@@ -82,6 +90,7 @@ const WORKSPACE_OP_LABELS: Record<WorkspaceOpKey, string> = {
 }
 
 interface PortState {
+  clientId: string
   name: string
   containerPort: string
   servicePort: string
@@ -89,6 +98,7 @@ interface PortState {
   raw?: Record<string, unknown>
 }
 interface SidecarState {
+  clientId: string
   name: string
   imageUrl: string
   prepullCommand: string[]
@@ -98,6 +108,7 @@ interface SidecarState {
   raw?: Record<string, unknown>
 }
 interface VolumeState {
+  clientId: string
   name: string
   mountPath: string
   studentAccess: string
@@ -127,13 +138,11 @@ interface FormSpec {
   capabilities: Record<'deploy' | 'tx' | 'query' | 'reset', CapabilityState>
 }
 
-/** emptyWorkspaceOps 工作区各项操作的空命令,每项先留一行空输入 */
 const emptyWorkspaceOps = (): Record<WorkspaceOpKey, string[]> =>
   Object.fromEntries(WORKSPACE_OP_KEYS.map((key) => [key, ['']])) as Record<
     WorkspaceOpKey,
     string[]
   >
-/** emptyCapabilities 链能力(部署、交易等)的空声明 */
 const emptyCapabilities = (): FormSpec['capabilities'] => ({
   deploy: { execTarget: '', command: [''], timeout: '' },
   tx: { execTarget: '', command: [''], timeout: '' },
@@ -141,45 +150,22 @@ const emptyCapabilities = (): FormSpec['capabilities'] => ({
   reset: { execTarget: '', command: [''], timeout: '' },
 })
 
-/** componentRecord 把未知值读成对象,不是对象时给空对象 */
-function componentRecord(value: unknown): Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {}
-}
-
-/** stringValue 文字原样读出,其余为空串 */
-function stringValue(value: unknown): string {
-  return typeof value === 'string' ? value : ''
-}
-/** numberText 有限数值写成文字,其余为空串(回填数字输入框用) */
-function numberText(value: unknown): string {
-  return typeof value === 'number' && Number.isFinite(value) ? String(value) : ''
-}
-/** commandText 只保留命令数组里的文字参数 */
-function commandText(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === 'string')
-    : []
-}
-
-/** readFormSpec 从运行时声明恢复字段,保留未编辑的完整声明。 */
 function readFormSpec(runtime?: SandboxRuntime): FormSpec {
-  const spec = componentRecord(runtime?.adapter_spec)
-  const container = componentRecord(spec.runtime_container)
+  const spec = recordOrEmpty(runtime?.adapter_spec)
+  const container = recordOrEmpty(spec.runtime_container)
   const ports = Array.isArray(container.ports) ? container.ports : []
   const sidecars = Array.isArray(spec.infra_sidecars) ? spec.infra_sidecars : []
   const volumes = Array.isArray(spec.volume_domains) ? spec.volume_domains : []
-  const ops = componentRecord(spec.workspace_ops)
-  const capability = componentRecord(spec.capability_commands)
+  const ops = recordOrEmpty(spec.workspace_ops)
+  const capability = recordOrEmpty(spec.capability_commands)
   const workspaceOps = emptyWorkspaceOps()
-  for (const key of WORKSPACE_OP_KEYS) workspaceOps[key] = commandText(ops[key])
+  for (const key of WORKSPACE_OP_KEYS) workspaceOps[key] = stringArray(ops[key])
   const capabilities = emptyCapabilities()
   for (const key of ['deploy', 'tx', 'query', 'reset'] as const) {
-    const item = componentRecord(capability[key])
+    const item = recordOrEmpty(capability[key])
     capabilities[key] = {
       execTarget: stringValue(item.exec_target),
-      command: commandText(item.command),
+      command: stringArray(item.command),
       timeout: numberText(item.timeout_seconds),
     }
   }
@@ -190,8 +176,9 @@ function readFormSpec(runtime?: SandboxRuntime): FormSpec {
     imageUrl: stringValue(container.image_url),
     containerAccess: readRuntimeContainerAccess(container),
     ports: ports.map((item) => {
-      const port = componentRecord(item)
+      const port = recordOrEmpty(item)
       return {
+        clientId: crypto.randomUUID(),
         name: stringValue(port.name),
         containerPort: numberText(port.container_port),
         servicePort: numberText(port.service_port),
@@ -200,20 +187,22 @@ function readFormSpec(runtime?: SandboxRuntime): FormSpec {
       }
     }),
     sidecars: sidecars.map((item) => {
-      const sidecar = componentRecord(item)
+      const sidecar = recordOrEmpty(item)
       return {
+        clientId: crypto.randomUUID(),
         name: stringValue(sidecar.name),
         imageUrl: stringValue(sidecar.image_url),
-        prepullCommand: commandText(sidecar.prepull_command),
+        prepullCommand: stringArray(sidecar.prepull_command),
         prepullHold: sidecar.prepull_hold === true,
-        command: commandText(sidecar.command),
+        command: stringArray(sidecar.command),
         access: readRuntimeContainerAccess(sidecar),
         raw: sidecar,
       }
     }),
     volumes: volumes.map((item) => {
-      const volume = componentRecord(item)
+      const volume = recordOrEmpty(item)
       return {
+        clientId: crypto.randomUUID(),
         name: stringValue(volume.name),
         mountPath: stringValue(volume.mount_path),
         studentAccess: stringValue(volume.student_access),
@@ -226,58 +215,51 @@ function readFormSpec(runtime?: SandboxRuntime): FormSpec {
     workspaceExecTarget: stringValue(ops.exec_target),
     scriptExecTarget: stringValue(ops.script_exec_target),
     privateArchive: {
-      execTarget: stringValue(componentRecord(spec.private_archive_ops).exec_target),
-      unpackTar: commandText(componentRecord(spec.private_archive_ops).unpack_tar),
+      execTarget: stringValue(recordOrEmpty(spec.private_archive_ops).exec_target),
+      unpackTar: stringArray(recordOrEmpty(spec.private_archive_ops).unpack_tar),
     },
     resetStrategy: stringValue(capability.reset_strategy),
     capabilities,
   }
 }
 
-/** buildAdapterSpec 将当前输入写回唯一服务端契约,不丢失私有执行与隔离配置。 */
 function buildAdapterSpec(form: FormSpec): SandboxAdapterSpec {
   return {
     ...form.baseSpec,
     workspace_dir: form.workspaceDir.trim(),
     runtime_container: {
-      ...componentRecord(form.baseSpec.runtime_container),
+      ...recordOrEmpty(form.baseSpec.runtime_container),
       ...runtimeContainerAccessFields(
-        componentRecord(form.baseSpec.runtime_container),
+        recordOrEmpty(form.baseSpec.runtime_container),
         form.containerAccess
       ),
       name: form.containerName.trim(),
       image_url: form.imageUrl.trim(),
-      ports: form.ports
-        .filter((port) => port.name.trim() !== '')
-        .map((port) => ({
-          ...port.raw,
-          name: port.name.trim(),
-          container_port: Number(port.containerPort),
-          service_port: Number(port.servicePort),
-          protocol: port.protocol.trim() || 'TCP',
-        })),
+      ports: form.ports.map((port) => ({
+        ...port.raw,
+        name: port.name.trim(),
+        container_port: Number(port.containerPort),
+        service_port: Number(port.servicePort),
+        protocol: port.protocol.trim() || 'TCP',
+      })),
     },
-    infra_sidecars: form.sidecars
-      .filter((sidecar) => sidecar.name.trim() !== '')
-      .map((sidecar) => ({
-        ...sidecar.raw,
-        ...runtimeContainerAccessFields(sidecar.raw ?? {}, sidecar.access),
-        name: sidecar.name.trim(),
-        image_url: sidecar.imageUrl.trim(),
-        prepull_command: sidecar.prepullCommand,
-        prepull_hold: sidecar.prepullHold,
-        command: sidecar.command,
-      })),
-    volume_domains: form.volumes
-      .filter((volume) => volume.name.trim() !== '')
-      .map((volume) => ({
-        ...volume.raw,
-        name: volume.name.trim(),
-        mount_path: volume.mountPath.trim(),
-        student_access: volume.studentAccess.trim(),
-        persistence: volume.persistence.trim(),
-        snapshot_scope: volume.snapshotScope.trim(),
-      })),
+    infra_sidecars: form.sidecars.map((sidecar) => ({
+      ...sidecar.raw,
+      ...runtimeContainerAccessFields(sidecar.raw ?? {}, sidecar.access),
+      name: sidecar.name.trim(),
+      image_url: sidecar.imageUrl.trim(),
+      prepull_command: sidecar.prepullCommand,
+      prepull_hold: sidecar.prepullHold,
+      command: sidecar.command,
+    })),
+    volume_domains: form.volumes.map((volume) => ({
+      ...volume.raw,
+      name: volume.name.trim(),
+      mount_path: volume.mountPath.trim(),
+      student_access: volume.studentAccess.trim(),
+      persistence: volume.persistence.trim(),
+      snapshot_scope: volume.snapshotScope.trim(),
+    })),
     workspace_ops: {
       ...Object.fromEntries(WORKSPACE_OP_KEYS.map((key) => [key, form.workspaceOps[key]])),
       exec_target: form.workspaceExecTarget.trim(),
@@ -317,7 +299,6 @@ export interface RuntimeFormModalProps {
   onSaved: () => void
 }
 
-/** RuntimeFormModal 编辑运行时基本信息和后端校验所需的结构化声明字段。 */
 export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModalProps) {
   const fieldId = useId()
   const editing = runtime !== undefined
@@ -338,144 +319,143 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
           : RuntimeStatus.ONBOARDING
     )
   )
-  const [form, setForm] = useState<FormSpec>(() => readFormSpec(runtime))
+  // 保留打开时的编辑基线；展示字段修改不得重写执行声明、撤销自检。
+  const [initialForm] = useState(() => readFormSpec(runtime))
+  const [form, setForm] = useState(initialForm)
   const [formError, setFormError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
-  const parsed = useMemo(() => buildAdapterSpec(form), [form])
+  const updateForm = <K extends keyof FormSpec>(key: K, value: FormSpec[K]) =>
+    setForm((current) => ({ ...current, [key]: value }))
+  const updateOp = (key: WorkspaceOpKey, value: string[]) =>
+    setForm((current) => ({
+      ...current,
+      workspaceOps: { ...current.workspaceOps, [key]: value },
+    }))
+  const updateCapability = (
+    key: keyof FormSpec['capabilities'],
+    field: keyof CapabilityState,
+    value: string | string[]
+  ) =>
+    setForm((current) => ({
+      ...current,
+      capabilities: {
+        ...current.capabilities,
+        [key]: { ...current.capabilities[key], [field]: value },
+      },
+    }))
 
-  const updateForm = useCallback(
-    <K extends keyof FormSpec>(key: K, value: FormSpec[K]) =>
-      setForm((current) => ({ ...current, [key]: value })),
-    []
-  )
-  const updateOp = useCallback(
-    (key: WorkspaceOpKey, value: string[]) =>
-      setForm((current) => ({
-        ...current,
-        workspaceOps: { ...current.workspaceOps, [key]: value },
-      })),
-    []
-  )
-  const updateCapability = useCallback(
-    (key: keyof FormSpec['capabilities'], field: keyof CapabilityState, value: string | string[]) =>
-      setForm((current) => ({
-        ...current,
-        capabilities: {
-          ...current.capabilities,
-          [key]: { ...current.capabilities[key], [field]: value },
-        },
-      })),
-    []
-  )
+  const capabilityKey =
+    Number(adapterLevel) === RuntimeAdapterLevel.PLUGIN ? pluginRef.trim() : capabilityImpl.trim()
+  const needsCapabilityCommands =
+    capabilityKey === 'sandbox-exec' ||
+    (Number(adapterLevel) === RuntimeAdapterLevel.STANDARD && capabilityKey === '')
 
-  const { errors, validate } = useFormValidation(
-    useCallback(() => {
-      const next: Record<string, string | null> = {
-        code: CODE_PATTERN.test(code.trim()) ? null : '短名只能使用小写字母、数字和连字符。',
-        name: name.trim() === '' ? '请输入运行时名称。' : null,
-        eco: eco.trim() === '' ? '请输入所属生态。' : null,
-        workspaceDir: form.workspaceDir.startsWith('/')
-          ? null
-          : '工作区目录必须是环境内的绝对路径。',
-        container: form.containerName.trim() === '' ? '请填写主环境名称。' : null,
-        containerAccess: validRuntimeContainerAccess(form.containerAccess)
-          ? null
-          : '请检查主环境的数据域与临时目录。',
-        ports: form.ports.some(
+  const { errors, validate } = useFormValidation(() => {
+    const next: Record<string, string | null> = {
+      code: CODE_PATTERN.test(code.trim()) ? null : '短名只能使用小写字母、数字和连字符。',
+      name: name.trim() === '' ? '请输入运行时名称。' : null,
+      eco: eco.trim() === '' ? '请输入所属生态。' : null,
+      workspaceDir: form.workspaceDir.startsWith('/') ? null : '工作区目录必须是环境内的绝对路径。',
+      container: form.containerName.trim() === '' ? '请填写主环境名称。' : null,
+      containerAccess: validRuntimeContainerAccess(form.containerAccess)
+        ? null
+        : '请检查主环境的数据域与临时目录。',
+      volumes: form.volumes.every(
+        (volume) =>
+          volume.name.trim() !== '' &&
+          volume.mountPath.trim().startsWith('/') &&
+          volume.studentAccess !== '' &&
+          volume.persistence !== '' &&
+          volume.snapshotScope !== '' &&
+          (volume.persistence !== 'object_storage_code' || volume.name.trim() === 'workspace') &&
+          (volume.persistence !== 'snapshot' || volume.snapshotScope !== 'never')
+      )
+        ? null
+        : '请补齐卷域名称、绝对路径和保存选项。代码归档仅用于工作区；快照保留须选择纳入快照。',
+      ports:
+        form.ports.length > 0 &&
+        form.ports.every(
           (port) =>
             port.name.trim() !== '' &&
             Number(port.containerPort) > 0 &&
             Number(port.servicePort) > 0
         )
           ? null
-          : '请至少填写一个有效端口。',
-        sidecars:
-          form.sidecars.every(
-            (sidecar) =>
-              sidecar.name.trim() !== '' &&
-              sidecar.imageUrl.trim() !== '' &&
-              validRuntimeContainerAccess(sidecar.access) &&
-              sidecar.prepullCommand.some((item) => item.trim() !== '')
-          ) && form.sidecars.filter((sidecar) => sidecar.prepullHold).length === 1
-            ? null
-            : '附加组件必须填写名称、镜像和预拉取命令,并且只能选择一个保持容器。',
-        workspaceOps:
-          EXEC_TARGET_PATTERN.test(form.workspaceExecTarget.trim()) &&
-          EXEC_TARGET_PATTERN.test(form.scriptExecTarget.trim()) &&
-          form.workspaceExecTarget.trim() !== form.scriptExecTarget.trim() &&
-          WORKSPACE_OP_KEYS.every((key) =>
-            form.workspaceOps[key].some((item) => item.trim() !== '')
+          : '请完整填写每个端口的名称、容器端口和服务端口。',
+      sidecars:
+        form.sidecars.every(
+          (sidecar) =>
+            sidecar.name.trim() !== '' &&
+            sidecar.imageUrl.trim() !== '' &&
+            validRuntimeContainerAccess(sidecar.access) &&
+            validCommand(sidecar.prepullCommand)
+        ) && form.sidecars.filter((sidecar) => sidecar.prepullHold).length === 1
+          ? null
+          : '附加组件必须填写名称、镜像和预拉取命令,并且只能选择一个保持容器。',
+      workspaceOps:
+        EXEC_TARGET_PATTERN.test(form.workspaceExecTarget.trim()) &&
+        EXEC_TARGET_PATTERN.test(form.scriptExecTarget.trim()) &&
+        form.workspaceExecTarget.trim() !== form.scriptExecTarget.trim() &&
+        WORKSPACE_OP_KEYS.every((key) => validCommand(form.workspaceOps[key]))
+          ? null
+          : '请明确不同的学生与私有脚本执行目标,并补齐工作区操作命令。',
+      privateArchive:
+        EXEC_TARGET_PATTERN.test(form.privateArchive.execTarget.trim()) &&
+        validCommand(form.privateArchive.unpackTar)
+          ? null
+          : '请填写私有归档的执行目标与解包命令。',
+      pluginRef:
+        Number(adapterLevel) === RuntimeAdapterLevel.PLUGIN && capabilityKey === ''
+          ? '请输入已注册的链能力插件名称。'
+          : null,
+      capabilities:
+        Number(adapterLevel) < RuntimeAdapterLevel.STANDARD ||
+        !needsCapabilityCommands ||
+        (['deploy', 'tx', 'query', 'reset'] as const).every((key) => {
+          if (key === 'reset' && form.resetStrategy === 'recreate_runtime') return true
+          const capability = form.capabilities[key]
+          return (
+            validCommand(capability.command) &&
+            EXEC_TARGET_PATTERN.test(capability.execTarget.trim()) &&
+            Number.isInteger(Number(capability.timeout)) &&
+            Number(capability.timeout) >= 0
           )
-            ? null
-            : '请明确不同的学生与私有脚本执行目标,并补齐工作区操作命令。',
-        privateArchive:
-          EXEC_TARGET_PATTERN.test(form.privateArchive.execTarget.trim()) &&
-          form.privateArchive.unpackTar.some((part) => part.trim() !== '')
-            ? null
-            : '请填写私有归档的执行目标与解包命令。',
-        capabilities:
-          Number(adapterLevel) < RuntimeAdapterLevel.STANDARD ||
-          capabilityImpl.trim() !== '' ||
-          pluginRef.trim() !== '' ||
-          (['deploy', 'tx', 'query', 'reset'] as const).every((key) => {
-            if (key === 'reset' && form.resetStrategy === 'recreate_runtime') return true
-            const capability = form.capabilities[key]
-            return (
-              capability.command.some((item) => item.trim() !== '') &&
-              EXEC_TARGET_PATTERN.test(capability.execTarget.trim()) &&
-              Number.isInteger(Number(capability.timeout)) &&
-              Number(capability.timeout) > 0
-            )
-          })
-            ? null
-            : '请补齐链能力执行目标、命令和有效超时,并选择重置方式。',
-      }
-      return next
-    }, [adapterLevel, capabilityImpl, code, eco, form, name, pluginRef])
-  )
+        })
+          ? null
+          : '请补齐链能力执行目标、命令和有效超时,并选择重置方式。',
+    }
+    return next
+  })
 
-  const submit = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      if (!validate()) return
-      setFormError(undefined)
-      setSubmitting(true)
-      try {
-        const payload: SandboxRuntimeRequest = {
-          code: code.trim(),
-          name: name.trim(),
-          eco: eco.trim(),
-          adapter_level: Number(adapterLevel) as RuntimeAdapterLevel,
-          adapter_spec: parsed,
-          capability_impl: capabilityImpl.trim(),
-          plugin_ref: pluginRef.trim(),
-          status: Number(status) === 0 ? undefined : (Number(status) as RuntimeStatus),
-        }
-        if (editing) await api.sandbox.updateRuntime(runtime.id, payload)
-        else await api.sandbox.registerRuntime(payload)
-        toast.success(editing ? '运行时配置已更新' : '运行时已登记')
-        onSaved()
-      } catch (error) {
-        setFormError(userFacingErrorMessage(error, '保存没有成功，请检查声明后重试。'))
-      } finally {
-        setSubmitting(false)
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!validate()) return
+    setFormError(undefined)
+    setSubmitting(true)
+    try {
+      const adapterSpec = buildAdapterSpec(form)
+      const executionUnedited =
+        runtime && JSON.stringify(adapterSpec) === JSON.stringify(buildAdapterSpec(initialForm))
+      const payload: SandboxRuntimeRequest = {
+        code: code.trim(),
+        name: name.trim(),
+        eco: eco.trim(),
+        adapter_level: Number(adapterLevel) as RuntimeAdapterLevel,
+        adapter_spec: executionUnedited ? initialForm.baseSpec : adapterSpec,
+        capability_impl: capabilityImpl.trim(),
+        plugin_ref: pluginRef.trim(),
+        status: Number(status) === 0 ? undefined : (Number(status) as RuntimeStatus),
       }
-    },
-    [
-      adapterLevel,
-      capabilityImpl,
-      code,
-      eco,
-      editing,
-      name,
-      onSaved,
-      parsed,
-      pluginRef,
-      runtime?.id,
-      status,
-      validate,
-    ]
-  )
+      if (editing) await api.sandbox.updateRuntime(runtime.id, payload)
+      else await api.sandbox.registerRuntime(payload)
+      toast.success(editing ? '运行时配置已更新' : '运行时已登记')
+      onSaved()
+    } catch (error) {
+      setFormError(userFacingErrorMessage(error, '保存没有成功，请检查声明后重试。'))
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   const levelHint = ADAPTER_LEVELS.find((item) => item.value === adapterLevel)?.hint
   return (
@@ -540,7 +520,11 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
                   onChange={(event) => setCapabilityImpl(event.target.value)}
                 />
               </FormField>
-              <FormField label="链能力插件名称" htmlFor={`${fieldId}-plugin`}>
+              <FormField
+                label="链能力插件名称"
+                htmlFor={`${fieldId}-plugin`}
+                error={errors.pluginRef}
+              >
                 <Input
                   id={`${fieldId}-plugin`}
                   value={pluginRef}
@@ -662,7 +646,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
                 <legend className="sr-only">工作区操作命令列表</legend>
                 <div className="grid gap-3 sm:grid-cols-2">
                   {WORKSPACE_OP_KEYS.map((key) => (
-                    <ArgvEditor
+                    <CommandArgvFields
                       key={key}
                       label={WORKSPACE_OP_LABELS[key]}
                       value={form.workspaceOps[key]}
@@ -699,7 +683,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
                   }
                 />
               </FormField>
-              <ArgvEditor
+              <CommandArgvFields
                 label="私有归档解包命令"
                 value={form.privateArchive.unpackTar}
                 onChange={(unpackTar) =>
@@ -728,7 +712,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
                       key={key}
                       className="grid gap-2"
                       aria-describedby={
-                        errors.capabilities ? `${fieldId}-${key}-capability-error` : undefined
+                        errors.capabilities ? `${fieldId}-capability-error` : undefined
                       }
                       aria-invalid={errors.capabilities ? true : undefined}
                     >
@@ -750,12 +734,12 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
                           }
                         />
                       </FormField>
-                      <ArgvEditor
+                      <CommandArgvFields
                         label="命令参数"
                         value={form.capabilities[key].command}
                         onChange={(value) => updateCapability(key, 'command', value)}
                       />
-                      <FormField label="超时秒数">
+                      <FormField label="超时秒数" helper="留空或填 0 时使用平台默认时限。">
                         <Input
                           type="number"
                           min={0}
@@ -763,25 +747,22 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
                           onChange={(event) => updateCapability(key, 'timeout', event.target.value)}
                         />
                       </FormField>
-                      {errors.capabilities ? (
-                        <p
-                          id={`${fieldId}-${key}-capability-error`}
-                          role="alert"
-                          className="text-xs text-danger"
-                        >
-                          {errors.capabilities}
-                        </p>
-                      ) : null}
                     </fieldset>
                   )
                 )}
               </div>
+              {errors.capabilities ? (
+                <p id={`${fieldId}-capability-error`} role="alert" className="text-xs text-danger">
+                  {errors.capabilities}
+                </p>
+              ) : null}
             </FormGroup>
-            <FormGroup title="数据卷域" invalid={false}>
+            <FormGroup title="数据卷域" invalid={Boolean(errors.volumes)}>
               <VolumeEditor
                 volumes={form.volumes}
                 onChange={(volumes) => updateForm('volumes', volumes)}
               />
+              {errors.volumes ? <Callout tone="danger">{errors.volumes}</Callout> : null}
             </FormGroup>
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
           </DrawerBody>
@@ -802,7 +783,6 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
 const CODE_PATTERN = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/
 const EXEC_TARGET_PATTERN = /^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/
 
-/** PortEditor 运行时对外端口的逐行编辑(名称、容器端口、服务端口、协议),错误挂在整组上 */
 function PortEditor({
   ports,
   error,
@@ -828,14 +808,23 @@ function PortEditor({
           variant="outline"
           size="sm"
           onClick={() =>
-            onChange([...ports, { name: '', containerPort: '', servicePort: '', protocol: 'TCP' }])
+            onChange([
+              ...ports,
+              {
+                clientId: crypto.randomUUID(),
+                name: '',
+                containerPort: '',
+                servicePort: '',
+                protocol: 'TCP',
+              },
+            ])
           }
         >
           添加端口
         </Button>
       </div>
       {ports.map((port, index) => (
-        <div key={`port-${index}`} className="grid gap-2 sm:grid-cols-5">
+        <div key={port.clientId} className="grid gap-2 sm:grid-cols-5">
           <Input
             aria-label="端口名称"
             value={port.name}
@@ -902,65 +891,6 @@ function PortEditor({
   )
 }
 
-/** ArgvEditor 命令参数的逐项编辑:每个参数一行,不拼成整条命令字符串 */
-function ArgvEditor({
-  label,
-  value,
-  onChange,
-  error,
-}: {
-  label: string
-  value: string[]
-  onChange: (value: string[]) => void
-  error?: string | null
-}) {
-  const fieldId = useId()
-  const errorId = `${fieldId}-error`
-
-  return (
-    <fieldset
-      className="flex min-w-0 flex-col gap-2"
-      aria-describedby={error ? errorId : undefined}
-      aria-invalid={error ? true : undefined}
-    >
-      <legend className="text-xs text-muted">{label}</legend>
-      {value.map((item, index) => (
-        <div key={`${label}-${index}`} className="flex items-center gap-2">
-          <Input
-            aria-label={`${label}第 ${index + 1} 个参数`}
-            className="min-w-0 flex-1 font-mono text-sm"
-            value={item}
-            placeholder={index === 0 ? '命令' : '参数'}
-            onChange={(event) =>
-              onChange(
-                value.map((part, partIndex) => (partIndex === index ? event.target.value : part))
-              )
-            }
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={value.length <= 1}
-            onClick={() => onChange(value.filter((_, partIndex) => partIndex !== index))}
-          >
-            移除
-          </Button>
-        </div>
-      ))}
-      <Button type="button" variant="outline" size="sm" onClick={() => onChange([...value, ''])}>
-        添加参数
-      </Button>
-      {error ? (
-        <p id={errorId} role="alert" className="text-xs text-danger">
-          {error}
-        </p>
-      ) : null}
-    </fieldset>
-  )
-}
-
-/** SidecarEditor 伴随容器的逐个编辑(名称、镜像、预拉取与启动命令、访问权限),错误挂在整组上 */
 function SidecarEditor({
   sidecars,
   error,
@@ -988,6 +918,7 @@ function SidecarEditor({
             onChange([
               ...sidecars,
               {
+                clientId: crypto.randomUUID(),
                 name: '',
                 imageUrl: '',
                 prepullCommand: [''],
@@ -1002,7 +933,7 @@ function SidecarEditor({
         </Button>
       </div>
       {sidecars.map((sidecar, index) => (
-        <div key={`sidecar-${index}`} className="flex flex-col gap-3">
+        <div key={sidecar.clientId} className="flex flex-col gap-3">
           <Input
             aria-label="组件名称"
             value={sidecar.name}
@@ -1015,7 +946,7 @@ function SidecarEditor({
               )
             }
           />
-          <ArgvEditor
+          <CommandArgvFields
             label="启动命令"
             value={sidecar.command}
             onChange={(command) =>
@@ -1029,7 +960,7 @@ function SidecarEditor({
               onChange(sidecars.map((item, i) => (i === index ? { ...item, access } : item)))
             }
           />
-          <ArgvEditor
+          <CommandArgvFields
             label="预拉取命令"
             value={sidecar.prepullCommand}
             onChange={(prepullCommand) =>
@@ -1081,7 +1012,6 @@ function SidecarEditor({
   )
 }
 
-/** VolumeEditor 数据卷域的逐行编辑(名称、挂载路径、学生访问、持久化方式与快照范围) */
 function VolumeEditor({
   volumes,
   onChange,
@@ -1089,6 +1019,11 @@ function VolumeEditor({
   volumes: VolumeState[]
   onChange: (volumes: VolumeState[]) => void
 }) {
+  const updateVolume = (clientId: string, patch: Partial<VolumeState>) =>
+    onChange(
+      volumes.map((volume) => (volume.clientId === clientId ? { ...volume, ...patch } : volume))
+    )
+
   return (
     <fieldset className="flex flex-col gap-2">
       <legend className="sr-only">数据卷域</legend>
@@ -1100,38 +1035,33 @@ function VolumeEditor({
           onClick={() =>
             onChange([
               ...volumes,
-              { name: '', mountPath: '', studentAccess: '', persistence: '', snapshotScope: '' },
+              {
+                clientId: crypto.randomUUID(),
+                name: '',
+                mountPath: '',
+                studentAccess: '',
+                persistence: '',
+                snapshotScope: '',
+              },
             ])
           }
         >
           添加卷域
         </Button>
       </div>
-      {volumes.map((volume, index) => (
-        <div key={`volume-${index}`} className="grid gap-2 sm:grid-cols-2">
+      {volumes.map((volume) => (
+        <div key={volume.clientId} className="grid gap-2 sm:grid-cols-2">
           <Input
             aria-label="卷域名称"
             value={volume.name}
             placeholder="workspace"
-            onChange={(event) =>
-              onChange(
-                volumes.map((item, i) =>
-                  i === index ? { ...item, name: event.target.value } : item
-                )
-              )
-            }
+            onChange={(event) => updateVolume(volume.clientId, { name: event.target.value })}
           />
           <Input
             aria-label="挂载路径"
             value={volume.mountPath}
             placeholder="/workspace"
-            onChange={(event) =>
-              onChange(
-                volumes.map((item, i) =>
-                  i === index ? { ...item, mountPath: event.target.value } : item
-                )
-              )
-            }
+            onChange={(event) => updateVolume(volume.clientId, { mountPath: event.target.value })}
           />
           <Select
             aria-label="学生访问权限"
@@ -1142,41 +1072,39 @@ function VolumeEditor({
               { value: 'read_only', label: '只读' },
               { value: 'read_write', label: '可读写' },
             ]}
-            onValueChange={(studentAccess) =>
-              onChange(volumes.map((item, i) => (i === index ? { ...item, studentAccess } : item)))
-            }
+            onValueChange={(studentAccess) => updateVolume(volume.clientId, { studentAccess })}
           />
           <Select
             aria-label="持久化策略"
             value={volume.persistence}
             placeholder="选择持久化策略"
             options={[
-              { value: 'object_storage_code', label: '工作区代码归档' },
+              {
+                value: 'object_storage_code',
+                label: '工作区代码归档',
+                disabled: volume.name.trim() !== 'workspace',
+              },
               { value: 'ephemeral', label: '临时数据' },
               { value: 'snapshot', label: '快照保留' },
             ]}
-            onValueChange={(persistence) =>
-              onChange(volumes.map((item, i) => (i === index ? { ...item, persistence } : item)))
-            }
+            onValueChange={(persistence) => updateVolume(volume.clientId, { persistence })}
           />
           <Select
             aria-label="快照范围"
             value={volume.snapshotScope}
             placeholder="选择快照范围"
             options={[
-              { value: 'never', label: '不纳入快照' },
+              { value: 'never', label: '不纳入快照', disabled: volume.persistence === 'snapshot' },
               { value: 'always', label: '始终纳入' },
               { value: 'snapshot_enabled', label: '开启快照时纳入' },
             ]}
-            onValueChange={(snapshotScope) =>
-              onChange(volumes.map((item, i) => (i === index ? { ...item, snapshotScope } : item)))
-            }
+            onValueChange={(snapshotScope) => updateVolume(volume.clientId, { snapshotScope })}
           />
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => onChange(volumes.filter((_, i) => i !== index))}
+            onClick={() => onChange(volumes.filter((item) => item.clientId !== volume.clientId))}
           >
             移除卷域
           </Button>

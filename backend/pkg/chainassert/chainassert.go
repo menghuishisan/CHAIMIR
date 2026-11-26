@@ -1,7 +1,8 @@
-// chainassert 包提供链上断言的通用判定能力,供 M3 判题和 M8 漏洞预验证复用。
+// Package chainassert 判定链上状态并生成脱敏摘要。
 package chainassert
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -76,6 +77,9 @@ func FromMap(raw map[string]any) (Assertion, error) {
 	default:
 		return Assertion{}, fmt.Errorf("链上断言 op 不受支持: %s", op)
 	}
+	if _, exists := raw["value"]; !exists && op != OperationExists {
+		return Assertion{}, fmt.Errorf("链上比较断言必须提供 value")
+	}
 	expectedLabel, err := optionalString(raw, "expected_label")
 	if err != nil {
 		return Assertion{}, err
@@ -87,23 +91,23 @@ func FromMap(raw map[string]any) (Assertion, error) {
 	return Assertion{Label: label, Target: target, Field: field, Op: op, Value: raw["value"], ExpectedLabel: expectedLabel, Hint: hint}, nil
 }
 
-// Check 对单条链上查询结果执行断言。
+// Check 判定链上查询结果；缺失字段不通过，显式 null 仍是存在的值。
 func Check(assertion Assertion, actual map[string]any) (Result, error) {
 	field := assertion.Field
 	if field == "" {
 		field = assertion.Target
 	}
-	actualValue := actual[field]
+	actualValue, exists := actual[field]
 	passed := false
 	switch assertion.Op {
 	case OperationEq, "":
-		passed = reflect.DeepEqual(actualValue, assertion.Value)
+		passed = exists && reflect.DeepEqual(actualValue, assertion.Value)
 	case OperationNe:
-		passed = !reflect.DeepEqual(actualValue, assertion.Value)
+		passed = exists && !reflect.DeepEqual(actualValue, assertion.Value)
 	case OperationContains:
-		passed = strings.Contains(fmt.Sprint(actualValue), fmt.Sprint(assertion.Value))
+		passed = exists && strings.Contains(fmt.Sprint(actualValue), fmt.Sprint(assertion.Value))
 	case OperationExists:
-		_, passed = actual[field]
+		passed = exists
 	default:
 		return Result{}, fmt.Errorf("链上断言 op 不受支持: %s", assertion.Op)
 	}
@@ -111,12 +115,27 @@ func Check(assertion Assertion, actual map[string]any) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Case: assertion.Label, Passed: passed, ExpectedLabel: assertion.ExpectedLabel, Actual: actualSummary, Hint: assertion.Hint}, nil
+	label := assertion.Label
+	if label == "" {
+		label = "链上状态检查"
+	}
+	return Result{Case: label, Passed: passed, ExpectedLabel: assertion.ExpectedLabel, Actual: actualSummary, Hint: assertion.Hint}, nil
 }
 
 // ShortJSON 返回脱敏短文本,避免把完整状态或期望结构传到前端。
 func ShortJSON(v any) (string, error) {
-	raw, err := json.Marshal(redactSensitiveValues(v))
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return "", fmt.Errorf("序列化链上状态失败: %w", err)
+	}
+	// 统一成 JSON 形状，具体 Go 类型的字段同样经过脱敏。
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return "", fmt.Errorf("解析链上状态失败: %w", err)
+	}
+	raw, err = json.Marshal(redactSensitiveValues(value))
 	if err != nil {
 		return "", fmt.Errorf("序列化链上断言摘要失败: %w", err)
 	}
@@ -129,11 +148,9 @@ func redactSensitiveValues(v any) any {
 	case map[string]any:
 		out := make(map[string]any, len(x))
 		for key, value := range x {
-			if privacy.IsResultSensitiveKey(key) {
-				out[key] = redactedValue
-				continue
+			if !privacy.IsResultSensitiveKey(key) {
+				out[key] = redactSensitiveValues(value)
 			}
-			out[key] = redactSensitiveValues(value)
 		}
 		return out
 	case []any:
@@ -142,6 +159,11 @@ func redactSensitiveValues(v any) any {
 			out[i] = redactSensitiveValues(value)
 		}
 		return out
+	case string:
+		if privacy.ContainsResultSensitiveText(x) {
+			return redactedValue
+		}
+		return x
 	default:
 		return v
 	}

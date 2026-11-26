@@ -2,11 +2,11 @@
 
 ## 镜像职责
 
-仅用于构建运行时 JSON helper 和平台网络诊断的公共基座镜像,不提供沙箱工作区或学生入口。
+仅提供通用 CLI 与平台网络诊断的公共基座镜像，不包含链动作代理、沙箱工作区或学生入口。
 
 ## 能力边界
 
-- 支持 capability：toolchain-base, blockchain-cli-tooling, runtime-json-helper-build
+- 支持 capability：toolchain-base, blockchain-cli-tooling
 - 明确不支持：manifest 未声明的能力、协议动作和跨镜像联动；入口和编排必须严格失败，不使用 generic fallback。
 - conflicts：无；cardinality：未声明；placement：未声明。
 
@@ -29,7 +29,7 @@
 
 ## command / args 语义
 
-- 镜像默认 CMD：["/usr/local/bin/chaimir-chain", "--version"]；manifest 未覆盖组件 command/args，使用该入口语义。
+- 镜像默认 CMD：["jq", "--version"]；实际构建或诊断由调用方显式声明命令。
 
 ## 初始化材料与运行时注入
 
@@ -56,7 +56,7 @@
 ## readiness / health
 
 - 未声明组件 readiness probe；容器运行不等于就绪或业务成功。
-- 镜像自检 common-tools：["bash","-lc","curl --version >/dev/null && jq --version >/dev/null && /usr/local/bin/chaimir-chain --version"]。
+- 镜像自检 common-tools：["bash","-lc","curl --version >/dev/null && jq --version >/dev/null && tar --version >/dev/null"]。
 
 ## 清理
 

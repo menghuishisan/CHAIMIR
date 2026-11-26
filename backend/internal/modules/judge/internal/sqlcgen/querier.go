@@ -39,6 +39,7 @@ type Querier interface {
 	ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, arg ListRecentJudgeTasksBySubmitterProblemParams) ([]ListRecentJudgeTasksBySubmitterProblemRow, error)
 	MarkJudgeOutboxFailed(ctx context.Context, arg MarkJudgeOutboxFailedParams) (JudgeEventOutbox, error)
 	MarkJudgeOutboxPublished(ctx context.Context, arg MarkJudgeOutboxPublishedParams) (JudgeEventOutbox, error)
+	ReadJudgeAlertMetrics(ctx context.Context, arg ReadJudgeAlertMetricsParams) (ReadJudgeAlertMetricsRow, error)
 	// 执行期心跳仅允许当前持有者延长未过期租约,避免长时判题被另一 worker 重领。
 	RenewJudgeTaskLease(ctx context.Context, arg RenewJudgeTaskLeaseParams) (int64, error)
 	ResetJudgeTaskForRejudge(ctx context.Context, arg ResetJudgeTaskForRejudgeParams) (ResetJudgeTaskForRejudgeRow, error)

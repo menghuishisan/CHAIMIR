@@ -1,11 +1,4 @@
-// ===== 沙箱组合声明与编译快照(实验 / 竞赛 / 判题共用)=====
-//
-// 后端把「教师声明什么」和「服务端编译出什么」分成了两组字段:
-// 教师提交 SandboxCompositionSpec(命名 runtime 实例 + 组件 + 连接 + 访问边界),
-// 服务端编译后冻结成 SandboxCompositionSnapshot(含镜像地址、适配器规格、镜像闭包)。
-//
-// 前端只提交前者、只读展示后者 —— 快照里的镜像地址、digest、启动命令与安全上下文
-// 不得回填成编辑输入(docs/对齐-后端待补齐清单-2026-08-23.md §6.3 / §7.5)。
+// 前端编辑组合声明;编译快照只读,变更须修改声明后重新编译。
 
 import type { SandboxAccessProfile, CompositionSelection } from '../constants/composition'
 import type {
@@ -14,7 +7,6 @@ import type {
   SandboxToolKind,
 } from '../constants/sandbox'
 
-/** CompositionRuntimeRef 是组合中的一个命名 runtime 实例及其明确镜像版本。 */
 export interface CompositionRuntimeRef {
   instance_code: string
   runtime_code: string
@@ -22,15 +14,13 @@ export interface CompositionRuntimeRef {
   params?: Record<string, unknown>
 }
 
-/** CompositionComponentRef 是工具或基础设施组件引用。 */
 export interface CompositionComponentRef {
   code: string
-  /** selection 记录这一项是教师显式选的,还是编译器按依赖展开的 */
   selection: CompositionSelection
   params?: Record<string, unknown>
 }
 
-/** CompositionLink 是组件之间唯一允许的内网连接声明。 */
+/** 未声明的组件连接不开放。 */
 export interface CompositionLink {
   source_component: string
   source_endpoint: string
@@ -52,16 +42,19 @@ export interface CompositionPreviewRequest {
 }
 
 /** CompositionBindingOption 是服务端已校验的连接目标,前端不自行拼接端点。 */
-export interface CompositionBindingOption {
+interface CompositionBindingOption {
   label: string
   link: CompositionLink
 }
 
 /** CompositionBindingPreview 中的绑定标识只作稳定键,不作为用户文案。 */
-export interface CompositionBindingPreview {
+interface CompositionBindingPreview {
   source_component: string
   source_name: string
   config_binding: string
+  title: string
+  optional: boolean
+  multiple: boolean
   options: CompositionBindingOption[]
 }
 
@@ -73,17 +66,14 @@ export interface CompositionPreviewResponse {
   complete: boolean
 }
 
-/** CompositionInitAsset 将初始化归档明确关联到某个运行时实例。 */
 export interface CompositionInitAsset {
   name: string
   source_ref: string
   target_runtime_instance: string
   target_domain: string
-  expected_sha256?: string
-  apply_phase?: string
+  expected_sha256: string
 }
 
-/** SandboxCompositionSpec 是单个环境的唯一声明来源,由教师提交。 */
 export interface SandboxCompositionSpec {
   id: string
   runtimes: CompositionRuntimeRef[]
@@ -95,22 +85,23 @@ export interface SandboxCompositionSpec {
   resource_profile?: Record<string, string>
   network_profile?: Record<string, unknown>
   init_assets?: CompositionInitAsset[]
+  init_chain_steps?: CompositionChainStep[]
   init_code_ref?: string
   init_script_ref?: string
 }
 
-/**
- * ScenarioNeutralCompositionSpec 是题库正文里的环境声明。
- * 同一道题既可能进解题赛也可能进对抗赛,访问边界由使用场景决定并由服务端写入,
- * 故题库这一份不固定 access_profile。
- */
+/** 环境开放前执行的链初始化，纳入组合摘要。 */
+export type CompositionChainStep = { runtime_instance: string } & (
+  | { op: 'deploy' | 'tx'; payload: Record<string, unknown> }
+  | { op: 'query'; target: string }
+  | { op: 'reset' }
+)
+
+/** 题目可用于不同赛制,访问边界由使用场景确定并由服务端写入。 */
 export type ScenarioNeutralCompositionSpec = Omit<SandboxCompositionSpec, 'access_profile'>
 
-/**
- * CompiledRuntimeSnapshot 是编译后冻结的运行时事实,只读。
- * adapter_spec 是服务端校验过的声明序列化结果,前端只做摘要展示。
- */
-export interface CompiledRuntimeSnapshot {
+/** adapter_spec 由服务端校验并冻结,前端只展示摘要。 */
+interface CompiledRuntimeSnapshot {
   instance_code: string
   runtime_id: number
   image_id: number
@@ -124,8 +115,7 @@ export interface CompiledRuntimeSnapshot {
   image_version: string
 }
 
-/** CompiledComponentSnapshot 是编译后冻结的工具/基础设施工作负载规格,只读。 */
-export interface CompiledComponentSnapshot {
+interface CompiledComponentSnapshot {
   component_id: number
   category: SandboxComponentCategory
   code: string
@@ -133,13 +123,12 @@ export interface CompiledComponentSnapshot {
   resource_spec: Record<string, unknown>
 }
 
-/** ImageClosureItem 是已编译快照锁定的镜像地址与版本。 */
-export interface ImageClosureMount {
+interface ImageClosureMount {
   name: string
   mount_path: string
 }
 
-export interface ImageClosureItem {
+interface ImageClosureItem {
   category: string
   code: string
   image_url: string
@@ -149,10 +138,6 @@ export interface ImageClosureItem {
   ephemeral_mounts?: ImageClosureMount[]
 }
 
-/**
- * SandboxCompositionSnapshot 是发布后不可变的组合事实来源。
- * 它由服务端编译产出,前端只读:要改内容只能改 spec 再重新编译,不能改快照。
- */
 export interface SandboxCompositionSnapshot {
   composition_digest: string
   spec: SandboxCompositionSpec

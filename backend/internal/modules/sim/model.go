@@ -7,8 +7,7 @@ import (
 )
 
 // Package 是平台级仿真包版本定义。
-// Compute 与 Entry 按 AuthorType 派生:平台内置 → 浏览器执行、无入口模块;
-// 教师/第三方 → 隔离容器执行、必须有入口模块与运行能力(见 docs/04-仿真可视化引擎/02-架构设计.md §8)。
+// 平台内置包在浏览器运行；教师及第三方包须提供入口模块并在隔离容器运行。
 type Package struct {
 	ID                  int64
 	Code                string
@@ -130,23 +129,11 @@ type InteractionParam struct {
 
 // CodeTraceAudit 保存代码追踪协议审核摘要,源码正文仍只存在 bundle 对象内。
 type CodeTraceAudit struct {
-	Enabled         bool     `json:"enabled"`
-	Language        string   `json:"language,omitempty"`
-	LineCount       int      `json:"line_count,omitempty"`
-	MappingCount    int      `json:"mapping_count,omitempty"`
-	VariableCount   int      `json:"variable_count,omitempty"`
-	ValidationNotes []string `json:"validation_notes,omitempty"`
-}
-
-// Checkpoint 是叙事设问或目标达成结果快照。
-type Checkpoint struct {
-	ID           int64
-	TenantID     int64
-	SessionID    int64
-	CheckpointID string
-	Answer       json.RawMessage
-	Achieved     bool
-	CreatedAt    time.Time
+	Enabled       bool   `json:"enabled"`
+	Language      string `json:"language,omitempty"`
+	LineCount     int    `json:"line_count,omitempty"`
+	MappingCount  int    `json:"mapping_count,omitempty"`
+	VariableCount int    `json:"variable_count,omitempty"`
 }
 
 // Share 是公开分享码全局索引,正文仍由租户会话与操作序列重建。
@@ -163,11 +150,7 @@ type Share struct {
 }
 
 // ValidationReport 保存上架审核所需的静态与隔离预览结论。
-//
-// 四项门禁各有明确生产者:BundleHash/MetadataValidation/StaticScan 由上传流程写入;
-// DeterminismCheck/WorkerPreview/PreviewFrames 由 M4 自己的隔离预览任务写入(见 service_preview.go)。
-// PreviewFrames 是容器渲出的样例教学帧 —— 自动校验只能回答"能不能跑、是否确定性",
-// 回答不了"这个算法实现对不对",故必须把帧摊给平台管理员看(见 06 流程 §4)。
+// 上传流程写静态结论，预览任务写确定性、执行结果与供人工审核的样例帧。
 type ValidationReport struct {
 	BundleHash         string           `json:"bundle_hash,omitempty"`
 	MetadataValidation ValidationStatus `json:"metadata_validation,omitzero"`
@@ -184,10 +167,7 @@ type ValidationStatus struct {
 }
 
 // StaticScanReport 描述后端上传时执行的危险调用扫描结果。
-//
-// 它是**给审核人的信号,不是隔离边界**:正则拦不住 `globalThis['fe'+'tch']` 这类拼接,
-// 动态语言下的能力访问无法靠模式匹配穷尽。真正的边界是隔离容器(见 07 安全设计 §3),
-// 扫描命中只用于把可疑包提请人工重点查看。
+// 扫描命中仅供人工审核；不可信代码的安全边界仍是隔离容器。
 type StaticScanReport struct {
 	Status   string   `json:"status,omitempty"`
 	Findings []string `json:"findings,omitempty"`
@@ -200,13 +180,7 @@ type BackendEvent struct {
 }
 
 // BackendClientMessage 是浏览器在隔离执行连接上下发的一条消息。
-//
-// 四种受控命令(取值见 enum.go 的 BackendCommandKind):推进一个推演时刻、注入一次包内声明的交互、
-// 回退一步、回到初始状态。
-// 时刻推进不是交互,不走交互白名单也不进操作记录 —— 它由 seed 决定、可复算,
-// 与内置包在浏览器 Worker 里的语义一致(见 docs/04-仿真可视化引擎/05-接口设计.md §4)。
-// 回退与重来按 M4 需求 C2「基于确定性重算到上一 tick」实现:容器从初始状态重放到目标位置,
-// 不做就地反算。
+// 时刻推进可由 seed 重算，不写用户操作记录；回退和重来重放到目标位置。
 type BackendClientMessage struct {
 	Type      string         `json:"type"`
 	EventType string         `json:"event_type,omitempty"`
@@ -220,30 +194,24 @@ type BackendCommand struct {
 }
 
 // BackendSnapshot 是隔离容器算出、经后端协议校验后推给前端的完整教学快照。
-//
-// 为什么推完整快照而非仅 State:render 是仿真包自己的函数,扩展包的 render 属外部代码,
-// 浏览器不得执行(见 07 安全设计 §2)。容器内完成 reducer + render + 叙事命中 + 检查点求值,
-// 前端拿到的已是纯数据帧,交给平台自己的封闭模式渲染器绘制。
+// 包内 render、叙事和检查点在容器求值，浏览器只渲染纯数据。
 type BackendSnapshot struct {
 	Tick                    int64          `json:"tick"`
 	State                   map[string]any `json:"state"`
 	View                    map[string]any `json:"view"`
 	CurrentStep             map[string]any `json:"current_step,omitempty"`
-	InteractionAvailability map[string]any `json:"interaction_availability,omitempty"`
-	CheckpointResults       map[string]any `json:"checkpoint_results,omitempty"`
+	InteractionAvailability map[string]any `json:"interaction_availability"`
+	CheckpointResults       map[string]any `json:"checkpoint_results"`
 }
 
 // BackendDescriptor 是隔离容器回传的仿真包自描述信息:操作清单、教学步骤、检查点与代码追踪。
-//
-// 为什么必须回传:浏览器不执行扩展包代码,拿不到包内声明,而"可用操作"的名称、参数字段、
-// 检查点标题和教学步骤总数都是渲染工作台的必要材料 —— 只推快照的话页面能画舞台却画不出操作面板。
-// 它与快照一样来自不可信容器,故同样要在后端校验后才转发(见 validateBackendDescriptor)。
+// 浏览器不执行包代码，操作清单和教学声明也须经后端校验后下发。
 type BackendDescriptor struct {
 	Meta         map[string]any   `json:"meta"`
 	Interactions []map[string]any `json:"interactions"`
-	Narrative    []map[string]any `json:"narrative,omitempty"`
+	Narrative    []map[string]any `json:"narrative"`
 	CodeTrace    map[string]any   `json:"codeTrace,omitempty"`
-	Checkpoints  []map[string]any `json:"checkpoints,omitempty"`
+	Checkpoints  []map[string]any `json:"checkpoints"`
 }
 
 // BackendStreamMessage 是隔离执行 WebSocket 推给浏览器的一帧。
@@ -251,9 +219,9 @@ type BackendDescriptor struct {
 // 每帧重发会把代码追踪源码这类大字段重复推送。帧类型取值见 enum.go。
 type BackendStreamMessage struct {
 	Type       string             `json:"type"`
+	ReadOnly   bool               `json:"read_only"`
 	Descriptor *BackendDescriptor `json:"descriptor,omitempty"`
 	Snapshot   BackendSnapshot    `json:"snapshot"`
-	// EventCount 是当前过程已执行的事件数。过程由服务端持有,浏览器据此判断还能不能回退 ——
-	// 它自己数不出来:刷新重连后服务端会按已登记操作把过程重放回来,前端计数会与服务端不一致。
+	// EventCount 含重连恢复的事件，供浏览器判断回退位置。
 	EventCount int64 `json:"event_count"`
 }

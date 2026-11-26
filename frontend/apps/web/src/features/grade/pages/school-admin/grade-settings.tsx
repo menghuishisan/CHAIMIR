@@ -585,21 +585,16 @@ function SemesterFormModal({ onClose, onSaved }: SemesterFormModalProps) {
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
+  const { errors, validate } = useFormValidation(() => ({
+    name: name.trim() ? null : '请输入学期名称',
+    startDate: startDate ? null : '请选择开始日期',
+    endDate: !endDate ? '请选择结束日期' : startDate && endDate < startDate ? '结束日期不能早于开始日期' : null,
+  }))
+
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (name.trim() === '') {
-        setFormError('请输入学期名称')
-        return
-      }
-      if (startDate === '' || endDate === '') {
-        setFormError('请选择学期的开始与结束日期')
-        return
-      }
-      if (endDate <= startDate) {
-        setFormError('结束日期要晚于开始日期')
-        return
-      }
+      if (working || !validate()) return
       setFormError(undefined)
       setWorking(true)
       try {
@@ -617,7 +612,7 @@ function SemesterFormModal({ onClose, onSaved }: SemesterFormModalProps) {
         setWorking(false)
       }
     },
-    [endDate, isCurrent, name, onSaved, startDate],
+    [endDate, isCurrent, name, onSaved, startDate, validate, working],
   )
 
   return (
@@ -629,27 +624,33 @@ function SemesterFormModal({ onClose, onSaved }: SemesterFormModalProps) {
         </ModalHeader>
         <form onSubmit={submit} noValidate>
           <ModalBody className="flex flex-col gap-4">
-            <FormField label="学期名称" htmlFor="semester-name" required helper="如 2026 春季学期">
+            <FormField label="学期名称" htmlFor="semester-name" required helper="如 2026 春季学期" error={errors.name}>
               <Input
                 id="semester-name"
                 value={name}
+                invalid={Boolean(errors.name)}
+                onBlur={() => validate(['name'])}
                 onChange={(event) => setName(event.target.value)}
               />
             </FormField>
             <div className="grid gap-4 sm:grid-cols-2">
-              <FormField label="开始日期" htmlFor="semester-start" required>
+              <FormField label="开始日期" htmlFor="semester-start" required error={errors.startDate}>
                 <Input
                   id="semester-start"
                   type="date"
                   value={startDate}
+                  invalid={Boolean(errors.startDate)}
+                  onBlur={() => validate(['startDate'])}
                   onChange={(event) => setStartDate(event.target.value)}
                 />
               </FormField>
-              <FormField label="结束日期" htmlFor="semester-end" required>
+              <FormField label="结束日期" htmlFor="semester-end" required error={errors.endDate}>
                 <Input
                   id="semester-end"
                   type="date"
                   value={endDate}
+                  invalid={Boolean(errors.endDate)}
+                  onBlur={() => validate(['endDate'])}
                   onChange={(event) => setEndDate(event.target.value)}
                 />
               </FormField>
@@ -675,11 +676,7 @@ function SemesterFormModal({ onClose, onSaved }: SemesterFormModalProps) {
   )
 }
 
-/**
- * WarningRulesSection 维护全校预警阈值。
- * 这是租户级单例配置(GET/PUT /warning-rules),与等级规则里的阈值是两处不同的东西:
- * 等级规则里的阈值随该套规则,这里是全校默认。
- */
+/** WarningRulesSection 编辑当前默认等级配置中的预警阈值。 */
 function WarningRulesSection() {
   const rules = useAsyncResource(() => api.grade.getWarningRules(), [], () => false)
 

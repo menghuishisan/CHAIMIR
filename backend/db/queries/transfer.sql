@@ -23,10 +23,6 @@ SELECT id, tenant_id, account_id, channel, subject, status, content_type, file_n
 FROM transfer_task
 WHERE tenant_id = $1 AND id = $2;
 
--- name: DeletePendingTransferTask :exec
-DELETE FROM transfer_task
-WHERE tenant_id = $1 AND id = $2 AND status = 'pending' AND attempt_count = 0;
-
 -- name: ListTransferTasks :many
 SELECT id, tenant_id, account_id, channel, subject, status, content_type, file_name,
        attempt_count, max_attempts, last_error, artifact_ref, artifact_size,
@@ -94,6 +90,15 @@ RETURNING id, tenant_id, account_id, channel, subject, status, content_type, fil
           artifact_content_type, artifact_file_name, created_at, updated_at,
           completed_at, next_attempt_after, lease_token, lease_until;
 
+-- name: RenewTransferTaskLease :execrows
+UPDATE transfer_task
+SET lease_until = sqlc.arg(lease_until)::timestamptz
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND id = sqlc.arg(id)
+  AND status = 'running'
+  AND lease_token = sqlc.arg(lease_token)
+  AND lease_until > now();
+
 -- name: CompleteTransferTask :one
 UPDATE transfer_task
 SET status = 'succeeded',
@@ -135,3 +140,6 @@ RETURNING id, tenant_id, account_id, channel, subject, status, content_type, fil
           attempt_count, max_attempts, last_error, artifact_ref, artifact_size,
           artifact_content_type, artifact_file_name, created_at, updated_at,
           completed_at, next_attempt_after, lease_token, lease_until;
+
+-- name: CountFailedTransfers :one
+SELECT count(*)::bigint FROM transfer_task WHERE tenant_id=$1 AND status='failed' AND updated_at BETWEEN $2 AND $3;

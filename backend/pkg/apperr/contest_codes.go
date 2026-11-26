@@ -80,6 +80,8 @@ const (
 	CodeContestVulnSourceJSONInvalid = "85010"
 	// CodeContestVulnSourceSyncMarkFailed 表示漏洞源同步状态保存失败。
 	CodeContestVulnSourceSyncMarkFailed = "85011"
+	// CodeContestVulnProblemDuplicate 表示相同来源的案例编号已存在。
+	CodeContestVulnProblemDuplicate = "85012"
 )
 
 var (
@@ -149,4 +151,6 @@ var (
 	ErrContestVulnSourceJSONInvalid = New(CodeContestVulnSourceJSONInvalid, "漏洞源返回格式不正确,请检查后重试")
 	// ErrContestVulnSourceSyncMarkFailed 表示同步状态暂时无法保存。
 	ErrContestVulnSourceSyncMarkFailed = New(CodeContestVulnSourceSyncMarkFailed, "漏洞源同步状态暂时无法保存,请稍后重试")
+	// ErrContestVulnProblemDuplicate 引导更换来源案例编号，避免覆盖既有题目。
+	ErrContestVulnProblemDuplicate = New(CodeContestVulnProblemDuplicate, "该来源的案例编号已存在，请更换编号或编辑已有题目")
 )

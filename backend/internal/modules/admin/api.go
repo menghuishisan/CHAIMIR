@@ -2,7 +2,6 @@
 package admin
 
 import (
-	"strconv"
 	"strings"
 	"time"
 
@@ -35,11 +34,6 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	school.GET("/statistics", api.schoolStatistics)
 	mixed.GET("/audit", api.queryAudit)
 	mixed.GET("/audit/export", api.exportAudit)
-	mixed.GET("/configs", api.listConfigs)
-	mixed.GET("/configs/:key", api.getConfig)
-	mixed.PUT("/configs/:key", api.updateConfig)
-	mixed.GET("/configs/:key/history", api.configHistory)
-	mixed.POST("/configs/:key/rollback", api.rollbackConfig)
 	mixed.GET("/alert-rules", api.listAlertRules)
 	mixed.POST("/alert-rules", api.createAlertRule)
 	mixed.PATCH("/alert-rules/:id", api.updateAlertRule)
@@ -50,26 +44,6 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 }
 
 type adminAPI struct{ svc *Service }
-
-// getConfig 读取单条配置的脱敏投影,供详情和乐观锁操作使用。
-func (a adminAPI) getConfig(c *gin.Context) {
-	key := strings.TrimSpace(c.Param("key"))
-	if key == "" {
-		httpx.Write(c, ConfigDTO{}, apperr.ErrAdminConfigInvalid)
-		return
-	}
-	scope := int16(0)
-	if raw := strings.TrimSpace(c.Query("scope")); raw != "" {
-		parsed, err := strconv.ParseInt(raw, 10, 16)
-		if err != nil {
-			httpx.Write(c, ConfigDTO{}, apperr.ErrAdminConfigInvalid)
-			return
-		}
-		scope = int16(parsed)
-	}
-	out, err := a.svc.GetConfig(c.Request.Context(), scope, key)
-	httpx.Write(c, out, err)
-}
 
 // platformDashboard 返回平台看板。
 func (a adminAPI) platformDashboard(c *gin.Context) {
@@ -117,54 +91,6 @@ func (a adminAPI) exportAudit(c *gin.Context) {
 	}
 	out, err := a.svc.ExportAuditCSV(c.Request.Context(), query)
 	httpx.Write(c, out, err)
-}
-
-// listConfigs 查询配置。
-func (a adminAPI) listConfigs(c *gin.Context) {
-	scope, ok := httpx.QueryInt16(c, "scope", httpx.QueryIntRule{Default: 0, Min: 0, Max: 2, HasMax: true})
-	if !ok {
-		return
-	}
-	out2, err := a.svc.ListConfigs(c.Request.Context(), scope)
-	httpx.Write(c, out2, err)
-}
-
-// updateConfig 更新配置。
-func (a adminAPI) updateConfig(c *gin.Context) {
-	var req ConfigUpdateRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrAdminConfigInvalid) {
-		return
-	}
-	out3, err := a.svc.UpdateConfig(c.Request.Context(), c.Param("key"), req)
-	httpx.Write(c, out3, err)
-}
-
-// configHistory 查询配置历史。
-func (a adminAPI) configHistory(c *gin.Context) {
-	page, size, ok := httpx.Page(c)
-	if !ok {
-		return
-	}
-	scope, ok := httpx.QueryInt16(c, "scope", httpx.QueryIntRule{Default: 1, Min: 1, Max: 2, HasMax: true})
-	if !ok {
-		return
-	}
-	tenantID, ok := httpx.QueryID(c, "tenant_id", false)
-	if !ok {
-		return
-	}
-	out4, total, p, s, err := a.svc.ListConfigHistory(c.Request.Context(), scope, tenantID, c.Param("key"), page, size)
-	httpx.WritePage(c, out4, total, p, s, err)
-}
-
-// rollbackConfig 回滚配置。
-func (a adminAPI) rollbackConfig(c *gin.Context) {
-	var req ConfigRollbackRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrAdminConfigInvalid) {
-		return
-	}
-	out5, err := a.svc.RollbackConfig(c.Request.Context(), c.Param("key"), req)
-	httpx.Write(c, out5, err)
 }
 
 // listAlertRules 查询告警规则。

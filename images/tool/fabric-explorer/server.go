@@ -1,4 +1,3 @@
-// 本文件提供 Fabric 原生浏览器服务,所有链上操作都通过受控 peer CLI 执行。
 package main
 
 import (
@@ -7,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net"
@@ -24,6 +24,7 @@ var fabricNamePattern = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,128}$`)
 
 type explorer struct {
 	timeout              time.Duration
+	outputMaxBytes       int
 	ordererAddress       string
 	ordererTLSRootCA     string
 	ordererTLSClientCert string
@@ -44,6 +45,7 @@ func main() {
 	ordererAddress := requiredEndpoint("CHAIMIR_FABRIC_ORDERER_ADDRESS")
 	explorerServer := &explorer{
 		timeout:              httpTimeout,
+		outputMaxBytes:       requiredPositiveInt("CHAIMIR_FABRIC_OUTPUT_MAX_BYTES"),
 		ordererAddress:       ordererAddress,
 		ordererTLSRootCA:     requiredFile("CHAIMIR_FABRIC_ORDERER_TLS_ROOTCERT_FILE"),
 		ordererTLSClientCert: requiredFile("CHAIMIR_FABRIC_ORDERER_TLS_CLIENTCERT_FILE"),
@@ -76,7 +78,7 @@ func (e *explorer) healthz(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "请求方法不受支持", "")
 		return
 	}
-	if _, _, err := e.runPeer(r.Context(), "version"); err != nil {
+	if _, _, err := e.runPeer(r.Context(), "channel", "list"); err != nil {
 		writeError(w, http.StatusServiceUnavailable, "浏览器服务正在准备,请稍候", traceID())
 		return
 	}
@@ -117,21 +119,21 @@ func (e *explorer) block(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "通道或区块编号不正确", "")
 		return
 	}
-	file, err := os.CreateTemp("/tmp", "fabric-block-*.pb")
+	file, err := os.CreateTemp("", "fabric-block-*.pb")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "暂时无法读取区块", traceID())
 		return
 	}
 	path := file.Name()
-	if err := file.Close(); err != nil {
-		writeError(w, http.StatusInternalServerError, "暂时无法读取区块", traceID())
-		return
-	}
 	defer func() {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			log.Printf("trace_id=%s operation=remove-fabric-block-file error=%q", traceID(), err.Error())
 		}
 	}()
+	if err := file.Close(); err != nil {
+		writeError(w, http.StatusInternalServerError, "暂时无法读取区块", traceID())
+		return
+	}
 	args := []string{"channel", "fetch", number, path, "-c", channel}
 	args = e.appendOrdererAddress(args)
 	_, stderr, runErr := e.runPeer(r.Context(), args...)
@@ -139,13 +141,19 @@ func (e *explorer) block(w http.ResponseWriter, r *http.Request) {
 		writePeerError(w, "读取区块失败", stderr, runErr)
 		return
 	}
-	data, err := os.ReadFile(filepath.Clean(path))
+	data, err := os.Open(path)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "读取区块结果失败", traceID())
 		return
 	}
-	sum := sha256.Sum256(data)
-	writeJSON(w, map[string]any{"channel": channel, "number": number, "size": len(data), "sha256": hex.EncodeToString(sum[:])})
+	defer data.Close()
+	hash := sha256.New()
+	size, err := io.Copy(hash, data)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "读取区块结果失败", traceID())
+		return
+	}
+	writeJSON(w, map[string]any{"channel": channel, "number": number, "size": size, "sha256": hex.EncodeToString(hash.Sum(nil))})
 }
 
 func (e *explorer) chaincodeQuery(w http.ResponseWriter, r *http.Request) {
@@ -255,7 +263,6 @@ func requiredPort(key string) int {
 	return port
 }
 
-// requiredPositiveInt 读取 HTTP 服务的有限正整数配置。
 func requiredPositiveInt(key string) int {
 	value := requiredConfig(key)
 	parsed, err := strconv.Atoi(value)
@@ -271,7 +278,62 @@ func (e *explorer) index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if _, err := io.WriteString(w, `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Fabric 网络浏览器</title><style>body{font-family:system-ui,sans-serif;max-width:900px;margin:40px auto;padding:0 20px;color:#1f2937}button{padding:8px 12px;margin:4px 0}input{padding:8px;margin:4px 0;width:100%;box-sizing:border-box}pre{background:#f3f4f6;padding:12px;white-space:pre-wrap}</style></head><body><h1>Fabric 网络浏览器</h1><p>通过平台代理查看当前网络状态并执行已授权的链码操作。</p><button id="refresh">读取通道</button><pre id="output">请选择操作</pre><script>const out=document.getElementById('output');document.getElementById('refresh').onclick=async()=>{const r=await fetch('/api/channels');out.textContent=JSON.stringify(await r.json(),null,2)};</script></body></html>`); err != nil {
+	if _, err := io.WriteString(w, `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Fabric 网络浏览器</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:960px;margin:0 auto;padding:24px;color:#17211f;background:#f7faf9}
+fieldset{border:0;padding:0;margin:0;min-width:0}section{background:#fff;border:1px solid #b8c8c4;border-radius:6px;padding:16px;margin:16px 0}
+label{display:block;margin:12px 0 6px}input,textarea,select{font:inherit;padding:8px;width:100%;box-sizing:border-box;border:1px solid #788d87;border-radius:4px}
+button{font:inherit;padding:10px 14px;margin-top:12px;background:#006c64;color:#fff;border:0;border-radius:4px;cursor:pointer}
+button:disabled{opacity:.6;cursor:wait}pre{background:#10201e;color:#e0f5ee;padding:16px;white-space:pre-wrap;overflow-wrap:anywhere}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:16px}
+</style></head><body><main><h1>Fabric 网络浏览器</h1><p>读取通道和区块摘要，或在当前网络查询、提交链码。</p>
+<fieldset id="controls"><legend>网络操作</legend><button id="refresh" type="button">读取通道</button>
+<div class="grid"><section><h2>区块摘要</h2><form id="blockForm">
+<label for="channel">通道</label><input id="channel" required>
+<label for="blockNumber">区块编号</label><input id="blockNumber" inputmode="numeric" pattern="[0-9]+" value="0" required>
+<button type="submit">读取区块</button></form></section>
+<section><h2>链码操作</h2><form id="chaincodeForm">
+<label for="chaincodeChannel">通道</label><input id="chaincodeChannel" required>
+<label for="name">链码名称</label><input id="name" required>
+<label for="fcn">函数名称</label><input id="fcn" required>
+<label for="chaincodeArgs">参数 JSON 字符串数组</label><textarea id="chaincodeArgs" rows="3">[]</textarea>
+<label for="chaincodeAction">操作</label><select id="chaincodeAction"><option value="query">只读查询</option><option value="submit">提交交易</option></select>
+<button type="submit">执行链码操作</button></form></section></div></fieldset>
+<h2>结果</h2><pre id="output" role="status" aria-live="polite">请选择操作</pre></main>
+<script>
+const output=document.getElementById('output');
+const controls=document.getElementById('controls');
+const value=id=>document.getElementById(id).value.trim();
+let busy=false;
+async function run(work){
+  if(busy)return;
+  busy=true;controls.disabled=true;output.textContent='正在处理…';
+  try{output.textContent=JSON.stringify(await work(),null,2)}
+  catch(error){output.textContent=error.message}
+  finally{busy=false;controls.disabled=false}
+}
+async function request(path,options){
+  const response=await fetch(path,options);
+  const result=await response.json();
+  if(!response.ok)throw new Error((result.message||'操作失败')+(result.trace_id?'，报障编号：'+result.trace_id:''));
+  return result;
+}
+document.getElementById('refresh').onclick=()=>run(()=>request('./api/channels'));
+document.getElementById('blockForm').onsubmit=event=>{
+  event.preventDefault();
+  return run(()=>request('./api/block?'+new URLSearchParams({channel:value('channel'),number:value('blockNumber')})));
+};
+document.getElementById('chaincodeForm').onsubmit=event=>{
+  event.preventDefault();
+  return run(()=>{
+    const args=JSON.parse(document.getElementById('chaincodeArgs').value);
+    if(!Array.isArray(args)||!args.every(arg=>typeof arg==='string'))throw new Error('参数必须是 JSON 字符串数组。');
+    const action=value('chaincodeAction');
+    return request('./api/chaincode/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channel:value('chaincodeChannel'),name:value('name'),fcn:value('fcn'),args})});
+  });
+};
+</script></body></html>`); err != nil {
 		log.Printf("trace_id=%s operation=write-fabric-index error=%q", traceID(), err.Error())
 	}
 }
@@ -280,14 +342,35 @@ func (e *explorer) runPeer(parent context.Context, args ...string) (string, stri
 	ctx, cancel := context.WithTimeout(parent, e.timeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, "peer", args...)
-	stdout, stderr := new(strings.Builder), new(strings.Builder)
+	command.WaitDelay = e.timeout
+	stdout := &limitedOutput{remaining: e.outputMaxBytes}
+	stderr := &limitedOutput{remaining: e.outputMaxBytes}
 	command.Stdout = stdout
 	command.Stderr = stderr
 	err := command.Run()
-	if ctx.Err() != nil {
-		return stdout.String(), stderr.String(), ctx.Err()
+	if stdout.exceeded || stderr.exceeded {
+		err = errors.Join(err, errOutputLimit)
 	}
-	return stdout.String(), stderr.String(), err
+	return stdout.buffer.String(), stderr.buffer.String(), errors.Join(err, ctx.Err())
+}
+
+var errOutputLimit = errors.New("peer output exceeds configured byte limit")
+
+type limitedOutput struct {
+	buffer    strings.Builder
+	remaining int
+	exceeded  bool
+}
+
+func (out *limitedOutput) Write(p []byte) (int, error) {
+	if len(p) <= out.remaining {
+		out.remaining -= len(p)
+		return out.buffer.Write(p)
+	}
+	out.exceeded = true
+	n, _ := out.buffer.Write(p[:out.remaining])
+	out.remaining = 0
+	return n, errOutputLimit
 }
 
 func validChaincodeRequest(req chaincodeRequest) bool {

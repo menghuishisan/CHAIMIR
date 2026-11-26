@@ -7,14 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
+	"chaimir/pkg/terminal"
 )
 
 const (
@@ -136,53 +139,61 @@ func contestSandboxGrantScopeMatches(grant ContestAccessGrant, contest Contest, 
 	return err == nil
 }
 
-// saveContestSubmissionWorkspace 从当前成员获授权的题目环境保存判题快照,不接受浏览器提供的对象引用。
-func (s *Service) saveContestSubmissionWorkspace(ctx context.Context, contest Contest, problem ContestProblem, team Team, sandboxID, memberTenantID, accountID int64) (contracts.SandboxWorkspaceSave, string, error) {
+// contestSubmissionSandbox 为代码采集与现场判题核验同一归属和就绪规则。
+func (s *Service) contestSubmissionSandbox(ctx context.Context, contest Contest, problem ContestProblem, team Team, sandboxID, memberTenantID, accountID int64, capability string) (contestSandboxAccess, contracts.SandboxInfo, error) {
 	if sandboxID <= 0 || problem.CompositionDigest == "" {
-		return contracts.SandboxWorkspaceSave{}, "", apperr.ErrContestSubmissionInvalid
+		return contestSandboxAccess{}, contracts.SandboxInfo{}, apperr.ErrContestSubmissionInvalid
 	}
-	access, err := s.resolveContestSandboxAccess(ctx, sandboxID, contestSandboxCapabilityWorkspaceWrite)
+	access, err := s.resolveContestSandboxAccess(ctx, sandboxID, capability)
 	if err != nil {
-		return contracts.SandboxWorkspaceSave{}, "", err
+		return contestSandboxAccess{}, contracts.SandboxInfo{}, err
 	}
 	if !contestSandboxGrantScopeMatches(access.grant, contest, problem, team, sandboxID, memberTenantID, accountID) {
-		return contracts.SandboxWorkspaceSave{}, "", apperr.ErrContestTeamAccessDenied
+		return contestSandboxAccess{}, contracts.SandboxInfo{}, apperr.ErrContestTeamAccessDenied
 	}
 	info, err := s.sandbox.GetSandboxForPrincipal(ctx, access.access)
 	if err != nil {
-		return contracts.SandboxWorkspaceSave{}, "", err
+		return contestSandboxAccess{}, contracts.SandboxInfo{}, err
 	}
 	if info.TenantID != contest.TenantID || info.SandboxID != sandboxID || info.SourceRef != access.grant.SourceRef ||
 		info.CompositionDigest != problem.CompositionDigest || !contestSubmissionSandboxReady(info) {
-		return contracts.SandboxWorkspaceSave{}, "", apperr.ErrContestSandboxUnavailable
+		return contestSandboxAccess{}, contracts.SandboxInfo{}, apperr.ErrContestSandboxUnavailable
 	}
+	return access, info, nil
+}
 
+// saveContestSubmissionWorkspace 从当前成员获授权的题目环境保存不可变代码输入。
+func (s *Service) saveContestSubmissionWorkspace(ctx context.Context, contest Contest, problem ContestProblem, team Team, sandboxID, memberTenantID, accountID int64) (contracts.SandboxWorkspaceSave, error) {
+	access, _, err := s.contestSubmissionSandbox(ctx, contest, problem, team, sandboxID, memberTenantID, accountID, contestSandboxCapabilityWorkspaceWrite)
+	if err != nil {
+		return contracts.SandboxWorkspaceSave{}, err
+	}
 	saved, err := s.sandbox.SaveSandboxFilesForPrincipal(ctx, access.access)
 	if err != nil {
-		return contracts.SandboxWorkspaceSave{}, "", err
+		return contracts.SandboxWorkspaceSave{}, err
 	}
 	if strings.TrimSpace(saved.CodeStorageKey) == "" || len(saved.CodeStorageKey) > 255 || !pkgcrypto.ValidSHA256Hex(saved.CodeHash) {
-		return contracts.SandboxWorkspaceSave{}, "", apperr.ErrContestSandboxUnavailable
+		return contracts.SandboxWorkspaceSave{}, apperr.ErrContestSandboxUnavailable
 	}
 
 	latest, err := s.resolveContestSandboxAccess(ctx, sandboxID, contestSandboxCapabilityWorkspaceWrite)
 	if err != nil {
-		return contracts.SandboxWorkspaceSave{}, "", err
+		return contracts.SandboxWorkspaceSave{}, err
 	}
 	if latest.grant.ID != access.grant.ID || latest.grant.GrantVersion != access.grant.GrantVersion ||
 		!contestSandboxGrantScopeMatches(latest.grant, contest, problem, team, sandboxID, memberTenantID, accountID) {
-		return contracts.SandboxWorkspaceSave{}, "", apperr.ErrContestTeamAccessDenied
+		return contracts.SandboxWorkspaceSave{}, apperr.ErrContestTeamAccessDenied
 	}
 	latestInfo, err := s.sandbox.GetSandboxForPrincipal(ctx, latest.access)
 	if err != nil {
-		return contracts.SandboxWorkspaceSave{}, "", err
+		return contracts.SandboxWorkspaceSave{}, err
 	}
 	if latestInfo.TenantID != contest.TenantID || latestInfo.SandboxID != sandboxID || latestInfo.SourceRef != latest.grant.SourceRef ||
 		latestInfo.CompositionDigest != problem.CompositionDigest || !contestSubmissionSandboxReady(latestInfo) ||
 		latestInfo.WorkspaceRevision != saved.WorkspaceRevision {
-		return contracts.SandboxWorkspaceSave{}, "", apperr.ErrContestSandboxUnavailable
+		return contracts.SandboxWorkspaceSave{}, apperr.ErrContestSandboxUnavailable
 	}
-	return saved, latestInfo.SourceRef, nil
+	return saved, nil
 }
 
 // contestSubmissionSandboxReady 接受已可编辑或因空闲进入待回收状态的环境,拒绝准备中和终止环境。
@@ -279,8 +290,15 @@ func (s *Service) ContestSandboxTerminalTarget(ctx context.Context, sandboxID in
 }
 
 // AttachContestSandboxTerminal 按已核验的 grant 和终端目标附加 PTY。
-func (s *Service) AttachContestSandboxTerminal(ctx context.Context, access contracts.SandboxPrincipalRequest, target contracts.SandboxTerminalTarget, stdin io.Reader, stdout io.Writer) error {
-	return s.sandbox.AttachSandboxTerminal(ctx, access, target, stdin, stdout)
+func (s *Service) AttachContestSandboxTerminal(ctx context.Context, access contracts.SandboxPrincipalRequest, target contracts.SandboxTerminalTarget, stdin io.Reader, stdout io.Writer, sizes terminal.SizeQueue) error {
+	current, err := s.resolveContestSandboxAccess(ctx, access.SandboxID, contestSandboxCapabilityTerminal)
+	if err != nil {
+		return err
+	}
+	if current.access != access {
+		return apperr.ErrContestTeamAccessDenied
+	}
+	return s.sandbox.AttachSandboxTerminal(ctx, current.access, target, stdin, stdout, sizes)
 }
 
 // ContestSandboxProgressSubscription 返回当前成员可订阅的沙箱进度主题。
@@ -297,14 +315,14 @@ func (s *Service) ContestSandboxProgressSubscription(ctx context.Context, sandbo
 }
 
 // ContestSandboxToolProxyTarget 返回当前成员可使用的 Web 工具代理目标及授权上下文。
-func (s *Service) ContestSandboxToolProxyTarget(ctx context.Context, sandboxID int64, toolCode string) (contracts.SandboxPrincipalRequest, contracts.SandboxToolProxyTarget, error) {
+func (s *Service) ContestSandboxToolProxyTarget(ctx context.Context, sandboxID int64, toolCode, proxyPath string) (contracts.SandboxPrincipalRequest, *url.URL, error) {
 	resolved, err := s.resolveContestSandboxAccess(ctx, sandboxID, contestSandboxCapabilityWebTools)
 	if err != nil {
-		return contracts.SandboxPrincipalRequest{}, contracts.SandboxToolProxyTarget{}, err
+		return contracts.SandboxPrincipalRequest{}, nil, err
 	}
-	target, err := s.sandbox.ToolProxyTargetForPrincipal(ctx, resolved.access, toolCode)
+	target, err := s.sandbox.ToolProxyTargetForPrincipal(ctx, resolved.access, toolCode, proxyPath)
 	if err != nil {
-		return contracts.SandboxPrincipalRequest{}, contracts.SandboxToolProxyTarget{}, err
+		return contracts.SandboxPrincipalRequest{}, nil, err
 	}
 	return resolved.access, target, nil
 }
@@ -360,18 +378,77 @@ func (s *Service) revokeContestSandboxGrants(ctx context.Context, tx TxStore, te
 }
 
 // closeRevokedContestSandboxSessions 尝试关闭全部被撤销 grant 的终端和进度连接,最后汇总清理错误。
-func (s *Service) closeRevokedContestSandboxSessions(grants []ContestAccessGrant) error {
-	if len(grants) > 0 && s.wsHub == nil {
-		return apperr.ErrSandboxToolProxyUnavailable
-	}
-	var closeErrs []error
+func (s *Service) closeRevokedContestSandboxSessions(ctx context.Context, tenantID int64, grants []ContestAccessGrant) error {
+	refs := make([]contracts.ContestSandboxSessionRef, 0, len(grants))
+	seen := make(map[contracts.ContestSandboxSessionRef]struct{}, len(grants))
+	var failures []error
 	for _, grant := range grants {
-		terminal := ws.SessionKey{TenantID: grant.MemberTenantID, AccountID: grant.MemberAccountID, Scope: contestSandboxSessionScope(grant.ID, grant.SandboxID)}
-		progress := terminal
-		progress.Scope += ":progress"
-		if err := errors.Join(s.wsHub.CloseSession(terminal), s.wsHub.CloseSession(progress)); err != nil {
-			closeErrs = append(closeErrs, fmt.Errorf("关闭已撤销竞赛沙箱连接失败: grant_id=%d sandbox_id=%d: %w", grant.ID, grant.SandboxID, err))
+		ref := contracts.ContestSandboxSessionRef{
+			GrantID: grant.ID, SandboxID: grant.SandboxID,
+			MemberTenantID: grant.MemberTenantID, MemberAccountID: grant.MemberAccountID,
+		}
+		if ref.GrantID <= 0 || ref.SandboxID <= 0 || ref.MemberTenantID <= 0 || ref.MemberAccountID <= 0 {
+			failures = append(failures, fmt.Errorf("竞赛授权连接引用非法: grant_id=%d sandbox_id=%d", grant.ID, grant.SandboxID))
+			continue
+		}
+		if _, ok := seen[ref]; !ok {
+			seen[ref] = struct{}{}
+			refs = append(refs, ref)
 		}
 	}
-	return errors.Join(closeErrs...)
+	if len(refs) == 0 {
+		return errors.Join(failures...)
+	}
+	if tenantID <= 0 {
+		failures = append(failures, fmt.Errorf("竞赛撤权租户非法: tenant_id=%d", tenantID))
+		return errors.Join(failures...)
+	}
+	if s.wsHub == nil {
+		failures = append(failures, apperr.ErrSandboxToolProxyUnavailable)
+	} else if err := closeContestSandboxSessions(s.wsHub, refs); err != nil {
+		failures = append(failures, err)
+	}
+	fanout, ok := s.bus.(eventbus.FanoutBus)
+	if !ok {
+		failures = append(failures, apperr.ErrEventBusMissing)
+	} else if err := fanout.PublishFanout(context.WithoutCancel(ctx), contracts.SubjectContestSandboxSessionsRevoked, contracts.ContestSandboxSessionsRevokedEvent{
+		TenantID: tenantID, Sessions: refs,
+	}); err != nil {
+		failures = append(failures, fmt.Errorf("广播竞赛授权撤销失败: %w", err))
+	}
+	return errors.Join(failures...)
+}
+
+type contestSessionCloser interface {
+	CloseSession(ws.SessionKey) error
+}
+
+// closeContestSandboxSessions 尝试关闭每项授权对应的终端和进度连接。
+func closeContestSandboxSessions(hub contestSessionCloser, refs []contracts.ContestSandboxSessionRef) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	if hub == nil {
+		return apperr.ErrSandboxToolProxyUnavailable
+	}
+	var failures []error
+	for _, ref := range refs {
+		if ref.GrantID <= 0 || ref.SandboxID <= 0 || ref.MemberTenantID <= 0 || ref.MemberAccountID <= 0 {
+			failures = append(failures, fmt.Errorf("竞赛授权会话引用非法: grant_id=%d sandbox_id=%d", ref.GrantID, ref.SandboxID))
+			continue
+		}
+		terminal := ws.SessionKey{
+			TenantID: ref.MemberTenantID, AccountID: ref.MemberAccountID,
+			Scope: contestSandboxSessionScope(ref.GrantID, ref.SandboxID),
+		}
+		progress := terminal
+		progress.Scope += ":progress"
+		if err := hub.CloseSession(terminal); err != nil {
+			failures = append(failures, fmt.Errorf("关闭竞赛终端失败: grant_id=%d sandbox_id=%d: %w", ref.GrantID, ref.SandboxID, err))
+		}
+		if err := hub.CloseSession(progress); err != nil {
+			failures = append(failures, fmt.Errorf("关闭竞赛进度连接失败: grant_id=%d sandbox_id=%d: %w", ref.GrantID, ref.SandboxID, err))
+		}
+	}
+	return errors.Join(failures...)
 }

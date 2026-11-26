@@ -263,7 +263,7 @@ export function Table<T>({
     // 给了 mobileCard 的表在 <md 改渲行卡,那时不需要横滚。
     <div
       className={cn(
-        "min-w-0",
+        "relative min-w-0",
         elevated && "rounded-lg bg-surface shadow-xs",
         mobileCard ? "md:overflow-x-auto" : "overflow-x-auto",
         className,

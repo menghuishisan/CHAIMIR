@@ -25,13 +25,6 @@ func (s *Service) PreviewComposition(ctx context.Context, req CompositionPreview
 		if err != nil {
 			return err
 		}
-		capabilities := aggregateRuntimeCapabilities(catalog.runtimeCapabilities)
-		if err := validateCompositionConflicts(capabilities, catalog.selected, catalog.tools); err != nil {
-			return err
-		}
-		if err := validateCapabilityCardinality(capabilities, catalog.selected, catalog.tools); err != nil {
-			return err
-		}
 		out, err = previewCompositionBindings(catalog)
 		return err
 	})
@@ -42,7 +35,7 @@ func (s *Service) PreviewComposition(ctx context.Context, req CompositionPreview
 }
 
 // previewCompositionBindings 只为manifest要求生成候选,保留仍合法的明确选择。
-// 唯一候选可以预选;多个或没有候选时保持未完成,不按顺序猜测目标。
+// 必需连接的唯一候选可以预选;可选连接始终由教师明确授权。
 func previewCompositionBindings(catalog compositionCatalog) (CompositionPreviewResponse, error) {
 	out := CompositionPreviewResponse{
 		Infra:    append([]contracts.CompositionComponentRef{}, catalog.spec.Infra...),
@@ -83,7 +76,7 @@ func previewCompositionBindings(catalog compositionCatalog) (CompositionPreviewR
 			if _, err := resolveCompositionEndpoint(ref.Code, sourceEndpoint, true, binding.SourceComponent, catalog.runtimeAdapters, catalog.tools); err != nil {
 				return CompositionPreviewResponse{}, err
 			}
-			item := CompositionBindingPreview{SourceComponent: ref.Code, SourceName: tool.Name, ConfigBinding: binding.ConfigBinding, Options: []CompositionBindingOption{}}
+			item := CompositionBindingPreview{SourceComponent: ref.Code, SourceName: tool.Name, ConfigBinding: binding.ConfigBinding, Title: binding.Title, Optional: binding.Optional, Multiple: binding.Multiple, Options: []CompositionBindingOption{}}
 			// 候选仅来自当前命名实例和依赖闭包,不暴露目录之外的服务。
 			for _, runtime := range catalog.runtimePlans {
 				if err := appendCompositionBindingOption(&item, binding, sourceEndpoint, runtime.InstanceCode, runtime.Runtime.Name+" · "+runtime.InstanceCode, runtimeCapabilities, catalog); err != nil {
@@ -98,32 +91,37 @@ func previewCompositionBindings(catalog compositionCatalog) (CompositionPreviewR
 					return CompositionPreviewResponse{}, err
 				}
 			}
-			var chosen *contracts.CompositionLink
+			var chosen []contracts.CompositionLink
+			seen := map[contracts.CompositionLink]struct{}{}
 			matches := 0
 			for _, existing := range catalog.spec.Links {
 				if existing.SourceComponent != ref.Code || existing.ConfigBinding != binding.ConfigBinding {
 					continue
 				}
 				matches++
-				if matches > 1 {
+				if matches > 1 && !binding.Multiple {
 					return CompositionPreviewResponse{}, fmt.Errorf("组件 %s 的连接 %s 重复", ref.Code, binding.Name)
 				}
+				if _, duplicate := seen[existing]; duplicate {
+					return CompositionPreviewResponse{}, fmt.Errorf("组件 %s 的连接 %s 目标重复", ref.Code, binding.Name)
+				}
+				seen[existing] = struct{}{}
 				for _, option := range item.Options {
 					if existing == option.Link {
-						link := option.Link
-						chosen = &link
+						chosen = append(chosen, option.Link)
 						break
 					}
 				}
 			}
-			if chosen == nil && len(item.Options) == 1 {
-				link := item.Options[0].Link
-				chosen = &link
+			if !binding.Optional && len(chosen) == 0 && len(item.Options) == 1 {
+				chosen = append(chosen, item.Options[0].Link)
 			}
-			if chosen == nil {
-				out.Complete = false
+			if len(chosen) == 0 {
+				if !binding.Optional {
+					out.Complete = false
+				}
 			} else {
-				out.Links = append(out.Links, *chosen)
+				out.Links = append(out.Links, chosen...)
 			}
 			out.Bindings = append(out.Bindings, item)
 		}
@@ -139,7 +137,7 @@ func previewCompositionBindings(catalog compositionCatalog) (CompositionPreviewR
 	if out.Complete {
 		spec := catalog.spec
 		spec.Links = out.Links
-		if err := validateCompositionLinks(spec, catalog.selected, catalog.tools); err != nil {
+		if err := validateCompositionLinks(spec, catalog.selected); err != nil {
 			return CompositionPreviewResponse{}, err
 		}
 		if err := validateCompositionBindings(spec, runtimeCapabilities, catalog.selected, catalog.tools); err != nil {

@@ -20,7 +20,8 @@ Optimism 风格 L2 教学编排镜像。
 
 ## bindings 与 links
 
-- 必需 bindings：[{"name":"l1_execution","capability":"evm-json-rpc","source_component":"infra","endpoint":"rpc","protocol":"HTTP","required_at_start":true,"config_binding":"env:OP_NODE_L1_ETH_RPC"},{"name":"l2_engine","capability":"evm-engine-api","source_component":"infra","endpoint":"engine","protocol":"HTTP","required_at_start":true,"config_binding":"env:OP_NODE_L2_ENGINE_RPC"},{"name":"l1_beacon","capability":"ethereum-beacon-api","source_component":"infra","endpoint":"http","protocol":"HTTP","required_at_start":true,"config_binding":"env:OP_NODE_L1_BEACON"}]；rollup_config、l1_chain_config 和 l1_beacon 也必须由同一 CompositionSpec 显式提供。
+- 必需 bindings：[{"name":"l1_execution","capability":"evm-json-rpc","source_component":"infra","endpoint":"rpc","protocol":"HTTP","required_at_start":true,"config_binding":"env:OP_NODE_L1_ETH_RPC"},{"name":"l2_engine","capability":"evm-engine-api","source_component":"infra","endpoint":"engine","protocol":"HTTP","required_at_start":true,"config_binding":"env:OP_NODE_L2_ENGINE_RPC"},{"name":"l1_beacon","capability":"ethereum-beacon-api","source_component":"infra","endpoint":"http","protocol":"HTTP","required_at_start":true,"config_binding":"env:OP_NODE_L1_BEACON"}]；rollup_config 和 l1_chain_config 由同一 CompositionSpec 显式提供，信标地址只由 l1_beacon 连接生成。
+- 监听地址、服务端口与禁用 P2P 是固定运行约束，不作为可编辑参数。
 - 必需 links：无；本镜像不声明跨组件 link。
 - binding 的 endpoint、协议、配置键和启动前置以 manifest 为准；缺失、重复、错误能力或错误 provider 均拒绝编排。
 

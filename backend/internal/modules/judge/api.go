@@ -154,7 +154,7 @@ func (a judgeAPI) cancelTask(c *gin.Context) {
 	if !ok {
 		return
 	}
-	httpx.Write(c, struct{}{}, a.svc.CancelTask(c.Request.Context(), tenantID, id))
+	httpx.Write(c, struct{}{}, a.svc.CancelJudgeTask(c.Request.Context(), tenantID, id))
 }
 
 // rejudgeTask 绑定内部服务或教师重判请求。
@@ -188,7 +188,7 @@ func (a judgeAPI) rejudgeBatch(c *gin.Context) {
 	if !ok {
 		return
 	}
-	httpx.Write(c, struct{}{}, a.svc.RejudgeBatch(c.Request.Context(), tenantID, req.SourceRef))
+	httpx.Write(c, struct{}{}, a.svc.RejudgeBySourceRef(c.Request.Context(), tenantID, req.SourceRef))
 }
 
 // exactFingerprints 绑定精确哈希查重查询。
@@ -197,7 +197,7 @@ func (a judgeAPI) exactFingerprints(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.ExactFingerprints(c.Request.Context(), tenantID, c.Query("problem_ref"), c.Query("code_hash"))
+	out, err := a.svc.FindExactMatch(c.Request.Context(), tenantID, c.Query("problem_ref"), c.Query("code_hash"))
 	httpx.Write(c, out, err)
 }
 

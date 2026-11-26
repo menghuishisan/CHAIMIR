@@ -1,5 +1,3 @@
-// resourceInvalidation 提供应用级有类型资源失效协议，统一刷新跨页面共享数据。
-
 export type AppResourceKey = 'notification-unread' | 'profile'
 
 const RESOURCE_INVALIDATION_EVENT = 'chaimir:resource-invalidated'

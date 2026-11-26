@@ -228,17 +228,8 @@ func (s *txStore) CountSubmissionsByStatusAndLate(ctx context.Context, tenantID,
 }
 
 // UpdateSubmissionManualGrade 更新教师批改分。
-func (s *txStore) UpdateSubmissionManualGrade(ctx context.Context, tenantID, id int64, manual, final int32, comment string) (Submission, error) {
-	row, err := s.q.UpdateSubmissionManualGrade(ctx, sqlcgen.UpdateSubmissionManualGradeParams{TenantID: tenantID, SubmissionID: id, ManualScore: pgtypex.Int4(manual), FinalScore: pgtypex.Int4(final), Comment: pgtypex.Text(comment)})
-	if err != nil {
-		return Submission{}, err
-	}
-	return submissionFromRow(row)
-}
-
-// UpdateSubmissionJudgeRef 写回 M3 判题任务引用。
-func (s *txStore) UpdateSubmissionJudgeRef(ctx context.Context, tenantID, id int64, taskRef string) (Submission, error) {
-	row, err := s.q.UpdateSubmissionJudgeRef(ctx, sqlcgen.UpdateSubmissionJudgeRefParams{TenantID: tenantID, ID: id, JudgeTaskRef: pgtypex.Text(taskRef)})
+func (s *txStore) UpdateSubmissionManualGrade(ctx context.Context, tenantID, id int64, manual int32, final *int32, comment string) (Submission, error) {
+	row, err := s.q.UpdateSubmissionManualGrade(ctx, sqlcgen.UpdateSubmissionManualGradeParams{TenantID: tenantID, SubmissionID: id, ManualScore: pgtypex.Int4(manual), FinalScore: pgtypex.Int4Ptr(final), Comment: pgtypex.Text(comment)})
 	if err != nil {
 		return Submission{}, err
 	}
@@ -246,8 +237,8 @@ func (s *txStore) UpdateSubmissionJudgeRef(ctx context.Context, tenantID, id int
 }
 
 // UpdateSubmissionAutoScore 按提交聚合自动分和迟交处理后的最终分。
-func (s *txStore) UpdateSubmissionAutoScore(ctx context.Context, tenantID, submissionID int64, score, final int32) (Submission, error) {
-	row, err := s.q.UpdateSubmissionAutoScore(ctx, sqlcgen.UpdateSubmissionAutoScoreParams{TenantID: tenantID, ID: submissionID, AutoScore: pgtypex.Int4(score), FinalScore: pgtypex.Int4(final)})
+func (s *txStore) UpdateSubmissionAutoScore(ctx context.Context, tenantID, submissionID int64, score int32, final *int32) (Submission, error) {
+	row, err := s.q.UpdateSubmissionAutoScore(ctx, sqlcgen.UpdateSubmissionAutoScoreParams{TenantID: tenantID, SubmissionID: submissionID, AutoScore: pgtypex.Int4(score), FinalScore: pgtypex.Int4Ptr(final)})
 	if err != nil {
 		return Submission{}, err
 	}

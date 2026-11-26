@@ -1,5 +1,3 @@
-// xterm 封装：为沙箱终端提供统一写入、清屏、输入转发和销毁生命周期。
-
 import '@xterm/xterm/css/xterm.css'
 import type { MountedTerminal, TerminalMountOptions } from './types'
 
@@ -56,7 +54,8 @@ export async function mountTerminal(
     write: (data) => terminal.write(data),
     clear: () => terminal.clear(),
     focus: () => terminal.focus(),
-    resize: () => fitAddon.fit(),
+    getSize: () => ({ cols: terminal.cols, rows: terminal.rows }),
+    onResize: (listener) => terminal.onResize(listener),
     dispose: () => {
       disposed = true
       observer.disconnect()
@@ -67,7 +66,6 @@ export async function mountTerminal(
   }
 }
 
-/** cssColor 读取设计令牌的计算值，供 xterm 主题配置使用。 */
 function cssColor(token: string): string {
   const value = getComputedStyle(document.documentElement).getPropertyValue(token).trim()
   if (!value) {

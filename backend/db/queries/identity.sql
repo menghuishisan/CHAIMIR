@@ -456,8 +456,11 @@ WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL;
 
 -- name: RecordPasswordFailure :one
 UPDATE account
-SET pwd_failed_count = $3, locked_until = $4, updated_at = now()
-WHERE id = $1 AND tenant_id = $2
+SET pwd_failed_count = LEAST(pwd_failed_count::integer + 1, sqlc.arg(max_failures)::smallint)::smallint,
+    locked_until = CASE WHEN pwd_failed_count::integer + 1 >= sqlc.arg(max_failures)::smallint
+                        THEN sqlc.narg(lock_until)::timestamptz ELSE locked_until END,
+    updated_at = now()
+WHERE id = sqlc.arg(account_id)::bigint AND tenant_id = sqlc.arg(tenant_id)::bigint
 RETURNING id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, pwd_failed_count, locked_until, activated_at, deleted_at, created_at, updated_at;
 
 -- name: ClearPasswordFailure :exec
@@ -675,3 +678,11 @@ SELECT
   COUNT(*) FILTER (WHERE status = 3) AS disabled_account_count
 FROM account
 WHERE tenant_id = $1;
+
+-- name: CountLoginFailures :one
+SELECT count(*)::bigint FROM audit_log WHERE tenant_id=$1 AND action='auth.login.failed' AND created_at BETWEEN $2 AND $3;
+
+-- name: ListAlertRecipients :many
+SELECT a.id FROM account a WHERE a.tenant_id=$1 AND a.status=2 AND a.deleted_at IS NULL
+AND EXISTS (SELECT 1 FROM account_role r WHERE r.account_id=a.id AND r.tenant_id=a.tenant_id AND r.role=2)
+ORDER BY a.id;

@@ -16,8 +16,10 @@ import (
 	"sync"
 	"time"
 
+	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
+	"chaimir/pkg/terminal"
 
 	"github.com/gorilla/websocket"
 )
@@ -189,6 +191,16 @@ func (c *Conn) ReadJSON(v any) error {
 	return nil
 }
 
+// ReadJSONContext 在本次业务执行被取消时中断底层读取,供租约丢失等场景终止空闲流。
+func (c *Conn) ReadJSONContext(ctx context.Context, v any) error {
+	stop := context.AfterFunc(ctx, func() { c.close(context.Cause(ctx)) })
+	defer stop()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return c.ReadJSON(v)
+}
+
 // Context 保留请求身份与trace,并在连接结束时取消关联执行。
 func (c *Conn) Context() context.Context {
 	return c.ctx
@@ -206,9 +218,10 @@ func (c *Conn) SendJSON(v any) error {
 	return nil
 }
 
-// Reader 返回 WebSocket 文本/二进制消息的连续读取流,供终端等交互场景透传输入。
-func (c *Conn) Reader() io.Reader {
-	return &connReader{conn: c}
+// TerminalInput 分离终端二进制输入与文本尺寸消息；调用方只启动一个 stdin 读循环。
+func (c *Conn) TerminalInput() (io.Reader, terminal.SizeQueue) {
+	input := &terminalReader{conn: c, sizes: make(chan terminal.Size, 1)}
+	return input, input
 }
 
 // Writer 返回写入 WebSocket 二进制消息的流式 writer,供终端等交互场景透传输出。
@@ -454,6 +467,31 @@ func (h *Hub) CloseSession(session SessionKey) error {
 	return conn.closeWithControl(websocket.ClosePolicyViolation, "session_replaced")
 }
 
+// RetainScopeSessions 关闭指定租户和作用域中未获当前授权的连接；空集合关闭全部。
+func (h *Hub) RetainScopeSessions(tenantID int64, scope string, accountIDs []int64) error {
+	allowed := make(map[int64]struct{}, len(accountIDs))
+	for _, accountID := range accountIDs {
+		allowed[accountID] = struct{}{}
+	}
+	h.mu.RLock()
+	var connections []*Conn
+	for session, conn := range h.sessions {
+		if session.TenantID == tenantID && session.Scope == scope {
+			if _, ok := allowed[session.AccountID]; !ok {
+				connections = append(connections, conn)
+			}
+		}
+	}
+	h.mu.RUnlock()
+	var failures []error
+	for _, conn := range connections {
+		if err := conn.closeWithControl(websocket.ClosePolicyViolation, "session_revoked"); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
+}
+
 // CloseAll 在服务进入 draining 状态时关闭全部 WebSocket 连接,让客户端重新连接到仍然就绪的副本。
 func (h *Hub) CloseAll(reason string) error {
 	if h == nil {
@@ -606,13 +644,16 @@ func (c *Conn) closeWithControl(code int, reason string) error {
 	return errors.Join(writeErr, c.closeErr)
 }
 
-type connReader struct {
-	conn *Conn
-	buf  *bytes.Reader
+type terminalReader struct {
+	conn  *Conn
+	buf   *bytes.Reader
+	sizes chan terminal.Size
 }
 
-// Read 从下一条 WebSocket 消息读取字节,消息边界由底层连接维护。
-func (r *connReader) Read(p []byte) (int, error) {
+func (r *terminalReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
 	for {
 		if r.buf != nil && r.buf.Len() > 0 {
 			return r.buf.Read(p)
@@ -626,12 +667,43 @@ func (r *connReader) Read(p []byte) (int, error) {
 			r.conn.close(err)
 			return 0, err
 		}
-		if messageType == websocket.TextMessage || messageType == websocket.BinaryMessage {
+		switch messageType {
+		case websocket.TextMessage:
+			var size terminal.Size
+			if err := jsonx.DecodeStrictKnownFields(data, &size); err != nil {
+				err = fmt.Errorf("解析终端尺寸失败: %w", err)
+				r.conn.close(err)
+				return 0, err
+			}
+			if size.Width == 0 || size.Height == 0 {
+				err := fmt.Errorf("终端行列数必须为正整数")
+				r.conn.close(err)
+				return 0, err
+			}
+			// 尺寸是当前快照，连续拖动时只需尚未消费的最新值，不阻塞输入。
+			select {
+			case <-r.sizes:
+			default:
+			}
+			r.sizes <- size
+		case websocket.BinaryMessage:
 			if len(data) == 0 {
 				continue
 			}
 			r.buf = bytes.NewReader(data)
 		}
+	}
+}
+
+func (r *terminalReader) Next() *terminal.Size {
+	if r.conn.ctx.Err() != nil {
+		return nil
+	}
+	select {
+	case size := <-r.sizes:
+		return &size
+	case <-r.conn.done:
+		return nil
 	}
 }
 

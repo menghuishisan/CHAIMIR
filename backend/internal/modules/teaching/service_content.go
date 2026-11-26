@@ -38,7 +38,7 @@ func (s *Service) CreateChapter(ctx context.Context, courseID int64, req Chapter
 }
 
 // UpdateChapter 更新章节。
-func (s *Service) UpdateChapter(ctx context.Context, chapterID int64, req ChapterRequest) (ChapterDTO, error) {
+func (s *Service) UpdateChapter(ctx context.Context, courseID, chapterID int64, req ChapterRequest) (ChapterDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return ChapterDTO{}, err
@@ -51,6 +51,9 @@ func (s *Service) UpdateChapter(ctx context.Context, chapterID int64, req Chapte
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		current, err := tx.GetChapter(ctx, id.TenantID, chapterID)
 		if err != nil {
+			return err
+		}
+		if err := ensureChapterInCourse(current, courseID); err != nil {
 			return err
 		}
 		course, err := tx.GetCourse(ctx, id.TenantID, current.CourseID)
@@ -70,7 +73,7 @@ func (s *Service) UpdateChapter(ctx context.Context, chapterID int64, req Chapte
 }
 
 // DeleteChapter 删除章节。
-func (s *Service) DeleteChapter(ctx context.Context, chapterID int64) error {
+func (s *Service) DeleteChapter(ctx context.Context, courseID, chapterID int64) error {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return err
@@ -79,6 +82,9 @@ func (s *Service) DeleteChapter(ctx context.Context, chapterID int64) error {
 		chapter, err := tx.GetChapter(ctx, id.TenantID, chapterID)
 		if err != nil {
 			return mapCourseError(err)
+		}
+		if err := ensureChapterInCourse(chapter, courseID); err != nil {
+			return err
 		}
 		course, err := tx.GetCourse(ctx, id.TenantID, chapter.CourseID)
 		if err != nil {
@@ -148,7 +154,7 @@ func (s *Service) GetLessonForUser(ctx context.Context, lessonID int64) (LessonD
 }
 
 // UpdateLesson 更新课时。
-func (s *Service) UpdateLesson(ctx context.Context, lessonID int64, req LessonRequest) (LessonDTO, error) {
+func (s *Service) UpdateLesson(ctx context.Context, chapterID, lessonID int64, req LessonRequest) (LessonDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return LessonDTO{}, err
@@ -159,12 +165,15 @@ func (s *Service) UpdateLesson(ctx context.Context, lessonID int64, req LessonRe
 	}
 	var lesson Lesson
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		current, err := tx.GetLesson(ctx, id.TenantID, lessonID)
+		current, err := tx.GetLessonForUpdate(ctx, id.TenantID, lessonID)
 		if err != nil {
 			return err
 		}
 		chapter, err := tx.GetChapter(ctx, id.TenantID, current.ChapterID)
 		if err != nil {
+			return err
+		}
+		if err := ensureLessonInChapter(current, chapterID); err != nil {
 			return err
 		}
 		course, err := tx.GetCourse(ctx, id.TenantID, chapter.CourseID)
@@ -189,7 +198,7 @@ func (s *Service) UpdateLesson(ctx context.Context, lessonID int64, req LessonRe
 }
 
 // DeleteLesson 删除课时。
-func (s *Service) DeleteLesson(ctx context.Context, lessonID int64) error {
+func (s *Service) DeleteLesson(ctx context.Context, chapterID, lessonID int64) error {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return err
@@ -198,6 +207,9 @@ func (s *Service) DeleteLesson(ctx context.Context, lessonID int64) error {
 		lesson, err := tx.GetLesson(ctx, id.TenantID, lessonID)
 		if err != nil {
 			return mapCourseError(err)
+		}
+		if err := ensureLessonInChapter(lesson, chapterID); err != nil {
+			return err
 		}
 		chapter, err := tx.GetChapter(ctx, id.TenantID, lesson.ChapterID)
 		if err != nil {
@@ -225,6 +237,10 @@ func (s *Service) JoinCourseByInvite(ctx context.Context, req JoinCourseRequest)
 	if code == "" {
 		return MemberDTO{}, apperr.ErrTeachingInviteInvalid
 	}
+	profile, err := s.identity.GetAccount(ctx, id.AccountID)
+	if err != nil {
+		return MemberDTO{}, apperr.ErrTeachingMemberInvalid.WithCause(err)
+	}
 	var member CourseMember
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		course, err := tx.GetCourseByInviteCode(ctx, code)
@@ -241,11 +257,6 @@ func (s *Service) JoinCourseByInvite(ctx context.Context, req JoinCourseRequest)
 		return err
 	}); err != nil {
 		return MemberDTO{}, err
-	}
-	// 加入者就是当前学生,姓名取自其账号档案(经 M1 契约,不查 identity 的表)。
-	profile, err := s.identity.GetAccount(ctx, id.AccountID)
-	if err != nil {
-		return MemberDTO{}, apperr.ErrTeachingMemberInvalid.WithCause(err)
 	}
 	return memberDTO(member, profile), nil
 }

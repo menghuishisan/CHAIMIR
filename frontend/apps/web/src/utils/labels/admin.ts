@@ -42,7 +42,6 @@ export function backupTypeLabel(type: BackupType): string {
 }
 
 const BACKUP_STATUS_LABELS: Record<BackupStatus, string> = {
-  [BackupStatus.RUNNING]: '备份中',
   [BackupStatus.SUCCEEDED]: '备份成功',
   [BackupStatus.FAILED]: '备份失败',
 }
@@ -67,12 +66,13 @@ export function auditActorRoleLabel(role: AuditActorRole): string {
 
 /**
  * 审计动作文案。action 是后端各模块自取的开放字符串(如 teaching.assignment.submit),
- * 界面必须显示中文动作名而不是内部标识(旧前端直出 auth.login 是 P0 违规)。
+ * 界面显示中文动作名,不把内部操作标识直接暴露给用户。
  * 未登记的动作按「模块 · 操作」拆解显示,仍不暴露原始点分标识。
  */
 const AUDIT_ACTION_LABELS: Record<string, string> = {
   // 登录与账号
   'auth.login': '登录',
+  'auth.login.failed': '登录验证未通过',
   'auth.logout': '退出登录',
   'auth.refresh.replay': '登录凭证被重复使用,已强制下线',
   'account.create': '创建账号',
@@ -224,8 +224,6 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   'sim.session.archive': '结束仿真',
   // 公告与系统
   'notify.announcement.publish': '发布公告',
-  'admin.config.update': '修改系统配置',
-  'admin.config.rollback': '回滚系统配置',
   'admin.alert.handle': '处理告警',
   'admin.alert_rule.create': '新建告警规则',
   'admin.alert_rule.update': '修改告警规则',
@@ -315,7 +313,6 @@ const AUDIT_TARGET_LABELS: Record<string, string> = {
   sim_package: '仿真场景',
   sim_session: '仿真记录',
   'notify.announcement': '公告',
-  system_config: '系统配置',
   alert_event: '告警',
   alert_rule: '告警规则',
   audit_log: '审计日志',
@@ -333,7 +330,6 @@ export function auditTargetTypeLabel(targetType: string): string {
 const STATISTICS_METRIC_LABELS: Record<string, string> = {
   account_count: '账号总数',
   active_account_count: '活跃账号',
-  new_account_count: '新增账号',
   course_count: '课程数',
   active_course_count: '进行中课程',
   experiment_count: '实验数',
@@ -341,40 +337,13 @@ const STATISTICS_METRIC_LABELS: Record<string, string> = {
   contest_count: '竞赛数',
   active_contest_count: '进行中竞赛',
   active_sandbox_count: '活跃沙箱',
-  submission_count: '作业提交数',
-  judge_task_count: '判题任务数',
   tenant_count: '学校数',
-  learning_duration_sec: '累计学习时长',
+  learning_duration_sec: '累计学习时长（秒）',
 }
 
 /** statisticsMetricLabel 返回统计指标名称;未登记键返回 undefined 由调用方跳过。 */
 export function statisticsMetricLabel(key: string): string | undefined {
   return STATISTICS_METRIC_LABELS[key]
-}
-
-/**
- * 系统配置项的用户向名称与说明。
- * 配置值是 JSONB,界面按已登记的配置项渲染显式表单,不给裸 JSON 文本域。
- */
-const CONFIG_KEY_LABELS: Record<string, { name: string; description: string }> = {
-  'sandbox.default_quota': {
-    name: '沙箱默认配额',
-    description: '新学校开通时的沙箱并发与资源上限',
-  },
-  'judge.concurrency': { name: '判题并发数', description: '同时执行的判题任务上限' },
-  'notify.retention_days': { name: '站内信保留天数', description: '超过后自动清理站内消息' },
-  'transfer.max_attempts': { name: '导入导出重试次数', description: '任务失败后的最大重试次数' },
-  'grade.summary_cache_ttl': { name: '成绩概览缓存时长', description: '学业概览的缓存有效期(秒)' },
-}
-
-/** configKeyLabel 返回配置项名称;未登记的键显示原键名(平台管理员能理解技术键)。 */
-export function configKeyLabel(key: string): string {
-  return CONFIG_KEY_LABELS[key]?.name ?? key
-}
-
-/** configKeyDescription 返回配置项说明;未登记返回 undefined。 */
-export function configKeyDescription(key: string): string | undefined {
-  return CONFIG_KEY_LABELS[key]?.description
 }
 
 /**

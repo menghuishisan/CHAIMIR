@@ -1,4 +1,3 @@
-// service_platform_selftest 文件实现平台级临时沙箱自检,不创建租户业务沙箱记录。
 package sandbox
 
 import (
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
@@ -21,26 +19,20 @@ func (s *Service) RunPlatformSelftest(ctx context.Context, req contracts.Sandbox
 	if err := validatePlatformSelftestRequest(req); err != nil {
 		return err
 	}
+	if s.cfg.ReadyTimeoutSeconds <= 0 || s.cfg.SelftestRecycleTimeoutSeconds <= 0 {
+		return apperr.ErrSandboxSelftestRecycleConfigInvalid
+	}
 	digest, err := contracts.CanonicalSnapshotDigest(req.CompositionSnapshot)
 	if err != nil || digest != req.CompositionSnapshot.Digest {
 		return apperr.ErrSandboxCreateRequestInvalid
 	}
-	runtimePlans, err := s.runtimePlansForSnapshot(ctx, req.CompositionSnapshot)
+	plan, err := s.planForSnapshot(ctx, req.CompositionSnapshot)
 	if err != nil {
 		return err
 	}
 	execTarget, err := materializePlatformSelftestExecTarget(req.ExecTarget, req.CompositionSnapshot.Spec.WorkspaceRuntimeInstance)
 	if err != nil {
 		return err
-	}
-	privateSidecars := privateSidecarsFromContract(req.CompositionSnapshot.PrivateSidecars)
-	if err := validatePrivateSidecars(privateSidecars, s.cfg, adapterSpecForPrivateSidecarValidation(runtimePlans)); err != nil {
-		return err
-	}
-	for _, runtimePlan := range runtimePlans {
-		if err := validatePlanImagesCurrentlyAdmitted(s.cfg, runtimePlan.Runtime, runtimePlan.Image, nil, privateSidecars); err != nil {
-			return err
-		}
 	}
 
 	selftestID := s.ids.Generate()
@@ -52,19 +44,17 @@ func (s *Service) RunPlatformSelftest(ctx context.Context, req contracts.Sandbox
 		Status:         SandboxStatusCreating,
 		OwnerAccountID: 0,
 	}
-	plan := CreateSandboxPlan{
-		Sandbox:                  sb,
-		WorkspaceRuntimeInstance: req.CompositionSnapshot.Spec.WorkspaceRuntimeInstance,
-		Runtimes:                 runtimePlans,
-		PrivateSidecars:          privateSidecars,
-	}
+	plan.Sandbox = sb
 
 	ctx = logging.WithAttrs(ctx, slog.Int64("sandbox_id", sb.ID), slog.String("namespace", sb.Namespace),
 		slog.String("composition_digest", digest), slog.String("exec_target", execTarget))
 	operationCtx, operationCancel := context.WithTimeout(ctx, time.Duration(req.TimeoutSec)*time.Second)
 	defer operationCancel()
 	started := time.Now()
-	runErr := s.orchestrator.CreateSandboxResources(operationCtx, plan)
+	archives, runErr := s.prepareRuntimeInitArchives(operationCtx, sb, plan.Runtimes)
+	if runErr == nil {
+		runErr = s.orchestrator.CreateSandboxResources(operationCtx, plan, archives)
+	}
 	if runErr == nil {
 		runErr = operationCtx.Err()
 	}
@@ -93,11 +83,13 @@ func (s *Service) RunPlatformSelftest(ctx context.Context, req contracts.Sandbox
 	}
 	operationCancel()
 
-	cleanupBase := logging.WithAttrs(context.WithoutCancel(ctx), logging.AttrsFromContext(ctx)...)
-	cleanupCtx, cleanupCancel := context.WithTimeout(cleanupBase, time.Duration(s.cfg.SelftestRecycleTimeoutSeconds)*time.Second)
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(s.cfg.SelftestRecycleTimeoutSeconds)*time.Second)
 	defer cleanupCancel()
 	started = time.Now()
 	cleanupErr := s.orchestrator.DestroySandboxResources(cleanupCtx, sb)
+	if cleanupErr == nil {
+		cleanupErr = cleanupCtx.Err()
+	}
 	logPlatformSelftestStage(cleanupCtx, "cleanup", started, cleanupErr)
 	if cleanupErr != nil {
 		runErr = errors.Join(runErr, fmt.Errorf("回收平台自检资源失败: %w", cleanupErr))
@@ -145,47 +137,4 @@ func validatePlatformSelftestRequest(req contracts.SandboxPlatformSelftestReques
 		}
 	}
 	return nil
-}
-
-// runtimePlansForSnapshot 从平台目录读取快照锁定的运行时和镜像,不从当前目录反推执行版本。
-func (s *Service) runtimePlansForSnapshot(ctx context.Context, snapshot contracts.SandboxCompositionSnapshot) ([]RuntimePlan, error) {
-	runtimePlans := make([]RuntimePlan, 0, len(snapshot.Runtimes))
-	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		for _, frozen := range snapshot.Runtimes {
-			runtime, err := tx.GetRuntimeByID(ctx, frozen.RuntimeID)
-			if err != nil {
-				return apperr.ErrSandboxRuntimeNotFound.WithCause(err)
-			}
-			if runtime.Code != frozen.Code || runtime.PluginRef != frozen.PluginRef || runtime.Status != RuntimeStatusAvailable || runtime.SelftestStatus != RuntimeSelftestPassed {
-				return apperr.ErrSandboxRuntimeUnavailable.WithCause(fmt.Errorf("平台自检运行时门禁拒绝: runtime_id=%d instance=%s code=%s frozen_code=%s status=%d selftest_status=%d", runtime.ID, frozen.InstanceCode, runtime.Code, frozen.Code, runtime.Status, runtime.SelftestStatus))
-			}
-			var frozenAdapter AdapterSpec
-			if err := jsonx.DecodeStrictKnownFields(frozen.AdapterSpec, &frozenAdapter); err != nil {
-				return apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
-			}
-			runtime.AdapterSpec = MaterializeRuntimeTopology(frozen.InstanceCode, frozenAdapter)
-			runtime.AdapterLevel = frozen.AdapterLevel
-			runtime.CapabilityImpl = frozen.CapabilityImpl
-			runtime.PluginRef = frozen.PluginRef
-			image, err := tx.GetRuntimeImageByID(ctx, frozen.RuntimeID, frozen.ImageID)
-			if err != nil {
-				return apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
-			}
-			if image.ImageURL != frozen.ImageURL || image.Version != frozen.ImageVersion {
-				return apperr.ErrSandboxRuntimeUnavailable.WithCause(fmt.Errorf("平台自检镜像与冻结声明不一致: runtime_id=%d image_id=%d composition_digest=%s", runtime.ID, image.ID, snapshot.Digest))
-			}
-			prepull, err := tx.GetCompositionPrepullForUpdate(ctx, image.ID, snapshot.Digest)
-			if err != nil {
-				return apperr.ErrSandboxRuntimeUnavailable.WithCause(fmt.Errorf("读取平台自检组合预拉取证明失败: runtime_id=%d image_id=%d composition_digest=%s: %w", runtime.ID, image.ID, snapshot.Digest, err))
-			}
-			if prepull.Status != ImagePrepullSucceeded {
-				return apperr.ErrSandboxRuntimeUnavailable.WithCause(fmt.Errorf("平台自检组合预拉取尚未通过: runtime_id=%d image_id=%d composition_digest=%s status=%d", runtime.ID, image.ID, snapshot.Digest, prepull.Status))
-			}
-			runtimePlans = append(runtimePlans, RuntimePlan{InstanceCode: frozen.InstanceCode, Runtime: runtime, Image: image})
-		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	return runtimePlans, nil
 }

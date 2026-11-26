@@ -1,9 +1,7 @@
-// sandbox convert 文件负责 DTO、内部模型与跨模块契约之间的纯转换。
 package sandbox
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -20,20 +18,22 @@ func sandboxInfoFromModel(sb Sandbox, snapshot contracts.SandboxCompositionSnaps
 		instances = append(instances, strings.TrimSpace(item.InstanceCode))
 	}
 	return contracts.SandboxInfo{
-		SandboxID:           sb.ID,
-		TenantID:            sb.TenantID,
-		Namespace:           sb.Namespace,
-		SourceRef:           sb.SourceRef,
-		ScopeRef:            sb.ScopeRef,
-		CompositionDigest:   sb.CompositionDigest,
-		OwnerAccountID:      sb.OwnerAccountID,
-		RuntimeCode:         runtime.Code,
-		RuntimeImageVersion: image.Version,
-		RuntimeInstances:    instances,
-		Phase:               sb.Phase,
-		Status:              sb.Status,
-		ToolAccess:          sandboxToolAccessFromModel(tools),
-		WorkspaceRevision:   sb.WorkspaceRevision,
+		SandboxID:                sb.ID,
+		TenantID:                 sb.TenantID,
+		Namespace:                sb.Namespace,
+		SourceRef:                sb.SourceRef,
+		ScopeRef:                 sb.ScopeRef,
+		CompositionDigest:        sb.CompositionDigest,
+		AccessProfile:            snapshot.Spec.AccessProfile,
+		OwnerAccountID:           sb.OwnerAccountID,
+		RuntimeCode:              runtime.Code,
+		RuntimeImageVersion:      image.Version,
+		RuntimeInstances:         instances,
+		WorkspaceRuntimeInstance: snapshot.Spec.WorkspaceRuntimeInstance,
+		Phase:                    sb.Phase,
+		Status:                   sb.Status,
+		ToolAccess:               sandboxToolAccessFromModel(tools),
+		WorkspaceRevision:        sb.WorkspaceRevision,
 	}
 }
 
@@ -70,13 +70,36 @@ func sandboxResponseFromInfo(info contracts.SandboxInfo) SandboxResponse {
 	}
 }
 
-// sandboxCapabilitiesFromModel 根据运行时命令清单和组合根注册表生成权威工作台能力。
-func sandboxCapabilitiesFromModel(runtime Runtime, tools []SandboxTool, registered map[string]ChainCapability) contracts.SandboxCapabilities {
-	ops := runtime.AdapterSpec.WorkspaceOps
+// runtimeChainOperations 只暴露该实例已声明且有注册实现的链操作。
+func runtimeChainOperations(runtime Runtime, registered map[string]ChainCapability) []string {
+	out := []string{}
+	key := runtimeCapabilityKey(runtime.AdapterLevel, runtime.CapabilityImpl, runtime.PluginRef)
+	if registered[key] == nil {
+		return out
+	}
+	if runtime.AdapterLevel == RuntimeAdapterLevelPlugin || len(runtime.AdapterSpec.CapabilityCommands.Deploy.Command) > 0 {
+		out = append(out, ChainOperationDeploy)
+	}
+	if runtime.AdapterLevel == RuntimeAdapterLevelPlugin || len(runtime.AdapterSpec.CapabilityCommands.Tx.Command) > 0 {
+		out = append(out, ChainOperationTransaction)
+	}
+	if runtime.AdapterLevel == RuntimeAdapterLevelPlugin || len(runtime.AdapterSpec.CapabilityCommands.Query.Command) > 0 {
+		out = append(out, ChainOperationQuery)
+	}
+	return out
+}
+
+// sandboxCapabilitiesFromSnapshot 按工作区归属和命名实例投影能力，不合并不同实例的执行入口。
+func sandboxCapabilitiesFromSnapshot(snapshot contracts.SandboxCompositionSnapshot, tools []SandboxTool, registered map[string]ChainCapability) (contracts.SandboxCapabilities, error) {
+	workspace, _, err := runtimeSnapshotForInstance(snapshot, snapshot.Spec.WorkspaceRuntimeInstance)
+	if err != nil {
+		return contracts.SandboxCapabilities{}, err
+	}
+	ops := workspace.AdapterSpec.WorkspaceOps
 	out := contracts.SandboxCapabilities{
 		FileWorkspace:   len(ops.ReadFile) > 0 && len(ops.WriteFile) > 0 && len(ops.ListFiles) > 0 && len(ops.PackTar) > 0,
 		Terminal:        len(ops.Terminal) > 0,
-		ChainOperations: []string{},
+		ChainOperations: map[string][]string{},
 	}
 	for _, tool := range tools {
 		if tool.Kind == SandboxToolKindCommand {
@@ -84,55 +107,13 @@ func sandboxCapabilitiesFromModel(runtime Runtime, tools []SandboxTool, register
 			break
 		}
 	}
-	key := strings.TrimSpace(runtime.CapabilityImpl)
-	if runtime.AdapterLevel == RuntimeAdapterLevelPlugin {
-		key = strings.TrimSpace(runtime.PluginRef)
-	}
-	if registered[key] == nil {
-		return out
-	}
-	if runtime.AdapterLevel == RuntimeAdapterLevelPlugin || len(runtime.AdapterSpec.CapabilityCommands.Deploy.Command) > 0 {
-		out.ChainOperations = append(out.ChainOperations, ChainOperationDeploy)
-	}
-	if runtime.AdapterLevel == RuntimeAdapterLevelPlugin || len(runtime.AdapterSpec.CapabilityCommands.Tx.Command) > 0 {
-		out.ChainOperations = append(out.ChainOperations, ChainOperationTransaction)
-	}
-	if runtime.AdapterLevel == RuntimeAdapterLevelPlugin || len(runtime.AdapterSpec.CapabilityCommands.Query.Command) > 0 {
-		out.ChainOperations = append(out.ChainOperations, ChainOperationQuery)
-	}
-	return out
-}
-
-// sandboxCapabilitiesFromSnapshot 按冻结的组合快照合并所有运行时实例的工作区与链能力,避免工作台只看到首个实例。
-// 快照是唯一事实来源:没有运行时或声明读不出即报错,不用工作区运行时冒充整套组合。
-func sandboxCapabilitiesFromSnapshot(snapshot contracts.SandboxCompositionSnapshot, tools []SandboxTool, registered map[string]ChainCapability) (contracts.SandboxCapabilities, error) {
-	if len(snapshot.Runtimes) == 0 {
-		return contracts.SandboxCapabilities{}, fmt.Errorf("沙箱组合快照缺少运行时")
-	}
-	out := contracts.SandboxCapabilities{ChainOperations: []string{}}
-	seenOps := map[string]struct{}{}
 	for _, frozen := range snapshot.Runtimes {
-		runtime := Runtime{
-			ID:             frozen.RuntimeID,
-			Code:           frozen.Code,
-			Eco:            frozen.Eco,
-			AdapterLevel:   frozen.AdapterLevel,
-			CapabilityImpl: frozen.CapabilityImpl,
-			PluginRef:      frozen.PluginRef,
+		runtime, _, err := runtimeSnapshotForInstance(snapshot, frozen.InstanceCode)
+		if err != nil {
+			return contracts.SandboxCapabilities{}, err
 		}
-		if err := jsonx.DecodeStrictKnownFields(frozen.AdapterSpec, &runtime.AdapterSpec); err != nil {
-			return contracts.SandboxCapabilities{}, fmt.Errorf("读取运行时 %s 的冻结声明失败: %w", frozen.InstanceCode, err)
-		}
-		item := sandboxCapabilitiesFromModel(runtime, tools, registered)
-		out.FileWorkspace = out.FileWorkspace || item.FileWorkspace
-		out.Terminal = out.Terminal || item.Terminal
-		out.CommandTools = out.CommandTools || item.CommandTools
-		for _, operation := range item.ChainOperations {
-			if _, exists := seenOps[operation]; exists {
-				continue
-			}
-			seenOps[operation] = struct{}{}
-			out.ChainOperations = append(out.ChainOperations, operation)
+		if operations := runtimeChainOperations(runtime, registered); len(operations) > 0 {
+			out.ChainOperations[frozen.InstanceCode] = operations
 		}
 	}
 	return out, nil
@@ -237,7 +218,7 @@ func orchestrationCatalogResponse(runtimes []CatalogRuntime, tools []CatalogTool
 	for _, runtime := range runtimes {
 		images := make([]CatalogRuntimeImageResponse, 0, len(runtime.Images))
 		for _, image := range runtime.Images {
-			images = append(images, CatalogRuntimeImageResponse{Version: image.Version})
+			images = append(images, CatalogRuntimeImageResponse(image))
 		}
 		out.Runtimes = append(out.Runtimes, CatalogRuntimeResponse{
 			Code:         runtime.Code,
@@ -259,15 +240,12 @@ func orchestrationCatalogResponse(runtimes []CatalogRuntime, tools []CatalogTool
 }
 
 // contractCreateFromDTO 把内部 HTTP 创建请求转换为跨模块创建契约。
-func contractCreateFromDTO(req CreateSandboxRequest) (contracts.SandboxCreateRequest, error) {
+func contractCreateFromDTO(req CreateSandboxRequest) contracts.SandboxCreateRequest {
 	authorizedAccountIDs := make([]int64, 0, len(req.AuthorizedAccountIDs))
 	for _, accountID := range req.AuthorizedAccountIDs {
 		authorizedAccountIDs = append(authorizedAccountIDs, accountID.Int64())
 	}
 	snapshot := req.CompositionSnapshot
-	if snapshot.Spec.InitCodeRef == "" {
-		snapshot.Spec.InitCodeRef = strings.TrimSpace(req.CompositionSnapshot.Spec.InitCodeRef)
-	}
 	snapshot.Digest = strings.TrimSpace(snapshot.Digest)
 	return contracts.SandboxCreateRequest{
 		TenantID:                 req.TenantID.Int64(),
@@ -282,25 +260,6 @@ func contractCreateFromDTO(req CreateSandboxRequest) (contracts.SandboxCreateReq
 		SnapshotEnabled:          req.SnapshotEnabled,
 		KeepAliveMinutes:         req.KeepAliveMinutes,
 		SnapshotRetentionMinutes: req.SnapshotRetentionMinutes,
-	}, nil
-}
-
-// createInputFromContract 把跨模块创建契约转换为规则层使用的本模块模型。
-func createInputFromContract(req contracts.SandboxCreateRequest) CreateSandboxInputModel {
-	return CreateSandboxInputModel{
-		TenantID:                 req.TenantID,
-		CompositionSnapshot:      req.CompositionSnapshot,
-		InitCodeRef:              strings.TrimSpace(req.InitCodeRef),
-		InitScriptRef:            strings.TrimSpace(req.InitScriptRef),
-		OwnerAccountID:           req.OwnerAccountID,
-		AuthorizedAccountIDs:     append([]int64(nil), req.AuthorizedAccountIDs...),
-		SourceRef:                strings.TrimSpace(req.SourceRef),
-		ScopeRef:                 strings.TrimSpace(req.ScopeRef),
-		KeepAlive:                req.KeepAlive,
-		SnapshotEnabled:          req.SnapshotEnabled,
-		KeepAliveMinutes:         req.KeepAliveMinutes,
-		SnapshotRetentionMinutes: req.SnapshotRetentionMinutes,
-		PrivateSidecars:          privateSidecarsFromContract(req.PrivateSidecars),
 	}
 }
 

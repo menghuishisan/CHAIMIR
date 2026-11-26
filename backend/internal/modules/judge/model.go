@@ -51,26 +51,30 @@ type JudgeTask struct {
 	InputSnapshot     JudgeInputSnapshot
 	SandboxMode       int16
 	TargetSandboxRef  string
-	Priority          int16
-	Status            int16
-	RetryCount        int32
-	MaxRetries        int32
-	LastError         string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	LeaseToken        string
-	LeaseUntil        time.Time
+	// runtimeInstance 只在执行期从 M2 现场快照取得，不持久化或覆盖判题器快照。
+	runtimeInstance string
+	accessProfile   contracts.SandboxAccessProfile
+	Priority        int16
+	Status          int16
+	RetryCount      int32
+	MaxRetries      int32
+	LastError       string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	LeaseToken      string
+	LeaseUntil      time.Time
 }
 
 // JudgeResultDetail 是可解释结果中的一项脱敏详情。
 type JudgeResultDetail struct {
-	Case          string `json:"case,omitempty"`
-	Source        string `json:"source,omitempty"`
-	Target        string `json:"target,omitempty"`
-	Passed        bool   `json:"passed"`
-	ExpectedLabel string `json:"expected_label,omitempty"`
-	Actual        string `json:"actual,omitempty"`
-	Hint          string `json:"hint,omitempty"`
+	Case          string                 `json:"case,omitempty"`
+	Source        string                 `json:"source,omitempty"`
+	Target        string                 `json:"target,omitempty"`
+	Passed        bool                   `json:"passed"`
+	ExpectedLabel string                 `json:"expected_label,omitempty"`
+	Actual        string                 `json:"actual,omitempty"`
+	Hint          string                 `json:"hint,omitempty"`
+	Outcome       contracts.JudgeOutcome `json:"outcome,omitempty"`
 }
 
 // JudgeResult 是一次任务判题结果的版本化记录。
@@ -96,7 +100,7 @@ type JudgeTaskInfo struct {
 	Existing bool
 }
 
-// JudgeInputSnapshot 固定一次判题所需的题目版本、执行器和脱敏期望。
+// JudgeInputSnapshot 是私有判题快照，固定输入、执行器与判定依据，不得用于用户响应。
 type JudgeInputSnapshot struct {
 	ItemCode                 string                               `json:"item_code"`
 	ItemVersion              string                               `json:"item_version"`
@@ -110,13 +114,13 @@ type JudgeInputSnapshot struct {
 	CodeHash                 string                               `json:"code_hash,omitempty"`
 	CompositionSnapshot      contracts.SandboxCompositionSnapshot `json:"composition_snapshot"`
 	SandboxSourceRef         string                               `json:"sandbox_source_ref,omitempty"`
+	SandboxCompositionDigest string                               `json:"sandbox_composition_digest,omitempty"`
 	GenesisRef               string                               `json:"genesis_ref,omitempty"`
 	InitScriptRef            string                               `json:"init_script_ref,omitempty"`
 	Command                  []string                             `json:"command,omitempty"`
 	ExecTarget               string                               `json:"exec_target,omitempty"`
 	ExecutionSidecars        []workload.ComponentSpec             `json:"execution_sidecars,omitempty"`
 	TimeoutSec               int32                                `json:"timeout_sec"`
-	MaxRetries               int32                                `json:"max_retries"`
 	MaxScore                 int32                                `json:"max_score"`
 	Expectation              map[string]any                       `json:"expectation,omitempty"`
 	ExtraInput               map[string]any                       `json:"extra_input,omitempty"`

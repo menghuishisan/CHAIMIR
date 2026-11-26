@@ -70,6 +70,9 @@ func (s *Service) UpsertGroupMember(ctx context.Context, groupID int64, req Upse
 		if !roleAllowed(exp.GroupConfig, req.Role) {
 			return apperr.ErrExperimentRoleInvalid
 		}
+		if err := s.ensureStudentAccount(ctx, req.StudentID.Int64()); err != nil {
+			return err
+		}
 		members, err := tx.ListGroupMembers(ctx, id.TenantID, groupID)
 		if err != nil {
 			return err
@@ -113,6 +116,19 @@ func (s *Service) UpsertGroupMember(ctx context.Context, groupID int64, req Upse
 		return GroupDTO{}, err
 	}
 	return groupDTOFromModel(group, profiles), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.group.member.upsert", auditTargetGroup, groupID, map[string]any{"student_id": req.StudentID, "role": req.Role})
+}
+
+// ensureStudentAccount 校验编组目标账号属于当前租户且具备学生角色。
+// 成员表只保存账号编号，入口必须先经过 identity 契约，避免把教师、管理员或跨租户账号写入小组。
+func (s *Service) ensureStudentAccount(ctx context.Context, accountID int64) error {
+	ok, err := s.roles.HasRole(ctx, accountID, contracts.RoleStudent)
+	if err != nil {
+		return apperr.ErrExperimentGroupInvalid.WithCause(err)
+	}
+	if !ok {
+		return apperr.ErrExperimentGroupInvalid
+	}
+	return nil
 }
 
 // RemoveGroupMember 移除协作小组成员,并在同一行锁流程内收回再重同步活跃资源授权。

@@ -1,4 +1,4 @@
-// response 实现全平台统一 HTTP 响应信封、trace_id 贯穿与错误分层暴露。
+// Package response 实现全平台统一 HTTP 响应信封、trace_id 贯穿与错误分层暴露。
 package response
 
 import (
@@ -17,8 +17,6 @@ import (
 )
 
 type traceCtxKey struct{}
-
-const ginTraceKey = "trace_id"
 
 // TraceHeader 是回传/透传 trace_id 的 HTTP 头。
 const TraceHeader = "X-Trace-Id"
@@ -53,26 +51,20 @@ func TraceFromContext(ctx context.Context) string {
 	return ""
 }
 
-// TraceFromGin 从 gin.Context 取 trace_id。
+// TraceFromGin 返回当前 HTTP 请求在 context 中的追踪编号。
 func TraceFromGin(c *gin.Context) string {
-	if v, ok := c.Get(ginTraceKey); ok {
-		if s, ok := v.(string); ok {
-			return s
-		}
-	}
-	return ""
+	return TraceFromContext(c.Request.Context())
 }
 
-// TraceMiddleware 为每个请求确立 trace_id,注入 gin/request.Context,并回写响应头。
+// TraceMiddleware 设置请求追踪编号并通过响应头回传。
 func TraceMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		traceID := strings.TrimSpace(c.GetHeader(TraceHeader))
 		if !isSafeTraceID(traceID) {
 			traceID = uuid.NewString()
 		}
-		c.Set(ginTraceKey, traceID)
 		ctx := WithTrace(c.Request.Context(), traceID)
-		ctx = logging.WithAttrs(ctx, loggingTraceAttr(traceID), requestMethodAttr(c.Request.Method), requestPathAttr(c.FullPath(), c.Request.URL.Path))
+		ctx = logging.WithAttrs(ctx, slog.String("trace_id", traceID), slog.String("method", c.Request.Method), requestPathAttr(c.FullPath(), c.Request.URL.Path))
 		c.Request = c.Request.WithContext(ctx)
 		c.Header(TraceHeader, traceID)
 		c.Next()
@@ -110,16 +102,12 @@ func OKPageWithFacets(c *gin.Context, list any, total int64, page, size int, fac
 
 // Fail 写出错误响应,并按错误分层规则记录内部原因。
 func Fail(c *gin.Context, err error) {
-	traceID := TraceFromGin(c)
-	if traceID == "" {
-		traceID = TraceFromContext(c.Request.Context())
-	}
 	ae, ok := apperr.As(err)
 	if !ok {
 		ae = apperr.ErrUnhandledFailure.WithCause(err)
 	}
-	logging.ErrorContext(c.Request.Context(), "request failed", ae.LogString(), errorCodeAttr(ae.UserCode()))
-	c.JSON(http.StatusOK, Envelope{Code: ae.UserCode(), Message: ae.UserMessage(), TraceID: traceID})
+	logging.ErrorContext(c.Request.Context(), "request failed", ae.LogString(), slog.String("error_code", ae.UserCode()))
+	c.JSON(http.StatusOK, Envelope{Code: ae.UserCode(), Message: ae.UserMessage(), TraceID: TraceFromGin(c)})
 }
 
 // NoRoute 将未注册路径收敛为统一错误信封,避免 Gin 默认 404 空响应。
@@ -142,16 +130,6 @@ func isSafeTraceID(traceID string) bool {
 	return true
 }
 
-// loggingTraceAttr 生成 trace_id 日志字段。
-func loggingTraceAttr(traceID string) slog.Attr {
-	return slog.String("trace_id", traceID)
-}
-
-// requestMethodAttr 生成请求方法日志字段。
-func requestMethodAttr(method string) slog.Attr {
-	return slog.String("method", method)
-}
-
 // requestPathAttr 生成请求路径日志字段,优先使用 Gin 路由模板避免记录敏感路径片段。
 func requestPathAttr(routePath, rawPath string) slog.Attr {
 	path := strings.TrimSpace(routePath)
@@ -159,9 +137,4 @@ func requestPathAttr(routePath, rawPath string) slog.Attr {
 		path = rawPath
 	}
 	return slog.String("path", path)
-}
-
-// errorCodeAttr 生成错误码日志字段。
-func errorCodeAttr(code string) slog.Attr {
-	return slog.String("error_code", code)
 }

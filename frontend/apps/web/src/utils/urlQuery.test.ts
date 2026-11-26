@@ -40,4 +40,6 @@ test('页码只接受正整数,其余都回到第一页', () => {
   }
   assert.equal(readPage(new URLSearchParams(''), 'page'), 1)
   assert.equal(readPage(new URLSearchParams('page=3'), 'page'), 3)
+  assert.equal(readPage(new URLSearchParams('page=9007199254740993'), 'page'), 1)
+  assert.equal(readPage(new URLSearchParams(`page=${'9'.repeat(400)}`), 'page'), 1)
 })

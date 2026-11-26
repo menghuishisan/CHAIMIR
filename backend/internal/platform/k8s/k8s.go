@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"chaimir/internal/platform/config"
+	"chaimir/pkg/terminal"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/dynamic"
@@ -97,7 +98,7 @@ func (c *Client) Exec(
 	stdout, stderr io.Writer,
 	tty bool,
 ) error {
-	return c.ExecStream(ctx, namespace, podName, container, command, stdin, stdout, stderr, tty)
+	return c.ExecStream(ctx, namespace, podName, container, command, stdin, stdout, stderr, tty, nil)
 }
 
 // ExecStream 在目标容器中执行命令并透传流,供交互式终端和非交互命令统一复用。
@@ -108,6 +109,7 @@ func (c *Client) ExecStream(
 	stdin io.Reader,
 	stdout, stderr io.Writer,
 	tty bool,
+	sizes terminal.SizeQueue,
 ) error {
 	if err := c.validateExecTarget(namespace, podName, container, command); err != nil {
 		return err
@@ -130,15 +132,32 @@ func (c *Client) ExecStream(
 	if err != nil {
 		return fmt.Errorf("创建 Kubernetes exec 会话失败: %w", err)
 	}
+	var sizeQueue remotecommand.TerminalSizeQueue
+	if sizes != nil {
+		sizeQueue = terminalSizeQueue{sizes: sizes}
+	}
 	if err := executor.StreamWithContext(ctx, remotecommand.StreamOptions{
-		Stdin:  stdin,
-		Stdout: stdout,
-		Stderr: stderr,
-		Tty:    tty,
+		Stdin:             stdin,
+		Stdout:            stdout,
+		Stderr:            stderr,
+		Tty:               tty,
+		TerminalSizeQueue: sizeQueue,
 	}); err != nil {
 		return fmt.Errorf("执行 Kubernetes exec 失败: %w", err)
 	}
 	return nil
+}
+
+type terminalSizeQueue struct {
+	sizes terminal.SizeQueue
+}
+
+func (q terminalSizeQueue) Next() *remotecommand.TerminalSize {
+	size := q.sizes.Next()
+	if size == nil {
+		return nil
+	}
+	return &remotecommand.TerminalSize{Width: size.Width, Height: size.Height}
 }
 
 // validateExecTarget 在发起 SPDY 会话前校验必填目标,避免空参数延迟成难排查的 Kubernetes 错误。

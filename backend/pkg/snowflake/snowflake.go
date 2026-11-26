@@ -1,4 +1,4 @@
-// snowflake 实现全平台雪花算法 ID 生成器,用于 BIGINT 主键生成。
+// Package snowflake 生成可存入 BIGINT 的分布式 ID。
 package snowflake
 
 import (
@@ -11,8 +11,8 @@ const (
 	epochMillis     int64 = 1735689600000
 	nodeBits              = 10
 	sequenceBits          = 12
-	maxNodeID             = -1 ^ (-1 << nodeBits)
-	maxSequence           = -1 ^ (-1 << sequenceBits)
+	maxNodeID             = (1 << nodeBits) - 1
+	maxSequence           = (1 << sequenceBits) - 1
 	timestampShift        = nodeBits + sequenceBits
 	nodeShift             = sequenceBits
 	maxLogicalDrift       = int64(5)
@@ -39,7 +39,7 @@ func NewNode(nodeID int64) (*Node, error) {
 	return &Node{nodeID: nodeID, lastTime: -1}, nil
 }
 
-// Generate 生成下一个全局唯一 ID;同毫秒序列耗尽时进入下一毫秒,时钟回拨时使用单调逻辑时间避免重复。
+// Generate 在同一节点内单调分配 ID。部署时为各节点配置唯一编号。
 func (n *Node) Generate() int64 {
 	n.mu.Lock()
 	defer n.mu.Unlock()

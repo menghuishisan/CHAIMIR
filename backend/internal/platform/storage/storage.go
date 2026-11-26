@@ -14,6 +14,7 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/minio/minio-go/v7/pkg/lifecycle"
 )
 
 // ErrObjectRefInvalid 表示对象引用不是受支持的 s3://bucket/key 格式。
@@ -21,12 +22,15 @@ var ErrObjectRefInvalid = errors.New("对象存储引用格式非法")
 
 // Storage 封装 S3 兼容客户端与平台约定桶名。
 type Storage struct {
-	client       *minio.Client
-	bucketCode   string
-	bucketAttach string
-	bucketReport string
-	bucketBackup string
+	client                 *minio.Client
+	bucketCode             string
+	bucketAttach           string
+	bucketReport           string
+	bucketBackup           string
+	temporaryRetentionDays int
 }
+
+const temporaryObjectTag = "chaimir-upload-state"
 
 // ObjectInfo 是统一对象存储对外暴露的安全对象摘要。
 type ObjectInfo struct {
@@ -52,6 +56,9 @@ func New(ctx context.Context, cfg config.ObjectStorageConfig) (*Storage, error) 
 	if cfg.PingTimeoutSeconds <= 0 {
 		return nil, fmt.Errorf("OBJECT_STORAGE_PING_TIMEOUT_SECONDS 必须大于 0")
 	}
+	if cfg.CourseCoverStageRetentionDays <= 0 {
+		return nil, fmt.Errorf("UPLOAD_COURSE_COVER_STAGE_RETENTION_DAYS 必须大于 0")
+	}
 	client, err := minio.New(cfg.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
 		Secure: cfg.Secure,
@@ -66,11 +73,12 @@ func New(ctx context.Context, cfg config.ObjectStorageConfig) (*Storage, error) 
 		return nil, fmt.Errorf("对象存储连通性检查失败: %w", err)
 	}
 	return &Storage{
-		client:       client,
-		bucketCode:   cfg.BucketCode,
-		bucketAttach: cfg.BucketAttach,
-		bucketReport: cfg.BucketReport,
-		bucketBackup: cfg.BucketBackup,
+		client:                 client,
+		bucketCode:             cfg.BucketCode,
+		bucketAttach:           cfg.BucketAttach,
+		bucketReport:           cfg.BucketReport,
+		bucketBackup:           cfg.BucketBackup,
+		temporaryRetentionDays: cfg.CourseCoverStageRetentionDays,
 	}, nil
 }
 
@@ -93,6 +101,31 @@ func (s *Storage) EnsureBuckets(ctx context.Context) error {
 			}
 		}
 	}
+	if s.temporaryRetentionDays <= 0 {
+		return fmt.Errorf("临时对象保留天数必须大于 0")
+	}
+	// 仅维护平台自己的标签规则，保留桶上其他规则；不支持生命周期时拒绝启动。
+	current, err := s.client.GetBucketLifecycle(ctx, s.bucketAttach)
+	if err != nil {
+		if minio.ToErrorResponse(err).Code != "NoSuchLifecycleConfiguration" {
+			return fmt.Errorf("读取附件桶临时对象生命周期失败: %w", err)
+		}
+		current = lifecycle.NewConfiguration()
+	}
+	wanted := lifecycle.Rule{ID: "chaimir-temporary-upload", Status: "Enabled",
+		RuleFilter: lifecycle.Filter{Tag: lifecycle.Tag{Key: temporaryObjectTag, Value: "temporary"}},
+		Expiration: lifecycle.Expiration{Days: lifecycle.ExpirationDays(s.temporaryRetentionDays)}}
+	for i, rule := range current.Rules {
+		if rule.ID != wanted.ID {
+			continue
+		}
+		current.Rules = append(current.Rules[:i], current.Rules[i+1:]...)
+		break
+	}
+	current.Rules = append(current.Rules, wanted)
+	if err := s.client.SetBucketLifecycle(ctx, s.bucketAttach, current); err != nil {
+		return fmt.Errorf("配置附件桶临时对象生命周期失败: %w", err)
+	}
 	return nil
 }
 
@@ -112,6 +145,18 @@ func ObjectKey(tenantID int64, module, resourceType string, parts ...string) (st
 
 // Put 上传对象到指定 bucket/key。
 func (s *Storage) Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error {
+	return s.put(ctx, bucket, key, r, size, minio.PutObjectOptions{ContentType: contentType})
+}
+
+// PutTemporary 写入受附件桶生命周期管理的暂存对象；正式复制不会继承临时标签。
+func (s *Storage) PutTemporary(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error {
+	if s == nil || bucket != s.bucketAttach {
+		return fmt.Errorf("临时上传只允许使用已配置生命周期的附件桶")
+	}
+	return s.put(ctx, bucket, key, r, size, minio.PutObjectOptions{ContentType: contentType, UserTags: map[string]string{temporaryObjectTag: "temporary"}})
+}
+
+func (s *Storage) put(ctx context.Context, bucket, key string, r io.Reader, size int64, options minio.PutObjectOptions) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("对象存储客户端未初始化")
 	}
@@ -121,7 +166,7 @@ func (s *Storage) Put(ctx context.Context, bucket, key string, r io.Reader, size
 	if !safeObjectRefBucket(bucket) || !safeObjectRefKey(key) {
 		return ErrObjectRefInvalid
 	}
-	if _, err := s.client.PutObject(ctx, bucket, key, r, size, minio.PutObjectOptions{ContentType: contentType}); err != nil {
+	if _, err := s.client.PutObject(ctx, bucket, key, r, size, options); err != nil {
 		return fmt.Errorf("上传对象 %s/%s 失败: %w", bucket, key, err)
 	}
 	return nil
@@ -214,7 +259,7 @@ func (s *Storage) ListObjects(ctx context.Context, bucket, prefix string) (<-cha
 	return out, errs, nil
 }
 
-// CopyObject 在对象存储服务端复制对象,用于备份任务避免把大对象落到本地磁盘。
+// CopyObject 在服务端生成持久副本并返回真实大小；源对象的生命周期标签不继承到副本。
 func (s *Storage) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string) (int64, error) {
 	if s == nil || s.client == nil {
 		return 0, fmt.Errorf("对象存储客户端未初始化")
@@ -222,7 +267,7 @@ func (s *Storage) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, 
 	if !safeObjectRefBucket(srcBucket) || !safeObjectRefBucket(dstBucket) || !safeObjectRefKey(srcKey) || !safeObjectRefKey(dstKey) {
 		return 0, ErrObjectRefInvalid
 	}
-	_, err := s.client.CopyObject(ctx, minio.CopyDestOptions{Bucket: dstBucket, Object: dstKey}, minio.CopySrcOptions{Bucket: srcBucket, Object: srcKey})
+	_, err := s.client.CopyObject(ctx, minio.CopyDestOptions{Bucket: dstBucket, Object: dstKey, ReplaceTags: true}, minio.CopySrcOptions{Bucket: srcBucket, Object: srcKey})
 	if err != nil {
 		return 0, fmt.Errorf("复制对象 %s/%s 到 %s/%s 失败: %w", srcBucket, srcKey, dstBucket, dstKey, err)
 	}

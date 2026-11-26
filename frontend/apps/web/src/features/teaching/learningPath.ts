@@ -1,10 +1,4 @@
-// learningPath.ts 把课程大纲整理成学习路径(设计 §7.2):课时按章序、再按章内序排列;
-// 「下一个课时」先取第一个学习中,再取第一个未开始,全部学完时为空;课时页的「上一节 / 下一节」由同一顺序计算。
-// 进度缺失的课时(从没打开过)视为未开始。纯函数,只认排序与进度用到的字段,供 node:test 直接运行。
-
-/** 进度状态取值,与 @chaimir/api-client 的 ProgressStatus 一致(本文件不在运行时导入它) */
-const STATUS_NOT_STARTED = 1
-const STATUS_IN_PROGRESS = 2
+import { ProgressStatus } from '@chaimir/api-client'
 
 /** 计算学习路径用到的大纲字段 */
 export interface PathInput {
@@ -35,7 +29,7 @@ export function orderedLessons(input: PathInput): PathLesson[] {
       return {
         lessonId: lesson.id,
         chapterId: lesson.chapter_id,
-        status: progress ? progress.status : STATUS_NOT_STARTED,
+        status: progress ? progress.status : ProgressStatus.NOT_STARTED,
         durationSec: progress ? progress.duration_sec : 0,
       }
     })
@@ -44,8 +38,8 @@ export function orderedLessons(input: PathInput): PathLesson[] {
 /** pickNextLesson 给出「下一步」卡片要推荐的课时;全部学完时返回 null */
 export function pickNextLesson(rows: readonly PathLesson[]): PathLesson | null {
   return (
-    rows.find((row) => row.status === STATUS_IN_PROGRESS) ??
-    rows.find((row) => row.status === STATUS_NOT_STARTED) ??
+    rows.find((row) => row.status === ProgressStatus.IN_PROGRESS) ??
+    rows.find((row) => row.status === ProgressStatus.NOT_STARTED) ??
     null
   )
 }

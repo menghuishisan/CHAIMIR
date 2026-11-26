@@ -12,12 +12,11 @@ import (
 
 // compositionCatalog 是一次目录读取解析出的完整选择,不包含发布或执行副作用。
 type compositionCatalog struct {
-	spec                contracts.SandboxCompositionSpec
-	runtimePlans        []RuntimePlan
-	runtimeAdapters     map[string]AdapterSpec
-	runtimeCapabilities []CapabilityConstraints
-	selected            []contracts.CompositionComponentRef
-	tools               map[string]Tool
+	spec            contracts.SandboxCompositionSpec
+	runtimePlans    []RuntimePlan
+	runtimeAdapters map[string]AdapterSpec
+	selected        []contracts.CompositionComponentRef
+	tools           map[string]Tool
 }
 
 // loadCompositionCatalog 在调用方事务中共用原目录、参数、兼容性和依赖展开规则。
@@ -49,7 +48,7 @@ func loadCompositionCatalog(ctx context.Context, tx TxStore, spec contracts.Sand
 	if len(runtimePlans) == 0 {
 		return compositionCatalog{}, fmt.Errorf("组合至少声明一个 runtime 实例")
 	}
-	if err := validateRuntimeVolumeDomains(runtimePlans); err != nil {
+	if err := validateRuntimeIsolation(runtimePlans); err != nil {
 		return compositionCatalog{}, err
 	}
 	aggregatedCapabilities := aggregateRuntimeCapabilities(runtimeCapabilities)
@@ -103,9 +102,6 @@ func loadCompositionCatalog(ctx context.Context, tx TxStore, spec contracts.Sand
 		if strings.TrimSpace(tool.ResourceSpec.Capabilities.Placement) != "sandbox" {
 			return compositionCatalog{}, fmt.Errorf("组件 %s 不能部署到沙箱", code)
 		}
-		if err := validateToolForRuntime(tool, runtimePlans); err != nil {
-			return compositionCatalog{}, fmt.Errorf("组件 %s 与运行时不兼容: %w", code, err)
-		}
 		if err := validateComponentParams(ref.Params, tool.ResourceSpec.Capabilities.ConfigSchema); err != nil {
 			return compositionCatalog{}, fmt.Errorf("组件 %s 参数无效: %w", code, err)
 		}
@@ -131,8 +127,14 @@ func loadCompositionCatalog(ctx context.Context, tx TxStore, spec contracts.Sand
 			selected = append(selected, contracts.CompositionComponentRef{Code: provider, Selection: "auto"})
 		}
 	}
-	autoInfra := append([]contracts.CompositionComponentRef(nil), selected[explicitInfraCount+len(spec.Tools):]...)
+	if err := validateCompositionConflicts(aggregatedCapabilities, selected, toolByCode); err != nil {
+		return compositionCatalog{}, err
+	}
+	if err := validateCapabilityCardinality(aggregatedCapabilities, selected, toolByCode); err != nil {
+		return compositionCatalog{}, err
+	}
+	autoInfra := selected[explicitInfraCount+len(spec.Tools):]
 	spec.Infra = append(append([]contracts.CompositionComponentRef(nil), spec.Infra...), autoInfra...)
 	spec.Tools = append([]contracts.CompositionComponentRef(nil), spec.Tools...)
-	return compositionCatalog{spec: spec, runtimePlans: runtimePlans, runtimeAdapters: runtimeAdapters, runtimeCapabilities: runtimeCapabilities, selected: selected, tools: toolByCode}, nil
+	return compositionCatalog{spec: spec, runtimePlans: runtimePlans, runtimeAdapters: runtimeAdapters, selected: selected, tools: toolByCode}, nil
 }

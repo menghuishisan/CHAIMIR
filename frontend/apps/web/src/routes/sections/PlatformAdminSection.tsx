@@ -49,12 +49,6 @@ const PlatformSimulationsPage = lazy(
 const PlatformVulnerabilitiesPage = lazy(
   () => import('../../features/contest/pages/platform-admin/vulnerabilities'),
 )
-const PlatformSettingsPage = lazy(
-  () => import('../../features/admin/pages/platform-admin/settings'),
-)
-const PlatformConfigHistoryPage = lazy(
-  () => import('../../features/admin/pages/platform-admin/settings-history'),
-)
 const PlatformMonitoringPage = lazy(
   () => import('../../features/admin/pages/platform-admin/monitoring'),
 )
@@ -96,9 +90,6 @@ export default function PlatformAdminSection() {
         <Route path="vulnerabilities" element={<PlatformVulnerabilitiesPage />} />
         <Route path="alerts" element={<SystemAlertsPage scope={AdminScope.GLOBAL} />} />
         <Route path="announcements" element={<AnnouncementsPage publisher="platform" />} />
-        <Route path="settings" element={<PlatformSettingsPage />} />
-        {/* 变更历史与回滚:历史是分页数据,故做成深页而不是弹窗(规范 §6.5.5 A) */}
-        <Route path="settings/:configKey/history" element={<PlatformConfigHistoryPage />} />
         <Route path="monitoring" element={<PlatformMonitoringPage />} />
         <Route path="backups" element={<PlatformBackupsPage />} />
         <Route path="audit" element={<PlatformAuditPage />} />

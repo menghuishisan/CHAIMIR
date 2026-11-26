@@ -9,7 +9,7 @@
 // 判题任务在本页只做「单任务重判、人工评分」两件教师能力(对齐清单 §6.4)。
 // 成绩申诉是「学生对判分有异议」的下游动作,作为本页标签(对齐清单 §3.2)。
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { CheckCheck, ChevronLeft, ClipboardCheck, RefreshCw, RotateCcw } from 'lucide-react'
 import {
@@ -189,7 +189,7 @@ function SubmissionsQueue() {
   const gradedCount = facetCount(facets, 'status', SubmissionStatus.GRADED)
   const lateCount = facetCount(facets, 'is_late', true)
 
-  const list = useMemo(() => submissions.data?.list ?? [], [submissions.data])
+  const list = submissions.data?.list ?? []
   const selected = finished
     ? undefined
     : (list.find((item) => item.id === selectedParam) ?? list[0])
@@ -450,8 +450,7 @@ interface SubmissionGradePaneProps {
  *
  * 评分不走弹窗:批改是本页的主动作,为看清一条提交而开窗、给完分再关窗,
  * 一个班的作业要重复几十次(§7.2 只在不可撤销的批量后果时才要二次确认,给分不是)。
- * 评语是给学生看的真实反馈,不提供模板按钮 ——
- * 旧前端用硬编码模板代替真实理由,那等于不告诉学生原因。
+ * 评语是给学生看的真实反馈,不提供模板按钮。
  *
  * key 由调用方按提交编号给出:切换条目时整个表单重建,
  * 上一条的草稿不会串到下一条(评分与评语都是每条独立的)。

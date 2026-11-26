@@ -195,9 +195,10 @@ function ConvertTo-ChaimirProcessArgument {
 function Invoke-ChaimirProcess {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
-        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string[]]$Arguments,
         [int]$TimeoutSeconds = 300,
-        [string]$WorkingDirectory
+        [string]$WorkingDirectory,
+        [Text.Encoding]$OutputEncoding = [Text.Encoding]::UTF8
     )
     if ($TimeoutSeconds -lt 1 -or $TimeoutSeconds -gt 2147483) { throw "原生工具超时必须为1..2147483秒" }
     $process = [Diagnostics.Process]::new()
@@ -209,13 +210,20 @@ function Invoke-ChaimirProcess {
     $process.StartInfo.CreateNoWindow = $true
     $process.StartInfo.RedirectStandardOutput = $true
     $process.StartInfo.RedirectStandardError = $true
-    $process.StartInfo.StandardOutputEncoding = [Text.Encoding]::UTF8
-    $process.StartInfo.StandardErrorEncoding = [Text.Encoding]::UTF8
+    $process.StartInfo.StandardOutputEncoding = $OutputEncoding
+    $process.StartInfo.StandardErrorEncoding = $OutputEncoding
     try {
         if (-not $process.Start()) { throw "原生工具启动失败: $FilePath" }
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        $budget = $TimeoutSeconds * 1000
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+        $streams = [Threading.Tasks.Task[]]@($stdoutTask, $stderrTask)
+        $processExited = $process.WaitForExit($budget)
+        # 子进程可能继承输出管道；父进程退出后仍须遵守原期限。
+        $remaining = [int][Math]::Max(0, $budget - $clock.ElapsedMilliseconds)
+        $timedOut = -not $processExited -or -not [Threading.Tasks.Task]::WaitAll($streams, $remaining)
+        if ($timedOut -and -not $process.HasExited) {
             try {
                 $termination = [Diagnostics.ProcessStartInfo]::new()
                 $termination.FileName = 'taskkill.exe'
@@ -232,27 +240,17 @@ function Invoke-ChaimirProcess {
             }
             if (-not $process.HasExited) { $process.Kill() }
             if (-not $process.WaitForExit(5000)) { throw "超时进程未能终止: $FilePath" }
-            if (-not $stdoutTask.Wait(5000) -or -not $stderrTask.Wait(5000)) {
-                throw "超时进程输出管道未关闭: $FilePath"
-            }
-            $stdout = $stdoutTask.GetAwaiter().GetResult()
-            $stderr = $stderrTask.GetAwaiter().GetResult()
-            return [pscustomobject]@{
-                Code = 124
-                Stdout = $stdout
-                Stderr = $stderr
-                TimedOut = $true
-                Text = ((@(("原生工具超时（{0} 秒）: {1}" -f $TimeoutSeconds, $FilePath), $stdout, $stderr) | Where-Object { $_ }) -join "`n").Trim()
-            }
+            [void][Threading.Tasks.Task]::WaitAll($streams, 5000)
         }
-        $stdout = $stdoutTask.GetAwaiter().GetResult()
-        $stderr = $stderrTask.GetAwaiter().GetResult()
+        $stdout = if ($stdoutTask.IsCompleted) { $stdoutTask.GetAwaiter().GetResult() } else { '' }
+        $stderr = if ($stderrTask.IsCompleted) { $stderrTask.GetAwaiter().GetResult() } else { '' }
+        $timeoutMessage = if ($timedOut) { "原生工具超时（${TimeoutSeconds} 秒）: $FilePath" } else { '' }
         return [pscustomobject]@{
-            Code = $process.ExitCode
+            Code = if ($timedOut) { 124 } else { $process.ExitCode }
             Stdout = $stdout
             Stderr = $stderr
-            TimedOut = $false
-            Text = ((@($stdout, $stderr) | Where-Object { $_ }) -join "`n").Trim()
+            TimedOut = $timedOut
+            Text = ((@($timeoutMessage, $stdout, $stderr) | Where-Object { $_ }) -join [Environment]::NewLine).Trim()
         }
     } finally {
         $process.Dispose()
@@ -262,7 +260,7 @@ function Invoke-ChaimirProcess {
 # Invoke-ChaimirDocker 使用共享进程边界执行Docker,保持镜像脚本的统一结果契约。
 function Invoke-ChaimirDocker {
     param(
-        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string[]]$Arguments,
         [int]$TimeoutSeconds = 300
     )
     return Invoke-ChaimirProcess -FilePath 'docker.exe' -Arguments $Arguments -TimeoutSeconds $TimeoutSeconds
@@ -278,10 +276,91 @@ function Get-ChaimirInternalImageBuildArguments {
         RUNTIME_IMAGE      = "base/runtime-min"
         EVM_HARDHAT_IMAGE  = "runtime/evm-hardhat"
         SLITHER_IMAGE      = "tool/slither"
-        PG_CLIENT_IMAGE    = "middleware/postgres"
-        CILIUM_RUNTIME_IMAGE = "network/cilium-runtime"
-        CILIUM_BUILDER_IMAGE = "network/cilium-builder"
-        CILIUM_ENVOY_IMAGE   = "network/cilium-envoy"
+        PG_CLIENT_IMAGE      = "infra/postgres"
+        CILIUM_RUNTIME_IMAGE = "infra/cilium-runtime"
+        CILIUM_BUILDER_IMAGE = "infra/cilium-builder"
+        CILIUM_ENVOY_IMAGE   = "infra/cilium-envoy"
+    }
+}
+
+# Get-ChaimirImageBuildSources 只解析 Dockerfile 声明的镜像参数；内部依赖以逻辑名称返回。
+function Get-ChaimirImageBuildSources {
+    param([string]$ManifestPath, [string]$DockerfileText)
+    $internal = Get-ChaimirInternalImageBuildArguments
+    $upstream = Get-ChaimirYamlBlock -Path $ManifestPath -BlockName 'upstream'
+    $externalArg = Get-ChaimirYamlValue -Lines $upstream -Key 'build_base_arg'
+    $sources = [ordered]@{}
+    foreach ($declaration in [regex]::Matches($DockerfileText, '(?im)^[ \t]*ARG[ \t]+([A-Z0-9_]+_IMAGE)\b')) {
+        $argument = $declaration.Groups[1].Value
+        if ($internal.Contains($argument)) {
+            $sources[$argument] = $internal[$argument]
+            continue
+        }
+        if ($argument -eq 'NGINX_RUNTIME_IMAGE') {
+            $imageKey = 'runtime'
+            $digestKey = 'runtime_digest'
+        } elseif ($argument -eq $externalArg) {
+            $imageKey = 'build_base_image'
+            $digestKey = 'build_base_digest'
+        } else {
+            throw "${ManifestPath}: 未登记的构建镜像参数 $argument"
+        }
+        $image = Get-ChaimirYamlValue -Lines $upstream -Key $imageKey
+        $digest = Get-ChaimirYamlValue -Lines $upstream -Key $digestKey
+        if ($image -notmatch '^[^@\s]+$' -or $digest -cnotmatch '^sha256:[0-9a-f]{64}$') {
+            throw "${ManifestPath}: upstream.$imageKey 和 upstream.$digestKey 必须组成不可变引用"
+        }
+        $sources[$argument] = "$image@$digest"
+    }
+    if ($externalArg -and ($internal.Contains($externalArg) -or -not $sources.Contains($externalArg))) {
+        throw "${ManifestPath}: upstream.build_base_arg 必须指向已声明的外部镜像参数"
+    }
+    return $sources
+}
+
+function Resolve-ChaimirImageBuildArguments {
+    param([System.Collections.IDictionary]$Sources, [string]$Registry, [hashtable]$DigestLock)
+    $arguments = [ordered]@{}
+    foreach ($argument in $Sources.Keys) {
+        $source = $Sources[$argument]
+        if ($source.Contains('@')) {
+            $arguments[$argument] = $source
+            continue
+        }
+        $digest = $DigestLock[$source]
+        if ($digest -cnotmatch '^sha256:[0-9a-f]{64}$') {
+            throw "digest 锁缺少合法的 $source，无法注入 $argument"
+        }
+        $arguments[$argument] = "$Registry/$source@$digest"
+    }
+    return $arguments
+}
+
+function Get-ChaimirFrontendBuildArguments {
+    param([string]$Path, [string]$DockerfileText)
+    $names = @([regex]::Matches($DockerfileText, '(?m)^ARG (VITE_[A-Z0-9_]+)\s*$') | ForEach-Object { $_.Groups[1].Value })
+    if (-not $names.Count) { throw '前端 Dockerfile 没有声明构建配置参数' }
+    $required = @($names | Where-Object { $_ -ne 'VITE_WS_BASE_URL' })
+    $values = Read-ChaimirEnvFile -Path $Path -RequiredKeys $required
+    $arguments = [ordered]@{}
+    foreach ($name in $names) { $arguments[$name] = [string]$values[$name] }
+    return $arguments
+}
+
+# Get-ChaimirImageBuildWaves 为选中的镜像分批。未选中的依赖从 digest 锁消费。
+function Get-ChaimirImageBuildWaves {
+    param([hashtable]$Dependencies)
+    $remaining = @{}
+    foreach ($image in $Dependencies.Keys) { $remaining[$image] = $true }
+    while ($remaining.Count) {
+        $ready = @($remaining.Keys | Sort-Object | Where-Object {
+            -not ($Dependencies[$_] | Where-Object { $remaining.ContainsKey($_) })
+        })
+        if (-not $ready.Count) {
+            throw "镜像内部构建依赖存在循环: $(($remaining.Keys | Sort-Object) -join ', ')"
+        }
+        [pscustomobject]@{ Images = $ready }
+        foreach ($image in $ready) { $remaining.Remove($image) }
     }
 }
 
@@ -314,6 +393,34 @@ function Resolve-ChaimirImageBuildPaths {
         Context    = $contextPath
         Dockerfile = $dockerfilePath
     }
+}
+
+# Assert-ChaimirImageSelection enforces the single image-selection contract for build, pull, and admission scripts.
+function Assert-ChaimirImageSelection {
+    param([string[]]$Images)
+    foreach ($image in $Images) {
+        if ([string]::IsNullOrWhiteSpace($image)) {
+            throw "-Images 不能包含空值"
+        }
+        if ($image.Contains(',')) {
+            throw "-Images 必须传入 PowerShell 数组元素,不能把多个镜像拼成逗号字符串: $image"
+        }
+    }
+}
+function Read-ChaimirDigestFragments {
+    param([string]$Directory)
+    $files = @(Get-ChildItem -LiteralPath $Directory -Filter '*.lock' -File)
+    if (-not $files.Count) { throw "digest 目录没有锁片段: $Directory" }
+    $items = @{}
+    foreach ($file in $files) {
+        $fragment = Read-ChaimirDigestLock -Path $file.FullName -Required
+        if ($fragment.Count -ne 1) { throw "每个 digest 片段须且只能声明一个镜像: $($file.Name)" }
+        foreach ($image in $fragment.Keys) {
+            if ($items.ContainsKey($image)) { throw "digest 锁片段重复声明 $image" }
+            $items[$image] = $fragment[$image]
+        }
+    }
+    return $items
 }
 
 # Read-ChaimirDigestLock 读取并严格校验 logical-image sha256:digest 锁。
@@ -369,4 +476,4 @@ function Write-ChaimirDigestLock {
     [System.IO.File]::WriteAllText($Path, $contents, [System.Text.ASCIIEncoding]::new())
 }
 
-Export-ModuleMember -Function Get-ChaimirYamlValue, Get-ChaimirTopLevelYamlValue, Get-ChaimirYamlBlock, Get-ChaimirImageSourceType, Get-ChaimirImageCatalog, Read-ChaimirEnvFile, Get-ChaimirCanonicalRegistry, Invoke-ChaimirProcess, Invoke-ChaimirDocker, Get-ChaimirInternalImageBuildArguments, Resolve-ChaimirImageBuildPaths, Read-ChaimirDigestLock, Write-ChaimirDigestLock
+Export-ModuleMember -Function Get-ChaimirYamlValue, Get-ChaimirTopLevelYamlValue, Get-ChaimirYamlBlock, Get-ChaimirImageSourceType, Get-ChaimirImageCatalog, Read-ChaimirEnvFile, Get-ChaimirCanonicalRegistry, Invoke-ChaimirProcess, Invoke-ChaimirDocker, Get-ChaimirImageBuildSources, Resolve-ChaimirImageBuildArguments, Get-ChaimirFrontendBuildArguments, Get-ChaimirImageBuildWaves, Resolve-ChaimirImageBuildPaths, Assert-ChaimirImageSelection, Read-ChaimirDigestFragments, Read-ChaimirDigestLock, Write-ChaimirDigestLock

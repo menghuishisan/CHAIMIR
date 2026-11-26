@@ -21,7 +21,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// NotifyModuleDeps 汇总组合根装配 M10 需要的基础设施。
+// NotifyModuleDeps 是 M10 装配所需的依赖。
 type NotifyModuleDeps struct {
 	Router   gin.IRouter
 	Database *db.DB
@@ -32,6 +32,7 @@ type NotifyModuleDeps struct {
 	EventBus eventbus.Bus
 	Auth     *auth.Manager
 	Roles    contracts.IdentityService
+	Contests contracts.ContestReadService
 	Audit    audit.Writer
 }
 
@@ -47,7 +48,7 @@ func RegisterNotifyModule(ctx context.Context, deps NotifyModuleDeps) (*notify.S
 		return nil, fmt.Errorf("notify module 缺少 database")
 	}
 	store := notify.NewStore(deps.Database)
-	svc, err := notify.NewService(notify.ServiceDeps{Store: store, IDs: deps.IDs, Redis: deps.Redis, Hub: deps.Hub, Roles: deps.Roles, Audit: deps.Audit, Config: deps.Config})
+	svc, err := notify.NewService(notify.ServiceDeps{Store: store, IDs: deps.IDs, Redis: deps.Redis, Hub: deps.Hub, Roles: deps.Roles, Contests: deps.Contests, Audit: deps.Audit, Config: deps.Config})
 	if err != nil {
 		return nil, err
 	}
@@ -57,21 +58,14 @@ func RegisterNotifyModule(ctx context.Context, deps NotifyModuleDeps) (*notify.S
 	if _, err := notify.SubscribeEvents(deps.EventBus, svc); err != nil {
 		return nil, err
 	}
-	task, err := notifyCleanupTask(deps.Config, svc)
-	if err != nil {
+	if err := background.Start(ctx,
+		background.Task{
+			Name:     "notify.cleanup",
+			Interval: time.Duration(deps.Config.CleanupIntervalSeconds) * time.Second,
+			Run:      svc.RunCleanupOnce,
+		},
+	); err != nil {
 		return nil, err
 	}
-	go background.Run(ctx, task)
 	return svc, nil
-}
-
-// notifyCleanupTask 把 M10 站内信清理接入统一后台任务运行器。
-func notifyCleanupTask(cfg config.NotifyConfig, svc *notify.Service) (background.Task, error) {
-	if svc == nil {
-		return background.Task{}, fmt.Errorf("notify cleanup task 缺少 service")
-	}
-	if cfg.CleanupIntervalSeconds <= 0 {
-		return background.Task{}, fmt.Errorf("NOTIFY_CLEANUP_INTERVAL_SECONDS 必须大于 0")
-	}
-	return background.Task{Name: "notify.cleanup", Interval: time.Duration(cfg.CleanupIntervalSeconds) * time.Second, Run: svc.RunCleanupOnce}, nil
 }

@@ -8,16 +8,31 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type AlertEvent struct {
-	ID          int64              `json:"id"`
+type AlertEvaluation struct {
 	RuleID      int64              `json:"rule_id"`
-	TenantID    pgtype.Int8        `json:"tenant_id"`
-	Level       int16              `json:"level"`
-	Message     string             `json:"message"`
-	Status      int16              `json:"status"`
-	HandlerID   pgtype.Int8        `json:"handler_id"`
-	TriggeredAt pgtype.Timestamptz `json:"triggered_at"`
-	HandledAt   pgtype.Timestamptz `json:"handled_at"`
+	TenantID    int64              `json:"tenant_id"`
+	Revision    int64              `json:"revision"`
+	ObservedAt  pgtype.Timestamptz `json:"observed_at"`
+	BreachSince pgtype.Timestamptz `json:"breach_since"`
+	Fired       bool               `json:"fired"`
+}
+
+type AlertEvent struct {
+	ID                int64              `json:"id"`
+	RuleID            int64              `json:"rule_id"`
+	TenantID          pgtype.Int8        `json:"tenant_id"`
+	Level             int16              `json:"level"`
+	Message           string             `json:"message"`
+	Status            int16              `json:"status"`
+	HandlerID         pgtype.Int8        `json:"handler_id"`
+	TriggeredAt       pgtype.Timestamptz `json:"triggered_at"`
+	HandledAt         pgtype.Timestamptz `json:"handled_at"`
+	NotifyTraceID     string             `json:"notify_trace_id"`
+	NotifyAttempts    int32              `json:"notify_attempts"`
+	NotifyLeaseToken  int64              `json:"notify_lease_token"`
+	NotifyNextAt      pgtype.Timestamptz `json:"notify_next_at"`
+	NotifyPublishedAt pgtype.Timestamptz `json:"notify_published_at"`
+	NotifyLastError   string             `json:"notify_last_error"`
 }
 
 type AlertRule struct {
@@ -29,6 +44,7 @@ type AlertRule struct {
 	Condition []byte             `json:"condition"`
 	Level     int16              `json:"level"`
 	Enabled   bool               `json:"enabled"`
+	Revision  int64              `json:"revision"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
@@ -53,16 +69,6 @@ type BackupRecord struct {
 	FinishedAt pgtype.Timestamptz `json:"finished_at"`
 }
 
-type ConfigChangeLog struct {
-	ID         int64              `json:"id"`
-	ConfigID   int64              `json:"config_id"`
-	TenantID   pgtype.Int8        `json:"tenant_id"`
-	OldValue   []byte             `json:"old_value"`
-	NewValue   []byte             `json:"new_value"`
-	OperatorID int64              `json:"operator_id"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-}
-
 type PlatformStatistic struct {
 	ID        int64              `json:"id"`
 	Scope     int16              `json:"scope"`
@@ -70,15 +76,4 @@ type PlatformStatistic struct {
 	StatDate  pgtype.Date        `json:"stat_date"`
 	Metrics   []byte             `json:"metrics"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
-}
-
-type SystemConfig struct {
-	ID        int64              `json:"id"`
-	Scope     int16              `json:"scope"`
-	TenantID  pgtype.Int8        `json:"tenant_id"`
-	Key       string             `json:"key"`
-	Value     []byte             `json:"value"`
-	Version   int32              `json:"version"`
-	UpdatedBy int64              `json:"updated_by"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }

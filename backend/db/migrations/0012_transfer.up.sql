@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS transfer_task (
 
 CREATE INDEX IF NOT EXISTS idx_transfer_task_tenant_account_status ON transfer_task(tenant_id, account_id, status);
 CREATE INDEX IF NOT EXISTS idx_transfer_task_tenant_created ON transfer_task(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_transfer_task_failed_window ON transfer_task(tenant_id, updated_at DESC) WHERE status='failed';
 CREATE INDEX IF NOT EXISTS idx_transfer_task_due ON transfer_task(status, next_attempt_after) WHERE next_attempt_after IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_transfer_task_lease ON transfer_task(status, lease_until) WHERE lease_until IS NOT NULL;
 

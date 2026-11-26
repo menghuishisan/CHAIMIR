@@ -9,35 +9,34 @@ import (
 )
 
 type Querier interface {
+	ClaimAlertNotifications(ctx context.Context, arg ClaimAlertNotificationsParams) ([]AlertEvent, error)
 	CountAlertEvents(ctx context.Context, arg CountAlertEventsParams) (int64, error)
 	// 告警列表的状态分段计数:套用级别与学校范围,不套用状态筛选。
 	CountAlertEventsByStatus(ctx context.Context, arg CountAlertEventsByStatusParams) ([]CountAlertEventsByStatusRow, error)
 	CountBackupRecords(ctx context.Context, status int16) (int64, error)
-	// 备份巡检的状态分段计数(进行中 / 已成功 / 已失败)。
+	// 备份成功/失败结果的分段计数。
 	CountBackupRecordsByStatus(ctx context.Context) ([]CountBackupRecordsByStatusRow, error)
-	CountConfigChangeLogs(ctx context.Context, configID int64) (int64, error)
 	CreateAlertEvent(ctx context.Context, arg CreateAlertEventParams) (AlertEvent, error)
 	CreateAlertRule(ctx context.Context, arg CreateAlertRuleParams) (AlertRule, error)
 	CreateAuditExportRequest(ctx context.Context, arg CreateAuditExportRequestParams) (AuditExportRequest, error)
 	CreateBackupRecord(ctx context.Context, arg CreateBackupRecordParams) (BackupRecord, error)
-	CreateConfigChangeLog(ctx context.Context, arg CreateConfigChangeLogParams) (ConfigChangeLog, error)
-	CreateSystemConfig(ctx context.Context, arg CreateSystemConfigParams) (SystemConfig, error)
 	DeleteAuditExportRequest(ctx context.Context, arg DeleteAuditExportRequestParams) error
-	GetAlertRule(ctx context.Context, id int64) (AlertRule, error)
-	GetConfigChangeLog(ctx context.Context, arg GetConfigChangeLogParams) (ConfigChangeLog, error)
-	GetSystemConfig(ctx context.Context, arg GetSystemConfigParams) (SystemConfig, error)
+	EnsureAlertEvaluation(ctx context.Context, arg EnsureAlertEvaluationParams) error
+	FinishAlertNotification(ctx context.Context, arg FinishAlertNotificationParams) (int64, error)
 	HandleAlertEvent(ctx context.Context, arg HandleAlertEventParams) (AlertEvent, error)
-	ListAlertEvents(ctx context.Context, arg ListAlertEventsParams) ([]AlertEvent, error)
+	ListAlertEvents(ctx context.Context, arg ListAlertEventsParams) ([]ListAlertEventsRow, error)
 	ListAlertRules(ctx context.Context, arg ListAlertRulesParams) ([]AlertRule, error)
-	// status 传 0 不按结果过滤;传具体结果供备份巡检按「已成功/已失败/进行中」取数与计数。
+	// status 传 0 不筛选，其余按成功/失败结果查询。
 	ListBackupRecords(ctx context.Context, arg ListBackupRecordsParams) ([]BackupRecord, error)
-	ListConfigChangeLogs(ctx context.Context, arg ListConfigChangeLogsParams) ([]ConfigChangeLog, error)
 	ListDueAuditExportRequests(ctx context.Context, arg ListDueAuditExportRequestsParams) ([]AuditExportRequest, error)
+	ListEvaluationRules(ctx context.Context) ([]AlertRule, error)
 	ListPlatformStatistics(ctx context.Context, arg ListPlatformStatisticsParams) ([]PlatformStatistic, error)
-	ListSystemConfigs(ctx context.Context, arg ListSystemConfigsParams) ([]SystemConfig, error)
+	LockAlertEvaluation(ctx context.Context, arg LockAlertEvaluationParams) (AlertEvaluation, error)
+	LockEvaluationRule(ctx context.Context, id int64) (AlertRule, error)
+	SaveAlertEvaluation(ctx context.Context, arg SaveAlertEvaluationParams) error
+	SetAlertNotificationTrace(ctx context.Context, arg SetAlertNotificationTraceParams) error
 	SetAuditExportRequestNextCheck(ctx context.Context, arg SetAuditExportRequestNextCheckParams) (AuditExportRequest, error)
 	UpdateAlertRule(ctx context.Context, arg UpdateAlertRuleParams) (AlertRule, error)
-	UpdateSystemConfig(ctx context.Context, arg UpdateSystemConfigParams) (SystemConfig, error)
 	UpsertGlobalPlatformStatistics(ctx context.Context, arg UpsertGlobalPlatformStatisticsParams) (PlatformStatistic, error)
 	UpsertTenantPlatformStatistics(ctx context.Context, arg UpsertTenantPlatformStatisticsParams) (PlatformStatistic, error)
 }

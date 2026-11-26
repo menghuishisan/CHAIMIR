@@ -1,14 +1,13 @@
-// 本文件提供 Remix IDE 静态资源的最小 HTTP 服务。
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log"
-	"mime"
 	"net/http"
 	"os"
-	"path/filepath"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -16,7 +15,6 @@ import (
 
 const version = "remix-static-server-1"
 
-// main 校验静态目录并启动只服务 Remix 静态资源的 HTTP 服务器。
 func main() {
 	addr := flag.String("addr", "", "listen address")
 	root := flag.String("root", "", "static root")
@@ -32,16 +30,17 @@ func main() {
 	}
 	httpTimeout := time.Duration(requiredPositiveInt("CHAIMIR_HTTP_TIMEOUT_SECONDS")) * time.Second
 
-	absRoot, err := filepath.Abs(*root)
+	assets, err := os.OpenRoot(*root)
 	if err != nil {
-		log.Fatalf("resolve static root: %v", err)
+		log.Fatalf("open static root: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(absRoot, "index.html")); err != nil {
+	defer assets.Close()
+	if info, err := assets.Stat("index.html"); err != nil || !info.Mode().IsRegular() {
 		log.Fatalf("missing Remix index.html: %v", err)
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/", staticHandler(absRoot))
+	mux.Handle("/", staticHandler(assets))
 
 	server := &http.Server{
 		Addr:              *addr,
@@ -58,7 +57,6 @@ func main() {
 	}
 }
 
-// requiredPositiveInt 读取服务端有限的正整数配置。
 func requiredPositiveInt(key string) int {
 	value := strings.TrimSpace(os.Getenv(key))
 	parsed, err := strconv.Atoi(value)
@@ -68,8 +66,7 @@ func requiredPositiveInt(key string) int {
 	return parsed
 }
 
-// staticHandler 返回静态资源处理器,并对前端路由回退到 index.html。
-func staticHandler(root string) http.Handler {
+func staticHandler(root *os.Root) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -79,21 +76,25 @@ func staticHandler(root string) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 
-		rel := strings.TrimPrefix(filepath.Clean("/"+r.URL.Path), string(filepath.Separator))
-		target := filepath.Join(root, rel)
-		relativeTarget, err := filepath.Rel(root, target)
-		if err != nil || relativeTarget == ".." || strings.HasPrefix(relativeTarget, ".."+string(filepath.Separator)) {
+		name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+		if name == "" {
+			name = "index.html"
+		}
+		file, err := root.Open(name)
+		// 仅前端导航回退；缺失资源或越界链接不能伪装成成功的 HTML。
+		if errors.Is(err, os.ErrNotExist) && path.Ext(name) == "" && strings.Contains(r.Header.Get("Accept"), "text/html") {
+			file, err = root.Open("index.html")
+		}
+		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
-
-		info, err := os.Stat(target)
-		if err != nil || info.IsDir() {
-			target = filepath.Join(root, "index.html")
+		defer file.Close()
+		info, err := file.Stat()
+		if err != nil || !info.Mode().IsRegular() {
+			http.NotFound(w, r)
+			return
 		}
-		if contentType := mime.TypeByExtension(filepath.Ext(target)); contentType != "" {
-			w.Header().Set("Content-Type", contentType)
-		}
-		http.ServeFile(w, r, target)
+		http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 	})
 }

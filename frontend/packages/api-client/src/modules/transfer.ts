@@ -1,5 +1,3 @@
-// Transfer API 文件定义统一导入导出任务中心前端调用入口。
-
 import { ApiClient, encodePathSegment } from '../client'
 import type { AttachmentResponse } from '../client'
 import type { PaginatedResponse } from '../types/common'

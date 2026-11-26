@@ -30,11 +30,23 @@ env_keys:
     - POSTGRES_INITDB_ARGS
   secret:
     - POSTGRES_PASSWORD
+    - POSTGRES_TLS_CERTIFICATE
+    - POSTGRES_TLS_PRIVATE_KEY
 secrets_required:
   - component: infra
     env: POSTGRES_PASSWORD
     secret_key: PG_PASSWORD
     source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
+  - component: infra
+    env: POSTGRES_TLS_CERTIFICATE
+    secret_key: POSTGRES_TLS_CERTIFICATE
+    source: deploy/config/chaimir-tls/postgres.crt
+    runtime_value: secret-or-kms
+  - component: infra
+    env: POSTGRES_TLS_PRIVATE_KEY
+    secret_key: POSTGRES_TLS_PRIVATE_KEY
+    source: deploy/config/chaimir-tls/postgres.key
     runtime_value: secret-or-kms
 capabilities:
   provides:
@@ -44,7 +56,20 @@ capabilities:
   conflicts: []
   cardinality: one
   placement: sandbox
-  config_schema: {}
+  config_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      database_name:
+        title: 数据库名称
+        type: string
+        pattern: '^[A-Za-z0-9_-]+$'
+        x-chaimir-env: infra/POSTGRES_DB
+      database_user:
+        title: 数据库账户
+        type: string
+        pattern: '^[A-Za-z0-9_.-]+$'
+        x-chaimir-env: infra/POSTGRES_USER
   student_access: private
 infra:
   eco_tags:
@@ -53,6 +78,7 @@ infra:
     - datastore
     - indexer-dependency
   resource_spec:
+    volume_source: self
     components:
       - name: infra
         image_url: "@self"
@@ -137,6 +163,10 @@ selftest:
       command:
         - postgres
         - --version
+    - name: openssl-version
+      command:
+        - openssl
+        - version
 supply_chain:
   sbom: true
   trivy_required: true

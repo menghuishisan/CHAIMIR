@@ -2,12 +2,23 @@
 package judge
 
 import (
+	"reflect"
 	"regexp"
 	"strings"
 
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/privacy"
 )
+
+// hasDeterministicExpectation 拒绝已启用的非确定性标记；空标记不启用。
+func hasDeterministicExpectation(expectation map[string]any) bool {
+	for _, key := range []string{"random", "wall_clock", "external_network"} {
+		if value := expectation[key]; value != nil && !reflect.ValueOf(value).IsZero() {
+			return false
+		}
+	}
+	return true
+}
 
 var (
 	codePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`)
@@ -38,12 +49,19 @@ func validateResultDetails(details []JudgeResultDetail) error {
 	if len(details) == 0 {
 		return apperr.ErrJudgeWorkerFailed
 	}
+	hasOutcome := false
 	for _, item := range details {
 		if strings.TrimSpace(item.Case) == "" && strings.TrimSpace(item.Source) == "" && strings.TrimSpace(item.Target) == "" {
 			return apperr.ErrJudgeWorkerFailed
 		}
 		if containsSensitiveMaterial(item.ExpectedLabel) || containsSensitiveMaterial(item.Actual) || containsSensitiveMaterial(item.Hint) {
 			return apperr.ErrJudgeWorkerFailed
+		}
+		if item.Outcome != "" {
+			if hasOutcome || !item.Outcome.Valid() || !item.Passed {
+				return apperr.ErrJudgeWorkerFailed
+			}
+			hasOutcome = true
 		}
 	}
 	return nil

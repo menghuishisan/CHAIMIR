@@ -36,7 +36,6 @@ type NotificationTemplate struct {
 	Type       string             `json:"type"`
 	TitleTpl   string             `json:"title_tpl"`
 	ContentTpl string             `json:"content_tpl"`
-	Channels   []string           `json:"channels"`
 	Force      bool               `json:"force"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`

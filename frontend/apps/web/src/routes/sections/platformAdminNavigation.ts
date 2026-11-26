@@ -15,7 +15,6 @@ import {
   Package,
   Save,
   Server,
-  Settings,
   Shield,
 } from 'lucide-react'
 import { ROLE_ROUTES } from '../../utils/roleRouting'
@@ -53,7 +52,6 @@ export const platformAdminNavigation: RoleNavigationConfig = {
       items: [
         { name: '告警中心', path: '/platform-admin/alerts', icon: BellRing },
         { name: '系统公告', path: '/platform-admin/announcements', icon: Megaphone },
-        { name: '系统配置', path: '/platform-admin/settings', icon: Settings },
         { name: '监控面板', path: '/platform-admin/monitoring', icon: Monitor },
         { name: '备份记录', path: '/platform-admin/backups', icon: Save },
         { name: '平台审计', path: '/platform-admin/audit', icon: FileText },

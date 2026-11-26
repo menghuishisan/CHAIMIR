@@ -28,11 +28,6 @@ function Read-PlatformSecrets {
     return $values
 }
 
-function Invoke-Docker {
-    param([string[]]$Arguments, [int]$TimeoutSeconds = 300)
-    return Invoke-ChaimirDocker -Arguments $Arguments -TimeoutSeconds $TimeoutSeconds
-}
-
 function Get-LockedImageRef([hashtable]$Lock, [string]$Image) {
     $digest = $Lock[$Image]
     if ($digest -notmatch '^sha256:[0-9a-f]{64}$') { throw "候选 digest 锁缺少合法条目: $Image" }
@@ -57,7 +52,7 @@ function Deploy-ControlledContract([string]$InitCode, [string]$PrivateKey, [stri
     [IO.File]::WriteAllText($initCodePath, $InitCode, [Text.ASCIIEncoding]::new())
     $sendShell = 'set -eu; cast send --async --json --rpc-url "{0}" --private-key "{1}" --create "$(cat /tmp/initcode)"' -f $rpcUrl, $PrivateKey
     try {
-        $send = Invoke-Docker @("run", "--rm", "--pull", "never", "--network", $network, "--mount", "type=bind,source=$initCodePath,target=/tmp/initcode,readonly", "--entrypoint", "sh", $foundryRef, "-lc", $sendShell)
+        $send = Invoke-ChaimirDocker @("run", "--rm", "--pull", "never", "--network", $network, "--mount", "type=bind,source=$initCodePath,target=/tmp/initcode,readonly", "--entrypoint", "sh", $foundryRef, "-lc", $sendShell)
     } finally {
         if (Test-Path -LiteralPath $initCodePath) { Remove-Item -LiteralPath $initCodePath -Force }
     }
@@ -87,7 +82,7 @@ function Invoke-ControlledRpc([string]$Method, [object[]]$Params) {
     $bodyBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($body))
     $shell = "set -eu; printf '%s' '$bodyBase64' | base64 -d >/tmp/rpc.json; curl --connect-timeout 2 --max-time 5 -fsS -H 'content-type: application/json' --data-binary @/tmp/rpc.json http://${RpcHost}:8545"
     $arguments = @('run', '--rm', '--pull', 'never', '--network', $network, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--tmpfs', '/tmp:rw,nosuid,nodev,noexec,size=1m', '--entrypoint', 'sh', $toolsRef, '-c', $shell)
-    $response = Invoke-Docker -Arguments $arguments -TimeoutSeconds 15
+    $response = Invoke-ChaimirDocker -Arguments $arguments -TimeoutSeconds 15
     if ($response.Code -ne 0) { throw "受控 EVM JSON-RPC $Method 请求失败: $($response.Text)" }
     try { $rpcResponse = $response.Text | ConvertFrom-Json } catch { throw "受控 EVM JSON-RPC $Method 返回无效 JSON: $($response.Text)" }
     if ($rpcResponse.PSObject.Properties.Name -notcontains 'result') { throw "受控 EVM JSON-RPC $Method 响应缺少 result 字段" }
@@ -153,14 +148,14 @@ optimizer_runs = 200
     [IO.File]::WriteAllText((Join-Path $aaRoot "remappings.txt"), "@openzeppelin/contracts/=/work/lib/openzeppelin-contracts/contracts/", [Text.UTF8Encoding]::new($false))
 
     if ($ownsRuntime) {
-        $networkResult = Invoke-Docker @("network", "create", "--internal", $network)
+        $networkResult = Invoke-ChaimirDocker @("network", "create", "--internal", $network)
         if ($networkResult.Code -ne 0) { throw "创建受控 EVM 材料网络失败: $($networkResult.Text)" }
-        $volumeResult = Invoke-Docker @("volume", "create", $volume)
+        $volumeResult = Invoke-ChaimirDocker @("volume", "create", $volume)
         if ($volumeResult.Code -ne 0) { throw "创建受控 EVM 材料卷失败: $($volumeResult.Text)" }
         if ($RuntimeImage -eq "runtime/op-geth") {
             $genesisPath = Join-Path $controlledOpStackMaterial "genesis.json"
             $executionStatePath = Join-Path $controlledOpStackMaterial "l1-execution-state.tar"
-            $seed = Invoke-Docker @("run", "--rm", "--pull", "never", "--user", "0:0", "--mount", "source=$volume,target=/runtime-state", "--mount", "type=bind,source=$controlledOpStackMaterial,target=/seed/op-stack,readonly", "--entrypoint", "sh", $judgeRef, "-lc", "set -eu; mkdir -p /runtime-state/op-geth; cp /seed/op-stack/genesis.json /runtime-state/op-geth/genesis.json; tar -xf /seed/op-stack/l1-execution-state.tar -C /runtime-state; chown -R 1000:1000 /runtime-state")
+            $seed = Invoke-ChaimirDocker @("run", "--rm", "--pull", "never", "--user", "0:0", "--mount", "source=$volume,target=/runtime-state", "--mount", "type=bind,source=$controlledOpStackMaterial,target=/seed/op-stack,readonly", "--entrypoint", "sh", $judgeRef, "-lc", "set -eu; mkdir -p /runtime-state/op-geth; cp /seed/op-stack/genesis.json /runtime-state/op-geth/genesis.json; tar -xf /seed/op-stack/l1-execution-state.tar -C /runtime-state; chown -R 1000:1000 /runtime-state")
             if ($seed.Code -ne 0) { throw "受控 OP-Geth execution 状态注入失败: $($seed.Text)" }
             $runtimeArguments = @("run", "-d", "--pull", "never", "--name", $runtime, "--network", $network, "--network-alias", "evm", "-v", "${volume}:/runtime-state", "-e", "OP_GETH_DATA_DIR=/runtime-state/op-geth", "-e", "OP_GETH_GENESIS_PATH=/runtime-state/op-geth/genesis.json", "-e", "OP_GETH_JWT_SECRET=$($secrets["OP_GETH_JWT_SECRET"])", "-e", "OP_GETH_RPC_PORT=8545", "-e", "OP_GETH_ENGINE_PORT=8551", $runtimeRef)
         } elseif ($RuntimeImage -eq "runtime/evm-geth") {
@@ -168,56 +163,56 @@ optimizer_runs = 200
         } else {
             $runtimeArguments = @("run", "-d", "--pull", "never", "--name", $runtime, "--network", $network, "--network-alias", "evm", "-v", "${volume}:/runtime-state", "-e", "CHAIMIR_CHAIN_STATE_DIR=/runtime-state", "-e", "CHAIMIR_RUNTIME_RPC_PORT=8545", "-e", "CHAIMIR_EVM_DEPLOYER_MNEMONIC=$($secrets["CHAIMIR_EVM_DEPLOYER_MNEMONIC"])", $runtimeRef)
         }
-        $runtimeResult = Invoke-Docker $runtimeArguments
+        $runtimeResult = Invoke-ChaimirDocker $runtimeArguments
         if ($runtimeResult.Code -ne 0) { throw "启动受控 EVM runtime 失败: $($runtimeResult.Text)" }
     } else {
-        $networkCheck = Invoke-Docker @("network", "inspect", $network)
+        $networkCheck = Invoke-ChaimirDocker @("network", "inspect", $network)
         if ($networkCheck.Code -ne 0) { throw "CompositionSpec runtime 网络不存在: $network" }
     }
 
     $ready = $false
     for ($attempt = 0; $attempt -lt 60; $attempt++) {
-        $probe = Invoke-Docker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "chain-id", "--rpc-url", "http://${RpcHost}:8545")
+        $probe = Invoke-ChaimirDocker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "chain-id", "--rpc-url", "http://${RpcHost}:8545")
         if ($probe.Code -eq 0 -and $probe.Text -match '^0x|^[0-9]+$') { $ready = $true; break }
         Start-Sleep -Seconds 1
     }
     if (-not $ready) { throw "受控 EVM runtime 在限定时间内未就绪" }
 
-    $build = Invoke-Docker @("run", "--rm", "--pull", "never", "--user", "0:0", "--entrypoint", "sh", "-v", "${aaRoot}:/work", "-v", "${ozRoot}:/deps/openzeppelin:ro", $foundryRef, "-lc", "set -eu; ln -s /deps/openzeppelin /work/lib/openzeppelin-contracts; cd /work; forge build contracts/core/EntryPoint.sol contracts/samples/VerifyingPaymaster.sol contracts/samples/SimpleAccountFactory.sol --root /work --use /usr/local/bin/solc-0.8.20 --offline")
+    $build = Invoke-ChaimirDocker @("run", "--rm", "--pull", "never", "--user", "0:0", "--entrypoint", "sh", "-v", "${aaRoot}:/work", "-v", "${ozRoot}:/deps/openzeppelin:ro", $foundryRef, "-lc", "set -eu; ln -s /deps/openzeppelin /work/lib/openzeppelin-contracts; cd /work; forge build contracts/core/EntryPoint.sol contracts/samples/VerifyingPaymaster.sol contracts/samples/SimpleAccountFactory.sol --root /work --use /usr/local/bin/solc-0.8.20 --offline")
     if ($build.Code -ne 0) { throw "官方 ERC-4337 合约离线编译失败: $($build.Text)" }
 
     $deployerKey = $secrets["CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY"]
     $signerKey = $secrets["CHAIMIR_PAYMASTER_PRIVATE_KEY"]
-    $deployerAddressResult = Invoke-Docker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "wallet", "address", "--private-key", $deployerKey)
+    $deployerAddressResult = Invoke-ChaimirDocker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "wallet", "address", "--private-key", $deployerKey)
     if ($deployerAddressResult.Code -ne 0 -or $deployerAddressResult.Text -notmatch '^0x[0-9a-fA-F]{40}$') { throw "平台 EVM 部署账户地址生成失败" }
     $deployerAddress = $deployerAddressResult.Text.Trim()
-    $deployerBalance = Invoke-Docker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "balance", $deployerAddress, "--rpc-url", "http://${RpcHost}:8545")
-    $deployerNonce = Invoke-Docker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "nonce", $deployerAddress, "--rpc-url", "http://${RpcHost}:8545")
+    $deployerBalance = Invoke-ChaimirDocker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "balance", $deployerAddress, "--rpc-url", "http://${RpcHost}:8545")
+    $deployerNonce = Invoke-ChaimirDocker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "nonce", $deployerAddress, "--rpc-url", "http://${RpcHost}:8545")
     if ($deployerBalance.Code -ne 0 -or $deployerNonce.Code -ne 0 -or $deployerBalance.Text -notmatch '^[0-9]+$' -or $deployerNonce.Text -notmatch '^[0-9]+$') {
         throw "平台 EVM 部署账户链上预检失败: balance_exit=$($deployerBalance.Code) nonce_exit=$($deployerNonce.Code)"
     }
-    $signer = Invoke-Docker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "wallet", "address", "--private-key", $signerKey)
+    $signer = Invoke-ChaimirDocker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "wallet", "address", "--private-key", $signerKey)
     if ($signer.Code -ne 0 -or $signer.Text -notmatch '^0x[0-9a-fA-F]{40}$') { throw "paymaster 验证签名地址生成失败" }
     $signerAddress = $signer.Text.Trim()
     $entryBytecode = Get-ArtifactBytecode 'EntryPoint'
     $entryAddress = Deploy-ControlledContract $entryBytecode $deployerKey '官方 EntryPoint'
     if ($entryAddress -notmatch '^0x[0-9a-fA-F]{40}$') { throw "EntryPoint 部署结果缺少合法地址" }
     $paymasterBytecode = Get-ArtifactBytecode 'VerifyingPaymaster'
-    $paymasterArguments = Invoke-Docker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "abi-encode", "constructor(address,address)", $entryAddress, $signerAddress)
+    $paymasterArguments = Invoke-ChaimirDocker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "abi-encode", "constructor(address,address)", $entryAddress, $signerAddress)
     if ($paymasterArguments.Code -ne 0 -or $paymasterArguments.Text -notmatch '^0x[0-9a-fA-F]+$') { throw "VerifyingPaymaster 构造参数 ABI 编码失败: $($paymasterArguments.Text)" }
     $paymasterInitCode = $paymasterBytecode + $paymasterArguments.Text.Trim().Substring(2)
     $paymasterAddress = Deploy-ControlledContract $paymasterInitCode $deployerKey '官方 VerifyingPaymaster'
     if ($paymasterAddress -notmatch '^0x[0-9a-fA-F]{40}$') { throw "paymaster 部署结果缺少合法地址" }
     $factoryBytecode = Get-ArtifactBytecode 'SimpleAccountFactory'
-    $factoryArguments = Invoke-Docker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "abi-encode", "constructor(address)", $entryAddress)
+    $factoryArguments = Invoke-ChaimirDocker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "abi-encode", "constructor(address)", $entryAddress)
     if ($factoryArguments.Code -ne 0 -or $factoryArguments.Text -notmatch '^0x[0-9a-fA-F]+$') { throw "SimpleAccountFactory 构造参数 ABI 编码失败: $($factoryArguments.Text)" }
     $factoryInitCode = $factoryBytecode + $factoryArguments.Text.Trim().Substring(2)
     $factoryAddress = Deploy-ControlledContract $factoryInitCode $deployerKey '官方 SimpleAccountFactory'
     if ($factoryAddress -notmatch '^0x[0-9a-fA-F]{40}$') { throw "SimpleAccountFactory 部署结果缺少合法地址" }
 
-    $entryCode = Invoke-Docker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "code", $entryAddress, "--rpc-url", "http://${RpcHost}:8545")
-    $paymasterCode = Invoke-Docker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "code", $paymasterAddress, "--rpc-url", "http://${RpcHost}:8545")
-    $factoryCode = Invoke-Docker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "code", $factoryAddress, "--rpc-url", "http://${RpcHost}:8545")
+    $entryCode = Invoke-ChaimirDocker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "code", $entryAddress, "--rpc-url", "http://${RpcHost}:8545")
+    $paymasterCode = Invoke-ChaimirDocker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "code", $paymasterAddress, "--rpc-url", "http://${RpcHost}:8545")
+    $factoryCode = Invoke-ChaimirDocker @("run", "--rm", "--pull", "never", "--network", $network, "--entrypoint", "cast", $foundryRef, "code", $factoryAddress, "--rpc-url", "http://${RpcHost}:8545")
     if ($entryCode.Code -ne 0 -or $entryCode.Text -eq "0x" -or $paymasterCode.Code -ne 0 -or $paymasterCode.Text -eq "0x" -or $factoryCode.Code -ne 0 -or $factoryCode.Text -eq "0x") { throw "部署后的官方合约没有可执行字节码" }
 
     $chainIdText = $probe.Text.Trim()
@@ -246,9 +241,9 @@ optimizer_runs = 200
     Write-Output "受控 ERC-4337 材料已生成: $OutputPath"
 } finally {
     if ($ownsRuntime) {
-        Invoke-Docker @("rm", "-f", "-v", $runtime) | Out-Null
-        Invoke-Docker @("network", "rm", $network) | Out-Null
-        Invoke-Docker @("volume", "rm", $volume) | Out-Null
+        Invoke-ChaimirDocker @("rm", "-f", "-v", $runtime) | Out-Null
+        Invoke-ChaimirDocker @("network", "rm", $network) | Out-Null
+        Invoke-ChaimirDocker @("volume", "rm", $volume) | Out-Null
     }
     if (Test-Path -LiteralPath $workRoot) { Remove-Item -LiteralPath $workRoot -Recurse -Force }
 }

@@ -1,5 +1,3 @@
-// vite-env.d.ts 声明 Vite 客户端类型和部署层注入的运行时配置,
-// 让 app/config.ts 之外的误用在编译期暴露(全站样式走 Tailwind 令牌,不使用 CSS Module)。
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
@@ -9,6 +7,9 @@ interface ImportMetaEnv {
   readonly VITE_WS_BASE_URL?: string
   /** 前端 API 请求超时(毫秒) */
   readonly VITE_API_TIMEOUT_MS?: string
+  readonly VITE_RUNTIME_SELFTEST_POLL_INTERVAL_MS?: string
+  readonly VITE_RUNTIME_SELFTEST_POLL_TIMEOUT_MS?: string
+  readonly VITE_SIM_STEP_INTERVAL_MS?: string
   /** 仿真 Worker 单条指令超时(毫秒) */
   readonly VITE_SIM_WORKER_COMMAND_TIMEOUT_MS?: string
 }

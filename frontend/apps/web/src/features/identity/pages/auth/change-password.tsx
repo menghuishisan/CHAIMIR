@@ -9,7 +9,7 @@ import {
   clearLoginTokens,
   completeRequiredPasswordChange,
 } from '../../../../utils/authSession'
-import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { errorDiagnostics, userFacingErrorMessage } from '../../../../utils/userFacingError'
 import {
   confirmPasswordError,
   passwordRequiredError,
@@ -63,8 +63,9 @@ export default function ChangePasswordPage() {
       setSubmitting(true)
       setFormError(null)
       try {
+        const me = await api.identity.getMe()
         await api.identity.changePassword({ old_password: oldPassword, new_password: newPassword })
-        navigate(completeRequiredPasswordChange(), { replace: true })
+        navigate(completeRequiredPasswordChange(me.account.roles), { replace: true })
       } catch (changeError) {
         setFormError(userFacingErrorMessage(changeError, '密码修改失败,请检查当前密码后重试。'))
       } finally {
@@ -78,8 +79,11 @@ export default function ChangePasswordPage() {
   const handleLogout = useCallback(async () => {
     try {
       await api.identity.logout()
-    } catch {
-      // 网络失败也必须允许用户离开:本地凭证已清除,服务端令牌按有效期自然过期
+    } catch (logoutError) {
+      console.warn('auth_logout_failed', {
+        operation: 'required_password_change_logout',
+        error: errorDiagnostics(logoutError),
+      })
     } finally {
       clearLoginTokens()
       navigate('/auth/login', { replace: true })

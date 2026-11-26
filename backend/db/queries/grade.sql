@@ -28,6 +28,12 @@ SET name = $2, mapping = $3, warning_rules = $4, is_default = $5, updated_at = n
 WHERE id = $1
 RETURNING id, tenant_id, name, mapping, warning_rules, is_default, created_at, updated_at;
 
+-- name: UpdateDefaultWarningRules :one
+UPDATE grade_level_config
+SET warning_rules = $1, updated_at = now()
+WHERE is_default = true
+RETURNING warning_rules;
+
 -- name: CreateSemester :one
 INSERT INTO semester (id, tenant_id, name, start_date, end_date, is_current)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -70,6 +76,14 @@ FROM grade_lock_outbox WHERE course_id = $1 ORDER BY revision DESC LIMIT 1;
 
 -- name: HasAcceptedAppealsByCourse :one
 SELECT EXISTS (SELECT 1 FROM grade_appeal WHERE course_id = $1 AND status = 2)::boolean;
+
+-- name: ListGradePublications :many
+SELECT o.course_id, COALESCE(r.semester_id, 0)::bigint AS semester_id, o.revision,
+       COALESCE(o.locked AND r.status = 2 AND r.is_locked, false)::boolean AS published
+FROM (SELECT DISTINCT ON (course_id) tenant_id, course_id, review_id, revision, locked
+      FROM grade_lock_outbox ORDER BY course_id, revision DESC) o
+JOIN grade_review r ON r.tenant_id = o.tenant_id AND r.id = o.review_id
+ORDER BY o.course_id;
 
 -- name: AcceptGradeAppeal :one
 UPDATE grade_appeal
@@ -232,11 +246,15 @@ FROM student_semester_grade
 WHERE student_id = $1
 ORDER BY computed_at DESC;
 
--- name: ListKnownStudentSemesterGrades :many
-SELECT id, tenant_id, student_id, semester_id, total_credits, gpa, cumulative_gpa, computed_at
+-- name: DeleteStudentSemesterGrades :exec
+DELETE FROM student_semester_grade WHERE student_id = $1;
+
+-- name: ListGradeWarningStudents :many
+SELECT student_id
 FROM student_semester_grade
 WHERE (sqlc.arg(student_id)::bigint = 0 OR student_id = sqlc.arg(student_id)::bigint)
-ORDER BY student_id ASC, semester_id ASC;
+  AND semester_id = sqlc.arg(semester_id)::bigint
+ORDER BY student_id;
 
 -- name: CreateGradeAppeal :one
 INSERT INTO grade_appeal (id, tenant_id, student_id, course_id, reason, status, created_at)
@@ -304,6 +322,8 @@ RETURNING id, tenant_id, student_id, course_id, reason, status, handler_id, resu
 -- name: CreateAcademicWarning :one
 INSERT INTO academic_warning (id, tenant_id, student_id, semester_id, type, detail, status, created_at, notify_trace_id)
 VALUES ($1, $2, $3, $4, $5, $6, 1, now(), $7)
+ON CONFLICT (tenant_id, student_id, semester_id, type)
+DO UPDATE SET detail = EXCLUDED.detail
 RETURNING id, tenant_id, student_id, semester_id, type, detail, status, created_at, notify_trace_id, notify_status, notify_attempts, notify_lease_token, notify_lease_until, notify_next_attempt_at, notify_last_error;
 
 -- name: ListAcademicWarnings :many
@@ -376,3 +396,8 @@ UPDATE academic_warning
 SET notify_status=4, notify_last_error=$4, notify_lease_token='', notify_lease_until=NULL,
     notify_next_attempt_at=sqlc.arg(next_at)::timestamptz
 WHERE tenant_id=$1 AND id=$2 AND notify_status=2 AND notify_lease_token=$3 AND notify_lease_until > now();
+
+-- name: CountCurrentUnackedWarnings :one
+SELECT count(*)::bigint FROM academic_warning w
+JOIN semester s ON s.id=w.semester_id AND s.tenant_id=w.tenant_id
+WHERE s.is_current AND w.status=1;

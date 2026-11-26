@@ -131,7 +131,7 @@ func submissionDTO(s Submission) (SubmissionDTO, error) {
 	if err != nil {
 		return SubmissionDTO{}, err
 	}
-	return SubmissionDTO{ID: ids.ID(s.ID), AssignmentID: ids.ID(s.AssignmentID), StudentID: ids.ID(s.StudentID), AttemptNo: s.AttemptNo, Content: content, ManualMaxScore: manualMaximumScore(s.ContentRef), JudgeTaskRef: s.JudgeTaskRef, AutoScore: s.AutoScore, ManualScore: s.ManualScore, FinalScore: s.FinalScore, Comment: s.Comment, IsLate: s.IsLate, Status: s.Status, SubmittedAt: timex.RFC3339OrEmpty(s.SubmittedAt)}, nil
+	return SubmissionDTO{ID: ids.ID(s.ID), AssignmentID: ids.ID(s.AssignmentID), StudentID: ids.ID(s.StudentID), AttemptNo: s.AttemptNo, Content: content, ManualMaxScore: manualMaximumScore(s.ContentRef), AutoScore: s.AutoScore, ManualScore: s.ManualScore, FinalScore: s.FinalScore, Comment: s.Comment, IsLate: s.IsLate, Status: s.Status, SubmittedAt: timex.RFC3339OrEmpty(s.SubmittedAt)}, nil
 }
 
 // draftDTO 将服务端权威作答草稿转换为 HTTP 响应结构。

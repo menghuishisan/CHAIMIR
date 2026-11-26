@@ -14,7 +14,7 @@ RUN apk add --no-cache \
     && mkdir -p /workspace /runtime-state/workspace-home \
     && chown -R 1000:1000 /workspace /runtime-state
 
-COPY images/base/chain-tools/chaimir-workspace /usr/local/bin/chaimir-workspace
+COPY chaimir-workspace /usr/local/bin/chaimir-workspace
 RUN chmod 0755 /usr/local/bin/chaimir-workspace
 
 WORKDIR /workspace

@@ -1,10 +1,5 @@
-// 题目编辑大抽屉(题库内容页)。设计 §7.4:右侧大抽屉,上方是题面,下方是判题配置与附件,
-// 底部固定「保存草稿 / 保存并发布」。已发布版本不可变(后端只改草稿),调用方先建新版本草稿再打开本抽屉;
-// 从已被引用的版本建出来时说明「修改会生成新版本,已布置的作业和实验不受影响」。
-//
-// 正文按内容类型渲染显式字段:实验模板填概述与步骤,竞赛题填场景,理论题填题干与选项。
-// 答案、判题配置与 flag 通过 sensitive_fields 声明剥离路径 —— 学生取题面时后端按此过滤。
-// 不给裸 JSON 文本域(旧前端 16 处裸 JSON 是被审查列为 P0 的问题)。
+// 创建和编辑题库草稿，保留未在表单展示的运行、判题内容与敏感路径。
+// 已发布内容由调用方先生成新版本草稿，已有业务引用继续使用原版本。
 
 import { useCallback, useId, useMemo, useState } from 'react'
 import {
@@ -232,8 +227,8 @@ function ItemForm({ item, derivedFrom, snapshot, onClose, onSaved }: ItemFormPro
   const [attachments, setAttachments] = useState<ContentAttachment[]>(readAttachments(body))
 
   const [formError, setFormError] = useState<string>()
-  // 正在进行的保存方式:只保存草稿,或保存后立即发布
-  const [submitting, setSubmitting] = useState<'draft' | 'publish'>()
+  // 上传与保存共用操作状态，避免提交时附件尚未写入正文。
+  const [submitting, setSubmitting] = useState<'upload' | 'draft' | 'publish'>()
 
   const categories = useAsyncResource(
     () => api.content.listCategories(),
@@ -242,22 +237,21 @@ function ItemForm({ item, derivedFrom, snapshot, onClose, onSaved }: ItemFormPro
   )
   const typeValue = Number(type) as ContentType
 
-  /**
-   * buildBody 按类型组装正文,只写该类型用到的键。
-   * 附件是三种类型共用的字段:有附件才写这个键,避免给没有附件的题目留个空数组。
-   */
+  /** buildBody 只覆盖表单负责的字段，保留其他正文并清除显式移除的配置。 */
   const buildBody = useCallback((): Record<string, unknown> => {
-    const shared = attachments.length > 0 ? { [BODY_KEYS.attachments]: attachments } : {}
+    const shared = { ...body }
+    delete shared[BODY_KEYS.attachments]
+    if (attachments.length > 0) shared[BODY_KEYS.attachments] = attachments
     if (typeValue === ContentType.EXPERIMENT_TEMPLATE) {
       return {
         ...shared,
         [BODY_KEYS.summary]: summary.trim(),
         [BODY_KEYS.steps]: splitLines(steps),
-        // 实验环境由实验编排向导按组合声明配置,模板正文不再写运行时
-        // 判题配置由检查点在实验编排里绑定判题器提供,题目正文不写判题细节
       }
     }
     if (typeValue === ContentType.CONTEST_PROBLEM) {
+      delete shared[BODY_KEYS.composition]
+      delete shared[BODY_KEYS.submitKey]
       return {
         ...shared,
         [BODY_KEYS.scenario]: scenario.trim(),
@@ -277,6 +271,8 @@ function ItemForm({ item, derivedFrom, snapshot, onClose, onSaved }: ItemFormPro
         ...(submitKey.trim() !== '' ? { [BODY_KEYS.submitKey]: submitKey.trim() } : {}),
       }
     }
+    delete shared[BODY_KEYS.options]
+    delete shared[BODY_KEYS.blankCount]
     return {
       ...shared,
       [BODY_KEYS.statement]: statement.trim(),
@@ -297,6 +293,7 @@ function ItemForm({ item, derivedFrom, snapshot, onClose, onSaved }: ItemFormPro
   }, [
     answer,
     attachments,
+    body,
     code,
     declaration,
     envEnabled,
@@ -399,7 +396,7 @@ function ItemForm({ item, derivedFrom, snapshot, onClose, onSaved }: ItemFormPro
    */
   const save = useCallback(
     async (mode: 'draft' | 'publish') => {
-      if (!validate()) return
+      if (submitting !== undefined || !validate()) return
 
       setSubmitting(mode)
       setFormError(undefined)
@@ -411,7 +408,12 @@ function ItemForm({ item, derivedFrom, snapshot, onClose, onSaved }: ItemFormPro
         knowledge_points: splitCommas(knowledgePoints),
         visibility: Number(visibility) as ContentVisibility,
         body: buildBody(),
-        sensitive_fields: SENSITIVE_PATHS_BY_TYPE[typeValue],
+        sensitive_fields: [
+          ...new Set([
+            ...(snapshot?.sensitive_fields ?? []),
+            ...SENSITIVE_PATHS_BY_TYPE[typeValue],
+          ]),
+        ],
       }
       let savedId: string
       try {
@@ -465,9 +467,11 @@ function ItemForm({ item, derivedFrom, snapshot, onClose, onSaved }: ItemFormPro
       item?.id,
       knowledgePoints,
       onSaved,
+      snapshot?.sensitive_fields,
       tags,
       title,
       typeValue,
+      submitting,
       validate,
       version,
       visibility,
@@ -913,6 +917,9 @@ function ItemForm({ item, derivedFrom, snapshot, onClose, onSaved }: ItemFormPro
                 <ContentAttachmentsField
                   attachments={attachments}
                   onChange={setAttachments}
+                  uploading={submitting === 'upload'}
+                  onUploadingChange={(uploading) => setSubmitting(uploading ? 'upload' : undefined)}
+                  disabled={submitting === 'draft' || submitting === 'publish'}
                   resourceId={item?.id}
                 />
               </FormField>
@@ -933,7 +940,7 @@ function ItemForm({ item, derivedFrom, snapshot, onClose, onSaved }: ItemFormPro
               type="submit"
               variant="outline"
               loading={submitting === 'draft'}
-              disabled={composingBlocked || submitting === 'publish'}
+              disabled={composingBlocked || submitting !== undefined}
             >
               保存草稿
             </Button>
@@ -941,7 +948,7 @@ function ItemForm({ item, derivedFrom, snapshot, onClose, onSaved }: ItemFormPro
               type="button"
               variant="seal"
               loading={submitting === 'publish'}
-              disabled={composingBlocked || submitting === 'draft'}
+              disabled={composingBlocked || submitting !== undefined}
               onClick={() => void save('publish')}
             >
               保存并发布

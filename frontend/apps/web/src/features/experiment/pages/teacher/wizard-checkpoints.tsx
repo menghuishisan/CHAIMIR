@@ -1,12 +1,8 @@
-// 实验编排向导:检查点步(第 4 步)。
-//
-// 检查点是实验的判分点:每个检查点绑定一个判题方式(M3 判题器目录)与一道题目(M5 锁版本),
-// 两者都从已注册清单里选,不让教师手填代码或题目编号。
-// 检查点可以绑定到某个环境或场景 —— 判题时按该组件的产出判分。
+// 检查点绑定锁定题目、组件和分值；判题方式由题目配置决定。
 
-import { useCallback, useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Plus, Target, Trash2 } from 'lucide-react'
-import type { CheckpointConfig, JudgerCatalog } from '@chaimir/api-client'
+import type { CheckpointConfig } from '@chaimir/api-client'
 import {
   Badge,
   Button,
@@ -26,15 +22,10 @@ import {
   ModalHeader,
   ModalTitle,
   Select,
-  Skeleton,
   Table,
   type TableColumn,
 } from '@chaimir/ui'
-import { api } from '../../../../app/api'
-import { ResourceState } from '../../../../components/ResourceState'
-import { type AsyncResourceState, useAsyncResource } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
-import { judgerTypeLabel } from '../../../../utils/labels/judge'
 import { ContentItemSelect } from '../../../content/components/ContentItemSelect'
 import type { ExperimentDraft } from './wizard-state'
 
@@ -44,36 +35,12 @@ export interface WizardCheckpointsStepProps {
   onChange: (patch: Partial<ExperimentDraft>) => void
 }
 
-/**
- * WizardCheckpointsStep 管理检查点配置。
- */
 export function WizardCheckpointsStep({ draft, errors, onChange }: WizardCheckpointsStepProps) {
   const [modal, setModal] = useState<{ index?: number } | undefined>()
-  // 判题器目录在这一步读一次:表格把判题器编码换成名称,表单弹窗用它列选项
-  const judgers = useAsyncResource(
-    () => api.judge.getJudgerCatalog(),
-    [],
-    (value) => value.judgers.length === 0
-  )
-  const judgerNames = useMemo(
-    () => new Map((judgers.data?.judgers ?? []).map((item) => [item.code, item.name])),
-    [judgers.data]
-  )
 
-  /** judgerText 表格里判题方式的说法:目录里的名称;目录没读到时先占位,目录里没有的说明已经下线 */
-  const judgerText = (code: string): string => {
-    const name = judgerNames.get(code)
-    if (name) return name
-    if (judgers.status === 'loading') return '…'
-    return judgers.status === 'error' ? '暂时读不到' : '已下线的判题方式'
+  const writeCheckpoints = (checkpoints: CheckpointConfig[]) => {
+    onChange({ components: { ...draft.components, checkpoints } })
   }
-
-  const writeCheckpoints = useCallback(
-    (checkpoints: CheckpointConfig[]) => {
-      onChange({ components: { ...draft.components, checkpoints } })
-    },
-    [draft.components, onChange],
-  )
 
   const totalScore = draft.components.checkpoints.reduce((sum, item) => sum + item.score, 0)
 
@@ -86,11 +53,6 @@ export function WizardCheckpointsStep({ draft, errors, onChange }: WizardCheckpo
           检查点 {draft.components.checkpoints.indexOf(checkpoint) + 1}
         </span>
       ),
-    },
-    {
-      key: 'judger',
-      header: '判题方式',
-      render: (checkpoint) => <Badge tone="neutral">{judgerText(checkpoint.judger)}</Badge>,
     },
     {
       key: 'item_code',
@@ -176,12 +138,11 @@ export function WizardCheckpointsStep({ draft, errors, onChange }: WizardCheckpo
               data={draft.components.checkpoints}
               rowKey={(checkpoint) => checkpoint.id}
               elevated={false}
-              // <md 换行卡(§6.4.1 规则 3):检查点序号一行、判题方式与题目一行,分值在右
               mobileCard={(checkpoint) => {
                 const index = draft.components.checkpoints.indexOf(checkpoint)
                 return {
                   title: `检查点 ${index + 1}`,
-                  meta: `${judgerText(checkpoint.judger)} · ${checkpoint.item_code} · ${checkpoint.item_version}`,
+                  meta: `${checkpoint.item_code} · ${checkpoint.item_version}`,
                   badge: <Badge tone="neutral">{checkpoint.score} 分</Badge>,
                   action: (
                     <div className="flex gap-1">
@@ -195,7 +156,7 @@ export function WizardCheckpointsStep({ draft, errors, onChange }: WizardCheckpo
                         aria-label={`删除检查点 ${index + 1}`}
                         onClick={() =>
                           writeCheckpoints(
-                            draft.components.checkpoints.filter((_, i) => i !== index),
+                            draft.components.checkpoints.filter((_, i) => i !== index)
                           )
                         }
                       />
@@ -220,14 +181,13 @@ export function WizardCheckpointsStep({ draft, errors, onChange }: WizardCheckpo
             modal.index !== undefined ? draft.components.checkpoints[modal.index] : undefined
           }
           usedIds={draft.components.checkpoints.map((item) => item.id)}
-          judgers={judgers}
           draft={draft}
           onClose={() => setModal(undefined)}
           onSave={(checkpoint) => {
             const checkpoints =
               modal.index !== undefined
                 ? draft.components.checkpoints.map((item, i) =>
-                    i === modal.index ? checkpoint : item,
+                    i === modal.index ? checkpoint : item
                   )
                 : [...draft.components.checkpoints, checkpoint]
             writeCheckpoints(checkpoints)
@@ -242,100 +202,81 @@ export function WizardCheckpointsStep({ draft, errors, onChange }: WizardCheckpo
 interface CheckpointFormModalProps {
   checkpoint?: CheckpointConfig
   usedIds: string[]
-  /** 步级读到的判题器目录 */
-  judgers: AsyncResourceState<JudgerCatalog>
   draft: ExperimentDraft
   onClose: () => void
   onSave: (checkpoint: CheckpointConfig) => void
 }
 
-/**
- * CheckpointFormModal 配置单个检查点。
- */
 function CheckpointFormModal({
   checkpoint,
   usedIds,
   draft,
-  judgers,
   onClose,
   onSave,
 }: CheckpointFormModalProps) {
   const editing = checkpoint !== undefined
   const [id, setId] = useState(checkpoint?.id ?? '')
-  const [judger, setJudger] = useState(checkpoint?.judger ?? '')
   const [itemCode, setItemCode] = useState(checkpoint?.item_code ?? '')
   const [itemVersion, setItemVersion] = useState(checkpoint?.item_version ?? '')
   const [score, setScore] = useState(String(checkpoint?.score ?? 20))
   const [bindTarget, setBindTarget] = useState(
-    checkpoint?.env_id ? `env:${checkpoint.env_id}` : checkpoint?.sim_id ? `sim:${checkpoint.sim_id}` : '',
+    checkpoint?.env_id
+      ? `env:${checkpoint.env_id}`
+      : checkpoint?.sim_id
+        ? `sim:${checkpoint.sim_id}`
+        : ''
   )
 
-  const judgerOptions = useMemo(
-    () =>
-      (judgers.data?.judgers ?? []).map((item) => ({
-        value: item.code,
-        label: `${item.name} · ${judgerTypeLabel(item.type)}`,
-      })),
-    [judgers.data],
-  )
-
-
-  const bindOptions = useMemo(
-    () => [
-      { value: '', label: '不绑定(按整体产出判分)' },
-      ...draft.components.envs.map((env, index) => ({ value: `env:${env.id}`, label: `代码环境 ${index + 1}` })),
-      ...draft.components.sims.map((sim, index) => ({ value: `sim:${sim.id}`, label: `仿真场景 ${index + 1}` })),
-    ],
-    [draft.components.envs, draft.components.sims],
-  )
+  const bindOptions = [
+    { value: '', label: '不绑定(按整体产出判分)' },
+    ...draft.components.envs.map((env, index) => ({
+      value: `env:${env.id}`,
+      label: `代码环境 ${index + 1}`,
+    })),
+    ...draft.components.sims.map((sim, index) => ({
+      value: `sim:${sim.id}`,
+      label: `仿真场景 ${index + 1}`,
+    })),
+  ]
 
   const { errors, validate } = useFormValidation(() => ({
-    id: id.trim() === '' ? '请给这个检查点起一个名称,阶段解锁与参数传递会引用它'
-      : !editing && usedIds.includes(id.trim()) ? '这个名称已被其他检查点使用,请换一个' : null,
-    judger: judger === '' ? '请选择判题方式' : null,
+    id:
+      id.trim() === ''
+        ? '请给这个检查点起一个名称,阶段解锁与参数传递会引用它'
+        : !editing && usedIds.includes(id.trim())
+          ? '这个名称已被其他检查点使用,请换一个'
+          : null,
     item: itemCode === '' || itemVersion === '' ? '请选择判分依据的题目' : null,
-    score: score.trim() === '' || !Number.isFinite(Number(score)) || Number(score) <= 0 ? '分值需要是大于 0 的数字' : null,
+    score:
+      score.trim() === '' || !Number.isFinite(Number(score)) || Number(score) <= 0
+        ? '分值需要是大于 0 的数字'
+        : null,
   }))
 
-  const submit = useCallback(() => {
+  const submit = () => {
     if (!validate()) return
     const scoreValue = Number(score)
 
     const [bindKind, bindId] = bindTarget === '' ? ['', ''] : bindTarget.split(':')
     onSave({
       id: id.trim(),
-      judger,
       item_code: itemCode,
       item_version: itemVersion,
       score: scoreValue,
       env_id: bindKind === 'env' ? bindId : undefined,
       sim_id: bindKind === 'sim' ? bindId : undefined,
-      // 判题额外输入由判题器自身的题目配置提供;编排层不构造判题参数,
-      // 避免把判题细节搬到教师界面(答案黑盒:判题配置对教师界面也不展开)
+      // 编辑时保留已有执行输入，表单不展开答案和判题配置。
       extra_input: checkpoint?.extra_input,
       mode: checkpoint?.mode,
     })
-  }, [
-    bindTarget,
-    checkpoint?.extra_input,
-    checkpoint?.mode,
-    id,
-    itemCode,
-    itemVersion,
-    judger,
-    onSave,
-    score,
-    validate,
-  ])
+  }
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
       <ModalContent size="lg">
         <ModalHeader>
           <ModalTitle>{editing ? '编辑检查点' : '添加检查点'}</ModalTitle>
-          <ModalDescription>
-            判题方式决定怎么判(跑测试、查链上状态、比对答案口令),题目决定判什么。
-          </ModalDescription>
+          <ModalDescription>选择判分依据的题目和分值，判题方式沿用题目配置。</ModalDescription>
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
           <FormField
@@ -354,28 +295,6 @@ function CheckpointFormModal({
               onChange={(event) => setId(event.target.value)}
             />
           </FormField>
-
-          <ResourceState
-            resource={judgers}
-            emptyIcon={Target}
-            emptyTitle="平台还没有可用判题器"
-            emptyDescription="请联系平台管理员在判题器里注册并自检。"
-            skeleton={<Skeleton variant="line" lines={2} />}
-          >
-            {() => (
-              <FormField label="判题方式" htmlFor="checkpoint-judger" required error={errors.judger}>
-                <Select
-                  id="checkpoint-judger"
-                  options={judgerOptions}
-                  value={judger}
-                  invalid={Boolean(errors.judger)}
-                  onBlur={() => validate(['judger'])}
-                  placeholder="选择判题方式"
-                  onValueChange={setJudger}
-                />
-              </FormField>
-            )}
-          </ResourceState>
 
           <FormField
             label="判分依据题目"
@@ -421,7 +340,6 @@ function CheckpointFormModal({
               />
             </FormField>
           </div>
-
         </ModalBody>
         <ModalFooter>
           <Button variant="outline" onClick={onClose}>

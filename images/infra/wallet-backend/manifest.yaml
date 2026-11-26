@@ -28,6 +28,7 @@ env_keys:
     - CHAIMIR_HTTP_TIMEOUT_SECONDS
     - CHAIMIR_MAX_BODY_BYTES
     - CHAIMIR_IMAGE_SERVICE_AUTH_MAX_SKEW_SECONDS
+    - CHAIMIR_IMAGE_SERVICE_AUTH_MAX_NONCES
     - CHAIMIR_WALLET_ALLOWED_DOMAINS
     - CHAIMIR_WALLET_CHALLENGE_TTL_SECONDS
     - CHAIMIR_WALLET_MAX_CHALLENGES
@@ -63,6 +64,7 @@ infra:
   eco_tags:
     - evm
   resource_spec:
+    volume_source: self
     components:
       - name: infra
         image_url: "@self"
@@ -73,6 +75,8 @@ infra:
             value: "30"
           - name: CHAIMIR_IMAGE_SERVICE_AUTH_MAX_SKEW_SECONDS
             value: "300"
+          - name: CHAIMIR_IMAGE_SERVICE_AUTH_MAX_NONCES
+            value: "4096"
           - name: CHAIMIR_MAX_BODY_BYTES
             value: "1048576"
           - name: CHAIMIR_WALLET_CHALLENGE_TTL_SECONDS

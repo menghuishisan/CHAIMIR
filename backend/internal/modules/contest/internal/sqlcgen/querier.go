@@ -11,7 +11,6 @@ import (
 )
 
 type Querier interface {
-	AccountTeamIDs(ctx context.Context, arg AccountTeamIDsParams) ([]int64, error)
 	AddTeamMember(ctx context.Context, arg AddTeamMemberParams) (TeamMember, error)
 	// 归档只在没有待执行/执行中对局时取得租约;状态改为已结束后不再接受新对局。
 	ClaimAutoArchiveContestsAcrossTenants(ctx context.Context, arg ClaimAutoArchiveContestsAcrossTenantsParams) ([]ClaimAutoArchiveContestsAcrossTenantsRow, error)
@@ -21,6 +20,7 @@ type Querier interface {
 	ClaimPendingBattleMatchesAcrossTenants(ctx context.Context, arg ClaimPendingBattleMatchesAcrossTenantsParams) ([]BattleMatch, error)
 	CompleteAutoArchiveContest(ctx context.Context, arg CompleteAutoArchiveContestParams) (int64, error)
 	CompleteBattleMatchFinalization(ctx context.Context, arg CompleteBattleMatchFinalizationParams) (int64, error)
+	CompleteLeaderboardPush(ctx context.Context, arg CompleteLeaderboardPushParams) error
 	ContestStats(ctx context.Context, tenantID int64) (ContestStatsRow, error)
 	CountBattleEntriesForTeam(ctx context.Context, arg CountBattleEntriesForTeamParams) (int64, error)
 	// 对局列表的状态分段计数:视角与列表相同(组织者全部 / 学生本队),不套用状态筛选。
@@ -45,12 +45,13 @@ type Querier interface {
 	CreateOrUpdateLadderRank(ctx context.Context, arg CreateOrUpdateLadderRankParams) (CreateOrUpdateLadderRankRow, error)
 	CreateSolveSubmission(ctx context.Context, arg CreateSolveSubmissionParams) (SolveSubmission, error)
 	CreateTeam(ctx context.Context, arg CreateTeamParams) (Team, error)
+	CreateVulnProblem(ctx context.Context, arg CreateVulnProblemParams) (VulnProblem, error)
 	DeactivateBattleEntries(ctx context.Context, arg DeactivateBattleEntriesParams) error
 	// 仅处理尚未提交 M3 的启动租约;已持有 judge_task_ref 的对局由 M3 生命周期收敛。
 	ExhaustUnstartedBattleMatches(ctx context.Context, arg ExhaustUnstartedBattleMatchesParams) ([]BattleMatch, error)
 	FailBattleMatchByJudgeTask(ctx context.Context, arg FailBattleMatchByJudgeTaskParams) (BattleMatch, error)
 	FailBattleMatchStart(ctx context.Context, arg FailBattleMatchStartParams) (BattleMatch, error)
-	FinalizeVulnProblem(ctx context.Context, arg FinalizeVulnProblemParams) (FinalizeVulnProblemRow, error)
+	FinalizeVulnProblem(ctx context.Context, arg FinalizeVulnProblemParams) (VulnProblem, error)
 	FindBattleMatchTenant(ctx context.Context, id int64) (int64, error)
 	// M8 网关跨租户读取当前成员的唯一沙箱授权；只在受控特权事务中使用。
 	FindContestAccessGrantForSubject(ctx context.Context, arg FindContestAccessGrantForSubjectParams) (ContestAccessGrant, error)
@@ -71,26 +72,29 @@ type Querier interface {
 	GetLadderByTeam(ctx context.Context, arg GetLadderByTeamParams) (GetLadderByTeamRow, error)
 	GetLadderSnapshot(ctx context.Context, arg GetLadderSnapshotParams) (ContestLadderSnapshot, error)
 	GetLatestSolveSubmission(ctx context.Context, arg GetLatestSolveSubmissionParams) (SolveSubmission, error)
+	GetPendingLeaderboardContest(ctx context.Context, arg GetPendingLeaderboardContestParams) (GetPendingLeaderboardContestRow, error)
 	GetSolveSubmission(ctx context.Context, arg GetSolveSubmissionParams) (SolveSubmission, error)
 	GetSolveSubmissionByJudgeTask(ctx context.Context, arg GetSolveSubmissionByJudgeTaskParams) (SolveSubmission, error)
 	GetTeam(ctx context.Context, arg GetTeamParams) (Team, error)
 	GetTeamByInviteCode(ctx context.Context, arg GetTeamByInviteCodeParams) (Team, error)
 	GetTeamForAccount(ctx context.Context, arg GetTeamForAccountParams) (Team, error)
-	GetVulnProblem(ctx context.Context, arg GetVulnProblemParams) (GetVulnProblemRow, error)
+	GetVulnProblem(ctx context.Context, arg GetVulnProblemParams) (VulnProblem, error)
 	GetVulnSource(ctx context.Context, arg GetVulnSourceParams) (VulnSource, error)
 	ListActiveBattleOpponents(ctx context.Context, arg ListActiveBattleOpponentsParams) ([]BattleEntry, error)
-	ListActiveBattleSourceRefsForArchive(ctx context.Context, arg ListActiveBattleSourceRefsForArchiveParams) ([]string, error)
 	ListBattleEntriesForTeam(ctx context.Context, arg ListBattleEntriesForTeamParams) ([]BattleEntry, error)
 	// 师生同一查询按视角过滤:传 team_id 只回该队参与的对局(学生视角),
 	// 传 0 回本赛事全部对局(组织者监控视角)。不为教师另开一条同义查询。
 	ListBattleMatchesForTeam(ctx context.Context, arg ListBattleMatchesForTeamParams) ([]BattleMatch, error)
 	ListBattleMatchesToReconcile(ctx context.Context, arg ListBattleMatchesToReconcileParams) ([]BattleMatch, error)
-	// 回放专用时间窗只读取已完成对局,并由服务端携带本队视角和当时生效的参战物。
+	// 回放只读取已完成对局，本队角色和版本直接取对局绑定的参战物。
 	ListBattleReplayMatchesForTeam(ctx context.Context, arg ListBattleReplayMatchesForTeamParams) ([]ListBattleReplayMatchesForTeamRow, error)
 	ListCheatRecords(ctx context.Context, arg ListCheatRecordsParams) ([]CheatRecord, error)
 	ListContestAccessGrantsForContest(ctx context.Context, arg ListContestAccessGrantsForContestParams) ([]ContestAccessGrant, error)
 	ListContestAccessGrantsForSandbox(ctx context.Context, arg ListContestAccessGrantsForSandboxParams) ([]ContestAccessGrant, error)
+	// 维护连接只定位学校；状态与审计交由该校普通租户事务提交。
+	ListContestLifecycleTenantIDs(ctx context.Context, endAt pgtype.Timestamptz) ([]int64, error)
 	ListContestProblems(ctx context.Context, arg ListContestProblemsParams) ([]ContestProblem, error)
+	ListContestSandboxScopeRefsForArchive(ctx context.Context, arg ListContestSandboxScopeRefsForArchiveParams) ([]string, error)
 	ListContests(ctx context.Context, arg ListContestsParams) ([]Contest, error)
 	// 报名中、进行中和封榜中的赛事过了结束时间都必须进入结束态,避免学生入口长期显示报名中。
 	ListContestsDueToEnd(ctx context.Context, endAt pgtype.Timestamptz) ([]Contest, error)
@@ -99,37 +103,41 @@ type Querier interface {
 	// 后台生命周期扫描只推进仍处于报名中的赛事;已越过结束时间的赛事由结束扫描直接收口。
 	ListContestsDueToRun(ctx context.Context, startAt pgtype.Timestamptz) ([]Contest, error)
 	ListLadder(ctx context.Context, arg ListLadderParams) ([]ListLadderRow, error)
+	ListPendingLeaderboardContests(ctx context.Context, arg ListPendingLeaderboardContestsParams) ([]ListPendingLeaderboardContestsRow, error)
+	ListRecentSolveTaskRefs(ctx context.Context, arg ListRecentSolveTaskRefsParams) ([]string, error)
+	ListSolveSubmissionSourceRefs(ctx context.Context, arg ListSolveSubmissionSourceRefsParams) ([]string, error)
 	ListStudentContestRecords(ctx context.Context, arg ListStudentContestRecordsParams) ([]ListStudentContestRecordsRow, error)
-	// status 传 0 回学生可发现的全部赛事(草稿态不可见);传具体状态时仍受可见区间约束。
+	// 本校或当前成员的跨校正式赛事；调用方绑定会话租户与账号，不接受客户端指定身份。
 	ListStudentContests(ctx context.Context, arg ListStudentContestsParams) ([]Contest, error)
 	ListTeamMembers(ctx context.Context, arg ListTeamMembersParams) ([]TeamMember, error)
 	// 榜单与成绩快照只存 team_id:读取时按当前页的队伍编号一次取队名(引用不拷贝,快照里不存名字)。
 	ListTeamNamesByIDs(ctx context.Context, arg ListTeamNamesByIDsParams) ([]ListTeamNamesByIDsRow, error)
-	ListVulnProblems(ctx context.Context, arg ListVulnProblemsParams) ([]ListVulnProblemsRow, error)
+	ListVulnProblems(ctx context.Context, arg ListVulnProblemsParams) ([]VulnProblem, error)
 	ListVulnSources(ctx context.Context, tenantID pgtype.Int8) ([]VulnSource, error)
 	// 结算统一锁赛事和对局,同一赛事的 ELO 读取与回写串行完成。
 	LockBattleMatchByJudgeTask(ctx context.Context, arg LockBattleMatchByJudgeTaskParams) (BattleMatch, error)
 	LockContestTeams(ctx context.Context, arg LockContestTeamsParams) error
 	LockTeam(ctx context.Context, arg LockTeamParams) (Team, error)
+	LockVulnSource(ctx context.Context, arg LockVulnSourceParams) (VulnSource, error)
 	MarkVulnSourceSynced(ctx context.Context, arg MarkVulnSourceSyncedParams) (VulnSource, error)
 	NextBattleVersion(ctx context.Context, arg NextBattleVersionParams) (int32, error)
-	RecentFailedSolveCount(ctx context.Context, arg RecentFailedSolveCountParams) (int64, error)
 	RecentSolveCount(ctx context.Context, arg RecentSolveCountParams) (int64, error)
 	RefreshContestRanks(ctx context.Context, arg RefreshContestRanksParams) error
 	// 启动沙箱和提交判题期间仅由当前 token 续租,避免长时准备被其他 worker 重领。
 	RenewBattleMatchStartLease(ctx context.Context, arg RenewBattleMatchStartLeaseParams) (int64, error)
 	RevokeContestAccessGrantsForSandbox(ctx context.Context, arg RevokeContestAccessGrantsForSandboxParams) error
 	SetContestStatus(ctx context.Context, arg SetContestStatusParams) (Contest, error)
-	SetVulnProblemPrevalidate(ctx context.Context, arg SetVulnProblemPrevalidateParams) (SetVulnProblemPrevalidateRow, error)
+	SetVulnProblemPrevalidate(ctx context.Context, arg SetVulnProblemPrevalidateParams) (VulnProblem, error)
 	StartBattleMatch(ctx context.Context, arg StartBattleMatchParams) (BattleMatch, error)
 	SumTeamSolvedScore(ctx context.Context, arg SumTeamSolvedScoreParams) (SumTeamSolvedScoreRow, error)
 	UpdateContest(ctx context.Context, arg UpdateContestParams) (Contest, error)
 	UpdateSolveSubmissionResult(ctx context.Context, arg UpdateSolveSubmissionResultParams) (SolveSubmission, error)
+	UpdateVulnProblem(ctx context.Context, arg UpdateVulnProblemParams) (VulnProblem, error)
 	// 重复准备环境复用未变化的授权版本;权限、来源、状态或有效期变化才使旧主体失效。
 	UpsertContestAccessGrant(ctx context.Context, arg UpsertContestAccessGrantParams) (ContestAccessGrant, error)
 	UpsertContestProblem(ctx context.Context, arg UpsertContestProblemParams) (ContestProblem, error)
 	UpsertLadderSnapshot(ctx context.Context, arg UpsertLadderSnapshotParams) (ContestLadderSnapshot, error)
-	UpsertVulnProblem(ctx context.Context, arg UpsertVulnProblemParams) (UpsertVulnProblemRow, error)
+	UpsertVulnProblem(ctx context.Context, arg UpsertVulnProblemParams) (VulnProblem, error)
 	UpsertVulnSource(ctx context.Context, arg UpsertVulnSourceParams) (VulnSource, error)
 }
 

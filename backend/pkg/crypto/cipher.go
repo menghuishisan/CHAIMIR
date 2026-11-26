@@ -1,4 +1,3 @@
-// crypto 对称加密:提供 AES-256-GCM,用于手机号等敏感字段密文存储。
 package crypto
 
 import (
@@ -42,8 +41,7 @@ func (c *Cipher) Encrypt(plaintext []byte) ([]byte, error) {
 	return c.gcm.Seal(nonce, nonce, plaintext, nil), nil
 }
 
-// ProtectPhone 生成手机号持久化所需的密文与检索用 HMAC,把「加密 + 哈希」这套存储组合收敛到唯一实现,
-// 供 identity 业务路径与验收夹具种子共用,杜绝各处内联复制导致算法漂移。
+// ProtectPhone 返回手机号密文和检索用 HMAC。
 func ProtectPhone(cipher *Cipher, hmacKey []byte, phone string) (enc []byte, hash string, err error) {
 	enc, err = cipher.Encrypt([]byte(phone))
 	if err != nil {

@@ -283,7 +283,6 @@ type SubmissionDTO struct {
 	AttemptNo      int32          `json:"attempt_no"`
 	Content        map[string]any `json:"content"`
 	ManualMaxScore int32          `json:"manual_max_score"`
-	JudgeTaskRef   string         `json:"judge_task_ref,omitempty"`
 	AutoScore      *int32         `json:"auto_score,omitempty"`
 	ManualScore    *int32         `json:"manual_score,omitempty"`
 	FinalScore     *int32         `json:"final_score,omitempty"`

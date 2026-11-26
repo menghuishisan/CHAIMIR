@@ -1,8 +1,6 @@
-// 题库分类管理(题库内容页内区块)。
-// 分类是树:父分类下挂子分类。删除父分类会连带下级,故走确认弹层
-// (旧前端删除院系/专业/班级全无确认,是被审查列为 P0 的问题)。
+// 管理多级题库分类；仅允许删除无子分类和题目引用的空分类。
 
-import { useCallback, useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { FolderTree, Pencil, Plus, Trash2 } from 'lucide-react'
 import type { ContentCategory } from '@chaimir/api-client'
@@ -33,16 +31,15 @@ import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
-/** CategoryRow 是分类表的一行:带层级深度用于缩进呈现树形。 */
+/** CategoryRow 保留完整路径,使深层分类在窄屏仍可辨认。 */
 interface CategoryRow {
   category: ContentCategory
   depth: number
   childCount: number
+  path: string
 }
 
-/**
- * ContentCategories 管理题库分类树。
- */
+/** ContentCategories 管理题库分类树。 */
 export function ContentCategories({ onChanged }: { onChanged?: () => void }) {
   const [formTarget, setFormTarget] = useState<{ category?: ContentCategory } | undefined>()
   const [deleteTarget, setDeleteTarget] = useState<CategoryRow>()
@@ -51,9 +48,10 @@ export function ContentCategories({ onChanged }: { onChanged?: () => void }) {
 
   const categories = useAsyncResource(() => api.content.listCategories(), [])
 
-  const rows = useMemo(() => buildRows(categories.data ?? []), [categories.data])
+  const rows = buildRows(categories.data ?? [])
 
-  const removeCategory = useCallback(async () => {
+  // 删除失败保留当前选择,便于处理引用后重试。
+  async function removeCategory() {
     if (!deleteTarget) return
     setWorking(true)
     setActionError(undefined)
@@ -68,15 +66,15 @@ export function ContentCategories({ onChanged }: { onChanged?: () => void }) {
     } finally {
       setWorking(false)
     }
-  }, [categories, deleteTarget, onChanged])
+  }
 
   const columns: TableColumn<CategoryRow>[] = [
     {
       key: 'name',
-      header: '分类名称',
+      header: '分类路径',
       render: (row) => (
-        <div className="flex items-center gap-2" style={{ paddingLeft: `${row.depth * 20}px` }}>
-          <span className="font-medium text-ink">{row.category.name}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="break-words font-medium text-ink">{row.path}</span>
           {row.childCount > 0 ? <Badge tone="neutral">{row.childCount} 个子分类</Badge> : null}
         </div>
       ),
@@ -100,7 +98,11 @@ export function ContentCategories({ onChanged }: { onChanged?: () => void }) {
             size="sm"
             icon={Trash2}
             aria-label={`删除分类 ${row.category.name}`}
-            onClick={() => setDeleteTarget(row)}
+            disabled={row.childCount > 0}
+            onClick={() => {
+              setActionError(undefined)
+              setDeleteTarget(row)
+            }}
           />
         </div>
       ),
@@ -109,7 +111,7 @@ export function ContentCategories({ onChanged }: { onChanged?: () => void }) {
 
   return (
     <PageSection
-      description="按知识领域组织题目,支持两级,便于检索与组卷。"
+      description="按知识领域分层组织题目。删除前请先调整子分类和题目归类。"
       actions={
         <Button variant="secondary" leftIcon={Plus} onClick={() => setFormTarget({})}>
           新建分类
@@ -119,8 +121,6 @@ export function ContentCategories({ onChanged }: { onChanged?: () => void }) {
       <div className="flex flex-col gap-4">
         {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
-        {/* 列表型页内子视图走 DataPanel 片段(§6.5.5 B):与同父页的「题目」标签同构 ——
-            那一块是 DataPanel(筛选井 + 表 + 分页),这里没有筛选与分页,只用片本身 */}
         <DataPanel label="题库分类">
           <ResourceState
             resource={categories}
@@ -140,9 +140,8 @@ export function ContentCategories({ onChanged }: { onChanged?: () => void }) {
                 data={rows}
                 rowKey={(row) => row.category.id}
                 elevated={false}
-                // <md 换行卡(§6.4.1 规则 3):分类名一行、层级与排序一行,增删改在右
                 mobileCard={(row) => ({
-                  title: row.category.name,
+                  title: row.path,
                   meta: `第 ${row.depth + 1} 层 · 排序 ${row.category.sort}${row.childCount > 0 ? ` · ${row.childCount} 个子分类` : ''}`,
                   action: (
                     <div className="flex gap-1">
@@ -189,18 +188,11 @@ export function ContentCategories({ onChanged }: { onChanged?: () => void }) {
           <ModalHeader>
             <ModalTitle>确认删除分类</ModalTitle>
             <ModalDescription>
-              {deleteTarget && deleteTarget.childCount > 0
-                ? '这个分类下还有子分类,删除会连带删除它们。已归入这些分类的题目不会被删除,只是失去分类。'
-                : '已归入这个分类的题目不会被删除,只是失去分类。'}
+              仅可删除没有子分类、没有题目引用的空分类。
             </ModalDescription>
           </ModalHeader>
           <ModalBody>
             <p className="text-base text-ink">{deleteTarget?.category.name}</p>
-            {deleteTarget && deleteTarget.childCount > 0 ? (
-              <Callout tone="warning" className="mt-3">
-                将连带删除 {deleteTarget.childCount} 个子分类。
-              </Callout>
-            ) : null}
           </ModalBody>
           <ModalFooter>
             <Button variant="outline" onClick={() => setDeleteTarget(undefined)}>
@@ -216,32 +208,30 @@ export function ContentCategories({ onChanged }: { onChanged?: () => void }) {
   )
 }
 
-/**
- * buildRows 把扁平分类列表按父子关系摊平成带缩进的行。
- * 后端只回扁平数组与 parent_id,树形结构在展示层构建。
- */
-function buildRows(categories: ContentCategory[]): CategoryRow[] {
+/** buildRows 按父子顺序展开完整路径,选择父分类时排除自身及整棵子树。 */
+function buildRows(categories: ContentCategory[], excludedId?: string): CategoryRow[] {
   const childrenByParent = new Map<string, ContentCategory[]>()
-  const roots: ContentCategory[] = []
 
   for (const category of categories) {
-    if (category.parent_id) {
-      const list = childrenByParent.get(category.parent_id) ?? []
-      list.push(category)
-      childrenByParent.set(category.parent_id, list)
-    } else {
-      roots.push(category)
-    }
+    const parentId = category.parent_id ?? ''
+    const children = childrenByParent.get(parentId) ?? []
+    children.push(category)
+    childrenByParent.set(parentId, children)
   }
-
-  const sortBySort = (a: ContentCategory, b: ContentCategory) => a.sort - b.sort
+  for (const children of childrenByParent.values()) children.sort((a, b) => a.sort - b.sort)
+  const pending = (childrenByParent.get('') ?? [])
+    .map((category) => ({ category, depth: 0, path: category.name }))
+    .reverse()
   const rows: CategoryRow[] = []
 
-  for (const root of roots.sort(sortBySort)) {
-    const children = (childrenByParent.get(root.id) ?? []).sort(sortBySort)
-    rows.push({ category: root, depth: 0, childCount: children.length })
-    for (const child of children) {
-      rows.push({ category: child, depth: 1, childCount: 0 })
+  while (pending.length > 0) {
+    const row = pending.pop()!
+    if (row.category.id === excludedId) continue
+    const children = childrenByParent.get(row.category.id) ?? []
+    rows.push({ ...row, childCount: children.length })
+    for (let index = children.length - 1; index >= 0; index--) {
+      const category = children[index]!
+      pending.push({ category, depth: row.depth + 1, path: `${row.path} / ${category.name}` })
     }
   }
 
@@ -256,10 +246,7 @@ interface CategoryFormModalProps {
   onSaved: () => void
 }
 
-/**
- * CategoryFormModal 承载分类创建与编辑。
- * 父分类只能选顶级分类:分类支持两级,避免层级过深让检索变复杂。
- */
+/** CategoryFormModal 编辑名称、排序和可用父分类,防环仍由服务端确认。 */
 function CategoryFormModal({
   category,
   categories,
@@ -269,7 +256,7 @@ function CategoryFormModal({
 }: CategoryFormModalProps) {
   const editing = category !== undefined
   const [name, setName] = useState(category?.name ?? '')
-  const [parentId, setParentId] = useState(category?.parent_id ?? '')
+  const [parentId, setParentId] = useState(category?.parent_id ?? '__root__')
   const [sort, setSort] = useState(String(category?.sort ?? nextSort))
   const [submitError, setSubmitError] = useState<string>()
   const [working, setWorking] = useState(false)
@@ -281,25 +268,20 @@ function CategoryFormModal({
       : null,
   }))
 
-  const parentOptions = useMemo(
-    () => [
-      { value: '', label: '作为顶级分类' },
-      ...categories
-        .filter((item) => !item.parent_id && item.id !== category?.id)
-        .map((item) => ({ value: item.id, label: item.name })),
-    ],
-    [categories, category?.id],
-  )
+  const parentOptions = [
+    { value: '__root__', label: '作为顶级分类' },
+    ...buildRows(categories, category?.id).map((row) => ({ value: row.category.id, label: row.path })),
+  ]
 
-  const submit = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
+  // 保存失败保留表单输入,不清除用户选择的父分类。
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
       event.preventDefault()
       if (!validate()) return
       setSubmitError(undefined)
       setWorking(true)
       try {
         const payload = {
-          parent_id: parentId === '' ? undefined : parentId,
+          parent_id: parentId === '__root__' ? undefined : parentId,
           name: name.trim(),
           sort: sortValue,
         }
@@ -316,16 +298,14 @@ function CategoryFormModal({
       } finally {
         setWorking(false)
       }
-    },
-    [category?.id, editing, name, onSaved, parentId, sortValue, validate],
-  )
+  }
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
       <ModalContent size="sm">
         <ModalHeader>
           <ModalTitle>{editing ? '编辑分类' : '新建分类'}</ModalTitle>
-          <ModalDescription>分类用于按知识领域组织题目,支持两级。</ModalDescription>
+          <ModalDescription>可在已有分类下继续分层,不能将分类移入自己的下级。</ModalDescription>
         </ModalHeader>
         <form onSubmit={submit} noValidate>
           <ModalBody className="flex flex-col gap-4">
@@ -350,7 +330,8 @@ function CategoryFormModal({
               <Input
                 id="category-sort"
                 type="number"
-                min="0"
+                min="-2147483648"
+                max="2147483647"
                 value={sort}
                 invalid={Boolean(errors.sort)}
                 onChange={(event) => setSort(event.target.value)}

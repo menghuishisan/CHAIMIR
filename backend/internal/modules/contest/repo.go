@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"chaimir/internal/contracts"
 	"chaimir/internal/modules/contest/internal/sqlcgen"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/intx"
@@ -23,7 +22,9 @@ import (
 type Store interface {
 	// TenantTx 在注入 RLS 租户变量后访问 M8 租户表。
 	TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
-	// PrivilegedTx 在受控后台任务中跨租户扫描 M8 自有表。
+	// PlatformTx 以显式平台标识维护共享源，允许 M1 复用同一普通应用事务。
+	PlatformTx(ctx context.Context, fn func(context.Context, TxStore) error) error
+	// PrivilegedTx 在后台任务或绑定会话身份的受控查询中跨租户访问 M8 自有表。
 	PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error
 }
 
@@ -36,9 +37,10 @@ type TxStore interface {
 	FindTeamTenant(context.Context, int64) (int64, error)
 	FindBattleMatchTenant(context.Context, int64) (int64, error)
 	ListContests(context.Context, int64, int16, string, int, int) ([]Contest, int64, error)
-	ListStudentContests(context.Context, int64, int16, string, int, int) ([]Contest, int64, error)
+	ListStudentContests(context.Context, int64, int64, int16, string, int, int) ([]Contest, int64, error)
 	UpdateContest(context.Context, Contest) (Contest, error)
 	SetContestStatus(context.Context, int64, int64, int16) (Contest, error)
+	ListContestLifecycleTenantIDs(context.Context, time.Time) ([]int64, error)
 	ListContestsDueToRun(context.Context, time.Time) ([]Contest, error)
 	ListContestsDueToFreeze(context.Context, time.Time) ([]Contest, error)
 	ListContestsDueToEnd(context.Context, time.Time) ([]Contest, error)
@@ -47,13 +49,12 @@ type TxStore interface {
 	ListContestProblems(context.Context, int64, int64) ([]ContestProblem, error)
 	CreateTeam(context.Context, Team) (Team, error)
 	GetTeam(context.Context, int64, int64) (Team, error)
-	GetTeamByInviteCode(context.Context, int64, string) (Team, error)
+	GetTeamByInviteCode(context.Context, int64, int64, string) (Team, error)
 	GetTeamForAccount(context.Context, int64, int64, int64, int64) (Team, error)
 	LockTeam(context.Context, int64, int64) (Team, error)
 	LockContestTeams(context.Context, int64, int64) error
 	AddTeamMember(context.Context, TeamMember) (TeamMember, error)
 	ListTeamMembers(context.Context, int64, int64) ([]TeamMember, error)
-	AccountTeamIDs(context.Context, int64, int64, int64, int64) ([]int64, error)
 	GetContestAccessGrant(context.Context, int64, int64) (ContestAccessGrant, error)
 	GetContestAccessGrantForSubject(context.Context, int64, int64, int64, int64) (ContestAccessGrant, error)
 	FindContestAccessGrantForSubject(context.Context, int64, int64, int64) (ContestAccessGrant, error)
@@ -68,12 +69,16 @@ type TxStore interface {
 	GetSolveSubmissionByJudgeTask(context.Context, int64, string) (SolveSubmission, error)
 	UpdateSolveSubmissionResult(context.Context, int64, int64, bool, int32) (SolveSubmission, error)
 	RecentSolveCount(context.Context, int64, int64, int64, int64, int) (int64, error)
-	RecentFailedSolveCount(context.Context, int64, int64, int64, int64, int) (int64, error)
+	ListRecentSolveTaskRefs(context.Context, int64, int64, int64, int64, int) ([]string, error)
+	ListSolveSubmissionSourceRefs(context.Context, int64, int64, int64) ([]string, error)
 	CountProblemSolvedTeams(context.Context, int64, int64, int64) (int64, error)
 	SumTeamSolvedScore(context.Context, int64, int64, int64) (LadderRank, error)
 	GetLadderByTeam(context.Context, int64, int64, int64) (LadderRank, error)
 	UpsertLadder(context.Context, LadderRank) (LadderRank, error)
 	RefreshContestRanks(context.Context, int64, int64) error
+	ListPendingLeaderboardContests(context.Context, int, int64) ([]Contest, error)
+	GetPendingLeaderboardContest(context.Context, int64, int64) (Contest, error)
+	CompleteLeaderboardPush(context.Context, int64, int64) error
 	ListLadder(context.Context, int64, int64, int, int) ([]LadderRank, int64, error)
 	TeamNames(context.Context, int64, int64, []int64) (map[int64]string, error)
 	DeactivateBattleEntries(context.Context, int64, int64, int64, int64, int16) error
@@ -98,7 +103,7 @@ type TxStore interface {
 	CountBattleReplayPendingForTeam(context.Context, int64, int64, int64) (int64, error)
 	CountBattleReplayCompletedForTeam(context.Context, int64, int64, int64) (int64, error)
 	GetBattleReplayCheckpointForTeam(context.Context, int64, int64, int64, int, int) (BattleReplayCheckpoint, error)
-	ListActiveBattleSourceRefsForArchive(context.Context, int64, int64) ([]string, error)
+	ListContestSandboxScopeRefsForArchive(context.Context, int64, int64) ([]string, error)
 	FinishBattleMatch(context.Context, BattleMatch) (BattleMatch, error)
 	FailBattleMatchStart(context.Context, int64, int64, string) (BattleMatch, bool, error)
 	FailBattleMatchByJudgeTask(context.Context, int64, int64, string) (BattleMatch, error)
@@ -109,13 +114,16 @@ type TxStore interface {
 	UpsertVulnSource(context.Context, VulnSource) (VulnSource, error)
 	ListVulnSources(context.Context, int64) ([]VulnSource, error)
 	GetVulnSource(context.Context, int64, int64) (VulnSource, error)
+	LockVulnSource(context.Context, int64, int64) (VulnSource, error)
 	MarkVulnSourceSynced(context.Context, int64, int64) (VulnSource, error)
 	UpsertVulnProblem(context.Context, VulnProblem) (VulnProblem, error)
+	CreateVulnProblem(context.Context, VulnProblem) (VulnProblem, error)
+	UpdateVulnProblem(context.Context, VulnProblem) (VulnProblem, error)
 	GetVulnProblem(context.Context, int64, int64) (VulnProblem, error)
 	ListVulnProblems(context.Context, int64, int64, int16, int16, int, int) ([]VulnProblem, int64, error)
 	CountVulnProblemsByStatus(context.Context, int64, int64) ([]vulnFacetRow, error)
-	SetVulnProblemPrevalidate(context.Context, int64, int64, int16, map[string]any, string, *contracts.SandboxCompositionSnapshot, string, string) (VulnProblem, error)
-	FinalizeVulnProblem(context.Context, int64, int64, string, string) (VulnProblem, error)
+	SetVulnProblemPrevalidate(context.Context, VulnProblem) (VulnProblem, error)
+	FinalizeVulnProblem(context.Context, int64, int64, string, string, time.Time) (VulnProblem, error)
 	ListStudentContestRecords(context.Context, int64, int64) ([]StudentContestRecord, error)
 	Stats(context.Context, int64) (ContestStatsSnapshot, error)
 	ClaimManualArchiveContest(context.Context, int64, int64, time.Time, time.Time, string) (ContestArchiveClaim, error)
@@ -125,13 +133,13 @@ type TxStore interface {
 
 // BattleReplayRow 是回放时间窗查询的内部行,包含服务端计算所需的队伍视角。
 type BattleReplayRow struct {
-	Match              BattleMatch
-	SequenceNo         int64
-	MySide             string
-	ActiveEntryID      int64
-	ActiveEntryRole    int16
-	ActiveEntryVersion int32
-	ActiveEntryAt      time.Time
+	Match        BattleMatch
+	SequenceNo   int64
+	MySide       string
+	EntryID      int64
+	EntryRole    int16
+	EntryVersion int32
+	EntryAt      time.Time
 }
 
 // BattleReplayCheckpoint 是窗口之前的服务端聚合状态。
@@ -159,6 +167,19 @@ func (s *store) TenantTx(ctx context.Context, tenantID int64, fn func(context.Co
 	})
 }
 
+// PlatformTx 只设置共享源所需的平台 RLS 标识，不授予跨校维护权限。
+func (s *store) PlatformTx(ctx context.Context, fn func(context.Context, TxStore) error) error {
+	if s == nil || s.database == nil {
+		return fmt.Errorf("contest store 未初始化")
+	}
+	return s.database.WithAppTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', '0', true)"); err != nil {
+			return fmt.Errorf("设置漏洞源平台事务标识失败: %w", err)
+		}
+		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
+	})
+}
+
 // PrivilegedTx 在 contest 模块自有表内执行受控后台扫描事务。
 func (s *store) PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error {
 	if s == nil || s.database == nil {
@@ -174,15 +195,11 @@ func isNoRows(err error) bool { return db.IsNoRows(err) }
 
 // CreateContest 创建竞赛草稿。
 func (tx *txStore) CreateContest(ctx context.Context, item Contest) (Contest, error) {
-	rules, err := jsonx.AnyBytes(item.Rules, apperr.ErrContestInvalid)
-	if err != nil {
-		return Contest{}, err
-	}
-	row, err := tx.q.CreateContest(ctx, sqlcgen.CreateContestParams{ID: item.ID, TenantID: item.TenantID, OrganizerID: item.OrganizerID, Name: item.Name, Mode: item.Mode, MatchMode: pgtypex.Int2(item.MatchMode), TeamMode: item.TeamMode, SignupStart: timex.Timestamptz(item.SignupStart), SignupEnd: timex.Timestamptz(item.SignupEnd), StartAt: timex.Timestamptz(item.StartAt), EndAt: timex.Timestamptz(item.EndAt), FreezeMinutes: item.FreezeMinutes, Rules: rules})
+	row, err := tx.q.CreateContest(ctx, sqlcgen.CreateContestParams{ID: item.ID, TenantID: item.TenantID, OrganizerID: item.OrganizerID, Name: item.Name, Mode: item.Mode, MatchMode: pgtypex.Int2(item.MatchMode), TeamMode: item.TeamMode, SignupStart: timex.Timestamptz(item.SignupStart), SignupEnd: timex.Timestamptz(item.SignupEnd), StartAt: timex.Timestamptz(item.StartAt), EndAt: timex.Timestamptz(item.EndAt), FreezeMinutes: item.FreezeMinutes})
 	if err != nil {
 		return Contest{}, apperr.ErrContestInvalid.WithCause(err)
 	}
-	return contestFromRow(row)
+	return contestFromRow(row), nil
 }
 
 // GetContest 读取竞赛定义。
@@ -191,7 +208,7 @@ func (tx *txStore) GetContest(ctx context.Context, tenantID, id int64) (Contest,
 	if err != nil {
 		return Contest{}, apperr.ErrContestNotFound.WithCause(err)
 	}
-	return contestFromRow(row)
+	return contestFromRow(row), nil
 }
 
 // GetContestForUpdate 锁定赛事父行,供编排保存和生命周期变更在同一事务内重验当前状态。
@@ -200,7 +217,7 @@ func (tx *txStore) GetContestForUpdate(ctx context.Context, tenantID, id int64) 
 	if err != nil {
 		return Contest{}, apperr.ErrContestNotFound.WithCause(err)
 	}
-	return contestFromRow(row)
+	return contestFromRow(row), nil
 }
 
 // FindPublishedContestTenant 在受控特权事务中解析公开竞赛所属租户,不暴露跨租户读写能力。
@@ -241,48 +258,30 @@ func (tx *txStore) ListContests(ctx context.Context, tenantID int64, status int1
 	if err != nil {
 		return nil, 0, apperr.ErrContestInvalid.WithCause(err)
 	}
-	out := make([]Contest, 0, len(rows))
-	for _, row := range rows {
-		item, err := contestFromRow(row)
-		if err != nil {
-			return nil, 0, err
-		}
-		out = append(out, item)
-	}
-	return out, total, nil
+	return contestsFromRows(rows), total, nil
 }
 
-// ListStudentContests 查询学生可发现的非草稿竞赛分页。
-// status 传 0 表示不按状态过滤;总数按同一条件计,与列表同口径。
-func (tx *txStore) ListStudentContests(ctx context.Context, tenantID int64, status int16, keyword string, page, size int) ([]Contest, int64, error) {
+// ListStudentContests 按会话学校和账号查询本校及本人已入队的跨校正式赛事。
+func (tx *txStore) ListStudentContests(ctx context.Context, tenantID, accountID int64, status int16, keyword string, page, size int) ([]Contest, int64, error) {
 	limit, offset := pagex.LimitOffset(page, size)
-	rows, err := tx.q.ListStudentContests(ctx, sqlcgen.ListStudentContestsParams{TenantID: tenantID, Status: status, Keyword: keyword, PageLimit: limit, PageOffset: offset})
+	rows, err := tx.q.ListStudentContests(ctx, sqlcgen.ListStudentContestsParams{TenantID: tenantID, AccountID: accountID, Status: status, Keyword: keyword, PageLimit: limit, PageOffset: offset})
 	if err != nil {
 		return nil, 0, err
 	}
-	items := make([]Contest, 0, len(rows))
-	for _, row := range rows {
-		item, err := contestFromRow(row)
-		if err != nil {
-			return nil, 0, err
-		}
-		items = append(items, item)
+	total, err := tx.q.CountStudentContests(ctx, sqlcgen.CountStudentContestsParams{TenantID: tenantID, AccountID: accountID, Status: status, Keyword: keyword})
+	if err != nil {
+		return nil, 0, err
 	}
-	total, err := tx.q.CountStudentContests(ctx, sqlcgen.CountStudentContestsParams{TenantID: tenantID, Status: status, Keyword: keyword})
-	return items, total, err
+	return contestsFromRows(rows), total, nil
 }
 
 // UpdateContest 更新草稿竞赛。
 func (tx *txStore) UpdateContest(ctx context.Context, item Contest) (Contest, error) {
-	rules, err := jsonx.AnyBytes(item.Rules, apperr.ErrContestInvalid)
-	if err != nil {
-		return Contest{}, err
-	}
-	row, err := tx.q.UpdateContest(ctx, sqlcgen.UpdateContestParams{TenantID: item.TenantID, ID: item.ID, Name: item.Name, Mode: item.Mode, MatchMode: pgtypex.Int2(item.MatchMode), TeamMode: item.TeamMode, SignupStart: timex.Timestamptz(item.SignupStart), SignupEnd: timex.Timestamptz(item.SignupEnd), StartAt: timex.Timestamptz(item.StartAt), EndAt: timex.Timestamptz(item.EndAt), FreezeMinutes: item.FreezeMinutes, Rules: rules})
+	row, err := tx.q.UpdateContest(ctx, sqlcgen.UpdateContestParams{TenantID: item.TenantID, ID: item.ID, Name: item.Name, Mode: item.Mode, MatchMode: pgtypex.Int2(item.MatchMode), TeamMode: item.TeamMode, SignupStart: timex.Timestamptz(item.SignupStart), SignupEnd: timex.Timestamptz(item.SignupEnd), StartAt: timex.Timestamptz(item.StartAt), EndAt: timex.Timestamptz(item.EndAt), FreezeMinutes: item.FreezeMinutes})
 	if err != nil {
 		return Contest{}, apperr.ErrContestStateInvalid.WithCause(err)
 	}
-	return contestFromRow(row)
+	return contestFromRow(row), nil
 }
 
 // SetContestStatus 更新竞赛生命周期状态。
@@ -291,7 +290,12 @@ func (tx *txStore) SetContestStatus(ctx context.Context, tenantID, id int64, sta
 	if err != nil {
 		return Contest{}, apperr.ErrContestStateInvalid.WithCause(err)
 	}
-	return contestFromRow(row)
+	return contestFromRow(row), nil
+}
+
+// ListContestLifecycleTenantIDs 只读定位待推进学校，不在维护事务中修改状态。
+func (tx *txStore) ListContestLifecycleTenantIDs(ctx context.Context, now time.Time) ([]int64, error) {
+	return tx.q.ListContestLifecycleTenantIDs(ctx, timex.Timestamptz(now))
 }
 
 // ListContestsDueToRun 查询已经到开始时间且仍在结束时间前的报名中赛事。
@@ -300,7 +304,7 @@ func (tx *txStore) ListContestsDueToRun(ctx context.Context, now time.Time) ([]C
 	if err != nil {
 		return nil, err
 	}
-	return contestsFromRows(rows)
+	return contestsFromRows(rows), nil
 }
 
 // ListContestsDueToFreeze 查询进入封榜窗口但尚未封榜的赛事。
@@ -309,7 +313,7 @@ func (tx *txStore) ListContestsDueToFreeze(ctx context.Context, now time.Time) (
 	if err != nil {
 		return nil, err
 	}
-	return contestsFromRows(rows)
+	return contestsFromRows(rows), nil
 }
 
 // ListContestsDueToEnd 查询已经到结束时间且尚未结束的赛事。
@@ -318,20 +322,16 @@ func (tx *txStore) ListContestsDueToEnd(ctx context.Context, now time.Time) ([]C
 	if err != nil {
 		return nil, err
 	}
-	return contestsFromRows(rows)
+	return contestsFromRows(rows), nil
 }
 
-// contestsFromRows 把生命周期扫描的 sqlc 行统一转换为领域模型。
-func contestsFromRows(rows []sqlcgen.Contest) ([]Contest, error) {
+// contestsFromRows 转换赛事列表和生命周期扫描结果。
+func contestsFromRows(rows []sqlcgen.Contest) []Contest {
 	items := make([]Contest, 0, len(rows))
 	for _, row := range rows {
-		item, err := contestFromRow(row)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
+		items = append(items, contestFromRow(row))
 	}
-	return items, nil
+	return items
 }
 
 // UpsertContestProblem 新增或更新赛题配置。
@@ -340,15 +340,11 @@ func (tx *txStore) UpsertContestProblem(ctx context.Context, item ContestProblem
 	if err != nil {
 		return ContestProblem{}, err
 	}
-	battleConfig, err := encodeOptionalJSON(item.BattleConfig, apperr.ErrContestProblemInvalid)
-	if err != nil {
-		return ContestProblem{}, err
-	}
 	snapshot, err := encodeOptionalJSON(item.CompositionSnapshot, apperr.ErrContestProblemInvalid)
 	if err != nil {
 		return ContestProblem{}, err
 	}
-	row, err := tx.q.UpsertContestProblem(ctx, sqlcgen.UpsertContestProblemParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, DynamicScore: dynamic, BattleConfig: battleConfig, BattleRule: pgtypex.Int2(item.BattleRule), Seq: item.Seq, CompositionDigest: pgtypex.Text(item.CompositionDigest), CompositionSnapshot: snapshot})
+	row, err := tx.q.UpsertContestProblem(ctx, sqlcgen.UpsertContestProblemParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, DynamicScore: dynamic, BattleRule: pgtypex.Int2(item.BattleRule), Seq: item.Seq, CompositionDigest: pgtypex.Text(item.CompositionDigest), CompositionSnapshot: snapshot})
 	if err != nil {
 		return ContestProblem{}, apperr.ErrContestProblemInvalid.WithCause(err)
 	}
@@ -403,9 +399,9 @@ func (tx *txStore) GetTeam(ctx context.Context, tenantID, id int64) (Team, error
 	return teamFromRows(row, members), nil
 }
 
-// GetTeamByInviteCode 按邀请码读取队伍。
-func (tx *txStore) GetTeamByInviteCode(ctx context.Context, tenantID int64, inviteCode string) (Team, error) {
-	row, err := tx.q.GetTeamByInviteCode(ctx, sqlcgen.GetTeamByInviteCodeParams{TenantID: tenantID, InviteCode: pgtypex.Text(inviteCode)})
+// GetTeamByInviteCode 在指定赛事内按邀请码读取队伍。
+func (tx *txStore) GetTeamByInviteCode(ctx context.Context, tenantID, contestID int64, inviteCode string) (Team, error) {
+	row, err := tx.q.GetTeamByInviteCode(ctx, sqlcgen.GetTeamByInviteCodeParams{TenantID: tenantID, ContestID: contestID, InviteCode: pgtypex.Text(inviteCode)})
 	if err != nil {
 		return Team{}, apperr.ErrContestTeamNotFound.WithCause(err)
 	}
@@ -458,11 +454,6 @@ func (tx *txStore) ListTeamMembers(ctx context.Context, tenantID, teamID int64) 
 		out = append(out, teamMemberFromRow(row))
 	}
 	return out, nil
-}
-
-// AccountTeamIDs 查询账号在竞赛中的队伍 ID。
-func (tx *txStore) AccountTeamIDs(ctx context.Context, tenantID, contestID, memberTenantID, accountID int64) ([]int64, error) {
-	return tx.q.AccountTeamIDs(ctx, sqlcgen.AccountTeamIDsParams{TenantID: tenantID, ContestID: contestID, MemberTenantID: memberTenantID, AccountID: accountID})
 }
 
 // GetContestAccessGrant 读取单条跨校竞赛授权。
@@ -530,7 +521,7 @@ func (tx *txStore) ListContestAccessGrantsForSandbox(ctx context.Context, tenant
 	return out, nil
 }
 
-// ListContestAccessGrantsForContest 读取竞赛仍有效的全部沙箱授权，供归档时一次性撤销。
+// ListContestAccessGrantsForContest 读取竞赛的全部沙箱授权，供撤权重试和归档清理复用。
 func (tx *txStore) ListContestAccessGrantsForContest(ctx context.Context, tenantID, contestID int64) ([]ContestAccessGrant, error) {
 	rows, err := tx.q.ListContestAccessGrantsForContest(ctx, sqlcgen.ListContestAccessGrantsForContestParams{TenantID: tenantID, ContestID: contestID})
 	if err != nil {
@@ -587,7 +578,7 @@ func (tx *txStore) FindSolveSubmissionTenant(ctx context.Context, id int64) (int
 	return row, nil
 }
 
-// GetSolveSubmissionByJudgeTask 按判题任务读取解题提交。
+// GetSolveSubmissionByJudgeTask 锁定赛事及提交，串行保护判分回写、处罚与榜单重算。
 func (tx *txStore) GetSolveSubmissionByJudgeTask(ctx context.Context, tenantID int64, judgeTaskRef string) (SolveSubmission, error) {
 	row, err := tx.q.GetSolveSubmissionByJudgeTask(ctx, sqlcgen.GetSolveSubmissionByJudgeTaskParams{TenantID: tenantID, JudgeTaskRef: pgtypex.Text(judgeTaskRef)})
 	if err != nil {
@@ -605,13 +596,22 @@ func (tx *txStore) UpdateSolveSubmissionResult(ctx context.Context, tenantID, id
 	return submissionFromRow(row)
 }
 
-// RecentFailedSolveCount 统计冷却期内失败提交数。
-func (tx *txStore) RecentFailedSolveCount(ctx context.Context, tenantID, contestID, problemID, teamID int64, seconds int) (int64, error) {
-	count, err := tx.q.RecentFailedSolveCount(ctx, sqlcgen.RecentFailedSolveCountParams{TenantID: tenantID, ContestID: contestID, ProblemID: problemID, TeamID: teamID, Column5: fmt.Sprintf("%d", seconds)})
+// ListRecentSolveTaskRefs 读取冷却窗口内本队本题的任务引用，不推断判题状态。
+func (tx *txStore) ListRecentSolveTaskRefs(ctx context.Context, tenantID, contestID, problemID, teamID int64, seconds int) ([]string, error) {
+	refs, err := tx.q.ListRecentSolveTaskRefs(ctx, sqlcgen.ListRecentSolveTaskRefsParams{TenantID: tenantID, ContestID: contestID, ProblemID: problemID, TeamID: teamID, Column5: fmt.Sprintf("%d", seconds)})
 	if err != nil {
-		return 0, apperr.ErrContestSubmitRateLimited.WithCause(err)
+		return nil, apperr.ErrContestJudgeUnavailable.WithCause(err)
 	}
-	return count, nil
+	return refs, nil
+}
+
+// ListSolveSubmissionSourceRefs 返回指定赛事赛题的精确提交范围，不推断来源前缀。
+func (tx *txStore) ListSolveSubmissionSourceRefs(ctx context.Context, tenantID, contestID, problemID int64) ([]string, error) {
+	refs, err := tx.q.ListSolveSubmissionSourceRefs(ctx, sqlcgen.ListSolveSubmissionSourceRefsParams{TenantID: tenantID, ContestID: contestID, ProblemID: problemID})
+	if err != nil {
+		return nil, apperr.ErrContestJudgeUnavailable.WithCause(err)
+	}
+	return refs, nil
 }
 
 // RecentSolveCount 统计限频窗口内全部提交数。
@@ -632,7 +632,7 @@ func (tx *txStore) CountProblemSolvedTeams(ctx context.Context, tenantID, contes
 	return count, nil
 }
 
-// SumTeamSolvedScore 汇总队伍解题赛最好成绩。
+// SumTeamSolvedScore 汇总每题最好通过得分并扣除该队累计处罚。
 func (tx *txStore) SumTeamSolvedScore(ctx context.Context, tenantID, contestID, teamID int64) (LadderRank, error) {
 	row, err := tx.q.SumTeamSolvedScore(ctx, sqlcgen.SumTeamSolvedScoreParams{TenantID: tenantID, ContestID: contestID, TeamID: teamID})
 	if err != nil {
@@ -659,9 +659,9 @@ func (tx *txStore) GetLadderByTeam(ctx context.Context, tenantID, contestID, tea
 	return ladderFromGetRow(row), nil
 }
 
-// RefreshContestRanks 重算竞赛排名序号。
+// RefreshContestRanks 在同一事务重算排名序号并标记榜单待推送。
 func (tx *txStore) RefreshContestRanks(ctx context.Context, tenantID, contestID int64) error {
-	if err := tx.q.RefreshContestRanks(ctx, sqlcgen.RefreshContestRanksParams{TenantID: tenantID, ContestID: contestID}); err != nil {
+	if err := tx.q.RefreshContestRanks(ctx, sqlcgen.RefreshContestRanksParams{TenantID: tenantID, ID: contestID}); err != nil {
 		return apperr.ErrContestSubmissionInvalid.WithCause(err)
 	}
 	return nil
@@ -699,6 +699,40 @@ func (tx *txStore) ListLadder(ctx context.Context, tenantID, contestID int64, pa
 		out = append(out, ladderFromRow(row))
 	}
 	return out, total, nil
+}
+
+// ListPendingLeaderboardContests 仅定位待推送赛事，投递回到普通租户事务执行。
+func (tx *txStore) ListPendingLeaderboardContests(ctx context.Context, limit int, afterID int64) ([]Contest, error) {
+	limit32, ok := intx.Int32(limit)
+	if !ok || limit32 <= 0 {
+		return nil, apperr.ErrContestNotifyFailed
+	}
+	rows, err := tx.q.ListPendingLeaderboardContests(ctx, sqlcgen.ListPendingLeaderboardContestsParams{AfterID: afterID, PageLimit: limit32})
+	if err != nil {
+		return nil, apperr.ErrContestNotifyFailed.WithCause(err)
+	}
+	items := make([]Contest, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, Contest{ID: row.ID, TenantID: row.TenantID})
+	}
+	return items, nil
+}
+
+// GetPendingLeaderboardContest 锁定仍待推送的赛事，与计分和状态变更互斥。
+func (tx *txStore) GetPendingLeaderboardContest(ctx context.Context, tenantID, contestID int64) (Contest, error) {
+	row, err := tx.q.GetPendingLeaderboardContest(ctx, sqlcgen.GetPendingLeaderboardContestParams{TenantID: tenantID, ID: contestID})
+	if err != nil {
+		return Contest{}, apperr.ErrContestNotifyFailed.WithCause(err)
+	}
+	return Contest{ID: row.ID, TenantID: row.TenantID, Status: row.Status}, nil
+}
+
+// CompleteLeaderboardPush 在持有赛事锁且发布已持久确认后清除待推送标记。
+func (tx *txStore) CompleteLeaderboardPush(ctx context.Context, tenantID, contestID int64) error {
+	if err := tx.q.CompleteLeaderboardPush(ctx, sqlcgen.CompleteLeaderboardPushParams{TenantID: tenantID, ID: contestID}); err != nil {
+		return apperr.ErrContestNotifyFailed.WithCause(err)
+	}
+	return nil
 }
 
 // DeactivateBattleEntries 停用同队同角色旧参战物。
@@ -952,8 +986,8 @@ func (tx *txStore) ListBattleReplayMatchesForTeam(ctx context.Context, tenantID,
 		}
 		item := BattleReplayRow{
 			Match: match, SequenceNo: row.SequenceNo, MySide: row.MySide,
-			ActiveEntryID: row.ActiveEntryID, ActiveEntryRole: row.ActiveEntryRole,
-			ActiveEntryVersion: row.ActiveEntryVersionNo, ActiveEntryAt: timex.FromTimestamptz(row.ActiveEntrySubmittedAt),
+			EntryID: row.EntryID, EntryRole: row.EntryRole,
+			EntryVersion: row.EntryVersionNo, EntryAt: timex.FromTimestamptz(row.EntrySubmittedAt),
 		}
 		out = append(out, item)
 	}
@@ -988,11 +1022,11 @@ func (tx *txStore) GetBattleReplayCheckpointForTeam(ctx context.Context, tenantI
 	return BattleReplayCheckpoint{Wins: row.Wins, Losses: row.Losses, Draws: row.Draws, RatingDelta: row.RatingDelta, Rating: row.Rating}, nil
 }
 
-// ListActiveBattleSourceRefsForArchive 查询归档时仍需回收的对抗对局沙箱来源。
-func (tx *txStore) ListActiveBattleSourceRefsForArchive(ctx context.Context, tenantID, contestID int64) ([]string, error) {
-	refs, err := tx.q.ListActiveBattleSourceRefsForArchive(ctx, sqlcgen.ListActiveBattleSourceRefsForArchiveParams{TenantID: tenantID, ContestID: contestID})
+// ListContestSandboxScopeRefsForArchive 查询归档需要回收的解题与对局环境作用域。
+func (tx *txStore) ListContestSandboxScopeRefsForArchive(ctx context.Context, tenantID, contestID int64) ([]string, error) {
+	refs, err := tx.q.ListContestSandboxScopeRefsForArchive(ctx, sqlcgen.ListContestSandboxScopeRefsForArchiveParams{TenantID: tenantID, ContestID: contestID})
 	if err != nil {
-		return nil, apperr.ErrContestBattleMatchFailed.WithCause(err)
+		return nil, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
 	return refs, nil
 }
@@ -1131,6 +1165,15 @@ func (tx *txStore) GetVulnSource(ctx context.Context, tenantID, id int64) (VulnS
 	return vulnSourceFromRow(row)
 }
 
+// LockVulnSource 锁定归属完全匹配的来源，配置更新据此保留当前密文。
+func (tx *txStore) LockVulnSource(ctx context.Context, tenantID, id int64) (VulnSource, error) {
+	row, err := tx.q.LockVulnSource(ctx, sqlcgen.LockVulnSourceParams{TenantID: pgtypex.Int8(tenantID), ID: id})
+	if err != nil {
+		return VulnSource{}, apperr.ErrContestVulnSourceInvalid.WithCause(err)
+	}
+	return vulnSourceFromRow(row)
+}
+
 // MarkVulnSourceSynced 更新时间同步标记。
 func (tx *txStore) MarkVulnSourceSynced(ctx context.Context, tenantID, id int64) (VulnSource, error) {
 	row, err := tx.q.MarkVulnSourceSynced(ctx, sqlcgen.MarkVulnSourceSyncedParams{TenantID: pgtypex.Int8(tenantID), ID: id})
@@ -1140,7 +1183,42 @@ func (tx *txStore) MarkVulnSourceSynced(ctx context.Context, tenantID, id int64)
 	return vulnSourceFromRow(row)
 }
 
-// UpsertVulnProblem 新增或更新漏洞题草稿。
+// CreateVulnProblem 仅新建手工草稿，来源编号冲突不能覆盖已有内容。
+func (tx *txStore) CreateVulnProblem(ctx context.Context, item VulnProblem) (VulnProblem, error) {
+	body, err := jsonx.AnyBytes(item.DraftBody, apperr.ErrContestVulnProblemInvalid)
+	if err != nil {
+		return VulnProblem{}, err
+	}
+	row, err := tx.q.CreateVulnProblem(ctx, sqlcgen.CreateVulnProblemParams{ID: item.ID, TenantID: item.TenantID, SourceID: pgtypex.Int8(item.SourceID), ExternalRef: pgtypex.Text(item.ExternalRef), Title: item.Title, Level: item.Level, RuntimeMode: item.RuntimeMode, DraftBody: body})
+	if db.IsUniqueViolation(err) {
+		return VulnProblem{}, apperr.ErrContestVulnProblemDuplicate.WithCause(err)
+	}
+	if err != nil {
+		return VulnProblem{}, apperr.ErrContestVulnProblemInvalid.WithCause(err)
+	}
+	return vulnProblemFromRow(row)
+}
+
+// UpdateVulnProblem 原子保存指定版本草稿并撤销旧验证；零匹配表示状态或版本已变化。
+func (tx *txStore) UpdateVulnProblem(ctx context.Context, item VulnProblem) (VulnProblem, error) {
+	body, err := jsonx.AnyBytes(item.DraftBody, apperr.ErrContestVulnProblemInvalid)
+	if err != nil {
+		return VulnProblem{}, err
+	}
+	row, err := tx.q.UpdateVulnProblem(ctx, sqlcgen.UpdateVulnProblemParams{ID: item.ID, TenantID: item.TenantID, SourceID: pgtypex.Int8(item.SourceID), ExternalRef: pgtypex.Text(item.ExternalRef), Title: item.Title, Level: item.Level, RuntimeMode: item.RuntimeMode, DraftBody: body, ExpectedUpdatedAt: timex.RequiredTimestamptz(item.UpdatedAt)})
+	if isNoRows(err) {
+		return VulnProblem{}, apperr.ErrConflict.WithCause(err)
+	}
+	if db.IsUniqueViolation(err) {
+		return VulnProblem{}, apperr.ErrContestVulnProblemDuplicate.WithCause(err)
+	}
+	if err != nil {
+		return VulnProblem{}, apperr.ErrContestVulnProblemInvalid.WithCause(err)
+	}
+	return vulnProblemFromRow(row)
+}
+
+// UpsertVulnProblem 按来源同步草稿；不重新打开已固化或废弃记录。
 func (tx *txStore) UpsertVulnProblem(ctx context.Context, item VulnProblem) (VulnProblem, error) {
 	body, err := jsonx.AnyBytes(item.DraftBody, apperr.ErrContestVulnProblemInvalid)
 	if err != nil {
@@ -1197,26 +1275,26 @@ func (tx *txStore) ListVulnProblems(ctx context.Context, tenantID, sourceID int6
 	return out, total, nil
 }
 
-// SetVulnProblemPrevalidate 保存预验证结论。
-func (tx *txStore) SetVulnProblemPrevalidate(ctx context.Context, tenantID, id int64, status int16, detail map[string]any, digest string, snapshot *contracts.SandboxCompositionSnapshot, initCodeRef, initScriptRef string) (VulnProblem, error) {
-	raw, err := jsonx.AnyBytes(detail, apperr.ErrContestVulnProblemInvalid)
+// SetVulnProblemPrevalidate 仅在 UpdatedAt 仍为读取时版本时保存预验证结论。
+func (tx *txStore) SetVulnProblemPrevalidate(ctx context.Context, item VulnProblem) (VulnProblem, error) {
+	raw, err := jsonx.AnyBytes(item.PrevalidateDetail, apperr.ErrContestVulnProblemInvalid)
 	if err != nil {
 		return VulnProblem{}, err
 	}
-	snapshotRaw, err := encodeOptionalJSON(snapshot, apperr.ErrContestVulnProblemInvalid)
+	snapshotRaw, err := encodeOptionalJSON(item.CompositionSnapshot, apperr.ErrContestVulnProblemInvalid)
 	if err != nil {
 		return VulnProblem{}, err
 	}
-	row, err := tx.q.SetVulnProblemPrevalidate(ctx, sqlcgen.SetVulnProblemPrevalidateParams{TenantID: tenantID, ID: id, PrevalidateStatus: status, PrevalidateDetail: raw, CompositionDigest: pgtypex.Text(digest), CompositionSnapshot: snapshotRaw, InitCodeRef: pgtypex.Text(initCodeRef), InitScriptRef: pgtypex.Text(initScriptRef)})
+	row, err := tx.q.SetVulnProblemPrevalidate(ctx, sqlcgen.SetVulnProblemPrevalidateParams{TenantID: item.TenantID, ID: item.ID, PrevalidateStatus: item.PrevalidateStatus, PrevalidateDetail: raw, CompositionDigest: pgtypex.Text(item.CompositionDigest), CompositionSnapshot: snapshotRaw, ExpectedUpdatedAt: timex.RequiredTimestamptz(item.UpdatedAt)})
 	if err != nil {
 		return VulnProblem{}, apperr.ErrContestVulnPrevalidateFailed.WithCause(err)
 	}
 	return vulnProblemFromRow(row)
 }
 
-// FinalizeVulnProblem 保存漏洞题固化后的 M5 内容引用。
-func (tx *txStore) FinalizeVulnProblem(ctx context.Context, tenantID, id int64, code, version string) (VulnProblem, error) {
-	row, err := tx.q.FinalizeVulnProblem(ctx, sqlcgen.FinalizeVulnProblemParams{TenantID: tenantID, ID: id, ContentItemCode: pgtypex.Text(code), ContentItemVersion: pgtypex.Text(version)})
+// FinalizeVulnProblem 仅为导入前读取的草稿版本绑定 M5 内容。
+func (tx *txStore) FinalizeVulnProblem(ctx context.Context, tenantID, id int64, code, version string, expectedUpdatedAt time.Time) (VulnProblem, error) {
+	row, err := tx.q.FinalizeVulnProblem(ctx, sqlcgen.FinalizeVulnProblemParams{TenantID: tenantID, ID: id, ContentItemCode: pgtypex.Text(code), ContentItemVersion: pgtypex.Text(version), ExpectedUpdatedAt: timex.RequiredTimestamptz(expectedUpdatedAt)})
 	if err != nil {
 		return VulnProblem{}, apperr.ErrContestVulnFinalizeFailed.WithCause(err)
 	}

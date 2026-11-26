@@ -51,7 +51,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: nats
-          image: chaimir/middleware/nats:placeholder
+          image: chaimir/infra/nats:placeholder
           # JetStream 持久化 + token 认证(token 经环境变量,不硬编码)。
           command: ["/usr/local/bin/chaimir-nats-entrypoint"]
           ports:

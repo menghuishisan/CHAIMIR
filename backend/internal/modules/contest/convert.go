@@ -11,12 +11,17 @@ import (
 
 // contestDTOFromModel 转换竞赛定义为 HTTP 输出。
 func contestDTOFromModel(item Contest) ContestDTO {
-	return ContestDTO{ID: ids.ID(item.ID), OrganizerID: ids.ID(item.OrganizerID), Name: item.Name, Mode: item.Mode, MatchMode: item.MatchMode, TeamMode: item.TeamMode, SignupStart: item.SignupStart, SignupEnd: item.SignupEnd, StartAt: item.StartAt, EndAt: item.EndAt, FreezeMinutes: item.FreezeMinutes, Rules: item.Rules, Status: item.Status, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
+	return ContestDTO{ID: ids.ID(item.ID), OrganizerID: ids.ID(item.OrganizerID), LeaderboardTopic: leaderboardTopic(item.TenantID, item.ID), Name: item.Name, Mode: item.Mode, MatchMode: item.MatchMode, TeamMode: item.TeamMode, SignupStart: item.SignupStart, SignupEnd: item.SignupEnd, StartAt: item.StartAt, EndAt: item.EndAt, FreezeMinutes: item.FreezeMinutes, Status: item.Status, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
+}
+
+// leaderboardTopic 使用数据所属主办方，跨校队员不改变主题前缀。
+func leaderboardTopic(tenantID, contestID int64) string {
+	return "tenant:" + ids.Format(tenantID) + ":contest:" + ids.Format(contestID) + ":leaderboard"
 }
 
 // problemDTOFromModel 转换竞赛题引用为 HTTP 输出。
 func problemDTOFromModel(item ContestProblem) ProblemDTO {
-	return ProblemDTO{ID: ids.ID(item.ID), ContestID: ids.ID(item.ContestID), ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, DynamicScore: item.DynamicScore, BattleConfig: item.BattleConfig, BattleRule: item.BattleRule, Seq: item.Seq, CompositionDigest: item.CompositionDigest}
+	return ProblemDTO{ID: ids.ID(item.ID), ContestID: ids.ID(item.ContestID), ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, DynamicScore: item.DynamicScore, BattleRule: item.BattleRule, Seq: item.Seq, CompositionDigest: item.CompositionDigest}
 }
 
 // teamDTOFromModel 转换队伍及成员为 HTTP 输出。
@@ -29,9 +34,19 @@ func teamDTOFromModel(item Team) TeamDTO {
 	return out
 }
 
-// submissionDTOFromModel 转换解题提交为 HTTP 输出。
-func submissionDTOFromModel(item SolveSubmission) SubmissionDTO {
-	return SubmissionDTO{ID: ids.ID(item.ID), ContestID: ids.ID(item.ContestID), ProblemID: ids.ID(item.ProblemID), TeamID: ids.ID(item.TeamID), SubmitterTenantID: ids.ID(item.SubmitterTenantID), SubmitterID: ids.ID(item.SubmitterID), ContentRef: item.ContentRef, SourceRef: item.SourceRef, JudgeTaskRef: item.JudgeTaskRef, Passed: item.Passed, Score: item.Score, SandboxRef: item.SandboxRef, SubmittedAt: item.SubmittedAt}
+func submissionDTOFromModel(item SolveSubmission, task contracts.JudgeTaskInfo, maxScore int32) SubmissionDTO {
+	out := SubmissionDTO{ID: ids.ID(item.ID), ContestID: ids.ID(item.ContestID), ProblemID: ids.ID(item.ProblemID), TeamID: ids.ID(item.TeamID), SubmitterTenantID: ids.ID(item.SubmitterTenantID), SubmitterID: ids.ID(item.SubmitterID), ContentRef: item.ContentRef, SourceRef: item.SourceRef, JudgeTaskRef: item.JudgeTaskRef, JudgeStatus: task.Status, SandboxRef: item.SandboxRef, SubmittedAt: item.SubmittedAt}
+	if task.Status == contracts.JudgeTaskStatusDone {
+		out.Passed = task.Result.Passed
+		if !out.Passed {
+			score := scaledContestScore(maxScore, task.Result.Score, task.Result.MaxScore)
+			out.Score = &score
+		} else if item.Passed {
+			// 动态分由 M8 结算；回写到达前不把旧分当成本次得分。
+			out.Score = &item.Score
+		}
+	}
+	return out
 }
 
 // contestSandboxResponseFromInfo 投影 M2 摘要到 M8 学生网关响应，禁止把组织方 Namespace 透传给浏览器。
@@ -140,12 +155,16 @@ func cheatDTOFromModel(item CheatRecord) CheatRecordDTO {
 
 // vulnSourceDTOFromModel 转换漏洞源为 HTTP 输出。
 func vulnSourceDTOFromModel(item VulnSource) VulnSourceDTO {
-	return VulnSourceDTO{ID: ids.ID(item.ID), Type: item.Type, Name: item.Name, Config: secretmap.Mask(item.Config), DefaultLevel: item.DefaultLevel, Enabled: item.Enabled, LastSyncAt: item.LastSyncAt}
+	out := VulnSourceDTO{ID: ids.ID(item.ID), IsShared: item.TenantID == 0, Type: item.Type, Name: item.Name, Config: secretmap.Mask(item.Config), DefaultLevel: item.DefaultLevel, Enabled: item.Enabled}
+	if !out.IsShared {
+		out.LastSyncAt = item.LastSyncAt
+	}
+	return out
 }
 
 // vulnProblemDTOFromModel 转换漏洞题草稿为 HTTP 输出。
 func vulnProblemDTOFromModel(item VulnProblem) VulnProblemDTO {
-	return VulnProblemDTO{ID: ids.ID(item.ID), SourceID: ids.ID(item.SourceID), ExternalRef: item.ExternalRef, Title: item.Title, Level: item.Level, RuntimeMode: item.RuntimeMode, DraftBody: item.DraftBody, PrevalidateStatus: item.PrevalidateStatus, PrevalidateDetail: item.PrevalidateDetail, CompositionDigest: item.CompositionDigest, ContentItemCode: item.ContentItemCode, ContentItemVersion: item.ContentItemVersion, Status: item.Status}
+	return VulnProblemDTO{ID: ids.ID(item.ID), SourceID: ids.ID(item.SourceID), ExternalRef: item.ExternalRef, Title: item.Title, Level: item.Level, RuntimeMode: item.RuntimeMode, DraftBody: item.DraftBody, PrevalidateStatus: item.PrevalidateStatus, PrevalidateDetail: item.PrevalidateDetail, CompositionDigest: item.CompositionDigest, ContentItemCode: item.ContentItemCode, ContentItemVersion: item.ContentItemVersion, Status: item.Status, UpdatedAt: item.UpdatedAt}
 }
 
 // contestAchievementFromRecord 转换个人战绩为跨模块竞赛成就契约。

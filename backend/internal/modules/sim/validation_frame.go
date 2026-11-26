@@ -1,36 +1,36 @@
-// sim validation_frame 文件校验隔离容器回传的教学帧,是不可信输出进入前端前的最后一道闸门。
-//
-// 为什么后端必须自己有一份:容器执行的是外部提交的仿真包代码,它的输出可能给出越界模式数、
-// 未登记的可视化模式、悬空 layout 引用或超规模状态。前端 `assertValidTeachingFrame` 有等价规则,
-// 但只靠前端等于把协议边界交给不可信来源的下游 —— runner 一旦被绕过或替换,非法帧就直达浏览器。
-// 校验规则与前端逐项对应(docs/04-仿真可视化引擎/03-可视化SDK与交互协议.md §1.1),
-// 两侧同改不得分叉。
 package sim
 
 import (
+	"encoding/json"
 	"fmt"
+	"slices"
 
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
 
-// frameError 统一把协议问题包成 42011,技术细节只进日志。
 func frameError(reason string) error {
 	return apperr.ErrSimFrameInvalid.WithCause(fmt.Errorf("隔离执行返回的教学帧不合协议: %s", reason))
 }
 
-// validateBackendSnapshot 校验完整快照的必填段与教学帧协议。
 func validateBackendSnapshot(snapshot BackendSnapshot, scaleLimit map[string]any) error {
-	if snapshot.Tick < 0 {
-		return frameError("tick 为负")
+	value := map[string]any{
+		"tick": snapshot.Tick, "state": snapshot.State, "view": snapshot.View,
+		"interactionAvailability": snapshot.InteractionAvailability, "checkpointResults": snapshot.CheckpointResults,
 	}
-	if len(snapshot.State) == 0 {
-		return frameError("state 为空")
+	if snapshot.CurrentStep != nil {
+		value["currentStep"] = snapshot.CurrentStep
+	}
+	if err := validateRuntimeProtocol("RuntimeFrame", value); err != nil {
+		return err
+	}
+	if snapshot.Tick > int64(jsonx.IntFromAny(scaleLimit["max_tick"])) {
+		return frameError("快照时刻超过包声明上限")
 	}
 	if err := validateBackendStateScale(snapshot.State, scaleLimit); err != nil {
 		return frameError(err.Error())
 	}
-	return validateTeachingFrame(snapshot.View, scaleLimit)
+	return validateTeachingFrameSemantics(snapshot.View, scaleLimit)
 }
 
 // validatePreviewFrames 确认审核依据非空且符合既有快照协议，不以成功徽章替代真实教学帧。
@@ -46,49 +46,26 @@ func validatePreviewFrames(frames []BackendSnapshot, scaleLimit map[string]any) 
 	return nil
 }
 
-// validateTeachingFrame 校验一帧的结构、职责声明、引用完整性与规模上限。
 func validateTeachingFrame(view map[string]any, scaleLimit map[string]any) error {
-	if len(view) == 0 {
-		return frameError("view 为空")
+	if err := validateRuntimeProtocol("TeachingFrame", view); err != nil {
+		return err
 	}
-	if jsonx.StringField(view, "summary") == "" {
-		return frameError("缺少 summary")
-	}
-	phase, ok := view["phase"].(map[string]any)
-	if !ok || jsonx.StringField(phase, "id") == "" || jsonx.StringField(phase, "title") == "" {
-		return frameError("缺少阶段声明")
-	}
-	focus, ok := view["focus"].(map[string]any)
-	if !ok {
-		return frameError("缺少观察焦点")
-	}
-	if primary, ok := focus["primary"].([]any); !ok || len(primary) == 0 {
-		return frameError("观察焦点为空")
-	}
-	layout, ok := view["layout"].(map[string]any)
-	if !ok || jsonx.StringField(layout, "primary") == "" {
-		return frameError("缺少主视图声明")
-	}
-	patterns, ok := view["patterns"].([]any)
-	if !ok || len(patterns) < 1 || len(patterns) > maxFramePatterns {
-		return frameError("视图数量必须为 1 到 3 个")
-	}
+	return validateTeachingFrameSemantics(view, scaleLimit)
+}
 
+// 结构先经共享 schema 校验；这里仅处理引用与包声明的动态容量。
+func validateTeachingFrameSemantics(view map[string]any, scaleLimit map[string]any) error {
+	layout := view["layout"].(map[string]any)
+	patterns := view["patterns"].([]any)
 	patternIDs := make(map[string]struct{}, len(patterns))
 	for _, item := range patterns {
-		pattern, ok := item.(map[string]any)
-		if !ok {
-			return frameError("视图项结构无效")
-		}
+		pattern := item.(map[string]any)
 		id := jsonx.StringField(pattern, "id")
-		if id == "" {
-			return frameError("视图编号为空")
-		}
 		if _, exists := patternIDs[id]; exists {
 			return frameError("视图编号重复")
 		}
-		if _, allowed := allowedPatternModes[jsonx.StringField(pattern, "mode")]; !allowed {
-			return frameError("视图使用了未登记的可视化模式")
+		if err := validatePatternScale(pattern, scaleLimit); err != nil {
+			return err
 		}
 		patternIDs[id] = struct{}{}
 	}
@@ -107,7 +84,6 @@ func validateTeachingFrame(view map[string]any, scaleLimit map[string]any) error
 	return nil
 }
 
-// layoutPatternIDs 汇总 layout 六个职责位引用到的视图编号。
 func layoutPatternIDs(layout map[string]any) map[string]struct{} {
 	ids := map[string]struct{}{}
 	for _, key := range []string{"primary", "timeline", "trace"} {
@@ -129,41 +105,109 @@ func layoutPatternIDs(layout map[string]any) map[string]struct{} {
 	return ids
 }
 
-// validateBackendDescriptor 校验容器回传的包自描述信息。
-//
-// 它和快照一样是不可信输出,但危害点不同:描述里的 emits 决定页面会渲出哪些操作按钮,
-// 若容器给出未登记的事件,学生点下去必然被服务端交互白名单拒绝 —— 那是一个必然失败的按钮。
-// 故这里按已入库的 interaction_schema 逐项核对,并核对包身份,避免容器冒充另一个包。
-func validateBackendDescriptor(descriptor BackendDescriptor, session SessionWithPackage) error {
-	code := jsonx.StringField(descriptor.Meta, "code")
-	version := jsonx.StringField(descriptor.Meta, "version")
-	if code != session.PackageCode || version != session.PackageVersion {
-		return frameError("包自描述信息的编号或版本与会话所引用的包不一致")
+func validateBackendDescriptor(descriptor BackendDescriptor, code, version string, schema InteractionSchema) error {
+	raw, err := json.Marshal(descriptor)
+	if err != nil {
+		return frameError(fmt.Sprintf("编码包描述失败: %v", err))
 	}
-	if len(descriptor.Interactions) == 0 {
-		return frameError("包自描述信息没有声明任何操作")
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return frameError(fmt.Sprintf("读取包描述失败: %v", err))
 	}
-	if len(descriptor.Interactions) > maxDescriptorInteractions || len(descriptor.Narrative) > maxDescriptorNarrative || len(descriptor.Checkpoints) > maxDescriptorCheckpoints {
-		return frameError("包自描述信息的条目数量超出允许范围")
+	if err := validateRuntimeProtocol("SimPackageDescriptor", value); err != nil {
+		return err
 	}
-	for _, interaction := range descriptor.Interactions {
-		if jsonx.StringField(interaction, "id") == "" {
-			return frameError("操作声明缺少编号")
+	if jsonx.StringField(descriptor.Meta, "code") != code || jsonx.StringField(descriptor.Meta, "version") != version {
+		return frameError("包自描述信息的编号或版本与已登记的包不一致")
+	}
+	var controls struct {
+		Interactions []struct {
+			simInteractionDef
+			ElementFilter string `json:"elementFilter"`
+			LabelTag      string `json:"labelTag"`
+		} `json:"interactions"`
+	}
+	if err := json.Unmarshal(raw, &controls); err != nil {
+		return frameError(fmt.Sprintf("读取控件声明失败: %v", err))
+	}
+	if len(controls.Interactions) != len(schema.Events) {
+		return frameError("包自描述的交互数量与审核声明不一致")
+	}
+	seenEvents := make(map[string]bool, len(controls.Interactions))
+	seenIDs := make(map[string]bool, len(controls.Interactions))
+	for _, control := range controls.Interactions {
+		in := control.simInteractionDef
+		in.ElementFilter, in.LabelTag = control.ElementFilter, control.LabelTag
+		actual, findings := interactionSchemaFromManifest(in)
+		expected, ok := schema.Events[in.Emits]
+		if !ok || len(findings) > 0 || in.ID != expected.InteractionID ||
+			actual.Kind != expected.Kind || actual.Target != expected.Target ||
+			!slices.EqualFunc(actual.Params, expected.Params, func(a, b InteractionParam) bool { return jsonx.Equal(a, b) }) {
+			return frameError("运行控件与审核声明不一致: " + in.Emits)
 		}
-		emits := jsonx.StringField(interaction, "emits")
-		if _, ok := session.InteractionSchema.Events[emits]; !ok {
-			return frameError("操作声明的事件未登记在包的交互白名单中: " + emits)
+		if seenEvents[in.Emits] || seenIDs[in.ID] {
+			return frameError("包自描述信息包含重复的交互事件或控件编号: " + in.Emits)
+		}
+		seenEvents[in.Emits], seenIDs[in.ID] = true, true
+	}
+	return nil
+}
+
+func validatePatternScale(pattern map[string]any, limits map[string]any) error {
+	data := pattern["data"].(map[string]any)
+	array := func(key string) []any { return data[key].([]any) }
+	nodes, events := 0, 0
+	switch pattern["mode"] {
+	case "graph":
+		nodes, events = len(array("nodes")), len(array("edges"))
+	case "chain":
+		nodes = len(array("blocks"))
+		for _, fork := range array("forks") {
+			nodes += len(fork.([]any))
+		}
+	case "tree":
+		queue := []any{data["root"]}
+		for len(queue) > 0 {
+			current := queue[len(queue)-1].(map[string]any)
+			queue = queue[:len(queue)-1]
+			nodes++
+			if children, ok := current["children"].([]any); ok {
+				queue = append(queue, children...)
+			}
+		}
+	case "matrix":
+		rows, columns, cells := array("rows"), array("columns"), array("cells")
+		nodes, events = max(len(rows), len(columns)), len(rows)*len(columns)
+		if len(cells) != len(rows) {
+			return frameError("矩阵行数据不完整")
+		}
+		for _, row := range cells {
+			if len(row.([]any)) != len(columns) {
+				return frameError("矩阵列数据不完整")
+			}
+		}
+	case "pipeline":
+		nodes = len(array("steps"))
+	case "lane":
+		actors := make(map[string]bool)
+		for _, actor := range array("actors") {
+			actors[actor.(string)] = true
+		}
+		nodes, events = len(array("actors")), len(array("messages"))
+		for _, value := range array("messages") {
+			message := value.(map[string]any)
+			if !actors[message["from"].(string)] || !actors[message["to"].(string)] {
+				return frameError("时序消息引用了未声明的参与方")
+			}
+		}
+	case "chart":
+		nodes = len(array("series"))
+		for _, series := range array("series") {
+			events += len(series.(map[string]any)["points"].([]any))
 		}
 	}
-	for _, checkpoint := range descriptor.Checkpoints {
-		if jsonx.StringField(checkpoint, "id") == "" || jsonx.StringField(checkpoint, "label") == "" {
-			return frameError("检查点声明缺少编号或标题")
-		}
-	}
-	for _, step := range descriptor.Narrative {
-		if jsonx.StringField(step, "id") == "" {
-			return frameError("教学步骤声明缺少编号")
-		}
+	if nodes > jsonx.IntFromAny(limits["nodes"]) || events > jsonx.IntFromAny(limits["max_events"]) {
+		return frameError("视图超过包声明的节点或事件规模")
 	}
 	return nil
 }

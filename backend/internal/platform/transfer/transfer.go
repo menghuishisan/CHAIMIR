@@ -236,8 +236,8 @@ func (m Manager) validateConfig() error {
 	if m.Config.RetryDelay <= 0 {
 		return fmt.Errorf("统一导入导出中心重试间隔必须大于 0")
 	}
-	if m.Config.LeaseDuration <= 0 {
-		return fmt.Errorf("统一导入导出中心任务租约时长必须大于 0")
+	if m.Config.LeaseDuration < 3*time.Second {
+		return fmt.Errorf("统一导入导出中心任务租约时长必须至少为 3 秒")
 	}
 	return nil
 }

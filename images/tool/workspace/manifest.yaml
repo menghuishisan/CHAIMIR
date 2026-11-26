@@ -67,8 +67,8 @@ resources:
   memory_limit: 256Mi
   ephemeral_storage_limit: 512Mi
 build:
-  context: ../../..
-  dockerfile: images/tool/workspace/Dockerfile
+  context: images/tool/workspace
+  dockerfile: Dockerfile
 selftest:
   commands:
     - name: workspace

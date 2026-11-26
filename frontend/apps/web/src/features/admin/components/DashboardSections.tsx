@@ -1,8 +1,4 @@
-// DashboardSections 学校看板与平台看板共用的区块(设计 §7.5 / §7.6):
-// 第一行关键数字小卡(自动排列,每张一个数字 + 一句口径 + 可选的次要数字);师生构成只有两类,
-// 放在数字卡里的比例条,不再画大环形图;实验环境卡显示运行中数量与并发上限的使用比例条。
-// 第二行「需要处理」:每项一个数字(用已有列表的总数接口取),整项可点进对应页面。
-// 数据来自强类型 Dashboard 契约,不按未知 JSON 键猜测。
+// 两级管理看板共用的关键数字、构成比例和待办入口。
 
 import type { ReactNode } from 'react'
 import { Link } from 'react-router'
@@ -37,10 +33,7 @@ function KeyFigure({ label, value, hint, secondary, children }: KeyFigureProps) 
   )
 }
 
-/**
- * RatioBar 两部分的比例条(如教师 / 学生):两段用不同深浅的玉色,各带文字与人数,不只靠颜色。
- * 宽度是运行时计算的百分比,按规范允许内联 style。
- */
+/** 两类人数的比例条，文字同时表达人数，不只依赖颜色。 */
 function RatioBar({ left, right }: { left: { label: string; value: number }; right: { label: string; value: number } }) {
   const total = left.value + right.value
   const leftShare = total > 0 ? Math.round((left.value / total) * 100) : 0
@@ -94,10 +87,7 @@ function UsageBar({ used, limit }: { used: number; limit: number }) {
   )
 }
 
-/**
- * DashboardKeyFigures 关键数字小卡一行:账号(总数 / 活跃)、师生(教师 / 学生,比例条)、课程(进行中 / 总数)、
- * 实验(数量 / 运行中实例)、竞赛(进行中 / 总数)、实验环境(运行中 · 配额使用比例条);平台范围多一张「学校」。
- */
+/** 按看板契约展示关键数字、组成和环境配额。 */
 export function DashboardKeyFigures({ dashboard }: { dashboard: Dashboard }) {
   const quota = dashboard.resource_quota_snapshot
   return (

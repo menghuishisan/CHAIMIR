@@ -1,5 +1,3 @@
-// 导入导出契约常量：维护基础层 transfer 任务状态和通道字符串。
-
 export const TRANSFER_STATUS = {
   PENDING: 'pending',
   RUNNING: 'running',

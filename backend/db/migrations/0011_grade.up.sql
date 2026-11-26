@@ -127,7 +127,7 @@ CREATE TABLE IF NOT EXISTS academic_warning (
     CONSTRAINT chk_academic_warning_status CHECK (status IN (1,2))
 );
 
-CREATE INDEX IF NOT EXISTS idx_academic_warning_student_semester ON academic_warning(tenant_id, student_id, semester_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_academic_warning_scope ON academic_warning(tenant_id, student_id, semester_id, type);
 CREATE INDEX IF NOT EXISTS idx_academic_warning_notify_due ON academic_warning(notify_next_attempt_at, created_at) WHERE notify_status IN (1,4);
 CREATE INDEX IF NOT EXISTS idx_academic_warning_notify_lease ON academic_warning(notify_lease_until) WHERE notify_status = 2;
 

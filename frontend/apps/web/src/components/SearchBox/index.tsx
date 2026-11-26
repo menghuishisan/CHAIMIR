@@ -2,7 +2,7 @@
 // 输入时只改本地草稿,回车或点放大镜才写进地址并触发读取 —— 每敲一个字就请求一次会把后端打碎;
 // 有内容时右侧出现清空按钮(用 type=text:type=search 会再带一个浏览器自己的清空叉)。地址里的搜索词变了(后退、点「清除筛选」)时草稿跟着变。
 
-import { useEffect, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { Search, X } from 'lucide-react'
 import { cn, IconButton, Input } from '@chaimir/ui'
 
@@ -18,9 +18,12 @@ export interface SearchBoxProps {
 }
 
 /** SearchBox 渲染一个回车提交的搜索框 */
-export function SearchBox({ value, onSearch, placeholder, label, className }: SearchBoxProps) {
+export function SearchBox(props: SearchBoxProps) {
+  return <SearchBoxDraft key={props.value} {...props} />
+}
+
+function SearchBoxDraft({ value, onSearch, placeholder, label, className }: SearchBoxProps) {
   const [draft, setDraft] = useState(value)
-  useEffect(() => setDraft(value), [value])
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()

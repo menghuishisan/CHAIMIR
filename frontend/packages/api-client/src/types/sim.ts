@@ -1,4 +1,4 @@
-// ===== M4 Sim 模块 =====
+// 仿真包、审核记录和会话的接口数据。
 
 import type {
   SimCompute,
@@ -10,7 +10,7 @@ import type {
 import type { SnowflakeID } from './common'
 
 /** 仿真包协议固定的三项规模上限,与 M4 manifest meta.scale_limit 一致。 */
-export interface SimScaleLimit {
+interface SimScaleLimit {
   nodes: number
   max_tick: number
   max_events: number
@@ -25,40 +25,28 @@ export interface SimPackageMeta {
   name: string
   category: string
   compute: SimCompute
-  scale_limit?: SimScaleLimit
+  scale_limit: SimScaleLimit
   bundle_hash?: string
   status: SimPackageStatus
   created_at: string
   updated_at: string
 }
 
-/**
- * 仿真包提交表单。刻意不含 compute 与运行能力:执行位置由后端按作者类型派生
- * (教师与第三方提交一律在隔离容器内运行),客户端声明它只会产生平台无法运行的无效状态。
- */
+/** 扩展包在隔离环境运行，由服务端决定执行位置。 */
 export interface SimPackageSubmit {
   bundle: File
   code: string
   version: string
   name: string
   category: string
-  scale_limit?: SimScaleLimit
+  scale_limit: SimScaleLimit
 }
 
 export interface SimPackageSubmissionResult extends SimPackageMeta {
   review: SimPackageReview
 }
 
-/**
- * 仿真包审核前预览响应:后端 PackagePreview 返回包摘要与最新审核记录两段,
- * 不把审核记录并进包对象(与提交响应的形状不同,故单独声明)。
- */
-export interface SimPackagePreview {
-  package: SimPackageMeta
-  review: SimPackageReview
-}
-
-export interface SimReviewDecision {
+export interface SimPackageReviewDetail {
   package: SimPackageMeta
   review: SimPackageReview
 }
@@ -68,19 +56,14 @@ export interface SimValidationStatus {
   message?: string
 }
 
-/**
- * 隔离容器算出、经后端协议校验后下发的一帧教学快照。
- *
- * 字段名保持后端下划线口径:它同时出现在审核报告的样例帧与隔离执行 WebSocket 帧里,
- * 两处是同一个服务端结构,故只声明一次。state/view 由平台自己的教学帧渲染器消费。
- */
+/** 审核报告和隔离执行流共用同一套教学快照协议。 */
 export interface SimTeachingSnapshot {
   tick: number
   state: Record<string, unknown>
   view: Record<string, unknown>
   current_step?: Record<string, unknown>
-  interaction_availability?: Record<string, boolean>
-  checkpoint_results?: Record<string, unknown>
+  interaction_availability: Record<string, boolean>
+  checkpoint_results: Record<string, unknown>
 }
 
 /**
@@ -93,15 +76,12 @@ export interface SimStreamCommandMessage {
   payload?: Record<string, unknown>
 }
 
-export interface SimStaticScanReport {
+interface SimStaticScanReport {
   status?: SimValidationStatusValue
   findings?: string[]
 }
 
-/**
- * 审核报告。preview_frames 是隔离容器渲出的样例教学帧:自动校验只能回答"能不能跑、
- * 是否确定性",回答不了"这个算法实现对不对",故审核页必须把帧摊给平台管理员看。
- */
+/** 样例帧供审核人判断教学内容，自动校验验证可运行性和确定性。 */
 export interface SimValidationReport {
   bundle_hash?: string
   metadata_validation?: SimValidationStatus
@@ -142,6 +122,7 @@ export interface SimActionLog {
 }
 
 export interface SimReplay {
+  read_only: boolean
   package_code: string
   version: string
   seed: number

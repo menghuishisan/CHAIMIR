@@ -1,4 +1,3 @@
-// sim service_compute 文件实现隔离执行 WebSocket 接入和 M4 自有能力注册表调度。
 package sim
 
 import (
@@ -12,12 +11,14 @@ import (
 	"chaimir/pkg/apperr"
 )
 
-// simSessionSessionScope 为每个仿真会话建立稳定的 WebSocket 撤销范围。
 func simSessionSessionScope(sessionID int64) string {
 	return "sim:" + ids.Format(sessionID)
 }
 
-// validateBackendAdapterAvailable 确保隔离执行包只能使用已装配的 M4 自有能力。
+func simReplaySessionScope(sessionID int64) string {
+	return simSessionSessionScope(sessionID) + ":replay"
+}
+
 func validateBackendAdapterAvailable(compute int16, adapterCode string, registry BackendRegistry) error {
 	if compute != ComputeIsolated {
 		return nil
@@ -29,7 +30,6 @@ func validateBackendAdapterAvailable(compute int16, adapterCode string, registry
 	return nil
 }
 
-// validateBackendAdapterConfig 在 M4 边界统一校验能力存在性和包配置。
 func validateBackendAdapterConfig(compute int16, adapterCode string, backendConfig map[string]any, registry BackendRegistry) error {
 	if err := validateBackendAdapterAvailable(compute, adapterCode, registry); err != nil {
 		return err
@@ -63,11 +63,15 @@ func (s *Service) ServeBackendStream(ctx context.Context, conn *ws.Conn, tenantI
 		return err
 	}
 	if s.wsHub != nil {
-		if err := conn.BindSession(ctx, ws.SessionKey{TenantID: tenantID, AccountID: accountID, Scope: simSessionSessionScope(sessionID)}); err != nil {
+		scope := simSessionSessionScope(sessionID)
+		if session.Status == SessionArchived {
+			scope = simReplaySessionScope(sessionID)
+		}
+		if err := conn.BindSession(ctx, ws.SessionKey{TenantID: tenantID, AccountID: accountID, Scope: scope}); err != nil {
 			return apperr.ErrSimBackendComputeUnavailable.WithCause(err)
 		}
 	}
-	if session.Compute != ComputeIsolated || session.Status == SessionArchived || session.Status == SessionFailed || strings.TrimSpace(session.BackendAdapter) == "" {
+	if session.Compute != ComputeIsolated || (session.Status != SessionAvailable && session.Status != SessionArchived) || strings.TrimSpace(session.BackendAdapter) == "" {
 		return apperr.ErrSimBackendComputeUnavailable
 	}
 	if err := validateBackendAdapterConfig(session.Compute, session.BackendAdapter, session.BackendConfig, s.backends); err != nil {
@@ -78,54 +82,77 @@ func (s *Service) ServeBackendStream(ctx context.Context, conn *ws.Conn, tenantI
 	if err != nil {
 		return err
 	}
-	// 断线重连、刷新页面都要回到上次离开的位置(FE-9):容器不常驻状态,过程由已登记的操作序列决定,
-	// 故连接建立时先取回本会话已有操作,交适配器在容器内重放到当前位置 ——
-	// 否则学生刷新一次就从头开始,而操作记录里还留着之前的 10 步,那份记录描述的过程再也复现不出来。
-	var recorded []Action
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		items, err := tx.ListActions(ctx, tenantID, sessionID)
-		if err != nil {
-			return apperr.ErrSimSessionQueryFailed.WithCause(err)
-		}
-		recorded = items
-		return nil
-	}); err != nil {
-		return err
-	}
-	guarded := &backendValidatedConn{ctx: ctx, svc: s, conn: conn, session: session, tenantID: tenantID}
-	if err := adapter.Serve(ctx, session, bundle, recorded, guarded); err != nil {
+	guarded := &backendValidatedConn{svc: s, conn: conn, session: session, tenantID: tenantID, accountID: accountID}
+	if err := adapter.Serve(ctx, session, bundle, guarded); err != nil {
 		return apperr.ErrSimBackendComputeUnavailable.WithCause(err)
 	}
 	return nil
 }
 
-// backendValidatedConn 在 M4 边界统一校验客户端命令、持久化动作,并校验容器回传的教学帧。
 type backendValidatedConn struct {
-	ctx      context.Context
-	svc      *Service
-	conn     *ws.Conn
-	session  SessionWithPackage
-	tenantID int64
+	svc       *Service
+	conn      *ws.Conn
+	session   SessionWithPackage
+	tenantID  int64
+	accountID int64
 	// tick 是最近一帧的推演时刻,用作用户操作入库时的 at_tick ——
 	// 回放要靠它把动作放回正确的时刻上(见 frontend features/sim/replayMoves.ts)。
 	tick int64
 	// diverged 记录本连接是否已回退或重来过;此后不再登记新操作。
 	diverged bool
+	lastSeq  int32
 }
 
-// ReadCommand 只允许适配器拿到已过包内交互 schema 的受控命令。
-//
-// 这里只做校验不落库:操作要在容器执行成功后才登记(见 RecordExecuted),
-// 否则一条被包拒绝的事件也会留在只追加的操作序列里,那份记录描述的过程再也复现不出来。
-func (c *backendValidatedConn) ReadCommand() (BackendCommand, error) {
+// LoadReplay 必须在取得执行权后读取,以免连接排队时会话已归档或操作记录已推进。
+func (c *backendValidatedConn) LoadReplay(ctx context.Context) ([]Action, error) {
+	session, actions, err := c.svc.loadReplay(ctx, c.tenantID, c.session.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.authorizeExecution(ctx, session.Session); err != nil {
+		return nil, err
+	}
+	c.session = session
+	c.lastSeq = 0
+	if len(actions) > 0 {
+		c.lastSeq = actions[len(actions)-1].Seq
+	}
+	return actions, nil
+}
+
+func (c *backendValidatedConn) authorizeExecution(ctx context.Context, session Session) error {
+	if !sessionAccountAuthorized(session, c.accountID) {
+		return apperr.ErrForbidden
+	}
+	// 连接模式在建立时固定；执行中归档必须断开后重新进入只读回放。
+	if session.Status != c.session.Status || (session.Status != SessionAvailable && session.Status != SessionArchived) {
+		return apperr.ErrSimSessionStateInvalid
+	}
+	return c.svc.requireSessionModules(ctx, c.tenantID, session.SourceRef)
+}
+
+// ReadCommand 复核当前访问权并校验命令；执行成功后才允许登记，避免污染回放。
+func (c *backendValidatedConn) ReadCommand(ctx context.Context) (BackendCommand, error) {
 	var message BackendClientMessage
-	if err := c.conn.ReadJSON(&message); err != nil {
+	if err := c.conn.ReadJSONContext(ctx, &message); err != nil {
+		return BackendCommand{}, err
+	}
+	if err := c.svc.store.TenantTx(ctx, c.tenantID, func(ctx context.Context, tx TxStore) error {
+		session, err := tx.GetSession(ctx, c.tenantID, c.session.ID)
+		if err != nil {
+			return lookupError(err, apperr.ErrSimSessionNotFound, apperr.ErrSimSessionQueryFailed)
+		}
+		return c.authorizeExecution(ctx, session)
+	}); err != nil {
 		return BackendCommand{}, err
 	}
 	switch BackendCommandKind(strings.TrimSpace(message.Type)) {
 	case BackendCommandStep, BackendCommandBack, BackendCommandRestart:
 		return BackendCommand{Kind: BackendCommandKind(strings.TrimSpace(message.Type))}, nil
 	case BackendCommandEvent:
+		if c.session.Status == SessionArchived {
+			return BackendCommand{}, apperr.ErrSimSessionStateInvalid
+		}
 		event := BackendEvent{EventType: strings.TrimSpace(message.EventType), Payload: message.Payload}
 		if err := validateActionContent(event.EventType, event.Payload); err != nil {
 			return BackendCommand{}, err
@@ -139,14 +166,12 @@ func (c *backendValidatedConn) ReadCommand() (BackendCommand, error) {
 	}
 }
 
-// RecordExecuted 在容器执行成功后登记这条命令的效果。
-//
-// 时刻推进不入操作记录:它由 seed 决定可复算,与内置包在浏览器 Worker 内的语义一致;
-// 把它写进只追加的操作序列会让记录里塞满与用户无关的条目,也会让 seq 失去"第几次操作"的含义。
-//
-// 回退与重来之后不再登记新操作:操作序列只追加,表达不了"撤回一步",
-// 继续追加会让这条记录描述一个从未发生过的过程(与浏览器内置包同一条规则)。
-func (c *backendValidatedConn) RecordExecuted(command BackendCommand) error {
+// RecordExecuted 只登记成功的用户操作，确定性时刻推进由回放重算。
+// 回退或重来后停止追加，保留原过程；浏览器 Worker 遵循同一规则。
+func (c *backendValidatedConn) RecordExecuted(ctx context.Context, command BackendCommand) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	switch command.Kind {
 	case BackendCommandBack, BackendCommandRestart:
 		c.diverged = true
@@ -155,63 +180,74 @@ func (c *backendValidatedConn) RecordExecuted(command BackendCommand) error {
 		if c.diverged {
 			return nil
 		}
-		_, err := c.persist(command.Event)
+		_, err := c.persist(ctx, command.Event)
 		return err
 	default:
 		return nil
 	}
 }
 
-// SendFrame 校验容器回传的教学帧与包自描述信息后再推给前端。
-//
-// 容器输出是不可信输入:它由外部提交的仿真包代码算出,可能给出越界模式数、未登记 mode、
-// 悬空 layout 引用或超规模状态。前端有一份等价校验,但**后端必须自己也有一份** ——
-// 只靠前端等于把协议边界交给不可信来源的下游(见 docs/04-仿真可视化引擎/07-安全设计.md §3)。
-func (c *backendValidatedConn) SendFrame(message BackendStreamMessage) error {
+// SendFrame 在服务端校验不可信包生成的快照及声明，再推送给前端。
+func (c *backendValidatedConn) SendFrame(ctx context.Context, message BackendStreamMessage) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := validateBackendSnapshot(message.Snapshot, c.session.ScaleLimit); err != nil {
 		return err
 	}
 	if message.Descriptor != nil {
-		if err := validateBackendDescriptor(*message.Descriptor, c.session); err != nil {
+		if err := validateBackendDescriptor(*message.Descriptor, c.session.PackageCode, c.session.PackageVersion, c.session.InteractionSchema); err != nil {
 			return err
 		}
 	}
+	message.ReadOnly = c.session.Status == SessionArchived
 	c.tick = message.Snapshot.Tick
 	return c.conn.SendJSON(message)
 }
 
-// persist 把隔离执行的用户操作写入同一条 sim_action_log 序列。
-func (c *backendValidatedConn) persist(event BackendEvent) (Action, error) {
+func (c *backendValidatedConn) persist(ctx context.Context, event BackendEvent) (Action, error) {
+	if c.session.Status != SessionAvailable {
+		return Action{}, apperr.ErrSimSessionStateInvalid
+	}
 	var out Action
 	atTick, tickOK := intx.Int64ToInt32(c.tick)
 	if !tickOK || atTick < 0 {
 		return Action{}, apperr.ErrSimActionSeqInvalid
 	}
-	err := c.svc.store.TenantTx(c.ctx, c.tenantID, func(ctx context.Context, tx TxStore) error {
+	err := c.svc.store.TenantTx(ctx, c.tenantID, func(ctx context.Context, tx TxStore) error {
+		if err := tx.LockSessionActions(ctx, c.tenantID, c.session.ID); err != nil {
+			return apperr.ErrSimActionSeqInvalid.WithCause(err)
+		}
 		session, err := tx.GetSession(ctx, c.tenantID, c.session.ID)
 		if err != nil {
 			return lookupError(err, apperr.ErrSimSessionNotFound, apperr.ErrSimSessionQueryFailed)
 		}
-		if !canMutateSession(session.Status) {
-			return apperr.ErrSimSessionStateInvalid
+		if err := c.authorizeExecution(ctx, session); err != nil {
+			return err
 		}
 		last, err := tx.GetLastAction(ctx, c.tenantID, c.session.ID)
 		if err != nil && !isNoRows(err) {
 			return apperr.ErrSimActionSeqInvalid.WithCause(err)
 		}
-		seq := int32(1)
+		lastSeq := int32(0)
 		if !isNoRows(err) {
-			if last.Seq == math.MaxInt32 {
-				return apperr.ErrSimActionSeqInvalid
-			}
-			seq = last.Seq + 1
+			lastSeq = last.Seq
 		}
-		created, err := tx.CreateAction(ctx, Action{ID: c.svc.ids.Generate(), TenantID: c.tenantID, SessionID: c.session.ID, Seq: seq, AtTick: atTick, EventType: strings.TrimSpace(event.EventType), Payload: event.Payload})
+		if lastSeq != c.lastSeq || lastSeq == math.MaxInt32 || atTick < last.AtTick {
+			return apperr.ErrSimActionSeqInvalid
+		}
+		if err := validateActionReplayPosition(lastSeq+1, atTick, c.session.ScaleLimit); err != nil {
+			return err
+		}
+		created, err := tx.CreateAction(ctx, Action{ID: c.svc.ids.Generate(), TenantID: c.tenantID, SessionID: c.session.ID, Seq: lastSeq + 1, AtTick: atTick, EventType: strings.TrimSpace(event.EventType), Payload: event.Payload})
 		if err != nil {
 			return apperr.ErrSimActionSeqInvalid.WithCause(err)
 		}
 		out = created
 		return nil
 	})
+	if err == nil {
+		c.lastSeq = out.Seq
+	}
 	return out, err
 }

@@ -1,4 +1,4 @@
-// jsonx 统一平台 JSON 序列化和强校验读取边界,避免业务模块各自处理 JSON 语义。
+// Package jsonx 统一 JSON 编码、解码与标量转换。
 package jsonx
 
 import (
@@ -41,11 +41,7 @@ func ObjectBytes(v map[string]any, marshalErr *apperr.Error) ([]byte, error) {
 	if v == nil {
 		return []byte("{}"), nil
 	}
-	data, err := json.Marshal(v)
-	if err != nil {
-		return nil, marshalErr.WithCause(err)
-	}
-	return data, nil
+	return AnyBytes(v, marshalErr)
 }
 
 // AnyBytes 将任意 JSON 结构序列化为数据库字节;nil 统一按空对象保存。
@@ -80,7 +76,7 @@ func DecodeStrict(data []byte, out any) error {
 	if len(data) == 0 {
 		return nil
 	}
-	return decodeStrict(data, out, false, false)
+	return decodeStrict(data, out, false)
 }
 
 // DecodeStrictKnownFields 解析 JSON 到指定目标,并拒绝结构体中未声明的字段。
@@ -88,7 +84,7 @@ func DecodeStrictKnownFields(data []byte, out any) error {
 	if len(data) == 0 {
 		return nil
 	}
-	return decodeStrict(data, out, true, false)
+	return decodeStrict(data, out, true)
 }
 
 // Valid 判断输入是否为合法 JSON,用于只需要结构合法性、不需要落地解析的边界校验。
@@ -122,10 +118,6 @@ func StringFromAny(v any) string {
 }
 
 // StringValue 只接受 JSON 字符串标量,其他类型一律返回空字符串。
-//
-// 与 StringFromAny 的区别是不做数字到字符串的宽松转换:校验不可信 JSON 时,
-// 数字形态的 id、布尔形态的 summary 必须判为"缺失"而不是被静默转成字符串,
-// 否则协议校验会放过明显不合契约的输入。
 func StringValue(v any) string {
 	text, _ := v.(string)
 	return text
@@ -138,7 +130,7 @@ func StringField(obj map[string]any, key string) string {
 
 // IntFromAny 把 JSON 数字或数字字符串转换为 int,无效值返回 0。
 func IntFromAny(v any) int {
-	if n, ok := int64Scalar(v, 64); ok {
+	if n, ok := int64Scalar(v); ok && (strconv.IntSize == 64 || (n >= math.MinInt32 && n <= math.MaxInt32)) {
 		return int(n)
 	}
 	return 0
@@ -146,7 +138,7 @@ func IntFromAny(v any) int {
 
 // Int32FromAny 把 JSON 数字或数字字符串转换为 int32,无效值返回默认值。
 func Int32FromAny(v any, defaultValue int32) int32 {
-	if n, ok := int64Scalar(v, 32); ok {
+	if n, ok := int64Scalar(v); ok {
 		converted, fits := intx.Int64ToInt32(n)
 		if !fits {
 			return defaultValue
@@ -158,7 +150,7 @@ func Int32FromAny(v any, defaultValue int32) int32 {
 
 // Int16FromAny 把 JSON 数字或数字字符串转换为 int16,无效值返回默认值。
 func Int16FromAny(v any, defaultValue int16) int16 {
-	if n, ok := int64Scalar(v, 16); ok {
+	if n, ok := int64Scalar(v); ok {
 		converted, fits := intx.Int64ToInt16(n)
 		if !fits {
 			return defaultValue
@@ -170,7 +162,7 @@ func Int16FromAny(v any, defaultValue int16) int16 {
 
 // Int64FromAny 把 JSON 数字或数字字符串转换为 int64,无效值返回默认值。
 func Int64FromAny(v any, defaultValue int64) int64 {
-	if n, ok := int64Scalar(v, 64); ok {
+	if n, ok := int64Scalar(v); ok {
 		return n
 	}
 	return defaultValue
@@ -205,15 +197,7 @@ func stringScalar(v any) (string, bool) {
 	}
 }
 
-// int64Scalar 把平台允许的 JSON 数字或数字字符串转换为 int64。
-func int64Scalar(v any, bitSize int) (int64, bool) {
-	if v == nil {
-		return 0, false
-	}
-	parseBits := bitSize
-	if parseBits == 0 {
-		parseBits = strconv.IntSize
-	}
+func int64Scalar(v any) (int64, bool) {
 	switch val := v.(type) {
 	case int:
 		return int64(val), true
@@ -222,25 +206,19 @@ func int64Scalar(v any, bitSize int) (int64, bool) {
 	case int32:
 		return int64(val), true
 	case int64:
-		return val, intFits(val, bitSize)
+		return val, true
 	case float32:
-		f := float64(val)
-		if math.IsNaN(f) || math.IsInf(f, 0) || math.Trunc(f) != f || f < -9223372036854775808 || f >= 9223372036854775808 {
-			return 0, false
-		}
-		n := int64(val)
-		return n, intFits(n, bitSize)
+		return int64Scalar(float64(val))
 	case float64:
-		if math.IsNaN(val) || math.IsInf(val, 0) || math.Trunc(val) != val || val < -9223372036854775808 || val >= 9223372036854775808 {
+		// 2^63 恰可由 float64 表示，但超出了 int64 上界。
+		if math.Trunc(val) != val || val < -0x1p63 || val >= 0x1p63 {
 			return 0, false
 		}
-		n := int64(val)
-		return n, intFits(n, bitSize)
+		return int64(val), true
 	case json.Number:
-		n, err := strconv.ParseInt(strings.TrimSpace(val.String()), 10, parseBits)
-		return n, err == nil
+		return int64Scalar(val.String())
 	case string:
-		n, err := strconv.ParseInt(strings.TrimSpace(val), 10, parseBits)
+		n, err := strconv.ParseInt(strings.TrimSpace(val), 10, 64)
 		return n, err == nil
 	default:
 		return 0, false
@@ -277,18 +255,6 @@ func float64Scalar(v any) (float64, bool) {
 // isFiniteFloat64 判断浮点值是否可安全参与范围比较和持久化。
 func isFiniteFloat64(value float64) bool {
 	return !math.IsNaN(value) && !math.IsInf(value, 0)
-}
-
-// intFits 校验转换结果是否仍落在调用方要求的整数宽度内。
-func intFits(n int64, bitSize int) bool {
-	switch bitSize {
-	case 32:
-		return n >= math.MinInt32 && n <= math.MaxInt32
-	case 64:
-		return true
-	default:
-		return false
-	}
 }
 
 // ObjectFromAny 把 JSON 值归一为对象,不匹配时返回空对象。
@@ -362,13 +328,10 @@ func normalize(v any) any {
 }
 
 // decodeStrict 使用标准 decoder 统一强校验 JSON,拒绝未知字段可选,并拒绝尾随非空 JSON token。
-func decodeStrict(data []byte, out any, knownFields, useNumber bool) error {
+func decodeStrict(data []byte, out any, knownFields bool) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	if knownFields {
 		dec.DisallowUnknownFields()
-	}
-	if useNumber {
-		dec.UseNumber()
 	}
 	if err := dec.Decode(out); err != nil {
 		return err

@@ -1,5 +1,3 @@
-// formatters.ts 提供 apps/web 内跨页面复用的时间与数值展示工具。
-
 const SHORT_DATE_TIME_FORMAT = new Intl.DateTimeFormat('zh-CN', {
   month: '2-digit',
   day: '2-digit',
@@ -105,7 +103,6 @@ export function formatDuration(seconds: number): string {
 /** 发生类时间里,服务器时钟略快于本机时仍算「刚刚」的容差(毫秒)。 */
 const CLOCK_SKEW_TOLERANCE_MS = 5 * 60_000
 
-/** pad2 把月、日、时、分补成两位。 */
 function pad2(value: number): string {
   return String(value).padStart(2, '0')
 }
@@ -172,17 +169,6 @@ export function formatGpa(value: number): string {
   return Number.isFinite(value) ? value.toFixed(2) : '—'
 }
 
-/** formatPercent 展示完成率等比例,四舍五入到整数百分比。 */
-export function formatPercent(done: number, total: number): string {
-  if (total <= 0) return '—'
-  return `${Math.round((done / total) * 100)}%`
-}
-
-/**
- * formatFileSize 把字节数换成用户向文件大小文案。
- * 课时材料、题库附件、备份记录与导出产物共用它 —— 这是跨模块的通用格式化,
- * 不属于任何单个模块的文案映射,故放在此处而不是 labels/<module>.ts。
- */
 export function formatFileSize(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '大小未知'
   if (bytes < 1024) return `${bytes} 字节`

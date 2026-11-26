@@ -13,6 +13,7 @@ import (
 	"chaimir/internal/platform/background"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/snowflake"
@@ -20,7 +21,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// SimModuleDeps 汇总组合根装配 M4 需要的基础设施和跨模块契约。
+// SimModuleDeps 是 M4 装配所需的依赖。
 type SimModuleDeps struct {
 	Router          gin.IRouter
 	Database        *db.DB
@@ -31,6 +32,7 @@ type SimModuleDeps struct {
 	Storage         *storage.Storage
 	Audit           audit.Writer
 	WSHub           *ws.Hub
+	EventBus        eventbus.Bus
 	Auth            *auth.Manager
 	Roles           contracts.IdentityService
 	BackendAdapters sim.BackendRegistry
@@ -48,6 +50,10 @@ func RegisterSimModule(ctx context.Context, deps SimModuleDeps) (*sim.Service, e
 		return nil, fmt.Errorf("sim module 缺少统一对象存储")
 	}
 	store := sim.NewStore(deps.Database)
+	fanout, ok := deps.EventBus.(eventbus.FanoutBus)
+	if !ok {
+		return nil, fmt.Errorf("sim module 缺少事件广播能力")
+	}
 	svc, err := sim.NewService(sim.ServiceDeps{
 		Store:           store,
 		IDs:             deps.IDs,
@@ -57,6 +63,7 @@ func RegisterSimModule(ctx context.Context, deps SimModuleDeps) (*sim.Service, e
 		Audit:           deps.Audit,
 		Identity:        deps.Roles,
 		WSHub:           deps.WSHub,
+		EventBus:        fanout,
 		BackendAdapters: deps.BackendAdapters,
 		SimBackend:      deps.SimBackend,
 	})
@@ -66,22 +73,18 @@ func RegisterSimModule(ctx context.Context, deps SimModuleDeps) (*sim.Service, e
 	if err := sim.RegisterRoutes(deps.Router, svc, deps.Auth, deps.Roles); err != nil {
 		return nil, err
 	}
-	previewTask, err := simPackagePreviewTask(deps.SimBackend, svc)
-	if err != nil {
+	if err := sim.RegisterEventSubscriptions(svc); err != nil {
 		return nil, err
 	}
-	go background.Run(ctx, previewTask)
+	// 隔离预览产生扩展包上架所需的确定性检查和 Worker 预览。
+	if err := background.Start(ctx,
+		background.Task{
+			Name:     "sim.package_preview",
+			Interval: time.Duration(deps.SimBackend.PreviewPollIntervalSeconds) * time.Second,
+			Run:      svc.RunPackagePreviewOnce,
+		},
+	); err != nil {
+		return nil, err
+	}
 	return svc, nil
-}
-
-// simPackagePreviewTask 把上架前隔离预览接入统一后台任务运行器。
-// 它是 determinism_check / worker_preview 两项审核门禁的唯一生产者,缺了扩展包永远无法上架。
-func simPackagePreviewTask(cfg config.SimBackendConfig, svc *sim.Service) (background.Task, error) {
-	if svc == nil {
-		return background.Task{}, fmt.Errorf("sim package preview task 缺少 service")
-	}
-	if cfg.PreviewPollIntervalSeconds <= 0 {
-		return background.Task{}, fmt.Errorf("SIM_PREVIEW_POLL_INTERVAL_SECONDS 必须大于 0")
-	}
-	return background.Task{Name: "sim.package_preview", Interval: time.Duration(cfg.PreviewPollIntervalSeconds) * time.Second, Run: svc.RunPackagePreviewOnce}, nil
 }

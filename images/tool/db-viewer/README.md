@@ -21,6 +21,7 @@
 - 必需 bindings：[{"name":"database","capability":"postgres-compatible","source_component":"web","endpoint":"postgres","protocol":"TCP","required_at_start":true,"config_binding":"env:CHAIMIR_DATABASE_ADDRESS"}]。
 - 必需 links：无；本镜像不声明跨组件 link。
 - binding 的 endpoint、协议、配置键和启动前置以 manifest 为准；缺失、重复、错误能力或错误 provider 均拒绝编排。
+- 数据库绑定只接收 `主机:端口`，端口范围 1–65535；入口拒绝内嵌协议、凭据、路径、查询和片段。
 
 ## 端口与服务
 
@@ -43,6 +44,8 @@
 - Secret 环境键：POSTGRES_PASSWORD。
 - 必需材料映射：[{"component":"web","env":"POSTGRES_PASSWORD","secret_key":"PG_PASSWORD","source":"deploy/config/chaimir.env","runtime_value":"secret-or-kms"}]
 - Secret 只来自平台 Secret/KMS 运行时注入，不能写入 Dockerfile、manifest、README、镜像层或测试输出。
+- 数据库密码由标准库转义，完整保留空白与特殊字符，不在错误中回显。
+- 数据库连接要求 TLS，连接 URL 与 pgweb 启动选项使用同一加密要求。
 
 ## 持久化与隔离边界
 

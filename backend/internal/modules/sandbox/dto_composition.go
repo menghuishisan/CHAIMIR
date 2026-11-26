@@ -25,6 +25,9 @@ type CompositionBindingPreview struct {
 	SourceComponent string                     `json:"source_component"`
 	SourceName      string                     `json:"source_name"`
 	ConfigBinding   string                     `json:"config_binding"`
+	Title           string                     `json:"title"`
+	Optional        bool                       `json:"optional"`
+	Multiple        bool                       `json:"multiple"`
 	Options         []CompositionBindingOption `json:"options"`
 }
 

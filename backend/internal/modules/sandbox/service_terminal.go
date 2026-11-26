@@ -1,11 +1,13 @@
-// sandbox service_terminal 文件实现终端和 Web 工具接入前的归属、容器与工具校验。
 package sandbox
 
 import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
+	"net/url"
+	"slices"
 	"strings"
 
 	"chaimir/internal/platform/ids"
@@ -13,29 +15,42 @@ import (
 	"chaimir/internal/platform/workload"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/terminal"
+
 	k8sexec "k8s.io/client-go/util/exec"
 )
 
 const studentAccessLabel = "chaimir.io/student-access"
 
-// sandboxTerminalSessionScope 隔离同一账号在不同沙箱中的终端连接。
 func sandboxTerminalSessionScope(sandboxID int64) string {
 	return "sandbox:" + ids.Format(sandboxID) + ":terminal"
 }
 
-// sandboxProgressSessionScope 隔离同一账号在不同沙箱中的进度连接。
 func sandboxProgressSessionScope(sandboxID int64) string {
 	return "sandbox:" + ids.Format(sandboxID) + ":progress"
 }
 
-// closeSandboxSessions 尝试关闭被撤销主体的全部长连接,不因终端关闭失败跳过进度连接。
 func (s *Service) closeSandboxSessions(tenantID, accountID, sandboxID int64) error {
 	if s.wsHub == nil {
 		return nil
 	}
+	return closeSandboxSessionsFor(s.wsHub, tenantID, accountID, sandboxID)
+}
+
+type sandboxSessionCloser interface {
+	CloseSession(ws.SessionKey) error
+}
+
+func closeSandboxSessionsFor(hub sandboxSessionCloser, tenantID, accountID, sandboxID int64) error {
+	if tenantID <= 0 || accountID <= 0 || sandboxID <= 0 {
+		return apperr.ErrSandboxContractRequestInvalid
+	}
+	if hub == nil {
+		return apperr.ErrSandboxToolProxyUnavailable
+	}
 	return errors.Join(
-		s.wsHub.CloseSession(ws.SessionKey{TenantID: tenantID, AccountID: accountID, Scope: sandboxTerminalSessionScope(sandboxID)}),
-		s.wsHub.CloseSession(ws.SessionKey{TenantID: tenantID, AccountID: accountID, Scope: sandboxProgressSessionScope(sandboxID)}),
+		hub.CloseSession(ws.SessionKey{TenantID: tenantID, AccountID: accountID, Scope: sandboxTerminalSessionScope(sandboxID)}),
+		hub.CloseSession(ws.SessionKey{TenantID: tenantID, AccountID: accountID, Scope: sandboxProgressSessionScope(sandboxID)}),
 	)
 }
 
@@ -54,8 +69,8 @@ func (s *Service) TerminalTargetForOwner(ctx context.Context, tenantID, accountI
 	if err != nil {
 		return TerminalTarget{}, err
 	}
-	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
-		return TerminalTarget{}, err
+	if !sandboxExecAllowed(sb) {
+		return TerminalTarget{}, apperr.ErrSandboxStateInvalid
 	}
 	targetContainer := strings.TrimSpace(container)
 	if targetContainer == "" {
@@ -72,48 +87,83 @@ func (s *Service) TerminalTargetForOwner(ctx context.Context, tenantID, accountI
 }
 
 // AttachTerminal 把已鉴权输入输出流代理到 Kubernetes exec PTY。
-func (s *Service) AttachTerminal(ctx context.Context, target TerminalTarget, stdin io.Reader, stdout io.Writer) error {
+func (s *Service) AttachTerminal(ctx context.Context, target TerminalTarget, stdin io.Reader, stdout io.Writer, sizes terminal.SizeQueue) error {
 	if target.TenantID <= 0 || target.SandboxID <= 0 || strings.TrimSpace(target.Namespace) == "" || strings.TrimSpace(target.Container) == "" || len(target.Command) == 0 {
 		return apperr.ErrSandboxToolProxyUnavailable
 	}
 	if err := s.recordTerminalOpen(ctx, target); err != nil {
 		return err
 	}
-	return s.orchestrator.ExecStream(ctx, target.Namespace, target.Container, target.Command, stdin, stdout, stdout, true)
+	return s.orchestrator.ExecStream(ctx, target.Namespace, target.Container, target.Command, stdin, stdout, stdout, true, sizes)
+}
+
+func (s *Service) AttachTerminalForOwner(ctx context.Context, tenantID, accountID int64, target TerminalTarget, stdin io.Reader, stdout io.Writer, sizes terminal.SizeQueue) error {
+	expected, err := s.TerminalTargetForOwner(ctx, tenantID, accountID, target.SandboxID, target.Container)
+	if err != nil {
+		return err
+	}
+	if expected.TenantID != target.TenantID || expected.SandboxID != target.SandboxID || expected.Namespace != target.Namespace || expected.Container != target.Container || !slices.Equal(expected.Command, target.Command) {
+		return apperr.ErrSandboxOwnershipInvalid
+	}
+	return s.AttachTerminal(ctx, expected, stdin, stdout, sizes)
 }
 
 // ToolProxyTargetForOwner 校验用户归属并解析 Web 工具代理目标。
-func (s *Service) ToolProxyTargetForOwner(ctx context.Context, tenantID, accountID, sandboxID int64, toolCode string) (Sandbox, SandboxTool, error) {
-	var sb Sandbox
-	var tools []SandboxTool
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		sb, err = tx.GetSandbox(ctx, tenantID, sandboxID)
-		if err != nil {
-			return apperr.ErrSandboxNotFound.WithCause(err)
-		}
-		if !sandboxAccountAuthorized(sb, accountID) {
-			return apperr.ErrSandboxOwnershipInvalid
-		}
-		tools, err = tx.ListSandboxTools(ctx, tenantID, sandboxID)
-		if err != nil {
-			return apperr.ErrSandboxToolNotFound.WithCause(err)
-		}
-		return nil
-	}); err != nil {
-		return Sandbox{}, SandboxTool{}, err
-	}
-	if err := s.requireSandboxModule(ctx, sb); err != nil {
-		return Sandbox{}, SandboxTool{}, err
-	}
-	tool, err := s.readySandboxTool(ctx, sb, tools, SandboxToolKindWebEmbed, toolCode)
+func (s *Service) ToolProxyTargetForOwner(ctx context.Context, tenantID, accountID, sandboxID int64, toolCode, proxyPath string) (Sandbox, *url.URL, error) {
+	sb, err := s.sandboxForOwner(ctx, tenantID, accountID, sandboxID)
 	if err != nil {
-		return Sandbox{}, SandboxTool{}, err
+		return Sandbox{}, nil, err
+	}
+	target, err := s.toolProxyTarget(ctx, sb, toolCode, proxyPath)
+	return sb, target, err
+}
+
+func (s *Service) toolProxyTarget(ctx context.Context, sb Sandbox, toolCode, proxyPath string) (*url.URL, error) {
+	tool, err := s.readySandboxTool(ctx, sb, SandboxToolKindWebEmbed, toolCode)
+	if err != nil {
+		return nil, err
+	}
+	target, err := toolProxyURL(sb, tool, proxyPath)
+	if err != nil {
+		return nil, err
 	}
 	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
-		return Sandbox{}, SandboxTool{}, err
+		return nil, err
 	}
-	return sb, tool, nil
+	return target, nil
+}
+
+// toolProxyURL 保持最长路径段匹配；不得因声明顺序把请求发往其他组件。
+func toolProxyURL(sb Sandbox, tool SandboxTool, proxyPath string) (*url.URL, error) {
+	if err := validateToolServicesAndRoutes(&tool.ResourceSpec); err != nil {
+		return nil, apperr.ErrSandboxToolProxyUnavailable.WithCause(err)
+	}
+	proxyPath = "/" + strings.TrimPrefix(proxyPath, "/")
+	var selected *workload.RouteSpec
+	for i := range tool.ResourceSpec.Routes {
+		route := &tool.ResourceSpec.Routes[i]
+		prefix := route.PathPrefix
+		if prefix != "/" && proxyPath != prefix && !strings.HasPrefix(proxyPath, prefix+"/") {
+			continue
+		}
+		if selected == nil || len(prefix) > len(selected.PathPrefix) {
+			selected = route
+		}
+	}
+	if selected == nil || strings.TrimSpace(sb.Namespace) == "" {
+		return nil, apperr.ErrSandboxToolProxyUnavailable.WithCause(fmt.Errorf("工具 %s 的路径 %q 无有效 Service 目标", tool.ToolCode, proxyPath))
+	}
+	for _, service := range tool.ResourceSpec.Services {
+		if service.Name != selected.Service {
+			continue
+		}
+		for _, port := range service.Ports {
+			if port.Name == selected.Port {
+				return &url.URL{Scheme: "http", Host: fmt.Sprintf("%s.%s.svc.cluster.local:%d", service.Name, sb.Namespace, port.Port)}, nil
+			}
+		}
+	}
+	return nil, apperr.ErrSandboxToolProxyUnavailable
 }
 
 // RunCommandToolForOwner 在命令工具容器中执行一次受控 argv 命令。
@@ -121,16 +171,21 @@ func (s *Service) RunCommandToolForOwner(ctx context.Context, tenantID, accountI
 	if tenantID <= 0 || accountID <= 0 || sandboxID <= 0 || strings.TrimSpace(toolCode) == "" || !workload.ValidNonShellCommand(req.Command) {
 		return ToolRunResponse{}, apperr.ErrSandboxToolRunRequestInvalid
 	}
+	sb, err := s.sandboxForOwner(ctx, tenantID, accountID, sandboxID)
+	if err != nil {
+		return ToolRunResponse{}, err
+	}
+	tool, err := s.readySandboxTool(ctx, sb, SandboxToolKindCommand, toolCode)
+	if err != nil {
+		return ToolRunResponse{}, err
+	}
+	return s.runCommandTool(ctx, sb, tool, req)
+}
+
+func (s *Service) runCommandTool(ctx context.Context, sb Sandbox, tool SandboxTool, req ToolRunRequest) (ToolRunResponse, error) {
 	stdin, err := decodeOptionalBase64(req.StdinBase64)
 	if err != nil {
 		return ToolRunResponse{}, apperr.ErrSandboxToolRunRequestInvalid.WithCause(err)
-	}
-	sb, tool, err := s.commandToolTargetForOwner(ctx, tenantID, accountID, sandboxID, toolCode)
-	if err != nil {
-		return ToolRunResponse{}, err
-	}
-	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
-		return ToolRunResponse{}, err
 	}
 	target := commandToolExecTarget(tool)
 	if target == "" {
@@ -147,33 +202,26 @@ func (s *Service) RunCommandToolForOwner(ctx context.Context, tenantID, accountI
 	if timeoutSec <= 0 {
 		return ToolRunResponse{}, apperr.ErrSandboxToolRunRequestInvalid
 	}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		return ToolRunResponse{}, err
+	}
 	execCtx, cancel := context.WithTimeout(ctx, timeDurationSeconds(int(timeoutSec)))
 	defer cancel()
-	stdout, stderr, err := s.orchestrator.Exec(execCtx, sb.Namespace, target, req.Command, stdin, false)
-	if err != nil {
-		if exitCode, ok := commandToolExitCode(err); ok {
-			if recordErr := s.recordCommandToolRun(ctx, sb, tool, req.Command); recordErr != nil {
-				return ToolRunResponse{}, recordErr
-			}
-			return ToolRunResponse{
-				StdoutBase64: base64.StdEncoding.EncodeToString(stdout),
-				StderrBase64: base64.StdEncoding.EncodeToString(stderr),
-				ExitCode:     exitCode,
-			}, nil
+	stdout, stderr, execErr := s.orchestrator.Exec(execCtx, sb.Namespace, target, req.Command, stdin, false)
+	exitCode := 0
+	if execErr != nil {
+		var exited bool
+		exitCode, exited = commandToolExitCode(execErr)
+		if !exited {
+			return ToolRunResponse{}, sandboxExecFailure(apperr.ErrSandboxExecFailed, execErr, stderr)
 		}
-		return ToolRunResponse{}, sandboxExecFailure(apperr.ErrSandboxExecFailed, err, stderr)
 	}
 	if err := s.recordCommandToolRun(ctx, sb, tool, req.Command); err != nil {
 		return ToolRunResponse{}, err
 	}
-	return ToolRunResponse{
-		StdoutBase64: base64.StdEncoding.EncodeToString(stdout),
-		StderrBase64: base64.StdEncoding.EncodeToString(stderr),
-		ExitCode:     0,
-	}, nil
+	return ToolRunResponse{StdoutBase64: base64.StdEncoding.EncodeToString(stdout), StderrBase64: base64.StdEncoding.EncodeToString(stderr), ExitCode: exitCode}, nil
 }
 
-// commandToolExitCode 从 Kubernetes exec 错误链中提取容器进程退出码。
 func commandToolExitCode(err error) (int, bool) {
 	var exitErr k8sexec.CodeExitError
 	if errors.As(err, &exitErr) {
@@ -182,38 +230,6 @@ func commandToolExitCode(err error) (int, bool) {
 	return 0, false
 }
 
-// commandToolTargetForOwner 校验用户归属并解析已挂载的命令工具。
-func (s *Service) commandToolTargetForOwner(ctx context.Context, tenantID, accountID, sandboxID int64, toolCode string) (Sandbox, SandboxTool, error) {
-	var sb Sandbox
-	var tools []SandboxTool
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		sb, err = tx.GetSandbox(ctx, tenantID, sandboxID)
-		if err != nil {
-			return apperr.ErrSandboxNotFound.WithCause(err)
-		}
-		if !sandboxAccountAuthorized(sb, accountID) {
-			return apperr.ErrSandboxOwnershipInvalid
-		}
-		tools, err = tx.ListSandboxTools(ctx, tenantID, sandboxID)
-		if err != nil {
-			return apperr.ErrSandboxToolNotFound.WithCause(err)
-		}
-		return nil
-	}); err != nil {
-		return Sandbox{}, SandboxTool{}, err
-	}
-	if err := s.requireSandboxModule(ctx, sb); err != nil {
-		return Sandbox{}, SandboxTool{}, err
-	}
-	tool, err := s.readySandboxTool(ctx, sb, tools, SandboxToolKindCommand, toolCode)
-	if err != nil {
-		return Sandbox{}, SandboxTool{}, err
-	}
-	return sb, tool, nil
-}
-
-// commandToolExecTarget 返回命令工具唯一组件的 exec 目标。
 func commandToolExecTarget(tool SandboxTool) string {
 	if len(tool.ResourceSpec.Components) == 0 {
 		return ""
@@ -225,30 +241,18 @@ func commandToolExecTarget(tool SandboxTool) string {
 	return toolComponentPodName(tool.ToolCode, component.Name) + "/" + component.Name
 }
 
-// commandToolCommandAllowed 判断请求 argv 是否逐项命中工具白名单。
 func commandToolCommandAllowed(policy CommandToolPolicy, command []string) bool {
 	if !workload.ValidNonShellCommand(command) {
 		return false
 	}
 	for _, allowed := range policy.AllowedArgv {
-		if len(command) != len(allowed) {
-			continue
-		}
-		matched := true
-		for i := range command {
-			if command[i] != allowed[i] {
-				matched = false
-				break
-			}
-		}
-		if matched {
+		if slices.Equal(command, allowed) {
 			return true
 		}
 	}
 	return false
 }
 
-// commandToolTimeoutSeconds 计算命令工具实际执行超时。
 func commandToolTimeoutSeconds(policy CommandToolPolicy, requested, platformMax int32) int32 {
 	if requested <= 0 {
 		requested = policy.DefaultTimeoutSeconds
@@ -266,7 +270,6 @@ func commandToolTimeoutSeconds(policy CommandToolPolicy, requested, platformMax 
 	return requested
 }
 
-// decodeOptionalBase64 解码可选 stdin,空字符串表示无输入。
 func decodeOptionalBase64(raw string) ([]byte, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -275,7 +278,6 @@ func decodeOptionalBase64(raw string) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(raw)
 }
 
-// recordCommandToolRun 写入命令工具执行技术事件,不记录输入输出内容。
 func (s *Service) recordCommandToolRun(ctx context.Context, sb Sandbox, tool SandboxTool, command []string) error {
 	return s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
 		detail, err := jsonBytes(map[string]any{"tool_code": tool.ToolCode, "command": command[0]})
@@ -289,7 +291,6 @@ func (s *Service) recordCommandToolRun(ctx context.Context, sb Sandbox, tool San
 	})
 }
 
-// runtimeContainerAllowed 判断终端是否允许进入运行时声明中的容器。
 func runtimeContainerAllowed(runtime Runtime, container string) bool {
 	podName, containerName := splitExecTarget(container)
 	for _, pod := range podGroupForRuntime(runtime) {
@@ -305,7 +306,6 @@ func runtimeContainerAllowed(runtime Runtime, container string) bool {
 	return false
 }
 
-// defaultTerminalContainer 选择第一个显式允许学生进入的容器,避免默认进入链节点主容器。
 func defaultTerminalContainer(runtime Runtime) string {
 	for _, pod := range podGroupForRuntime(runtime) {
 		for _, container := range pod.Containers {
@@ -317,9 +317,11 @@ func defaultTerminalContainer(runtime Runtime) string {
 	return ""
 }
 
-// recordTerminalOpen 写入终端打开技术事件,只记录容器目标,不保存终端输入内容。
 func (s *Service) recordTerminalOpen(ctx context.Context, target TerminalTarget) error {
 	return s.store.TenantTx(ctx, target.TenantID, func(ctx context.Context, tx TxStore) error {
+		if _, err := tx.MarkSandboxActive(ctx, target.TenantID, target.SandboxID); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
 		detail, err := jsonBytes(map[string]any{"container": target.Container})
 		if err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
@@ -331,7 +333,6 @@ func (s *Service) recordTerminalOpen(ctx context.Context, target TerminalTarget)
 	})
 }
 
-// runtimeExecTarget 返回平台内部执行 helper 的运行时主容器目标。
 func runtimeExecTarget(runtime Runtime) string {
 	for _, pod := range podGroupForRuntime(runtime) {
 		for _, container := range pod.Containers {
@@ -343,12 +344,10 @@ func runtimeExecTarget(runtime Runtime) string {
 	return "sandbox/" + runtime.AdapterSpec.RuntimeContainer.Name
 }
 
-// workspaceExecTarget 返回适配器显式声明的学生工作区 helper 目标。
 func workspaceExecTarget(runtime Runtime) string {
 	return strings.TrimSpace(runtime.AdapterSpec.WorkspaceOps.ExecTarget)
 }
 
-// podGroupForRuntime 复用编排拓扑,让终端和内部 exec 解析同一组 Pod。
 func podGroupForRuntime(runtime Runtime) []workload.PodSpec {
 	return podTopologyForAdapter(runtime.AdapterSpec)
 }

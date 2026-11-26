@@ -1,18 +1,3 @@
-// 作业作答页(深页,/student/courses/:courseId/assignments/:assignmentId)。设计 §7.2:
-// 页头为作业名 + 截止倒计时 + 一行属性(截止时间 · 可提交次数 · 迟交规则),右侧「历次提交」;
-// ≥lg 左侧答题卡(已作答实底、当前题描边、可跳转),右侧题目卡片依次排列;底部固定操作条
-// (保存状态、已作答 n / m、立即保存、提交作业)。不能再提交时(次数用完,或截止后不接收)页面只读,
-// 操作条换成一句原因和「查看结果」;截止后仍接收的作业照常作答,提交按迟交处理。
-//
-// FE-7 服务端草稿:进入先拉服务端草稿,编辑按 60 秒定时 + 失焦即时写回服务端,
-// 服务端草稿是权威;本地只保留尚未同步的编辑态与最近同步标记,
-// 服务端读写失败时不用本地内容替代草稿进入提交链路(规范 §6.6)。有未保存改动时离开页面先提醒。
-//
-// 答案黑盒:题面经 M6 → M5 GetContentFace 取得,答案/判题配置已在后端剥离,
-// 前端不做二次过滤也不请求 full 内容(铁律 1 + 对齐清单 §6.4)。
-//
-// 作业只引用 M5 理论题;题型和答案结构决定作答控件与判分路径。
-
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { ClipboardList, History, Info } from 'lucide-react'
@@ -33,7 +18,12 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { UnsavedChangesGuard } from '../../../../components/UnsavedChangesGuard'
-import { useActiveAnchor, useAsyncResource, usePageLocation, locationLabel } from '../../../../hooks'
+import {
+  useActiveAnchor,
+  useAsyncResource,
+  usePageLocation,
+  locationLabel,
+} from '../../../../hooks'
 import { formatDateTime, formatRelativeDeadline } from '../../../../utils/formatters'
 import { latePolicyLabel } from '../../../../utils/labels/teaching'
 import { errorDiagnostics, userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -58,7 +48,6 @@ import {
 } from '../../components/assignment/QuestionCard'
 import { SubmitConfirmModal } from '../../components/assignment/SubmitConfirmModal'
 
-/** 服务端草稿定时写回间隔:与 M6 接口设计 §6.2「自动每 60s」一致。 */
 const DRAFT_AUTOSAVE_INTERVAL_MS = 60_000
 
 interface LocalAssignmentDraft {
@@ -68,12 +57,10 @@ interface LocalAssignmentDraft {
   answers: AnswerMap
 }
 
-/** localDraftKey 将未同步作答限定到当前学生和作业。 */
 function localDraftKey(studentId: string, assignmentId: string) {
   return `chaimir:teaching-draft:${studentId}:${assignmentId}`
 }
 
-/** readLocalDraft 只读取归属和结构均有效的本机记录,显式报告恢复失败。 */
 function readLocalDraft(
   studentId: string,
   assignmentId: string
@@ -99,21 +86,12 @@ function readLocalDraft(
   }
 }
 
-/** writeLocalDraft 仅保存尚未写入服务端草稿的编辑。 */
-function writeLocalDraft(key: string, draft: LocalAssignmentDraft) {
-  window.localStorage.setItem(key, JSON.stringify(draft))
-}
-
-/**
- * StudentAssignmentPage 读取作业题面、服务端草稿与已提交次数。
- */
 export default function StudentAssignmentPage() {
   const { courseId = '', assignmentId = '' } = useParams<{
     courseId: string
     assignmentId: string
   }>()
 
-  // 题面、草稿与已提交次数一次读齐:草稿要按题目编号铺回表单,提交次数决定还能不能作答
   const view = useAsyncResource(
     () =>
       Promise.all([
@@ -139,7 +117,6 @@ export default function StudentAssignmentPage() {
     [assignmentId],
     () => false
   )
-  // 课程名只用于顶栏位置;读不到时顶栏用通用名称,不影响作答
   const outline = useAsyncResource(
     () => api.teaching.getCourseOutline(courseId),
     [courseId],
@@ -190,7 +167,6 @@ export default function StudentAssignmentPage() {
   )
 }
 
-/** AssignmentSkeleton 与真实内容同形:页头、左侧答题卡、右侧题目卡 */
 function AssignmentSkeleton() {
   return (
     <div aria-busy="true" className="flex flex-col gap-6">
@@ -215,7 +191,6 @@ interface AssignmentFormProps {
   courseId: string
   assignmentId: string
   detail: AssignmentDetail
-  /** 已用提交次数(本人在这份作业下的提交总数) */
   attemptsUsed: number
   studentId: string
   serverAnswers: AnswerMap
@@ -228,9 +203,6 @@ interface AssignmentFormProps {
   localStorageUnavailable: boolean
 }
 
-/**
- * AssignmentForm 承载作答、草稿自动保存与提交;不能再提交时只读。
- */
 function AssignmentForm({
   courseId,
   assignmentId,
@@ -248,7 +220,6 @@ function AssignmentForm({
 }: AssignmentFormProps) {
   const navigate = useNavigate()
   const assignment = detail.assignment
-  // 还能不能提交:与服务端提交校验同口径(次数用完,或截止后不接收即只读)
   const submitState = submissionWindow({
     dueAt: assignment.due_at,
     latePolicy: assignment.late_policy,
@@ -256,7 +227,6 @@ function AssignmentForm({
     attemptsUsed,
   })
   const readOnly = !submitState.open
-  // 只读时不恢复本机记录、不再写服务端草稿,页面显示服务器上的作答
   const restoreLocal = localDraftNeedsRestore && !readOnly
   const [answers, setAnswers] = useState<AnswerMap>(
     localDraftNeedsRestore && !restoreLocal ? serverAnswers : initialAnswers
@@ -272,10 +242,8 @@ function AssignmentForm({
   const [submitError, setSubmitError] = useState<string>()
   const [recoveryConflict, setRecoveryConflict] = useState(localDraftConflict && !readOnly)
   const [localCacheError, setLocalCacheError] = useState(localStorageUnavailable)
-  /** 已落库的作答快照:与当前作答逐题比对,得出「有几处改动未保存」 */
   const [savedAnswers, setSavedAnswers] = useState<AnswerMap>(serverAnswers)
 
-  // 未同步标记:只有真正改动过才写服务端,避免定时器空跑
   const dirtyRef = useRef(restoreLocal)
   const editVersionRef = useRef(restoreLocal ? 1 : 0)
   const inFlightSaveRef = useRef<Promise<boolean> | null>(null)
@@ -286,7 +254,38 @@ function AssignmentForm({
   const deadline = formatRelativeDeadline(assignment.due_at)
   const hasShortAnswer = detail.items.some((item) => item.body?.q_type === 'short_answer')
 
-  /** saveDraft 把当前作答写回服务端草稿;服务端成功才认为已保存。 */
+  const cacheDraft = useCallback(
+    (draft: AnswerMap | null) => {
+      try {
+        if (draft === null) {
+          window.localStorage.removeItem(localKey)
+        } else {
+          const record: LocalAssignmentDraft = {
+            studentId,
+            assignmentId,
+            serverUpdatedAt: serverUpdatedAtRef.current,
+            answers: draft,
+          }
+          window.localStorage.setItem(localKey, JSON.stringify(record))
+        }
+        setLocalCacheError(false)
+        return true
+      } catch (error) {
+        setLocalCacheError(true)
+        console.error('本机作答恢复记录无法更新', {
+          operation:
+            draft === null
+              ? 'teaching.assignment.clearLocalDraft'
+              : 'teaching.assignment.writeLocalDraft',
+          error: errorDiagnostics(error),
+        })
+        return false
+      }
+    },
+    [assignmentId, localKey, studentId]
+  )
+
+  // 保存期间有新编辑时继续同步最新快照；提交会等待同一个保存任务。
   const saveDraft = useCallback((): Promise<boolean> => {
     if (inFlightSaveRef.current) return inFlightSaveRef.current
     if (!dirtyRef.current) return Promise.resolve(true)
@@ -305,31 +304,9 @@ function AssignmentForm({
           if (snapshotVersion === editVersionRef.current) {
             dirtyRef.current = false
             setAutosaveState('saved')
-            try {
-              window.localStorage.removeItem(localKey)
-              setLocalCacheError(false)
-            } catch (error) {
-              setLocalCacheError(true)
-              console.error('已保存作答,但清除本机恢复记录失败', {
-                operation: 'teaching.assignment.clearLocalDraft',
-                error: errorDiagnostics(error),
-              })
-            }
+            cacheDraft(null)
           } else {
-            try {
-              writeLocalDraft(localKey, {
-                studentId,
-                assignmentId,
-                serverUpdatedAt: result.updated_at,
-                answers: answersRef.current,
-              })
-            } catch (error) {
-              setLocalCacheError(true)
-              console.error('本机作答恢复记录更新失败', {
-                operation: 'teaching.assignment.writeLocalDraft',
-                error: errorDiagnostics(error),
-              })
-            }
+            cacheDraft(answersRef.current)
           }
         } catch (error) {
           setAutosaveState('error')
@@ -348,7 +325,7 @@ function AssignmentForm({
     })
     inFlightSaveRef.current = tracked
     return tracked
-  }, [assignmentId, detail.items, localKey, studentId])
+  }, [assignmentId, cacheDraft, detail.items])
 
   useEffect(() => {
     if (restoreLocal) void saveDraft()
@@ -361,7 +338,6 @@ function AssignmentForm({
     return () => window.clearInterval(timer)
   }, [readOnly, saveDraft])
 
-  /** updateAnswer 记录作答并标记未同步。 */
   const updateAnswer = useCallback(
     (itemId: string, value: TheoryAnswer) => {
       if (readOnly || submitting || recoveryConflict) return
@@ -371,38 +347,14 @@ function AssignmentForm({
       dirtyRef.current = true
       setAutosaveState('idle')
       setAnswers(next)
-      try {
-        writeLocalDraft(localKey, {
-          studentId,
-          assignmentId,
-          serverUpdatedAt: serverUpdatedAtRef.current,
-          answers: next,
-        })
-        setLocalCacheError(false)
-      } catch (error) {
-        setLocalCacheError(true)
-        console.error('本机作答恢复记录写入失败', {
-          operation: 'teaching.assignment.writeLocalDraft',
-          error: errorDiagnostics(error),
-        })
-      }
+      cacheDraft(next)
     },
-    [assignmentId, localKey, readOnly, recoveryConflict, studentId, submitting]
+    [cacheDraft, readOnly, recoveryConflict, submitting]
   )
 
   const discardConflictingLocalDraft = useCallback(() => {
-    try {
-      window.localStorage.removeItem(localKey)
-      setLocalCacheError(false)
-      setRecoveryConflict(false)
-    } catch (error) {
-      setLocalCacheError(true)
-      console.error('本机作答恢复记录清除失败', {
-        operation: 'teaching.assignment.clearLocalDraft',
-        error: errorDiagnostics(error),
-      })
-    }
-  }, [localKey])
+    if (cacheDraft(null)) setRecoveryConflict(false)
+  }, [cacheDraft])
 
   const restoreConflictingLocalDraft = useCallback(() => {
     if (!pendingLocalAnswers) return
@@ -413,33 +365,10 @@ function AssignmentForm({
     setAnswers(next)
     setSavedAnswers(serverAnswers)
     setRecoveryConflict(false)
-    try {
-      writeLocalDraft(localKey, {
-        studentId,
-        assignmentId,
-        serverUpdatedAt: serverUpdatedAtRef.current,
-        answers: next,
-      })
-      setLocalCacheError(false)
-    } catch (error) {
-      setLocalCacheError(true)
-      console.error('本机作答恢复记录写入失败', {
-        operation: 'teaching.assignment.writeLocalDraft',
-        error: errorDiagnostics(error),
-      })
-    }
+    cacheDraft(next)
     void saveDraft()
-  }, [
-    assignmentId,
-    detail.items,
-    localKey,
-    pendingLocalAnswers,
-    saveDraft,
-    serverAnswers,
-    studentId,
-  ])
+  }, [cacheDraft, detail.items, pendingLocalAnswers, saveDraft, serverAnswers])
 
-  /** submit 正式提交作答。提交前先把草稿落库,确保服务端与页面一致。 */
   const submit = useCallback(async () => {
     setSubmitting(true)
     setSubmitError(undefined)
@@ -478,7 +407,6 @@ function AssignmentForm({
   )
   const answeredCount = sheetItems.filter((item) => item.answered).length
 
-  /** 未保存改动数:逐题与已落库快照比对 —— 「改了 2 题」比「有改动」信息量更足 */
   const dirtyCount = useMemo(
     () =>
       detail.items.filter(
@@ -488,7 +416,6 @@ function AssignmentForm({
     [answers, detail.items, savedAnswers]
   )
 
-  // 当前题跟随滚动;点答题卡或弹窗里的题号时跳过去,焦点落到那题的标题上
   const anchorIds = useMemo(
     () => detail.items.map((item) => questionAnchorId(item.id)),
     [detail.items]

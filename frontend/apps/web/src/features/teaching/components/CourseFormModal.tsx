@@ -1,9 +1,3 @@
-// 课程表单弹层(课程管理页与课程详情页共用)。
-// 创建与编辑共用同一表单:后端 CourseRequest 两者字段完全一致,分两套表单必然漂移。
-//
-// 课程表(schedule)是 JSONB 开放对象。这里不把它作为裸 JSON 文本域交给用户,
-// 而是渲染「星期 + 时间段」的显式字段(旧前端 16 处裸 JSON 是被审查列为 P0 的问题)。
-
 import { useCallback, useId, useMemo, useState } from 'react'
 import {
   CourseType,
@@ -35,12 +29,12 @@ import {
   teachingDifficultyLabel,
 } from '../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
+import { parseDateInput, toDateTimeInputValue } from '../../../utils/dateInput'
 import { ImageUploadField, readImageDataUrl } from '../../../components/ImageUploadField'
 import { courseTypeCover } from '../coursePresentation'
 import { COURSE_TYPES, TEACHING_DIFFICULTIES } from '../options'
 import { useCourseCoverSrc } from '../useCourseCoverSrc'
 
-/** 星期取值与显示名:课程表用它构造结构化的上课时间,不让用户手写 JSON。 */
 const WEEKDAYS = [
   { value: 'mon', label: '周一' },
   { value: 'tue', label: '周二' },
@@ -51,7 +45,6 @@ const WEEKDAYS = [
   { value: 'sun', label: '周日' },
 ] as const
 
-/** 课程表在 schedule 里的键:与后端约定的结构化形状对应。 */
 const SCHEDULE_WEEKDAY_KEY = 'weekday'
 const SCHEDULE_PERIOD_KEY = 'period'
 
@@ -78,8 +71,8 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
   const [credits, setCredits] = useState(String(course?.credits ?? '2'))
   const [weekday, setWeekday] = useState(readScheduleString(course, SCHEDULE_WEEKDAY_KEY, 'mon'))
   const [period, setPeriod] = useState(readScheduleString(course, SCHEDULE_PERIOD_KEY, ''))
-  const [startAt, setStartAt] = useState(toDateInput(course?.start_at))
-  const [endAt, setEndAt] = useState(toDateInput(course?.end_at))
+  const [startAt, setStartAt] = useState(toDateTimeInputValue(course?.start_at).slice(0, 10))
+  const [endAt, setEndAt] = useState(toDateTimeInputValue(course?.end_at).slice(0, 10))
   const [coverRef, setCoverRef] = useState(course?.cover_ref ?? '')
   const [coverPreview, setCoverPreview] = useState('')
   // 编辑已有封面时换一次投放授权用于预览;本次刚选的图优先,清空后两者都不显示。
@@ -88,18 +81,19 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
 
   const [formError, setFormError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
+  const [coverBusy, setCoverBusy] = useState(false)
+  const busy = submitting || coverBusy
 
-  /** validate 校验必填与取值范围,返回是否通过并把错误留在原位。 */
   const { errors, validate } = useFormValidation(useCallback(() => {
     const next: Record<string, string | null> = {
       name: name.trim() === '' ? '请输入课程名称' : null,
       semester: semester.trim() === '' ? '请输入学校登记的完整学期名称' : null,
       credits:
         Number.isFinite(Number(credits)) && Number(credits) > 0 ? null : '学分需要是大于 0 的数字',
-      startAt: startAt === '' ? '请选择开课日期' : null,
+      startAt: !parseDateInput(startAt) ? '请选择有效的开课日期' : null,
       endAt:
-        endAt === ''
-          ? '请选择结课日期'
+        !parseDateInput(endAt)
+          ? '请选择有效的结课日期'
           : startAt !== '' && endAt < startAt
             ? '结课日期不能早于开课日期'
             : null,
@@ -110,6 +104,7 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
+      if (busy) return
       if (!validate()) return
 
       setSubmitting(true)
@@ -123,8 +118,8 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
         credits: Number(credits),
         // 课程表按结构化字段组装,不接受用户手写 JSON
         schedule: { [SCHEDULE_WEEKDAY_KEY]: weekday, [SCHEDULE_PERIOD_KEY]: period.trim() },
-        start_at: toIsoStart(startAt),
-        end_at: toIsoEnd(endAt),
+        start_at: new Date(`${startAt}T00:00:00`).toISOString(),
+        end_at: new Date(`${endAt}T23:59:59.999`).toISOString(),
         // 留空即不设封面:传空串会把「没设过」和「设了个空值」混成一种状态
         cover_ref: coverRef === '' ? undefined : coverRef,
       }
@@ -144,6 +139,7 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
     },
     [
       course?.id,
+      busy,
       coverRef,
       credits,
       description,
@@ -175,7 +171,12 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
   )
 
   return (
-    <Drawer open onOpenChange={(open) => !open && onClose()}>
+    <Drawer
+      open
+      onOpenChange={(open) => {
+        if (!open && !busy) onClose()
+      }}
+    >
       <DrawerContent size="wide">
         <DrawerHeader>
           <DrawerTitle>{editing ? '编辑课程' : '新建课程'}</DrawerTitle>
@@ -300,6 +301,8 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
                 inputId={`${fieldId}-cover`}
                 hasImage={coverRef !== ''}
                 failureMessage="封面这次没有更新成功,请稍后重试。"
+                disabled={submitting}
+                onBusyChange={setCoverBusy}
                 preview={
                   <CoverImage
                     id={course?.id ?? ''}
@@ -311,10 +314,10 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
                   />
                 }
                 onUpload={async (file, onProgress) => {
+                  const preview = await readImageDataUrl(file)
                   const uploaded = await api.teaching.uploadCourseCover(file, onProgress)
                   setCoverRef(uploaded.object_ref)
-                  // 此刻封面还只在暂存位、课程也可能还不存在,拿不到投放地址,先用本地文件预览
-                  setCoverPreview(await readImageDataUrl(file))
+                  setCoverPreview(preview)
                 }}
                 onCleared={() => {
                   setCoverRef('')
@@ -326,10 +329,10 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
           </DrawerBody>
           <DrawerFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
               取消
             </Button>
-            <Button type="submit" variant="primary" loading={submitting}>
+            <Button type="submit" variant="primary" loading={submitting} disabled={coverBusy}>
               {editing ? '保存修改' : '创建课程'}
             </Button>
           </DrawerFooter>
@@ -346,22 +349,4 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
 function readScheduleString(course: Course | undefined, key: string, fallback: string): string {
   const value = course?.schedule?.[key]
   return typeof value === 'string' ? value : fallback
-}
-
-/** toDateInput 把后端时间转成 date 控件需要的 YYYY-MM-DD;无法解析时回空串。 */
-function toDateInput(value: string | undefined): string {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toISOString().slice(0, 10)
-}
-
-/** toIsoStart 把日期转成当天开始时刻的 ISO 串(后端按 RFC3339 解析)。 */
-function toIsoStart(value: string): string {
-  return new Date(`${value}T00:00:00`).toISOString()
-}
-
-/** toIsoEnd 把日期转成当天结束时刻的 ISO 串,保证结课日整天有效。 */
-function toIsoEnd(value: string): string {
-  return new Date(`${value}T23:59:59`).toISOString()
 }

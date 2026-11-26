@@ -1,6 +1,6 @@
-# 镜像流水线:除四个服务镜像外的运行时/工具/判题器/仿真/基础镜像。
+# 镜像流水线:按依赖构建运行时、平台设施及迁移/运维镜像；backend/frontend 由专用流水线负责。
 # 依据 docs/总-部署架构设计.md §六 + docs/总-镜像与容器设计.md:
-#   构建型镜像含 Dockerfile + manifest.yaml;矩阵构建 → Trivy/SBOM → 推 Harbor → Cosign 签名/证明/验证。
+#   按依赖分批并行构建；后续批次使用当前运行中已验证的上游 digest。
 # 路径触发:通用镜像源码、manifest 或共享供应链实现变化时运行。
 name: images
 
@@ -15,6 +15,7 @@ on:
       - "!images/service/migrate/**"
       - "!images/service/cron/**"
       - ".github/workflows/images.yml"
+      - ".github/workflows/image-build-wave.yml"
       - "deploy/ci/**"
   pull_request:
     paths:
@@ -25,322 +26,132 @@ on:
       - "!images/service/migrate/**"
       - "!images/service/cron/**"
       - ".github/workflows/images.yml"
+      - ".github/workflows/image-build-wave.yml"
+      - "deploy/ci/**"
 
 permissions:
   contents: read
 
 jobs:
-  # 发现变更的镜像目录(每个镜像目录含 Dockerfile + manifest.yaml)。
   discover:
     runs-on: ubuntu-latest
     outputs:
-      go_builder_matrix: ${{ steps.set.outputs.go_builder_matrix }}
-      base_matrix: ${{ steps.set.outputs.base_matrix }}
-      main_matrix: ${{ steps.set.outputs.main_matrix }}
+      wave_0: ${{ steps.set.outputs.wave_0 }}
+      wave_1: ${{ steps.set.outputs.wave_1 }}
+      wave_2: ${{ steps.set.outputs.wave_2 }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: 校验 manifest、Dockerfile 与 digest lock 契约
         shell: pwsh
-        run: ./images/validate-image-metadata.ps1 -RepoRoot .
+        run: ./images/validate-image-metadata.ps1 -RepoRoot . -AllowUnpromoted
       - id: set
-        name: 收集 images/ 下含 Dockerfile 的镜像目录
+        name: 生成通用镜像构建矩阵
+        shell: pwsh
         run: |
-          set -euo pipefail
+          Import-Module ./images/lib/ImageMetadata.psm1
+          $root = (Get-Location).Path
+          $catalog = Get-ChaimirImageCatalog -ImagesRoot (Join-Path $root 'images')
+          $services = @('service/backend', 'service/frontend', 'service/migrate', 'service/cron')
+          $items = @{}
+          $dependencies = @{}
+          foreach ($entry in ($catalog.Values | Sort-Object Image)) {
+              if (-not $entry.Deployable -or $entry.SourceType -eq 'upstream-pinned' -or $entry.Image -in $services) { continue }
+              $build = Get-ChaimirYamlBlock -Path $entry.Manifest -BlockName 'build'
+              $paths = Resolve-ChaimirImageBuildPaths -RepoRoot $root -ManifestPath $entry.Manifest -ContextValue (Get-ChaimirYamlValue -Lines $build -Key 'context') -DockerfileValue (Get-ChaimirYamlValue -Lines $build -Key 'dockerfile')
+              $sources = Get-ChaimirImageBuildSources -ManifestPath $entry.Manifest -DockerfileText (Get-Content -LiteralPath $paths.Dockerfile -Raw)
+              $dependencies[$entry.Image] = @($sources.Values | Where-Object { -not $_.Contains('@') })
+              $items[$entry.Image] = @{
+                  logical = $entry.Image
+                  safe = $entry.Image.Replace('/', '-')
+                  context = (Resolve-Path -LiteralPath $paths.Context -Relative).Replace('\', '/')
+                  dockerfile = (Resolve-Path -LiteralPath $paths.Dockerfile -Relative).Replace('\', '/')
+              }
+          }
+          foreach ($image in $items.Keys) {
+              $items[$image].required_candidates = (@($dependencies[$image] | Where-Object { $items.ContainsKey($_) }) -join ' ')
+          }
+          $waves = @(Get-ChaimirImageBuildWaves -Dependencies $dependencies)
+          if ($waves.Count -eq 0 -or $waves.Count -gt 3) { throw "通用镜像依赖需要 $($waves.Count) 批，流水线支持 1–3 批" }
+          for ($index = 0; $index -lt 3; $index++) {
+              $entries = @(if ($index -lt $waves.Count) { foreach ($image in $waves[$index].Images) { $items[$image] } })
+              $matrix = ConvertTo-Json -Compress -Depth 4 -InputObject @{ include = $entries }
+              "wave_$index=$matrix" >> $env:GITHUB_OUTPUT
+          }
 
-          # 输出矩阵项:context/dockerfile 以 manifest 为准,避免 CI 与本地构建上下文不一致。
-          go_builder='[]'
-          base='[]'
-          main='[]'
-          read_top_level() {
-            local key="$1"
-            local file="$2"
-            awk -v key="$key" '
-              $0 ~ "^" key ":" {
-                sub("^[^:]+:[[:space:]]*", "");
-                gsub(/^["'\''"]|["'\''"]$/, "");
-                print;
-                exit;
-              }
-            ' "$file"
-          }
-          read_build_value() {
-            local key="$1"
-            local file="$2"
-            awk -v key="$key" '
-              /^build:[[:space:]]*$/ { inside = 1; next }
-              inside && /^[A-Za-z_][A-Za-z0-9_]*:[[:space:]]*/ { inside = 0 }
-              inside && $0 ~ "^[[:space:]]+" key ":" {
-                sub("^[[:space:]]+" key ":[[:space:]]*", "");
-                gsub(/^["'\''"]|["'\''"]$/, "");
-                print;
-                exit;
-              }
-            ' "$file"
-          }
-          read_supply_chain_value() {
-            local key="$1"
-            local file="$2"
-            awk -v key="$key" '
-              /^supply_chain:[[:space:]]*$/ { inside = 1; next }
-              inside && /^[A-Za-z_][A-Za-z0-9_]*:[[:space:]]*/ { inside = 0 }
-              inside && $0 ~ "^[[:space:]]+" key ":[[:space:]]*" {
-                sub("^[[:space:]]+" key ":[[:space:]]*", "");
-                gsub(/^["'\''"]|["'\''"]$/, "");
-                print;
-                exit;
-              }
-            ' "$file"
-          }
-          dirs=$(find images -name Dockerfile -printf '%h\n' | sort -u)
-          for d in $dirs; do
-            manifest="$d/manifest.yaml"
-            test -f "$manifest"
-            logical=$(read_top_level image "$manifest")
-            safe=${logical//\//-}
-            context_value=$(read_build_value context "$manifest")
-            dockerfile_value=$(read_build_value dockerfile "$manifest")
-            if [[ -z "$logical" ]]; then
-              echo "manifest 缺少顶层 image: $manifest" >&2
-              exit 1
-            fi
-            deployable=$(read_supply_chain_value deployable "$manifest")
-            if [[ "$deployable" == "false" ]]; then
-              block_reason=$(read_supply_chain_value block_reason "$manifest")
-              if [[ -z "$block_reason" ]]; then
-                echo "manifest 将镜像标记为不可部署但缺少 block_reason: $manifest" >&2
-                exit 1
-              fi
-              continue
-            fi
-            if [[ "$logical" == "service/backend" || "$logical" == "service/frontend" || "$logical" == "service/migrate" || "$logical" == "service/cron" ]]; then
-              continue
-            fi
-            if [[ -z "$context_value" ]]; then
-              context_value="."
-            fi
-            if [[ -z "$dockerfile_value" ]]; then
-              dockerfile_value="Dockerfile"
-            fi
-            if [[ "$context_value" == images/* ]]; then
-              context_rel="$context_value"
-            else
-              context_abs=$(realpath -m "$d/$context_value")
-              context_rel=$(realpath --relative-to="$GITHUB_WORKSPACE" "$context_abs")
-              if [[ "$context_rel" == "." ]]; then
-                context_rel="."
-              fi
-            fi
-            if [[ "$dockerfile_value" == images/* ]]; then
-              dockerfile_rel="$dockerfile_value"
-            elif [[ "$context_rel" == "." ]]; then
-              dockerfile_rel="$dockerfile_value"
-            else
-              dockerfile_rel="$context_rel/$dockerfile_value"
-            fi
-            item=$(jq -cn \
-              --arg dir "$d" \
-              --arg logical "$logical" \
-              --arg safe "$safe" \
-              --arg context "$context_rel" \
-              --arg dockerfile "$dockerfile_rel" \
-              '{dir:$dir, logical:$logical, safe:$safe, context:$context, dockerfile:$dockerfile}')
-            if [[ "$logical" == "base/go-builder" ]]; then
-              go_builder=$(echo "$go_builder" | jq -c --argjson item "$item" '. + [$item]')
-            elif [[ "$logical" == base/* ]]; then
-              base=$(echo "$base" | jq -c --argjson item "$item" '. + [$item]')
-            else
-              main=$(echo "$main" | jq -c --argjson item "$item" '. + [$item]')
-            fi
-          done
-          echo "go_builder_matrix={\"include\":$go_builder}" >> "$GITHUB_OUTPUT"
-          echo "base_matrix={\"include\":$base}" >> "$GITHUB_OUTPUT"
-          echo "main_matrix={\"include\":$main}" >> "$GITHUB_OUTPUT"
-
-  build-go-builder:
+  build-wave-0:
     needs: discover
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.discover.outputs.go_builder_matrix != '{"include":[]}'
-    runs-on: ubuntu-latest
-    outputs:
-      digest_ref: ${{ steps.build.outputs.digest_ref }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.discover.outputs.go_builder_matrix) }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: 安装 Cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-        with:
-          cosign-release: v2.4.3
-      - name: 构建+扫描+签名+推送
-        id: build
-        uses: ./deploy/ci/build-scan-sign-push
-        with:
-          image: ${{ secrets.HARBOR_REGISTRY }}/${{ matrix.logical }}
-          tag: ${{ github.sha }}
-          context: ${{ matrix.context }}
-          dockerfile: ${{ matrix.dockerfile }}
-          registry: ${{ secrets.HARBOR_REGISTRY }}
-          registry-username: ${{ secrets.HARBOR_USERNAME }}
-          registry-password: ${{ secrets.HARBOR_PASSWORD }}
-          cosign-key: ${{ secrets.COSIGN_KEY }}
-          cosign-password: ${{ secrets.COSIGN_PASSWORD }}
-      - name: 写入构建产物 digest 锁片段
-        run: |
-          mkdir -p image-digest-artifacts
-          printf '%s %s\n' "${{ matrix.logical }}" "${{ steps.build.outputs.digest }}" > "image-digest-artifacts/${{ matrix.safe }}.lock"
-      - name: 上传构建产物 digest 锁片段
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: image-digest-${{ matrix.safe }}
-          path: image-digest-artifacts/${{ matrix.safe }}.lock
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.discover.outputs.wave_0 != '{"include":[]}'
+    uses: ./.github/workflows/image-build-wave.yml
+    with:
+      matrix: ${{ needs.discover.outputs.wave_0 }}
+    secrets:
+      registry: ${{ secrets.HARBOR_REGISTRY }}
+      registry-username: ${{ secrets.HARBOR_USERNAME }}
+      registry-password: ${{ secrets.HARBOR_PASSWORD }}
+      cosign-key: ${{ secrets.COSIGN_KEY }}
+      cosign-password: ${{ secrets.COSIGN_PASSWORD }}
 
-  build-base:
-    needs: [discover, build-go-builder]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.discover.outputs.base_matrix != '{"include":[]}' && needs.build-go-builder.result == 'success'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.discover.outputs.base_matrix) }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: 安装 Cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-        with:
-          cosign-release: v2.4.3
-      - name: 构建+扫描+签名+推送
-        id: build
-        uses: ./deploy/ci/build-scan-sign-push
-        with:
-          image: ${{ secrets.HARBOR_REGISTRY }}/${{ matrix.logical }}
-          tag: ${{ github.sha }}
-          context: ${{ matrix.context }}
-          dockerfile: ${{ matrix.dockerfile }}
-          build-args: |
-            GO_BUILDER_IMAGE=${{ needs.build-go-builder.outputs.digest_ref }}
-          registry: ${{ secrets.HARBOR_REGISTRY }}
-          registry-username: ${{ secrets.HARBOR_USERNAME }}
-          registry-password: ${{ secrets.HARBOR_PASSWORD }}
-          cosign-key: ${{ secrets.COSIGN_KEY }}
-          cosign-password: ${{ secrets.COSIGN_PASSWORD }}
-      - name: 写入构建产物 digest 锁片段
-        run: |
-          mkdir -p image-digest-artifacts
-          printf '%s %s\n' "${{ matrix.logical }}" "${{ steps.build.outputs.digest }}" > "image-digest-artifacts/${{ matrix.safe }}.lock"
-      - name: 上传构建产物 digest 锁片段
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: image-digest-${{ matrix.safe }}
-          path: image-digest-artifacts/${{ matrix.safe }}.lock
+  build-wave-1:
+    needs: [discover, build-wave-0]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.discover.outputs.wave_1 != '{"include":[]}'
+    uses: ./.github/workflows/image-build-wave.yml
+    with:
+      matrix: ${{ needs.discover.outputs.wave_1 }}
+      download-candidates: true
+    secrets:
+      registry: ${{ secrets.HARBOR_REGISTRY }}
+      registry-username: ${{ secrets.HARBOR_USERNAME }}
+      registry-password: ${{ secrets.HARBOR_PASSWORD }}
+      cosign-key: ${{ secrets.COSIGN_KEY }}
+      cosign-password: ${{ secrets.COSIGN_PASSWORD }}
 
-  build-main:
-    needs: [discover, build-base]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.discover.outputs.main_matrix != '{"include":[]}' && needs.build-base.result == 'success'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.discover.outputs.main_matrix) }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: 安装 Cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-        with:
-          cosign-release: v2.4.3
-      - name: 下载基础镜像 digest 片段
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          pattern: image-digest-base-*
-          path: image-base-digests
-          merge-multiple: true
-      - id: build-bases
-        name: 生成不可变基础镜像构建参数
-        shell: bash
-        run: |
-          set -euo pipefail
-          read_digest() {
-            local logical="$1"
-            local digest
-            digest=$(awk -v image="$logical" '$1 == image { print $2 }' image-base-digests/*.lock)
-            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-              echo "缺少或存在多个基础镜像 digest: $logical" >&2
-              exit 1
-            fi
-            printf '%s' "$digest"
-          }
-          go_builder=$(read_digest base/go-builder)
-          judge_min=$(read_digest base/judge-min)
-          node_builder=$(read_digest base/node-builder)
-          chain_tools=$(read_digest base/chain-tools)
-          fabric_tools=$(read_digest base/fabric-tools)
-          runtime_min=$(read_digest base/runtime-min)
-          {
-            echo 'args<<EOF'
-            echo "GO_BUILDER_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/go-builder@$go_builder"
-            echo "JUDGE_MIN_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/judge-min@$judge_min"
-            echo "NODE_BUILDER_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/node-builder@$node_builder"
-            echo "CHAIN_TOOLS_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/chain-tools@$chain_tools"
-            echo "FABRIC_TOOLS_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/fabric-tools@$fabric_tools"
-            echo "RUNTIME_IMAGE=${{ secrets.HARBOR_REGISTRY }}/base/runtime-min@$runtime_min"
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
-      - name: 构建+扫描+签名+推送
-        id: build
-        uses: ./deploy/ci/build-scan-sign-push
-        with:
-          image: ${{ secrets.HARBOR_REGISTRY }}/${{ matrix.logical }}
-          tag: ${{ github.sha }}
-          context: ${{ matrix.context }}
-          dockerfile: ${{ matrix.dockerfile }}
-          build-args: ${{ steps.build-bases.outputs.args }}
-          registry: ${{ secrets.HARBOR_REGISTRY }}
-          registry-username: ${{ secrets.HARBOR_USERNAME }}
-          registry-password: ${{ secrets.HARBOR_PASSWORD }}
-          cosign-key: ${{ secrets.COSIGN_KEY }}
-          cosign-password: ${{ secrets.COSIGN_PASSWORD }}
-      - name: 写入构建产物 digest 锁片段
-        run: |
-          mkdir -p image-digest-artifacts
-          printf '%s %s\n' "${{ matrix.logical }}" "${{ steps.build.outputs.digest }}" > "image-digest-artifacts/${{ matrix.safe }}.lock"
-      - name: 上传构建产物 digest 锁片段
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: image-digest-${{ matrix.safe }}
-          path: image-digest-artifacts/${{ matrix.safe }}.lock
+  build-wave-2:
+    needs: [discover, build-wave-1]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.discover.outputs.wave_2 != '{"include":[]}'
+    uses: ./.github/workflows/image-build-wave.yml
+    with:
+      matrix: ${{ needs.discover.outputs.wave_2 }}
+      download-candidates: true
+    secrets:
+      registry: ${{ secrets.HARBOR_REGISTRY }}
+      registry-username: ${{ secrets.HARBOR_USERNAME }}
+      registry-password: ${{ secrets.HARBOR_PASSWORD }}
+      cosign-key: ${{ secrets.COSIGN_KEY }}
+      cosign-password: ${{ secrets.COSIGN_PASSWORD }}
 
   merge-digest-batch:
-    needs: [build-go-builder, build-base, build-main]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.build-go-builder.result == 'success' && needs.build-base.result == 'success' && needs.build-main.result == 'success'
+    needs: [discover, build-wave-0, build-wave-1, build-wave-2]
+    if: >-
+      !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.discover.result == 'success' && needs.build-wave-0.result == 'success' &&
+      (needs.build-wave-1.result == 'success' || needs.discover.outputs.wave_1 == '{"include":[]}') &&
+      (needs.build-wave-2.result == 'success' || needs.discover.outputs.wave_2 == '{"include":[]}')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: 下载镜像 digest 锁片段
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: image-digest-*
+          pattern: build-digest-*
           path: image-digest-artifacts
           merge-multiple: true
       - name: 合并通用镜像 digest 批次
+        shell: pwsh
+        env:
+          WAVE_0: ${{ needs.discover.outputs.wave_0 }}
+          WAVE_1: ${{ needs.discover.outputs.wave_1 }}
+          WAVE_2: ${{ needs.discover.outputs.wave_2 }}
         run: |
-          set -euo pipefail
-          mkdir -p image-digest-batch
-          if ! find image-digest-artifacts -name '*.lock' -type f | grep -q .; then
-            echo "未找到镜像 digest 锁片段" >&2
-            exit 1
-          fi
-
-          cat image-digest-artifacts/*.lock | tr -d '\r' | sed '/^[[:space:]]*$/d' | sort > image-digest-batch/common.lock
-          awk '
-            NF != 2 || $2 !~ /^sha256:[0-9a-f]{64}$/ {
-              printf("digest 锁格式非法: %s\n", $0) > "/dev/stderr";
-              exit 1;
-            }
-            seen[$1] && seen[$1] != $2 {
-              printf("镜像 %s 存在多个 digest: %s / %s\n", $1, seen[$1], $2) > "/dev/stderr";
-              exit 1;
-            }
-            { seen[$1] = $2 }
-          ' image-digest-batch/common.lock
+          Import-Module ./images/lib/ImageMetadata.psm1
+          $items = Read-ChaimirDigestFragments -Directory ./image-digest-artifacts
+          $expected = @(foreach ($wave in @($env:WAVE_0, $env:WAVE_1, $env:WAVE_2)) { (ConvertFrom-Json $wave).include | ForEach-Object { $_.logical } })
+          if ($items.Count -ne $expected.Count -or ($expected | Where-Object { -not $items.ContainsKey($_) })) {
+              throw 'digest 批次与构建矩阵不一致，拒绝发布片段'
+          }
+          Write-ChaimirDigestLock -Path ./image-digest-batch/common.lock -Items $items
       - name: 上传通用镜像 digest 批次
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: image-digest-common-batch
           path: image-digest-batch/common.lock
+          if-no-files-found: error

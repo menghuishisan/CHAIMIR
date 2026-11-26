@@ -584,6 +584,12 @@ const groups = [
 
   [
     "backend/internal/modules/judge/enum.go",
+    "JudgeTaskStatus",
+    "frontend/packages/api-client/src/constants/judge.ts",
+    "JudgeTaskStatusCode",
+  ],
+  [
+    "backend/internal/modules/judge/enum.go",
     "JudgerType",
     "frontend/packages/api-client/src/constants/judge.ts",
     "JudgerType",

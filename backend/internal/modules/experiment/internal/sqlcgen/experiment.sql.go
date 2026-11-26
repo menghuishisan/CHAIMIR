@@ -815,91 +815,6 @@ func (q *Queries) GetActiveOwnerInstance(ctx context.Context, arg GetActiveOwner
 	return i, err
 }
 
-const getCheckpointResult = `-- name: GetCheckpointResult :one
-SELECT id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, binding_output, judged_at
-FROM checkpoint_result
-WHERE tenant_id = $1 AND instance_id = $2 AND checkpoint_id = $3
-`
-
-type GetCheckpointResultParams struct {
-	TenantID     int64  `json:"tenant_id"`
-	InstanceID   int64  `json:"instance_id"`
-	CheckpointID string `json:"checkpoint_id"`
-}
-
-type GetCheckpointResultRow struct {
-	ID            int64              `json:"id"`
-	TenantID      int64              `json:"tenant_id"`
-	InstanceID    int64              `json:"instance_id"`
-	CheckpointID  string             `json:"checkpoint_id"`
-	JudgeTaskRef  pgtype.Text        `json:"judge_task_ref"`
-	Passed        bool               `json:"passed"`
-	Score         float64            `json:"score"`
-	DetailRef     pgtype.Text        `json:"detail_ref"`
-	BindingOutput []byte             `json:"binding_output"`
-	JudgedAt      pgtype.Timestamptz `json:"judged_at"`
-}
-
-func (q *Queries) GetCheckpointResult(ctx context.Context, arg GetCheckpointResultParams) (GetCheckpointResultRow, error) {
-	row := q.db.QueryRow(ctx, getCheckpointResult, arg.TenantID, arg.InstanceID, arg.CheckpointID)
-	var i GetCheckpointResultRow
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.InstanceID,
-		&i.CheckpointID,
-		&i.JudgeTaskRef,
-		&i.Passed,
-		&i.Score,
-		&i.DetailRef,
-		&i.BindingOutput,
-		&i.JudgedAt,
-	)
-	return i, err
-}
-
-const getCheckpointResultByJudgeTask = `-- name: GetCheckpointResultByJudgeTask :one
-SELECT id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, binding_output, judged_at
-FROM checkpoint_result
-WHERE tenant_id = $1 AND judge_task_ref = $2
-`
-
-type GetCheckpointResultByJudgeTaskParams struct {
-	TenantID     int64       `json:"tenant_id"`
-	JudgeTaskRef pgtype.Text `json:"judge_task_ref"`
-}
-
-type GetCheckpointResultByJudgeTaskRow struct {
-	ID            int64              `json:"id"`
-	TenantID      int64              `json:"tenant_id"`
-	InstanceID    int64              `json:"instance_id"`
-	CheckpointID  string             `json:"checkpoint_id"`
-	JudgeTaskRef  pgtype.Text        `json:"judge_task_ref"`
-	Passed        bool               `json:"passed"`
-	Score         float64            `json:"score"`
-	DetailRef     pgtype.Text        `json:"detail_ref"`
-	BindingOutput []byte             `json:"binding_output"`
-	JudgedAt      pgtype.Timestamptz `json:"judged_at"`
-}
-
-func (q *Queries) GetCheckpointResultByJudgeTask(ctx context.Context, arg GetCheckpointResultByJudgeTaskParams) (GetCheckpointResultByJudgeTaskRow, error) {
-	row := q.db.QueryRow(ctx, getCheckpointResultByJudgeTask, arg.TenantID, arg.JudgeTaskRef)
-	var i GetCheckpointResultByJudgeTaskRow
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.InstanceID,
-		&i.CheckpointID,
-		&i.JudgeTaskRef,
-		&i.Passed,
-		&i.Score,
-		&i.DetailRef,
-		&i.BindingOutput,
-		&i.JudgedAt,
-	)
-	return i, err
-}
-
 const getExperiment = `-- name: GetExperiment :one
 SELECT id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, group_config, require_report, wizard_step, status, created_at, updated_at, deleted_at
 FROM experiment
@@ -1365,6 +1280,66 @@ func (q *Queries) ListCheckpointResults(ctx context.Context, arg ListCheckpointR
 	return items, nil
 }
 
+const listCourseExperimentsForClone = `-- name: ListCourseExperimentsForClone :many
+SELECT id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, group_config, require_report, wizard_step, status, created_at, updated_at, deleted_at
+FROM experiment
+WHERE tenant_id = $1::bigint AND deleted_at IS NULL
+  AND (course_id = $2::bigint
+       OR (course_id IS NULL AND author_id = $3::bigint AND id = ANY($4::bigint[])))
+ORDER BY id
+FOR SHARE
+`
+
+type ListCourseExperimentsForCloneParams struct {
+	TenantID            int64   `json:"tenant_id"`
+	CourseID            int64   `json:"course_id"`
+	SourceTeacherID     int64   `json:"source_teacher_id"`
+	LessonExperimentIds []int64 `json:"lesson_experiment_ids"`
+}
+
+func (q *Queries) ListCourseExperimentsForClone(ctx context.Context, arg ListCourseExperimentsForCloneParams) ([]Experiment, error) {
+	rows, err := q.db.Query(ctx, listCourseExperimentsForClone,
+		arg.TenantID,
+		arg.CourseID,
+		arg.SourceTeacherID,
+		arg.LessonExperimentIds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Experiment{}
+	for rows.Next() {
+		var i Experiment
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.CourseID,
+			&i.AuthorID,
+			&i.TemplateRef,
+			&i.TemplateVersion,
+			&i.Name,
+			&i.Description,
+			&i.Components,
+			&i.CollabMode,
+			&i.GroupConfig,
+			&i.RequireReport,
+			&i.WizardStep,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExperimentGroups = `-- name: ListExperimentGroups :many
 SELECT id, tenant_id, experiment_id, name, created_at
 FROM experiment_group
@@ -1622,7 +1597,7 @@ SELECT i.id, i.tenant_id, i.experiment_id, i.owner_account_id, i.group_id, i.sou
        i.scope_ref, COALESCE(i.score::float8, 0)::float8 AS score, i.started_at, i.finished_at, i.last_active_at
 FROM experiment_instance i
 JOIN experiment e ON e.tenant_id = i.tenant_id AND e.id = i.experiment_id
-WHERE i.tenant_id = $1 AND e.course_id = $2 AND i.status IN (1, 2, 3, 7)
+WHERE i.tenant_id = $1 AND e.course_id = $2 AND i.status IN (1, 2, 3, 4, 6, 7)
 ORDER BY i.id
 `
 
@@ -1648,8 +1623,7 @@ type ListLiveInstancesByCourseRow struct {
 	LastActiveAt   pgtype.Timestamptz `json:"last_active_at"`
 }
 
-// 列出某课程下仍占用引擎资源的实验实例,供课程结束时级联回收(M7 需求 D3)。
-// 只取 creating/running/paused/released 四态:已完成、已回收与错误态不再持有沙箱或仿真会话。
+// 完成态和错误态可能仍在等待资源清理；仅排除已回收实例。
 func (q *Queries) ListLiveInstancesByCourse(ctx context.Context, arg ListLiveInstancesByCourseParams) ([]ListLiveInstancesByCourseRow, error) {
 	rows, err := q.db.Query(ctx, listLiveInstancesByCourse, arg.TenantID, arg.CourseID)
 	if err != nil {
@@ -1950,21 +1924,22 @@ func (q *Queries) MarkExperimentEventOutboxPublished(ctx context.Context, arg Ma
 	return i, err
 }
 
-const setExperimentStatus = `-- name: SetExperimentStatus :one
+const publishExperimentIfUnchanged = `-- name: PublishExperimentIfUnchanged :one
 UPDATE experiment
-SET status = $3, updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
-WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+SET status = 2, updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
+WHERE tenant_id = $1 AND id = $2 AND status IN (1, 3) AND deleted_at IS NULL
+  AND updated_at = $3::timestamptz
 RETURNING id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, group_config, require_report, wizard_step, status, created_at, updated_at, deleted_at
 `
 
-type SetExperimentStatusParams struct {
-	TenantID int64 `json:"tenant_id"`
-	ID       int64 `json:"id"`
-	Status   int16 `json:"status"`
+type PublishExperimentIfUnchangedParams struct {
+	TenantID          int64              `json:"tenant_id"`
+	ID                int64              `json:"id"`
+	ExpectedUpdatedAt pgtype.Timestamptz `json:"expected_updated_at"`
 }
 
-func (q *Queries) SetExperimentStatus(ctx context.Context, arg SetExperimentStatusParams) (Experiment, error) {
-	row := q.db.QueryRow(ctx, setExperimentStatus, arg.TenantID, arg.ID, arg.Status)
+func (q *Queries) PublishExperimentIfUnchanged(ctx context.Context, arg PublishExperimentIfUnchangedParams) (Experiment, error) {
+	row := q.db.QueryRow(ctx, publishExperimentIfUnchanged, arg.TenantID, arg.ID, arg.ExpectedUpdatedAt)
 	var i Experiment
 	err := row.Scan(
 		&i.ID,
@@ -2128,6 +2103,43 @@ func (q *Queries) TouchExperimentInstance(ctx context.Context, arg TouchExperime
 	return i, err
 }
 
+const unpublishExperiment = `-- name: UnpublishExperiment :one
+UPDATE experiment
+SET status = 3, updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND deleted_at IS NULL
+RETURNING id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, group_config, require_report, wizard_step, status, created_at, updated_at, deleted_at
+`
+
+type UnpublishExperimentParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) UnpublishExperiment(ctx context.Context, arg UnpublishExperimentParams) (Experiment, error) {
+	row := q.db.QueryRow(ctx, unpublishExperiment, arg.TenantID, arg.ID)
+	var i Experiment
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.CourseID,
+		&i.AuthorID,
+		&i.TemplateRef,
+		&i.TemplateVersion,
+		&i.Name,
+		&i.Description,
+		&i.Components,
+		&i.CollabMode,
+		&i.GroupConfig,
+		&i.RequireReport,
+		&i.WizardStep,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const updateExperiment = `-- name: UpdateExperiment :one
 UPDATE experiment
 SET course_id = $3,
@@ -2141,7 +2153,7 @@ SET course_id = $3,
     require_report = $11,
     wizard_step = $12,
     updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
-WHERE tenant_id = $1 AND id = $2 AND status = 1 AND deleted_at IS NULL
+WHERE tenant_id = $1 AND id = $2 AND status IN (1, 3) AND deleted_at IS NULL
 RETURNING id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, group_config, require_report, wizard_step, status, created_at, updated_at, deleted_at
 `
 
@@ -2259,7 +2271,7 @@ UPDATE experiment_instance
 SET scope_ref = $3,
     sandbox_refs = $4,
     sim_session_refs = $5,
-    status = CASE WHEN status = 6 THEN 6 ELSE $6 END,
+    status = $6,
     last_active_at = now()
 WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
@@ -2324,12 +2336,14 @@ const upsertCheckpointResult = `-- name: UpsertCheckpointResult :one
 INSERT INTO checkpoint_result (id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score, detail_ref, binding_output, judged_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7::text::numeric, $8, $9, now())
 ON CONFLICT (tenant_id, instance_id, checkpoint_id) DO UPDATE
-SET judge_task_ref = EXCLUDED.judge_task_ref,
+SET id = EXCLUDED.id,
+    judge_task_ref = EXCLUDED.judge_task_ref,
     passed = EXCLUDED.passed,
     score = EXCLUDED.score,
     detail_ref = EXCLUDED.detail_ref,
-    binding_output = CASE WHEN EXCLUDED.binding_output = '{}'::jsonb THEN checkpoint_result.binding_output ELSE EXCLUDED.binding_output END,
+    binding_output = EXCLUDED.binding_output,
     judged_at = now()
+WHERE checkpoint_result.id <= EXCLUDED.id
 RETURNING id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, binding_output, judged_at
 `
 
@@ -2388,11 +2402,13 @@ func (q *Queries) UpsertCheckpointResult(ctx context.Context, arg UpsertCheckpoi
 
 const upsertExperimentReport = `-- name: UpsertExperimentReport :one
 INSERT INTO experiment_report (id, tenant_id, instance_id, student_id, content_ref, manual_score, comment, status, submitted_at)
-VALUES ($1, $2, $3, $4, $5, NULL, NULL, 1, now())
+VALUES ($1, $2, $3, $4, $5, NULL, NULL, 1, clock_timestamp())
 ON CONFLICT (tenant_id, instance_id, student_id) DO UPDATE
 SET content_ref = EXCLUDED.content_ref,
+    manual_score = NULL,
+    comment = NULL,
     status = 1,
-    submitted_at = now()
+    submitted_at = GREATEST(clock_timestamp(), experiment_report.submitted_at + INTERVAL '1 microsecond')
 RETURNING id, tenant_id, instance_id, student_id, content_ref, COALESCE(manual_score::float8, 0)::float8 AS manual_score, comment, status, submitted_at
 `
 

@@ -41,79 +41,6 @@ $dependencySpecs = @(
     [pscustomobject]@{ Name = "solmate"; Repository = "transmissions11/solmate"; Commit = "8f9b23f8838670afda0fd8983f2c41e8037ae6bc"; Sha256 = "97038b0f62ecbcc37440261a5eddb990d80480f4538b85967ea471c5954709b2" }
 )
 
-function ConvertTo-ProcessArgument([string]$Value) {
-    if ($null -eq $Value -or $Value.Length -eq 0) { return '""' }
-    if ($Value -notmatch '[\s"]') { return $Value }
-    $builder = [Text.StringBuilder]::new()
-    [void]$builder.Append('"')
-    $slashes = 0
-    foreach ($character in $Value.ToCharArray()) {
-        if ($character -eq '\') {
-            $slashes++
-            continue
-        }
-        if ($character -eq '"') {
-            if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
-            [void]$builder.Append('\').Append('"')
-            $slashes = 0
-            continue
-        }
-        if ($slashes -gt 0) { [void]$builder.Append(('\' * $slashes) -join '') }
-        [void]$builder.Append($character)
-        $slashes = 0
-    }
-    if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
-    [void]$builder.Append('"')
-    return $builder.ToString()
-}
-
-function Invoke-Docker {
-    param(
-        [string[]]$Arguments,
-        [int]$TimeoutSeconds = 300
-    )
-    $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("chaimir-docker-call-" + [Guid]::NewGuid().ToString("N"))
-    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
-    $stdoutPath = Join-Path $tempRoot "stdout.txt"
-    $stderrPath = Join-Path $tempRoot "stderr.txt"
-    $process = [Diagnostics.Process]::new()
-    $process.StartInfo = [Diagnostics.ProcessStartInfo]::new()
-    $process.StartInfo.FileName = "docker.exe"
-    $process.StartInfo.Arguments = (($Arguments | ForEach-Object { ConvertTo-ProcessArgument ([string]$_) }) -join " ")
-    $process.StartInfo.UseShellExecute = $false
-    $process.StartInfo.CreateNoWindow = $true
-    $process.StartInfo.RedirectStandardOutput = $true
-    $process.StartInfo.RedirectStandardError = $true
-    $process.StartInfo.StandardOutputEncoding = [Text.Encoding]::UTF8
-    $process.StartInfo.StandardErrorEncoding = [Text.Encoding]::UTF8
-    try {
-        if (-not $process.Start()) { throw "Docker CLI 启动失败" }
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            try {
-                $process.Kill($true)
-            } catch {
-                Write-Warning ("Docker 超时后的进程树终止失败,继续尝试终止主进程: {0}" -f $_.Exception.Message)
-                try {
-                    $process.Kill()
-                } catch {
-                    Write-Warning ("Docker 超时后的主进程终止也失败: {0}" -f $_.Exception.Message)
-                }
-            }
-            $stdout = $stdoutTask.GetAwaiter().GetResult()
-            $stderr = $stderrTask.GetAwaiter().GetResult()
-            return [pscustomobject]@{ Code = 124; Text = ("Docker CLI 超时（{0} 秒）: {1}`n{2}`n{3}" -f $TimeoutSeconds, ($Arguments -join " "), $stdout, $stderr).Trim() }
-        }
-        $stdout = $stdoutTask.GetAwaiter().GetResult()
-        $stderr = $stderrTask.GetAwaiter().GetResult()
-        return [pscustomobject]@{ Code = $process.ExitCode; Text = ((@($stdout, $stderr) | Where-Object { $_ }) -join "`n").Trim() }
-    } finally {
-        $process.Dispose()
-        if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue }
-    }
-}
-
 function Assert-SHA256([string]$Path, [string]$Expected, [string]$Label) {
     $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actual -ne $Expected.ToLowerInvariant()) { throw "$Label SHA-256 不匹配: $actual" }
@@ -165,13 +92,13 @@ function Write-Utf8NoBom([string]$Path, [string]$Content) {
 }
 
 function Expand-ArchiveInBuilder([string]$Archive, [string]$Destination, [string]$Label, [string]$BuilderRef) {
-    $result = Invoke-Docker -TimeoutSeconds 900 @("run","--rm","--pull","never","--user","0:0","--mount","type=bind,source=$Archive,target=/in/archive,readonly","--mount","type=bind,source=$Destination,target=/out","--entrypoint","bash",$BuilderRef,"-lc","set -eu; tar -xzf /in/archive -C /out")
+    $result = Invoke-ChaimirDocker -TimeoutSeconds 900 @("run","--rm","--pull","never","--user","0:0","--mount","type=bind,source=$Archive,target=/in/archive,readonly","--mount","type=bind,source=$Destination,target=/out","--entrypoint","bash",$BuilderRef,"-lc","set -eu; tar -xzf /in/archive -C /out")
     if ($result.Code -ne 0) { throw "$Label 解压失败: $($result.Text)" }
 }
 
 function Expand-DependencyInBuilder([string]$Archive, [string]$Destination, [string]$Label, [string]$BuilderRef) {
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-    $result = Invoke-Docker -TimeoutSeconds 900 @("run","--rm","--pull","never","--user","0:0","--mount","type=bind,source=$Archive,target=/in/archive,readonly","--mount","type=bind,source=$Destination,target=/out","--entrypoint","bash",$BuilderRef,"-lc","set -eu; tar -xzf /in/archive --strip-components=1 -C /out")
+    $result = Invoke-ChaimirDocker -TimeoutSeconds 900 @("run","--rm","--pull","never","--user","0:0","--mount","type=bind,source=$Archive,target=/in/archive,readonly","--mount","type=bind,source=$Destination,target=/out","--entrypoint","bash",$BuilderRef,"-lc","set -eu; tar -xzf /in/archive --strip-components=1 -C /out")
     if ($result.Code -ne 0) { throw "$Label 依赖解压失败: $($result.Text)" }
 }
 
@@ -188,7 +115,7 @@ $goBuilderRef = Get-LockedImageRef $lock $registry "base/go-builder"
 $foundryRef = Get-LockedImageRef $lock $registry "runtime/evm-foundry"
 $jwt = Read-PlatformSecret "OP_GETH_JWT_SECRET"
 $deployerKey = Read-PlatformSecret "CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY"
-$deployerAddressResult = Invoke-Docker @("run","--rm","--pull","never","--entrypoint","cast",$foundryRef,"wallet","address","--private-key",$deployerKey)
+$deployerAddressResult = Invoke-ChaimirDocker @("run","--rm","--pull","never","--entrypoint","cast",$foundryRef,"wallet","address","--private-key",$deployerKey)
 if ($deployerAddressResult.Code -ne 0 -or $deployerAddressResult.Text -notmatch '(?m)^0x[0-9a-fA-F]{40}$') { throw "平台统一 EVM 部署账户地址生成失败" }
 $deployerAddress = $deployerAddressResult.Text.Trim().ToLowerInvariant()
 if ($ValidatorCount -lt 1 -or $ValidatorCount -gt 16) { throw "ValidatorCount 必须位于 1-16" }
@@ -251,7 +178,7 @@ try {
     Expand-ArchiveInBuilder $registryArchive $registryRoot "superchain-registry" $goBuilderRef
     $generatorBinary = Join-Path $generatorRoot "eth-genesis-state-generator"
     if (-not (Test-Path -LiteralPath $generatorBinary -PathType Leaf)) { throw "固定共识生成器归档缺少 eth-genesis-state-generator" }
-    $generatorMode = Invoke-Docker -TimeoutSeconds 60 @("run","--rm","--pull","never","--user","0:0","--mount","type=bind,source=$generatorBinary,target=/tools/eth-genesis-state-generator","--entrypoint","bash",$goBuilderRef,"-lc","set -eu; chmod 0755 /tools/eth-genesis-state-generator; test -x /tools/eth-genesis-state-generator")
+    $generatorMode = Invoke-ChaimirDocker -TimeoutSeconds 60 @("run","--rm","--pull","never","--user","0:0","--mount","type=bind,source=$generatorBinary,target=/tools/eth-genesis-state-generator","--entrypoint","bash",$goBuilderRef,"-lc","set -eu; chmod 0755 /tools/eth-genesis-state-generator; test -x /tools/eth-genesis-state-generator")
     if ($generatorMode.Code -ne 0) { throw "固定共识生成器执行权限初始化失败: $($generatorMode.Text)" }
     $beaconSourceDir = @(Get-ChildItem -LiteralPath $beaconSourceRoot -Directory | Select-Object -First 1)[0]
     $optimismSourceDir = @(Get-ChildItem -LiteralPath $optimismSourceRoot -Directory | Select-Object -First 1)[0]
@@ -296,52 +223,52 @@ try {
     Copy-Item -LiteralPath (Join-Path $repoRoot "deploy\scripts\op-stack-material-export\main.go") -Destination (Join-Path $exporterDir "main.go") -Force
     $export = Join-Path $workRoot "export"
     New-Item -ItemType Directory -Path $export -Force | Out-Null
-    $cacheExisting = Invoke-Docker @("volume","inspect",$cacheVolume)
+    $cacheExisting = Invoke-ChaimirDocker @("volume","inspect",$cacheVolume)
     if ($cacheExisting.Code -ne 0) { throw "项目统一的 Go 构建缓存卷不存在: $cacheVolume" }
-    $cachePrepare = Invoke-Docker @("run","--rm","--pull","never","--user","0:0","--mount","type=volume,source=$cacheVolume,target=/runtime-state","--entrypoint","/bin/sh",$toolsRef,"-lc","mkdir -p /runtime-state/go-mod-cache /runtime-state/go-cache; chown -R 1000:1000 /runtime-state")
+    $cachePrepare = Invoke-ChaimirDocker @("run","--rm","--pull","never","--user","0:0","--mount","type=volume,source=$cacheVolume,target=/runtime-state","--entrypoint","/bin/sh",$toolsRef,"-lc","mkdir -p /runtime-state/go-mod-cache /runtime-state/go-cache; chown -R 1000:1000 /runtime-state")
     if ($cachePrepare.Code -ne 0) { throw "Go 构建缓存卷权限初始化失败: $($cachePrepare.Text)" }
-    $sourceCreated = Invoke-Docker @("volume","create",$sourceVolume)
+    $sourceCreated = Invoke-ChaimirDocker @("volume","create",$sourceVolume)
     if ($sourceCreated.Code -ne 0) { throw "创建 OP-Stack Docker 源码卷失败: $($sourceCreated.Text)" }
     $createdVolumes += $sourceVolume
-    $sourceCopy = Invoke-Docker -TimeoutSeconds 900 @("run","--rm","--pull","never","--user","0:0","--mount","type=bind,source=$($optimismSourceDir.FullName),target=/in,readonly","--mount","type=volume,source=$sourceVolume,target=/src","--entrypoint","bash",$goBuilderRef,"-lc","set -eu; cp -a /in/. /src/; chown -R 1000:1000 /src")
+    $sourceCopy = Invoke-ChaimirDocker -TimeoutSeconds 900 @("run","--rm","--pull","never","--user","0:0","--mount","type=bind,source=$($optimismSourceDir.FullName),target=/in,readonly","--mount","type=volume,source=$sourceVolume,target=/src","--entrypoint","bash",$goBuilderRef,"-lc","set -eu; cp -a /in/. /src/; chown -R 1000:1000 /src")
     if ($sourceCopy.Code -ne 0) { throw "OP-Stack 源码复制到 Docker named volume 失败: $($sourceCopy.Text)" }
     Write-Stage "使用新候选 Foundry 编译官方合约材料"
     $foundryCommand = 'set -eu; export HOME=/runtime-state/foundry-home; export FOUNDRY_DISABLE_NIGHTLY_INSTALLS=1; export PATH=/usr/local/go/bin:/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; for version in 0.8.15 0.8.19 0.8.20 0.8.24 0.8.25 0.8.26; do mkdir -p "$HOME/.svm/$version"; cp "/usr/local/bin/solc-$version" "$HOME/.svm/$version/solc-$version"; chmod 0755 "$HOME/.svm/$version/solc-$version"; done; cd /src/op-stack/packages/contracts-bedrock; timeout --foreground 1200s forge build --offline --deny never --skip "test/**" --skip "script/**"'
     # 分离 create/start/inspect,使 Docker attach 的 unexpected EOF 不会覆盖容器真实退出码。
-    $foundryCreate = Invoke-Docker -TimeoutSeconds 60 @("create","--pull","never","--user","1000:1000","--name",$foundryContainer,"--mount","type=volume,source=$sourceVolume,target=/src/op-stack","--mount","type=volume,source=$cacheVolume,target=/runtime-state","--entrypoint","bash",$foundryRef,"-lc",$foundryCommand)
+    $foundryCreate = Invoke-ChaimirDocker -TimeoutSeconds 60 @("create","--pull","never","--user","1000:1000","--name",$foundryContainer,"--mount","type=volume,source=$sourceVolume,target=/src/op-stack","--mount","type=volume,source=$cacheVolume,target=/runtime-state","--entrypoint","bash",$foundryRef,"-lc",$foundryCommand)
     if ($foundryCreate.Code -ne 0) { throw "创建官方合约离线编译容器失败: $($foundryCreate.Text)" }
     $createdContainers += $foundryContainer
-    $foundryStart = Invoke-Docker -TimeoutSeconds 60 @("start",$foundryContainer)
+    $foundryStart = Invoke-ChaimirDocker -TimeoutSeconds 60 @("start",$foundryContainer)
     if ($foundryStart.Code -ne 0) { throw "启动官方合约离线编译容器失败: $($foundryStart.Text)" }
     $foundryState = $null
     $foundryDeadline = [DateTime]::UtcNow.AddSeconds(1200)
     while ([DateTime]::UtcNow -lt $foundryDeadline) {
-        $foundryState = Invoke-Docker -TimeoutSeconds 10 @("inspect","--format","{{.State.Status}}|{{.State.ExitCode}}",$foundryContainer)
+        $foundryState = Invoke-ChaimirDocker -TimeoutSeconds 10 @("inspect","--format","{{.State.Status}}|{{.State.ExitCode}}",$foundryContainer)
         if ($foundryState.Code -eq 0 -and $foundryState.Text -match '^exited\|') { break }
         Start-Sleep -Seconds 1
     }
     if ($foundryState.Code -ne 0 -or $foundryState.Text -notmatch '^exited\|0$') {
-        $foundryLogs = Invoke-Docker -TimeoutSeconds 30 @("logs","--tail","200",$foundryContainer)
+        $foundryLogs = Invoke-ChaimirDocker -TimeoutSeconds 30 @("logs","--tail","200",$foundryContainer)
         throw "官方合约材料离线编译失败: state=$($foundryState.Text) logs=$($foundryLogs.Text)"
     }
     # 材料导出只允许使用项目统一缓存,网络关闭时缺失模块会立即失败,避免隐式公网下载。
     $exportCommand = 'set -eu; export PATH=/usr/local/go/bin:/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; export GOPROXY=off; export GOSUMDB=off; go version; cd /src/op-stack; timeout --foreground 180s env GOMODCACHE=/runtime-state/go-mod-cache GOCACHE=/runtime-state/go-cache go mod download; timeout --foreground 300s env GOMODCACHE=/runtime-state/go-mod-cache GOCACHE=/runtime-state/go-cache CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go run ./cmd/chaimir-material-export -out /out'
-    $exportBuild = Invoke-Docker -TimeoutSeconds 1800 @("run","--rm","--pull","never","--network","none","--user","1000:1000","--mount","type=volume,source=$sourceVolume,target=/src/op-stack","--mount","type=bind,source=$export,target=/out","--mount","type=volume,source=$cacheVolume,target=/runtime-state","--entrypoint","bash",$goBuilderRef,"-lc",$exportCommand)
+    $exportBuild = Invoke-ChaimirDocker -TimeoutSeconds 1800 @("run","--rm","--pull","never","--network","none","--user","1000:1000","--mount","type=volume,source=$sourceVolume,target=/src/op-stack","--mount","type=bind,source=$export,target=/out","--mount","type=volume,source=$cacheVolume,target=/runtime-state","--entrypoint","bash",$goBuilderRef,"-lc",$exportCommand)
     if ($exportBuild.Code -ne 0) { throw "官方 OP-Stack 材料导出失败: $($exportBuild.Text)" }
     foreach ($file in @("deploy-config.json","l1-allocs.json","l1-deployments.json","l2-allocs.json")) { Copy-Item -LiteralPath (Join-Path $export $file) -Destination (Join-Path $materialRoot $file) -Force }
     Copy-Item -LiteralPath (Join-Path $optimismSourceDir.FullName "op-core\superchain\superchain-configs.zip") -Destination (Join-Path $materialRoot "superchain-configs.zip") -Force
     # 官方 e2e 配置默认带有 Anvil 测试角色;生产材料必须把所有实际签名角色统一绑定到平台受控账户。
     $normalizeDeployConfigCommand = "set -eu; jq --arg address '$deployerAddress' ' .proxyAdminOwner = `$address | .finalSystemOwner = `$address | .baseFeeVaultRecipient = `$address | .l1FeeVaultRecipient = `$address | .sequencerFeeVaultRecipient = `$address | .operatorFeeVaultRecipient = `$address | .governanceTokenOwner = `$address | .liquidityControllerOwner = `$address | .p2pSequencerAddress = `$address | .batchSenderAddress = `$address | .superchainConfigGuardian = `$address | .l2OutputOracleProposer = `$address | .l2OutputOracleChallenger = `$address ' /material/deploy-config.json > /material/deploy-config.json.next; mv /material/deploy-config.json.next /material/deploy-config.json; jq -e --arg address '$deployerAddress' '[.proxyAdminOwner,.finalSystemOwner,.baseFeeVaultRecipient,.l1FeeVaultRecipient,.sequencerFeeVaultRecipient,.operatorFeeVaultRecipient,.liquidityControllerOwner,.p2pSequencerAddress,.batchSenderAddress,.superchainConfigGuardian,.l2OutputOracleProposer,.l2OutputOracleChallenger] | all(.[]; . == `$address)' /material/deploy-config.json >/dev/null"
-    $normalizeDeployConfig = Invoke-Docker @("run","--rm","--pull","never","--user","0:0","--mount","type=bind,source=$materialRoot,target=/material", "--entrypoint","sh",$toolsRef,"-lc",$normalizeDeployConfigCommand)
+    $normalizeDeployConfig = Invoke-ChaimirDocker @("run","--rm","--pull","never","--user","0:0","--mount","type=bind,source=$materialRoot,target=/material", "--entrypoint","sh",$toolsRef,"-lc",$normalizeDeployConfigCommand)
     if ($normalizeDeployConfig.Code -ne 0) { throw "OP-Stack 签名角色统一绑定失败: $($normalizeDeployConfig.Text)" }
     # L1/L2 所有真实操作都使用同一平台账户,因此两条链的 genesis allocs 都必须注入该账户资金。
     $fundDeployerCommand = "set -eu; jq --arg address '$deployerAddress' --arg balance '0x3635c9adc5dea00000' '.[(`$address)] = {balance: `$balance}' /material/l1-allocs.json > /material/l1-allocs.json.next; mv /material/l1-allocs.json.next /material/l1-allocs.json; jq --arg address '$deployerAddress' --arg balance '0x3635c9adc5dea00000' '.[(`$address)] = {balance: `$balance}' /material/l2-allocs.json > /material/l2-allocs.json.next; mv /material/l2-allocs.json.next /material/l2-allocs.json; jq -e --arg address '$deployerAddress' 'has(`$address)' /material/l1-allocs.json >/dev/null; jq -e --arg address '$deployerAddress' 'has(`$address)' /material/l2-allocs.json >/dev/null"
-    $fundDeployer = Invoke-Docker @("run","--rm","--pull","never","--user","0:0","--mount","type=bind,source=$materialRoot,target=/material", "--entrypoint","sh",$toolsRef,"-lc",$fundDeployerCommand)
+    $fundDeployer = Invoke-ChaimirDocker @("run","--rm","--pull","never","--user","0:0","--mount","type=bind,source=$materialRoot,target=/material", "--entrypoint","sh",$toolsRef,"-lc",$fundDeployerCommand)
     if ($fundDeployer.Code -ne 0) { throw "平台统一 EVM 部署账户写入 L1/L2 allocs 失败: $($fundDeployer.Text)" }
 
     # 使用同一官方 op-node 生成带 Optimism 合约状态的 L1 genesis,禁止回退到通用执行层模板。
     Write-Stage "生成官方 OP-Stack L1 genesis"
-    $genesis = Invoke-Docker @("run","--rm","--pull","never","--mount","type=bind,source=$materialRoot,target=/material","--entrypoint","op-node",$opNodeRef,"genesis","l1","--deploy-config","/material/deploy-config.json","--l1-allocs","/material/l1-allocs.json","--l1-deployments","/material/l1-deployments.json","--outfile.l1","/material/l1-genesis.json")
+    $genesis = Invoke-ChaimirDocker @("run","--rm","--pull","never","--mount","type=bind,source=$materialRoot,target=/material","--entrypoint","op-node",$opNodeRef,"genesis","l1","--deploy-config","/material/deploy-config.json","--l1-allocs","/material/l1-allocs.json","--l1-deployments","/material/l1-deployments.json","--outfile.l1","/material/l1-genesis.json")
     if ($genesis.Code -ne 0) { throw "官方 OP-Stack L1 genesis 生成失败: $($genesis.Text)" }
     Copy-Item -LiteralPath (Join-Path $materialRoot "l1-genesis.json") -Destination (Join-Path $materialRoot "genesis.json") -Force
 
@@ -381,32 +308,32 @@ try {
     Write-Stage "生成受控 Beacon genesis state"
     $binaryMount = "type=bind,source=$generatorBinary,target=/tools/eth-genesis-state-generator,readonly"
     $materialMount = "type=bind,source=$materialRoot,target=/material"
-    $generate = Invoke-Docker @("run","--rm","--pull","never","--user","0:0","--mount",$binaryMount,"--mount",$materialMount,"--entrypoint","/tools/eth-genesis-state-generator",$beaconRef,"beaconchain","--config","/material/config.yaml","--eth1-config","/material/genesis.json","--mnemonics","/material/mnemonics.yaml","--state-output","/material/genesis.ssz","--json-output","/material/parsedConsensusGenesis.json","--validators-mapping-output","/material/validator_names.yaml")
+    $generate = Invoke-ChaimirDocker @("run","--rm","--pull","never","--user","0:0","--mount",$binaryMount,"--mount",$materialMount,"--entrypoint","/tools/eth-genesis-state-generator",$beaconRef,"beaconchain","--config","/material/config.yaml","--eth1-config","/material/genesis.json","--mnemonics","/material/mnemonics.yaml","--state-output","/material/genesis.ssz","--json-output","/material/parsedConsensusGenesis.json","--validators-mapping-output","/material/validator_names.yaml")
     if ($generate.Code -ne 0) { throw "受控 Beacon genesis state 生成失败: $($generate.Text)" }
 
     Write-Stage "启动受控 L1 和 Beacon 生成 L2 genesis 与 rollup"
-    $created = Invoke-Docker @("network","create","--internal",$network)
+    $created = Invoke-ChaimirDocker @("network","create","--internal",$network)
     if ($created.Code -ne 0) { throw "创建 OP-Stack 材料生成网络失败: $($created.Text)" }
     $createdNetwork = $true
     foreach ($volume in @($gethVolume,$beaconVolume,$validatorVolume)) {
-        $created = Invoke-Docker @("volume","create",$volume)
+        $created = Invoke-ChaimirDocker @("volume","create",$volume)
         if ($created.Code -ne 0) { throw "创建材料卷失败: $($created.Text)" }
         $createdVolumes += $volume
     }
-    $prepare = Invoke-Docker @("run","--rm","--pull","never","--user","0:0","--mount","source=$gethVolume,target=/runtime-state","--mount","type=bind,source=$(Join-Path $materialRoot 'genesis.json'),target=/seed/genesis.json,readonly","--entrypoint","/bin/sh",$toolsRef,"-lc","mkdir -p /runtime-state/op-geth; cp /seed/genesis.json /runtime-state/op-geth/genesis.json; chown -R 1000:1000 /runtime-state")
+    $prepare = Invoke-ChaimirDocker @("run","--rm","--pull","never","--user","0:0","--mount","source=$gethVolume,target=/runtime-state","--mount","type=bind,source=$(Join-Path $materialRoot 'genesis.json'),target=/seed/genesis.json,readonly","--entrypoint","/bin/sh",$toolsRef,"-lc","mkdir -p /runtime-state/op-geth; cp /seed/genesis.json /runtime-state/op-geth/genesis.json; chown -R 1000:1000 /runtime-state")
     if ($prepare.Code -ne 0) { throw "OP-Geth genesis 准备注入失败: $($prepare.Text)" }
-    $started = Invoke-Docker @("run","-d","--pull","never","--name",$gethContainer,"--network",$network,"--network-alias","opgeth","-v","${gethVolume}:/runtime-state","-e","OP_GETH_DATA_DIR=/runtime-state/op-geth","-e","OP_GETH_GENESIS_PATH=/runtime-state/op-geth/genesis.json","-e","OP_GETH_JWT_SECRET=$jwt","-e","OP_GETH_RPC_PORT=8545","-e","OP_GETH_ENGINE_PORT=8551",$gethRef)
+    $started = Invoke-ChaimirDocker @("run","-d","--pull","never","--name",$gethContainer,"--network",$network,"--network-alias","opgeth","-v","${gethVolume}:/runtime-state","-e","OP_GETH_DATA_DIR=/runtime-state/op-geth","-e","OP_GETH_GENESIS_PATH=/runtime-state/op-geth/genesis.json","-e","OP_GETH_JWT_SECRET=$jwt","-e","OP_GETH_RPC_PORT=8545","-e","OP_GETH_ENGINE_PORT=8551",$gethRef)
     if ($started.Code -ne 0) { throw "OP-Geth 启动失败: $($started.Text)" }; $createdContainers += $gethContainer
-    $rpcReady = Invoke-Docker @("run","--rm","--pull","never","--network",$network,"--entrypoint","/bin/sh",$toolsRef,"-lc","set -eu; for n in `$(seq 1 60); do curl --fail --silent --show-error -H 'content-type: application/json' --data '{`"jsonrpc`":`"2.0`",`"id`":1,`"method`":`"eth_chainId`",`"params`":[]}' http://opgeth:8545/ | grep -q result && exit 0; sleep 1; done; exit 1")
+    $rpcReady = Invoke-ChaimirDocker @("run","--rm","--pull","never","--network",$network,"--entrypoint","/bin/sh",$toolsRef,"-lc","set -eu; for n in `$(seq 1 60); do curl --fail --silent --show-error -H 'content-type: application/json' --data '{`"jsonrpc`":`"2.0`",`"id`":1,`"method`":`"eth_chainId`",`"params`":[]}' http://opgeth:8545/ | grep -q result && exit 0; sleep 1; done; exit 1")
     if ($rpcReady.Code -ne 0) { throw "OP-Geth L1 RPC 在 60 秒内未就绪: $($rpcReady.Text)" }
     # L2 genesis 和 rollup config 必须由同一 L1 genesis、同一 deployment 材料和真实 L1 RPC 生成。
-    $l2 = Invoke-Docker @("run","--rm","--pull","never","--network",$network,"--mount",$materialMount,"--entrypoint","op-node",$opNodeRef,"genesis","l2","--deploy-config","/material/deploy-config.json","--l1-deployments","/material/l1-deployments.json","--l1-rpc","http://opgeth:8545","--l2-allocs","/material/l2-allocs.json","--outfile.l2","/material/l2-genesis.json","--outfile.rollup","/material/rollup.json")
+    $l2 = Invoke-ChaimirDocker @("run","--rm","--pull","never","--network",$network,"--mount",$materialMount,"--entrypoint","op-node",$opNodeRef,"genesis","l2","--deploy-config","/material/deploy-config.json","--l1-deployments","/material/l1-deployments.json","--l1-rpc","http://opgeth:8545","--l2-allocs","/material/l2-allocs.json","--outfile.l2","/material/l2-genesis.json","--outfile.rollup","/material/rollup.json")
     if ($l2.Code -ne 0) { throw "官方 OP-Stack L2 genesis/rollup 生成失败: $($l2.Text)" }
-    $served = Invoke-Docker @("run","-d","--pull","never","--name",$sourceContainer,"--network",$network,"--network-alias","source","--mount","type=bind,source=$materialRoot,target=/material,readonly","--entrypoint","/bin/sh",$toolsRef,"-lc","size=`$(wc -c < /material/genesis.ssz); for n in `$(seq 1 30); do { printf 'HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %s\r\nConnection: close\r\n\r\n' `"`$size`"; cat /material/genesis.ssz; } | timeout 30 nc -l -p 8000 || exit `$?; done; exit 1")
+    $served = Invoke-ChaimirDocker @("run","-d","--pull","never","--name",$sourceContainer,"--network",$network,"--network-alias","source","--mount","type=bind,source=$materialRoot,target=/material,readonly","--entrypoint","/bin/sh",$toolsRef,"-lc","size=`$(wc -c < /material/genesis.ssz); for n in `$(seq 1 30); do { printf 'HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %s\r\nConnection: close\r\n\r\n' `"`$size`"; cat /material/genesis.ssz; } | timeout 30 nc -l -p 8000 || exit `$?; done; exit 1")
     if ($served.Code -ne 0) { throw "受控 Beacon genesis state 服务启动失败: $($served.Text)" }; $createdContainers += $sourceContainer
-    $bootstrap = Invoke-Docker @("run","-d","--pull","never","--name",$beaconContainer,"--network",$network,"--network-alias","beacon","-v","${beaconVolume}:/runtime-state","--mount","type=bind,source=$materialRoot,target=/material,readonly","--entrypoint","lighthouse",$beaconRef,"beacon_node","--testnet-dir","/material","--datadir","/runtime-state/lighthouse","--execution-endpoint","http://opgeth:8551","--execution-jwt-secret-key",$jwt,"--genesis-state-url","http://source:8000/state","--http","--http-address","0.0.0.0","--http-port","5052")
+    $bootstrap = Invoke-ChaimirDocker @("run","-d","--pull","never","--name",$beaconContainer,"--network",$network,"--network-alias","beacon","-v","${beaconVolume}:/runtime-state","--mount","type=bind,source=$materialRoot,target=/material,readonly","--entrypoint","lighthouse",$beaconRef,"beacon_node","--testnet-dir","/material","--datadir","/runtime-state/lighthouse","--execution-endpoint","http://opgeth:8551","--execution-jwt-secret-key",$jwt,"--genesis-state-url","http://source:8000/state","--http","--http-address","0.0.0.0","--http-port","5052")
     if ($bootstrap.Code -ne 0) { throw "受控 Beacon bootstrap 启动失败: $($bootstrap.Text)" }; $createdContainers += $beaconContainer
-    $beaconReady = Invoke-Docker @("run","--rm","--pull","never","--network",$network,"--entrypoint","/bin/sh",$toolsRef,"-lc","set -eu; for n in `$(seq 1 60); do curl --fail --silent --show-error --connect-timeout 2 --max-time 4 http://beacon:5052/eth/v1/node/health >/dev/null && exit 0; sleep 1; done; exit 1")
+    $beaconReady = Invoke-ChaimirDocker @("run","--rm","--pull","never","--network",$network,"--entrypoint","/bin/sh",$toolsRef,"-lc","set -eu; for n in `$(seq 1 60); do curl --fail --silent --show-error --connect-timeout 2 --max-time 4 http://beacon:5052/eth/v1/node/health >/dev/null && exit 0; sleep 1; done; exit 1")
     if ($beaconReady.Code -ne 0) { throw "受控 Beacon HTTP API 在 60 秒内未就绪: $($beaconReady.Text)" }
     # genesis 状态只作为生成器输入,最终归档必须使用有 finalized head 的受控 checkpoint。
     # validator 密钥只在本轮受控卷和临时文件中存在,不写入镜像、仓库或最终材料归档。
@@ -415,25 +342,25 @@ try {
     Set-Content -LiteralPath $validatorMnemonicPath -Value $mnemonic -NoNewline -Encoding ASCII
     Set-Content -LiteralPath $validatorPasswordPath -Value $validatorPassword -NoNewline -Encoding ASCII
     $validatorRecoveryCommand = "set -eu; cat /input/validator-password /input/validator-password | lighthouse account_manager validator recover --testnet-dir /input/material --validator-dir /runtime-state/validators --secrets-dir /runtime-state/secrets --first-index 0 --count $ValidatorCount --mnemonic-path /input/validator-mnemonic --stdin-inputs"
-    $validatorRecovery = Invoke-Docker @("run","--rm","--pull","never","--user","1000:1000","--mount","source=$validatorVolume,target=/runtime-state","--mount","type=bind,source=$workRoot,target=/input,readonly","--entrypoint","sh",$beaconRef,"-lc",$validatorRecoveryCommand)
+    $validatorRecovery = Invoke-ChaimirDocker @("run","--rm","--pull","never","--user","1000:1000","--mount","source=$validatorVolume,target=/runtime-state","--mount","type=bind,source=$workRoot,target=/input,readonly","--entrypoint","sh",$beaconRef,"-lc",$validatorRecoveryCommand)
     if ($validatorRecovery.Code -ne 0) { throw "受控 validator 密钥恢复失败: $($validatorRecovery.Text)" }
-    $validatorStarted = Invoke-Docker @("run","-d","--pull","never","--user","1000:1000","--name",$validatorContainer,"--network",$network,"--network-alias","validator","--mount","source=$validatorVolume,target=/runtime-state","--mount","type=bind,source=$materialRoot,target=/material,readonly","--entrypoint","lighthouse",$beaconRef,"validator_client","--testnet-dir","/material","--validators-dir","/runtime-state/validators","--secrets-dir","/runtime-state/secrets","--beacon-nodes","http://beacon:5052","--suggested-fee-recipient",$deployerAddress,"--init-slashing-protection","--disable-log-timestamp")
+    $validatorStarted = Invoke-ChaimirDocker @("run","-d","--pull","never","--user","1000:1000","--name",$validatorContainer,"--network",$network,"--network-alias","validator","--mount","source=$validatorVolume,target=/runtime-state","--mount","type=bind,source=$materialRoot,target=/material,readonly","--entrypoint","lighthouse",$beaconRef,"validator_client","--testnet-dir","/material","--validators-dir","/runtime-state/validators","--secrets-dir","/runtime-state/secrets","--beacon-nodes","http://beacon:5052","--suggested-fee-recipient",$deployerAddress,"--init-slashing-protection","--disable-log-timestamp")
     if ($validatorStarted.Code -ne 0) { throw "受控 validator client 启动失败: $($validatorStarted.Text)" }; $createdContainers += $validatorContainer
     $finalizedCommand = 'set -eu; for n in $(seq 1 600); do slot=$(curl --fail --silent --show-error --connect-timeout 2 --max-time 4 http://beacon:5052/eth/v1/beacon/headers/finalized | jq -r .data.header.message.slot); if test x$slot = x || test x$slot = xnull || test x$slot = x0; then :; elif test $slot -ge 32; then printf %s $slot; exit 0; fi; sleep 1; done; exit 1'
     # finalized 探针最多运行 600 秒, Docker CLI 超时必须覆盖探针上限并保持有界返回。
-    $finalized = Invoke-Docker -TimeoutSeconds 660 @("run","--rm","--pull","never","--network",$network,"--entrypoint","/bin/sh",$toolsRef,"-lc",$finalizedCommand)
+    $finalized = Invoke-ChaimirDocker -TimeoutSeconds 660 @("run","--rm","--pull","never","--network",$network,"--entrypoint","/bin/sh",$toolsRef,"-lc",$finalizedCommand)
     if ($finalized.Code -ne 0) {
-        $validatorLog = (Invoke-Docker @("logs","--tail","120",$validatorContainer)).Text
-        $beaconLog = (Invoke-Docker @("logs","--tail","120",$beaconContainer)).Text
+        $validatorLog = (Invoke-ChaimirDocker @("logs","--tail","120",$validatorContainer)).Text
+        $beaconLog = (Invoke-ChaimirDocker @("logs","--tail","120",$beaconContainer)).Text
         throw "受控 Beacon finalized checkpoint 在 600 秒内未形成: $($finalized.Text)`nvalidator=$validatorLog`nbeacon=$beaconLog"
     }
     $finalizedSlot = [UInt64]$finalized.Text.Trim()
     $checkpointCommand = 'set -eu; curl --fail --silent --show-error -H Accept:application/octet-stream -o /material/genesis.ssz http://beacon:5052/eth/v2/debug/beacon/states/finalized; curl --fail --silent --show-error -H Accept:application/octet-stream -o /material/genesis-block.ssz http://beacon:5052/eth/v2/beacon/blocks/finalized; test -s /material/genesis.ssz; test -s /material/genesis-block.ssz'
     # finalized 文件先由共识生成器以受控材料身份创建,导出覆盖必须使用材料生成阶段的 root 权限边界。
-    $checkpoint = Invoke-Docker @("run","--rm","--pull","never","--user","0:0","--network",$network,"--mount","type=bind,source=$materialRoot,target=/material","--entrypoint","/bin/sh",$toolsRef,"-lc",$checkpointCommand)
+    $checkpoint = Invoke-ChaimirDocker @("run","--rm","--pull","never","--user","0:0","--network",$network,"--mount","type=bind,source=$materialRoot,target=/material","--entrypoint","/bin/sh",$toolsRef,"-lc",$checkpointCommand)
     if ($checkpoint.Code -ne 0) { throw "受控 Beacon finalized checkpoint 导出失败: $($checkpoint.Text)" }
     # finalized checkpoint 引用的 L1 execution head 必须随同归档保存,否则重新从 genesis 启动会丢失共识引用的区块。
-    $executionStateExport = Invoke-Docker -TimeoutSeconds 900 @("run","--rm","--pull","never","--user","0:0","--mount","source=$gethVolume,target=/runtime-state","--mount","type=bind,source=$materialRoot,target=/out","--entrypoint","/bin/sh",$toolsRef,"-lc","set -eu; tar -cf /out/l1-execution-state.tar -C /runtime-state op-geth/geth op-geth/chaimir-genesis-initialized; test -s /out/l1-execution-state.tar")
+    $executionStateExport = Invoke-ChaimirDocker -TimeoutSeconds 900 @("run","--rm","--pull","never","--user","0:0","--mount","source=$gethVolume,target=/runtime-state","--mount","type=bind,source=$materialRoot,target=/out","--entrypoint","/bin/sh",$toolsRef,"-lc","set -eu; tar -cf /out/l1-execution-state.tar -C /runtime-state op-geth/geth op-geth/chaimir-genesis-initialized; test -s /out/l1-execution-state.tar")
     if ($executionStateExport.Code -ne 0) { throw "受控 L1 execution 状态导出失败: $($executionStateExport.Text)" }
     Write-Stage "校验完整材料并打包"
     foreach ($file in @("config.yaml","genesis.json","l1-genesis.json","l2-genesis.json","rollup.json","deploy-config.json","l1-allocs.json","l1-deployments.json","l2-allocs.json","superchain-configs.zip","genesis.ssz","genesis-block.ssz","parsedConsensusGenesis.json","validator_names.yaml","deposit_contract.txt","deposit_contract_block.txt","bootstrap_nodes.txt","l1-execution-state.tar")) {
@@ -451,8 +378,8 @@ try {
     if (-not (Test-Path -LiteralPath $outputAbsolute -PathType Leaf)) { throw "受控 OP-Stack 初始化归档未生成" }
     Write-Output "受控 OP-Stack 完整初始化归档已生成: $outputAbsolute"
 } finally {
-    foreach ($container in $createdContainers) { Invoke-Docker @("rm","-f","-v",$container) | Out-Null }
-    foreach ($volume in $createdVolumes) { Invoke-Docker @("volume","rm",$volume) | Out-Null }
-    if ($createdNetwork) { Invoke-Docker @("network","rm",$network) | Out-Null }
+    foreach ($container in $createdContainers) { Invoke-ChaimirDocker @("rm","-f","-v",$container) | Out-Null }
+    foreach ($volume in $createdVolumes) { Invoke-ChaimirDocker @("volume","rm",$volume) | Out-Null }
+    if ($createdNetwork) { Invoke-ChaimirDocker @("network","rm",$network) | Out-Null }
     if (Test-Path -LiteralPath $workRoot) { Remove-Item -LiteralPath $workRoot -Recurse -Force }
 }

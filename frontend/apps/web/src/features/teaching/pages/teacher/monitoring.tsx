@@ -1,12 +1,4 @@
-// 实时监控页(教师侧栏,/teacher/monitoring)。设计 §7.4:
-// 页头右侧「刷新」与「更新于 N 秒前」;最上方「需要处理」白卡,把判题失败的任务与准备失败的实验环境
-// 合并成一个列表(来源、对象、问题、处理动作),没有时显示「目前一切正常」;下方「判题任务 / 实验环境 /
-// 竞赛对局」三个标签,标签上带进行中数量,各自是状态筛选 + 表格;标签与筛选都写进地址。
-//
-// 数据全部是真实状态(M3 判题任务、M7 实例列表、M8 对局记录),不做装饰性雷达或假飞线。
-// 刷新是显式动作:高频路径不自动轮询(规范 §4.1),由教师按需刷新,处理完一项后自动刷新。
-// 对局按竞赛查看:「竞赛对局」标签里先选竞赛,再按「全部 / 进行中 / 失败」分段(服务端筛选,数字取 facets);
-// 失败对局不并入「需要处理」:那要为每场进行中的对抗赛各发一次请求,改在标签里的「失败」分段查看。
+// 教师监控汇总失败任务与实验环境；对局按进行中的竞赛读取，避免为汇总逐场请求。
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router'
@@ -170,6 +162,10 @@ interface MonitoringBoardProps {
  */
 function MonitoringBoard({ experimentsEnabled, contestsEnabled }: MonitoringBoardProps) {
   const [query, setQuery] = useUrlState(MONITOR_QUERY)
+  const tab =
+    (query.tab === 'experiment' && !experimentsEnabled) || (query.tab === 'battle' && !contestsEnabled)
+      ? 'judge'
+      : query.tab
   const [refreshVersion, setRefreshVersion] = useState(0)
   const [refreshedAt, setRefreshedAt] = useState(() => Date.now())
   const [detailTask, setDetailTask] = useState<JudgeTask>()
@@ -216,10 +212,42 @@ function MonitoringBoard({ experimentsEnabled, contestsEnabled }: MonitoringBoar
   )
   const labels = useInstanceLabels(experimentsEnabled)
 
-  const tab =
-    (query.tab === 'experiment' && !experimentsEnabled) || (query.tab === 'battle' && !contestsEnabled)
-      ? 'judge'
-      : query.tab
+  const contestList = battleContests.status === 'success' ? battleContests.data : null
+  const activeContestId = (contestList?.find((contest) => contest.id === query.contest) ?? contestList?.[0])?.id
+  const tasks = useAsyncResource(
+    () => tab === 'judge'
+      ? api.judge.getTasks({ state: judgeStateOf(query.judge), page: 1, size: MONITOR_SIZE })
+      : Promise.resolve(emptyPage<JudgeTask>()),
+    [tab, query.judge, refreshVersion],
+    () => false,
+  )
+  const instances = useAsyncResource(
+    () => tab === 'experiment'
+      ? api.experiment.listInstances({ status: envStatusOf(query.env), page: 1, size: MONITOR_SIZE })
+      : Promise.resolve(emptyPage<ExperimentInstance>()),
+    [tab, query.env, refreshVersion],
+    () => false,
+  )
+  const battleSegment = BATTLE_SEGMENTS.find((item) => item.value === query.battle)
+  const battleStatus = battleSegment && 'status' in battleSegment ? battleSegment.status : undefined
+  const matches = useAsyncResource(
+    () => tab === 'battle' && activeContestId
+      ? api.contest.listBattleMatches(activeContestId, { status: battleStatus, page: 1, size: MONITOR_SIZE })
+      : Promise.resolve(emptyPage<BattleMatch>()),
+    [tab, activeContestId, battleStatus, refreshVersion],
+    () => false,
+  )
+  const refreshing = [failedTasks, failedInstances, battleContests, tasks, instances, matches]
+    .some((resource) => resource.status === 'loading')
+
+  // URL 是可分享视图的权威来源，功能关闭或赛事结束后同步清除失效选择。
+  useEffect(() => {
+    const invalidContest = query.contest !== '' && contestList !== null
+      && !contestList.some((contest) => contest.id === query.contest)
+    if (query.tab !== tab || invalidContest) {
+      setQuery({ tab, ...(invalidContest ? { contest: '' } : {}) })
+    }
+  }, [query.tab, query.contest, tab, contestList, setQuery])
   const failedTaskCount = facetCount(taskFacets, 'state', JUDGE_TASK_STATE.ABNORMAL)
   const failedInstanceCount = experimentsEnabled ? facetCount(instanceFacets, 'status', ExperimentInstanceStatus.ERROR) : undefined
 
@@ -230,7 +258,7 @@ function MonitoringBoard({ experimentsEnabled, contestsEnabled }: MonitoringBoar
         actions={
           <div className="flex items-center gap-3">
             <RefreshedAgo at={refreshedAt} />
-            <Button variant="outline" leftIcon={RefreshCw} loading={failedTasks.status === 'loading'} onClick={refresh}>
+            <Button variant="outline" leftIcon={RefreshCw} loading={refreshing} onClick={refresh}>
               刷新
             </Button>
           </div>
@@ -270,7 +298,7 @@ function MonitoringBoard({ experimentsEnabled, contestsEnabled }: MonitoringBoar
             segment={query.judge}
             onSegmentChange={(value) => setQuery({ judge: value })}
             counts={{ active: activeTaskCount, failed: failedTaskCount }}
-            refreshVersion={refreshVersion}
+            tasks={tasks}
             onChanged={refresh}
             onOpenTask={setDetailTask}
           />
@@ -281,7 +309,7 @@ function MonitoringBoard({ experimentsEnabled, contestsEnabled }: MonitoringBoar
               segment={query.env}
               onSegmentChange={(value) => setQuery({ env: value })}
               counts={{ running: runningCount, paused: pausedCount, failed: failedInstanceCount }}
-              refreshVersion={refreshVersion}
+              instances={instances}
               labels={labels}
             />
           </TabsContent>
@@ -294,7 +322,7 @@ function MonitoringBoard({ experimentsEnabled, contestsEnabled }: MonitoringBoar
               onContestChange={(value) => setQuery({ contest: value })}
               segment={query.battle}
               onSegmentChange={(value) => setQuery({ battle: value })}
-              refreshVersion={refreshVersion}
+              matches={matches}
             />
           </TabsContent>
         ) : null}
@@ -518,7 +546,7 @@ interface JudgeTabProps {
   onSegmentChange: (value: string) => void
   /** 各分段的全量计数;读取中为 undefined,「全部」不带数字 */
   counts: { active?: number; failed?: number }
-  refreshVersion: number
+  tasks: AsyncResourceState<PaginatedResponse<JudgeTask>>
   onChanged: () => void
   onOpenTask: (task: JudgeTask) => void
 }
@@ -528,12 +556,7 @@ interface JudgeTabProps {
  * 筛选交给服务端:在本机对最近 30 条再筛一次,会在这 30 条里恰好没有失败任务时
  * 显示「没有判题失败的任务」,而队列里可能积压着更早的失败任务。
  */
-function JudgeTab({ segment, onSegmentChange, counts, refreshVersion, onChanged, onOpenTask }: JudgeTabProps) {
-  const tasks = useAsyncResource(
-    () => api.judge.getTasks({ state: judgeStateOf(segment), page: 1, size: MONITOR_SIZE }),
-    [segment, refreshVersion],
-    () => false,
-  )
+function JudgeTab({ segment, onSegmentChange, counts, tasks, onChanged, onOpenTask }: JudgeTabProps) {
   const { rejudge, rejudgingId, actionError } = useRejudgeTask(onChanged)
 
   const columns: TableColumn<JudgeTask>[] = [
@@ -694,7 +717,7 @@ interface ExperimentTabProps {
   onSegmentChange: (value: string) => void
   /** 各分段的全量计数;读取中为 undefined */
   counts: { running?: number; paused?: number; failed?: number }
-  refreshVersion: number
+  instances: AsyncResourceState<PaginatedResponse<ExperimentInstance>>
   labels: InstanceLabels
 }
 
@@ -702,13 +725,8 @@ interface ExperimentTabProps {
  * ExperimentTab 学生实验环境:状态分段 + 表格(实验、学生、状态、最近活跃、开始时间)。
  * 数据来自实例本身的运行状态(GET /experiment/instances),按最近活跃排序;整行进入该实验的报告与小组。
  */
-function ExperimentTab({ segment, onSegmentChange, counts, refreshVersion, labels }: ExperimentTabProps) {
+function ExperimentTab({ segment, onSegmentChange, counts, instances, labels }: ExperimentTabProps) {
   const navigate = useNavigate()
-  const instances = useAsyncResource(
-    () => api.experiment.listInstances({ status: envStatusOf(segment), page: 1, size: MONITOR_SIZE }),
-    [segment, refreshVersion],
-    () => false,
-  )
 
   const columns: TableColumn<ExperimentInstance>[] = [
     {
@@ -846,11 +864,11 @@ interface BattleTabProps {
   /** 对局状态分段(写进地址) */
   segment: string
   onSegmentChange: (value: string) => void
-  refreshVersion: number
+  matches: AsyncResourceState<PaginatedResponse<BattleMatch>>
 }
 
 /** BattleTab 进行中对抗赛的对局;没有进行中的对抗赛时说明何时会有 */
-function BattleTab({ contests, contestId, onContestChange, segment, onSegmentChange, refreshVersion }: BattleTabProps) {
+function BattleTab({ contests, contestId, onContestChange, segment, onSegmentChange, matches }: BattleTabProps) {
   return (
     <ResourceState
       resource={contests}
@@ -875,7 +893,7 @@ function BattleTab({ contests, contestId, onContestChange, segment, onSegmentCha
             segment={segment}
             onSegmentChange={onSegmentChange}
             onContestChange={onContestChange}
-            refreshVersion={refreshVersion}
+            matches={matches}
           />
         )
       }
@@ -893,16 +911,10 @@ function BattleMatches({
   onContestChange,
   segment,
   onSegmentChange,
-  refreshVersion,
+  matches,
 }: Omit<BattleTabProps, 'contests'> & { contests: Contest[] }) {
   const active = contests.find((contest) => contest.id === contestId) ?? contests[0]
   const battleSegment = BATTLE_SEGMENTS.find((item) => item.value === segment)
-  const battleStatus = battleSegment && 'status' in battleSegment ? battleSegment.status : undefined
-  const matches = useAsyncResource(
-    () => api.contest.listBattleMatches(active.id, { status: battleStatus, page: 1, size: MONITOR_SIZE }),
-    [active.id, battleStatus, refreshVersion],
-    () => false,
-  )
   // 分段上的数字取列表返回的 facets(套用所选竞赛,不套用状态);读取中或失败时不显示
   const battleFacets = matches.status === 'success' || matches.status === 'empty' ? matches.data?.facets : undefined
   const battleCounts = segmentCounts(battleFacets, 'status', BATTLE_SEGMENTS, (item) =>

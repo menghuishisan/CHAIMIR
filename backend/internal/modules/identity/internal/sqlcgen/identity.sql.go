@@ -427,6 +427,23 @@ func (q *Queries) CountClassStudents(ctx context.Context, arg CountClassStudents
 	return count, err
 }
 
+const countLoginFailures = `-- name: CountLoginFailures :one
+SELECT count(*)::bigint FROM audit_log WHERE tenant_id=$1 AND action='auth.login.failed' AND created_at BETWEEN $2 AND $3
+`
+
+type CountLoginFailuresParams struct {
+	TenantID    pgtype.Int8        `json:"tenant_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+}
+
+func (q *Queries) CountLoginFailures(ctx context.Context, arg CountLoginFailuresParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countLoginFailures, arg.TenantID, arg.CreatedAt, arg.CreatedAt_2)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countPendingImportPreviews = `-- name: CountPendingImportPreviews :one
 SELECT COUNT(*)::bigint FROM import_preview
 WHERE tenant_id = $1 AND operator_id = $2 AND target_type = $3 AND status = 1 AND expire_at > now()
@@ -1936,6 +1953,32 @@ func (q *Queries) ListAccountsByPhoneHashPrivileged(ctx context.Context, phoneHa
 	return items, nil
 }
 
+const listAlertRecipients = `-- name: ListAlertRecipients :many
+SELECT a.id FROM account a WHERE a.tenant_id=$1 AND a.status=2 AND a.deleted_at IS NULL
+AND EXISTS (SELECT 1 FROM account_role r WHERE r.account_id=a.id AND r.tenant_id=a.tenant_id AND r.role=2)
+ORDER BY a.id
+`
+
+func (q *Queries) ListAlertRecipients(ctx context.Context, tenantID int64) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listAlertRecipients, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAuthSessionsByAccount = `-- name: ListAuthSessionsByAccount :many
 SELECT id, tenant_id, account_id, refresh_token_hash, device_info, ip, status, expire_at, created_at
 FROM auth_session
@@ -2833,24 +2876,27 @@ func (q *Queries) QueryAuditLogs(ctx context.Context, arg QueryAuditLogsParams) 
 
 const recordPasswordFailure = `-- name: RecordPasswordFailure :one
 UPDATE account
-SET pwd_failed_count = $3, locked_until = $4, updated_at = now()
-WHERE id = $1 AND tenant_id = $2
+SET pwd_failed_count = LEAST(pwd_failed_count::integer + 1, $1::smallint)::smallint,
+    locked_until = CASE WHEN pwd_failed_count::integer + 1 >= $1::smallint
+                        THEN $2::timestamptz ELSE locked_until END,
+    updated_at = now()
+WHERE id = $3::bigint AND tenant_id = $4::bigint
 RETURNING id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, pwd_failed_count, locked_until, activated_at, deleted_at, created_at, updated_at
 `
 
 type RecordPasswordFailureParams struct {
-	ID             int64              `json:"id"`
-	TenantID       int64              `json:"tenant_id"`
-	PwdFailedCount int16              `json:"pwd_failed_count"`
-	LockedUntil    pgtype.Timestamptz `json:"locked_until"`
+	MaxFailures int16              `json:"max_failures"`
+	LockUntil   pgtype.Timestamptz `json:"lock_until"`
+	AccountID   int64              `json:"account_id"`
+	TenantID    int64              `json:"tenant_id"`
 }
 
 func (q *Queries) RecordPasswordFailure(ctx context.Context, arg RecordPasswordFailureParams) (Account, error) {
 	row := q.db.QueryRow(ctx, recordPasswordFailure,
-		arg.ID,
+		arg.MaxFailures,
+		arg.LockUntil,
+		arg.AccountID,
 		arg.TenantID,
-		arg.PwdFailedCount,
-		arg.LockedUntil,
 	)
 	var i Account
 	err := row.Scan(

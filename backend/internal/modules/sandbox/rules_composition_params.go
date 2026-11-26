@@ -1,4 +1,3 @@
-// rules_composition_params 统一验证目录声明的编排参数,不加载外部schema或注入默认值。
 package sandbox
 
 import (
@@ -7,7 +6,6 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-// validateComponentParams 由预览和最终编译共用标准校验器,映射授权仍由M2控制。
 func validateComponentParams(params map[string]any, schema map[string]any) error {
 	if len(schema) == 0 {
 		if len(params) > 0 {

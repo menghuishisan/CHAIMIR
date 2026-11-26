@@ -1,0 +1,24 @@
+{
+  "descriptor": {
+    "meta": {"code":"teacher_11__fixture","name":"教学夹具","category":"consensus","version":"1.0.0","summary":"验证渲染契约","learningObjectives":["观察"],"scaleLimit":{"nodes":8,"maxTick":8,"maxEvents":8}},
+    "interactions":[{"id":"advance","kind":"button","label":"推进","description":"继续观察","emits":"advance"}],
+    "narrative":[{"id":"initial","title":"初态","highlight":["flow"],"explain":"观察初态","defaultDurationMs":1000}],
+    "checkpoints":[{"id":"done","label":"完成观察"}]
+  },
+  "snapshot": {
+    "tick":0,
+    "state":{"tick":0,"phase":"initial","explanation":{"title":"初态","effect":"观察","reason":"验证","defaultDurationMs":1000},"metrics":{},"checkpointValues":{}},
+    "view":{"summary":"初态","phase":{"id":"initial","title":"初态","intent":"observe","explanation":{"what":"观察","why":"验证"}},"focus":{"primary":["flow"]},"layout":{"primary":"flow"},"patterns":[{"id":"flow","mode":"pipeline","title":"流程","data":{"steps":[],"currentStepId":""}}]},
+    "interactionAvailability":{"advance":true},
+    "checkpointResults":{"done":{"achieved":false,"answer":null,"explanation":"尚未完成"}}
+  },
+  "patterns": [
+    {"id":"flow","title":"网络","mode":"graph","data":{"layout":"ring","nodes":[{"id":"a","label":"甲","role":"节点","status":"idle"},{"id":"b","label":"乙","role":"节点","status":"active"}],"edges":[{"id":"ab","from":"a","to":"b","label":"消息","status":"pending"}]}},
+    {"id":"flow","title":"区块","mode":"chain","data":{"blocks":[{"id":"genesis","height":0,"hash":"0","parentHash":"","label":"创世块","status":"genesis"}],"forks":[]}},
+    {"id":"flow","title":"树","mode":"tree","data":{"root":{"id":"root","label":"根","hash":"0","children":[{"id":"child","label":"叶","hash":"1"}]},"highlightedPath":["root"]}},
+    {"id":"flow","title":"矩阵","mode":"matrix","data":{"rows":["甲"],"columns":["乙"],"cells":[[{"label":"通过","status":"yes"}]]}},
+    {"id":"flow","title":"流程","mode":"pipeline","data":{"steps":[{"id":"step","label":"验证","status":"running","detail":"验证输入"}],"currentStepId":"step"}},
+    {"id":"flow","title":"时序","mode":"lane","data":{"actors":["甲","乙"],"messages":[{"id":"ab","from":"甲","to":"乙","at":0,"label":"消息","status":"sent"}],"currentTime":0}},
+    {"id":"flow","title":"图表","mode":"chart","data":{"series":[{"label":"计数","points":[{"x":0,"y":1},{"x":1,"y":2}]}],"unit":"次"}}
+  ]
+}

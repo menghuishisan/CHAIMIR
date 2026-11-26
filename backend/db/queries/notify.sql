@@ -1,12 +1,7 @@
 -- name: GetNotificationTemplate :one
-SELECT id, type, title_tpl, content_tpl, channels, force, created_at, updated_at
+SELECT id, type, title_tpl, content_tpl, force, created_at, updated_at
 FROM notification_template
 WHERE type = $1;
-
--- name: ListNotificationTemplates :many
-SELECT id, type, title_tpl, content_tpl, channels, force, created_at, updated_at
-FROM notification_template
-ORDER BY type;
 
 -- name: CreateNotification :exec
 INSERT INTO notification (id, tenant_id, receiver_id, type, title, content, link, source_ref, is_read, created_at)

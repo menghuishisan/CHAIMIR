@@ -1,19 +1,9 @@
-﻿// ===== 通用类型 =====
+// ===== 通用类型 =====
 
 /** SnowflakeID 是浏览器公开契约中的十进制字符串资源标识。 */
 export type SnowflakeID = string
 
-/**
- * PageFacets 是分页响应里的全量分组计数。
- *
- * 后端在同一事务、同一可见性边界内算出,故它是**全量口径**而不是当前页的切片统计 ——
- * 这正是规范 §6.5.4 要求指标必须满足的条件。外层键是分组维度(如 `action`、`scope`),
- * 内层键是该维度的取值(枚举值按十进制字符串给出),值是条数。
- *
- * 带状态(或类别)分段的列表都返回这个字段(规则见 `docs/总-API接口总览.md`「分段计数」,清单见
- * `docs/审查测试记录/对齐-后端待补齐清单-2026-08-23.md` §6.2):每组不套用本组筛选,套用其余筛选。
- * 没有分段的分页接口不带它,故这里是可选的;前端不得对没有契约的接口猜测 facets。
- */
+/** 按维度统计全量可见记录。每组套用其他筛选，跳过本组筛选。 */
 export type PageFacets = Record<string, Record<string, number>>
 
 export interface PaginatedResponse<T> {
@@ -21,6 +11,6 @@ export interface PaginatedResponse<T> {
   total: number
   page: number
   size: number
-  /** 全量分组计数;仅在后端为该列表声明了聚合契约时出现 */
+  /** 仅在该接口声明分段计数时出现。 */
   facets?: PageFacets
 }

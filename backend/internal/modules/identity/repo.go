@@ -2,6 +2,7 @@
 package identity
 
 import (
+	"chaimir/internal/contracts"
 	"context"
 	"fmt"
 	"time"
@@ -17,12 +18,16 @@ import (
 // Store 定义 service 所需的 identity 持久化能力,不暴露 sqlc 行类型。
 type Store interface {
 	PlatformTx(ctx context.Context, fn func(context.Context, TxStore) error) error
+	PlatformTxIfPresent(ctx context.Context, fn func(context.Context, TxStore) error) (bool, error)
 	TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
+	TenantTxIfPresent(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) (bool, error)
 	PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error
 }
 
 // TxStore 定义单个事务内可调用的 identity 数据访问能力。
 type TxStore interface {
+	AlertRecipients(context.Context, int64) ([]int64, error)
+	ReadAlertMetrics(context.Context, contracts.AlertMetricQuery) (map[string]float64, error)
 	UseTenant(ctx context.Context, tenantID int64) error
 	GetPlatformAdminByUsername(ctx context.Context, username string) (PlatformAdmin, error)
 	GetPlatformAdminByID(ctx context.Context, id int64) (PlatformAdmin, error)
@@ -62,7 +67,7 @@ type TxStore interface {
 	UpdateAccountPassword(ctx context.Context, accountID, tenantID int64, passwordHash string, mustChange bool, status int16) (Account, error)
 	ActivateSSOAccount(ctx context.Context, accountID, tenantID int64) (Account, error)
 	UpdateAccountPhone(ctx context.Context, tenantID, accountID int64, phoneEnc []byte, phoneHash string) (Account, error)
-	RecordPasswordFailure(ctx context.Context, accountID, tenantID int64, count int16, lockedUntil *time.Time) error
+	RecordPasswordFailure(ctx context.Context, accountID, tenantID int64, maxFailures int16, lockedUntil *time.Time) error
 	ClearPasswordFailure(ctx context.Context, accountID, tenantID int64) error
 	GrantRole(ctx context.Context, tenantID, accountID int64, role int16, roleID int64) error
 	RevokeRole(ctx context.Context, tenantID, accountID int64, role int16) error
@@ -175,12 +180,32 @@ func (s *store) PlatformTx(ctx context.Context, fn func(context.Context, TxStore
 	})
 }
 
+// PlatformTxIfPresent 供跨模块审计复用调用方应用事务,没有外层事务时不执行回调。
+func (s *store) PlatformTxIfPresent(ctx context.Context, fn func(context.Context, TxStore) error) (bool, error) {
+	if s == nil || s.database == nil {
+		return false, fmt.Errorf("identity store 未初始化")
+	}
+	return s.database.WithAppTxIfPresent(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		return fn(ctx, &txStore{q: sqlcgen.New(tx), tx: tx})
+	})
+}
+
 // TenantTx 在注入 RLS 租户变量后访问租户内自有表。
 func (s *store) TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error {
 	if s == nil || s.database == nil {
 		return fmt.Errorf("identity store 未初始化")
 	}
 	return s.database.WithTenantTxID(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		return fn(ctx, &txStore{q: sqlcgen.New(tx), tx: tx})
+	})
+}
+
+// TenantTxIfPresent 供跨模块审计复用同租户事务,没有外层事务时不执行回调。
+func (s *store) TenantTxIfPresent(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) (bool, error) {
+	if s == nil || s.database == nil {
+		return false, fmt.Errorf("identity store 未初始化")
+	}
+	return s.database.WithTenantTxIfPresent(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		return fn(ctx, &txStore{q: sqlcgen.New(tx), tx: tx})
 	})
 }

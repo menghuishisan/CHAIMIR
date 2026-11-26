@@ -1,5 +1,3 @@
-// 成绩契约常量：维护前端需要与后端 grade 模块枚举编号对齐的值。
-
 export enum GradeReviewStatus {
   PENDING = 1,
   APPROVED = 2,
@@ -8,6 +6,7 @@ export enum GradeReviewStatus {
 
 export enum GradeAppealStatus {
   PENDING = 1,
+  // 等待任课教师改分。
   ACCEPTED = 2,
   COMPLETED = 3,
   REJECTED = 4,

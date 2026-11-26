@@ -1,17 +1,14 @@
-// sim dto 文件定义 M4 HTTP 请求结构,不承载业务编排逻辑。
+// sim dto 定义仿真 HTTP 请求和响应。
 package sim
 
 import (
-	"chaimir/internal/platform/ids"
 	"encoding/json"
 	"time"
+
+	"chaimir/internal/platform/ids"
 )
 
-// SubmitPackageRequest 是教师或第三方提交仿真包时的元数据。
-//
-// 刻意不含 compute 与 backend_adapter:执行位置按 author_type 派生(教师/第三方恒为隔离容器,
-// 见 docs/04-仿真可视化引擎/02-架构设计.md §8),让客户端声明它只会产生
-// "提交了一个平台没有任何路径能运行的包"这类无效状态。
+// SubmitPackageRequest 是扩展仿真包的上传元数据。扩展包始终由服务端安排隔离执行。
 type SubmitPackageRequest struct {
 	Code       string          `json:"code"`
 	Version    string          `json:"version"`
@@ -45,14 +42,6 @@ type ReportActionRequest struct {
 	Payload   map[string]any `json:"payload"`
 }
 
-// ReportCheckpointRequest 是内部服务上报的检查点快照。
-type ReportCheckpointRequest struct {
-	CheckpointID string          `json:"checkpoint_id"`
-	Answer       json.RawMessage `json:"answer"`
-	Achieved     bool            `json:"achieved"`
-}
-
-// RecycleRequest 是内部服务按生命周期作用域归档会话的请求。
 type RecycleRequest struct {
 	SourceRef string `json:"source_ref"`
 	ScopeRef  string `json:"scope_ref"`
@@ -65,8 +54,7 @@ type CreateShareRequest struct {
 }
 
 // BackendAdapterDescriptor 描述当前部署已装配的隔离执行能力。
-// 它只在启动装配时用于核对能力目录与适配器实现一致,不对外暴露 —— 执行位置与运行能力
-// 都由服务端按作者类型派生,客户端没有可选项,也就没有能力列表接口。
+// 仅用于启动装配核对，不对外提供能力选择入口。
 type BackendAdapterDescriptor struct {
 	Code        string `json:"code"`
 	Name        string `json:"name"`
@@ -167,14 +155,8 @@ type SimPackageSubmissionResponse struct {
 	Review SimPackageReviewResponse `json:"review"`
 }
 
-// SimPackagePreviewResponse 是作者预览自己的审核报告时的响应。
-type SimPackagePreviewResponse struct {
-	Package SimPackageResponse       `json:"package"`
-	Review  SimPackageReviewResponse `json:"review"`
-}
-
-// SimReviewDecisionResponse 是平台管理员审核决策后的响应。
-type SimReviewDecisionResponse struct {
+// SimPackageReviewDetailResponse 返回作者预览或管理员决策时的包和审核记录。
+type SimPackageReviewDetailResponse struct {
 	Package SimPackageResponse       `json:"package"`
 	Review  SimPackageReviewResponse `json:"review"`
 }
@@ -196,6 +178,7 @@ type SimActionResponse struct {
 
 // SimReplayResponse 是可复现回放的公开 HTTP 响应。
 type SimReplayResponse struct {
+	ReadOnly    bool                `json:"read_only"`
 	PackageCode string              `json:"package_code"`
 	Version     string              `json:"version"`
 	Seed        int64               `json:"seed"`

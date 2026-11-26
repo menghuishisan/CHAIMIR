@@ -1,8 +1,8 @@
-// 一次性审查脚本:合规审查的统一入口,依次跑十项静态一致性检查并汇总判定。
+// 合规审查统一入口，逐项执行源码和产物一致性检查。
 // 用法:node scripts/audit/index.mjs
 // 源码门禁(不依赖前端构建产物):node scripts/audit/index.mjs --source-only
 //
-// 十项分别回答一个问题:
+// 每项检查覆盖一类契约:
 //   structure-responsibilities 后端文件职责、模块边界和前端目录职责是否符合工程规范
 //   route-matrix          后端注册路由 ↔ openapi 契约是否四方一致、有无同 handler 双轨
 //   sdk-matrix            api-client 每条路径是否命中真实后端路由、有无不可达方法
@@ -10,6 +10,7 @@
 //   pagination-contract   后端分页默认值/上限 ↔ api-client 常量是否一致
 //   role-guard-crosscheck 各角色页面调用的接口守卫是否与该角色相容(静态检查发现不了的越权)
 //   sim-catalog-drift     后端内置仿真包清单产物 ↔ 前端 sim-sdk 源码是否一致
+//   sim-runtime-protocol  SDK 类型 ↔ JSON Schema 与预编译校验器是否一致
 //   check-frontend-standards 前端实现是否符合设计令牌、组件和无障碍规范
 //   bundle-boundary       入口包是否泄漏四端路由结构与栏目名(前端铁律 2 自证)
 //   frontend-boundaries   公共/工具/CAS origin、overlay 和安全响应头是否统一
@@ -30,6 +31,7 @@ const CHECKS = [
   { name: "pagination-contract", title: "后端分页契约 ↔ api-client 常量一致性" },
   { name: "role-guard-crosscheck", title: "角色页面 ↔ 接口守卫相容性" },
   { name: "sim-catalog-drift", title: "内置仿真包清单 ↔ sim-sdk 源码一致性" },
+  { name: "sim-runtime-protocol", title: "仿真运行契约与生成校验器一致性", script: join(ROOT, "scripts/codegen/sim-runtime-protocol.mjs"), args: ["--check"] },
   { name: "check-frontend-standards", title: "前端设计规范门禁" },
   { name: "bundle-boundary", title: "前端打包边界自证", needsDist: true },
   {
@@ -55,7 +57,7 @@ for (const check of CHECKS) {
   try {
     const out = execFileSync(
       process.execPath,
-      [join(ROOT, "scripts/audit", `${check.name}.mjs`)],
+      [check.script ?? join(ROOT, "scripts/audit", `${check.name}.mjs`), ...(check.args ?? [])],
       {
         cwd: ROOT,
         encoding: "utf8",
@@ -74,6 +76,6 @@ console.log(`\n${"=".repeat(72)}`);
 console.log(
   failed
     ? "有检查未能完成,见上方输出。"
-    : "十项检查全部执行完毕,逐项结论见上方输出。",
+    : "检查全部执行完毕,逐项结论见上方输出。",
 );
 if (failed) process.exitCode = 1;

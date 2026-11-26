@@ -1,27 +1,15 @@
-// runtimeSpec 负责读取沙箱运行时声明中的公开摘要字段。
-// 声明本体是平台管理员提交的动态 JSON,不在应用层复制后端 workload 编排模型。
+// 从管理员声明中读取运行时摘要；工作负载模型由后端维护。
 
-/** asRecord 将未知 JSON 值收敛为对象,非对象由调用方按缺省处理。 */
-export function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined
-}
-
-/** readString 读取动态声明中的非空字符串字段。 */
-export function readString(record: Record<string, unknown> | undefined, key: string): string {
-  const value = record?.[key]
-  return typeof value === 'string' ? value : ''
-}
+import { asRecord, stringValue } from './dynamicSpec'
 
 /** runtimeWorkspaceDir 返回运行时工作区目录,缺失时给出空值供界面展示。 */
 export function runtimeWorkspaceDir(spec: Record<string, unknown>): string {
-  return readString(spec, 'workspace_dir')
+  return stringValue(spec.workspace_dir)
 }
 
 /** runtimeContainerName 返回主环境名称。 */
 export function runtimeContainerName(spec: Record<string, unknown>): string {
-  return readString(asRecord(spec.runtime_container), 'name')
+  return stringValue(asRecord(spec.runtime_container)?.name)
 }
 
 /** runtimeContainerPortCount 返回主环境声明的端口数量。 */
@@ -47,5 +35,5 @@ export function runtimeHasDeployCommand(spec: Record<string, unknown>): boolean 
  * 是用户向说明,页面原样展示 —— 前端不自己推断也不隐藏(对齐清单 §6.3 / §8.3)。
  */
 export function runtimeDisabledReason(spec: Record<string, unknown>): string {
-  return readString(spec, 'disabled_reason')
+  return stringValue(spec.disabled_reason)
 }

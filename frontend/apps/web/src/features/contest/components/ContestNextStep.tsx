@@ -1,8 +1,6 @@
-// ContestNextStep 赛事赛程的「下一步」按钮与确认弹窗(设计 §7.4 赛事组织行内、赛事详情页头主按钮共用)。
-// 下一步由 contestNextStep 判定(与后端状态图和时间窗口一致);暂时不能做时按钮不可用,原因就近写在按钮旁(规范 §6.5)。
-// 确认弹窗写清会发生什么、能否撤销;发布与归档是落印类动作用朱砂,其余用主色。
+// 赛事列表与详情共用的赛程操作及确认弹窗。
 
-import { useCallback, useState } from 'react'
+import { useState } from 'react'
 import { Archive, Lock, Play, Send, Snowflake, type LucideIcon } from 'lucide-react'
 import type { Contest } from '@chaimir/api-client'
 import {
@@ -68,7 +66,7 @@ const ACTION_COPY: Record<
   },
 }
 
-/** runLifecycleAction 调用对应的状态流转接口 */
+/** runLifecycleAction 执行赛事状态流转。 */
 async function runLifecycleAction(action: LifecycleAction, contestId: string): Promise<void> {
   if (action === 'publish') await api.contest.publishContest(contestId)
   else if (action === 'start') await api.contest.startContest(contestId)
@@ -83,20 +81,16 @@ export interface ContestNextStepButtonProps {
   placement: 'row' | 'header'
   /** 流转成功后(弹窗已关闭)通知调用方重读 */
   onDone: () => void
-  /** 暂时不能发布的原因(如还没有赛题);给了就把「发布」置为不可用并显示这个原因 */
+  /** 由页面补充的发布阻塞原因，如未添加赛题。 */
   publishBlocker?: string
 }
 
-/**
- * ContestNextStepButton 一场赛事的「下一步」。已归档时不渲染;
- * 失败时错误留在弹窗里(就近反馈),成功后关闭弹窗并短提示。
- */
+/** ContestNextStepButton 按赛程与发布条件提供下一步操作。 */
 export function ContestNextStepButton({ contest, placement, onDone, publishBlocker }: ContestNextStepButtonProps) {
   const [open, setOpen] = useState(false)
   const [working, setWorking] = useState(false)
   const [error, setError] = useState<string>()
   const timed = contestNextStep(contest)
-  // 时间窗口允许发布但页面知道还缺东西(如没有赛题)时,同样置为不可用并写原因
   const step =
     timed && timed.action === 'publish' && timed.available && publishBlocker
       ? { action: timed.action, available: false, reason: publishBlocker }
@@ -104,7 +98,7 @@ export function ContestNextStepButton({ contest, placement, onDone, publishBlock
 
   const action = step?.action
 
-  const confirm = useCallback(async () => {
+  async function confirm() {
     if (!action) return
     setWorking(true)
     setError(undefined)
@@ -118,7 +112,7 @@ export function ContestNextStepButton({ contest, placement, onDone, publishBlock
     } finally {
       setWorking(false)
     }
-  }, [action, contest.id, onDone])
+  }
 
   if (!step) return null
   const copy = ACTION_COPY[step.action]
@@ -142,7 +136,6 @@ export function ContestNextStepButton({ contest, placement, onDone, publishBlock
       {step.available ? (
         button
       ) : (
-        // 行内:原因在按钮下方右对齐;页头:原因在按钮左侧。原因是可见文字,读屏顺序读到
         <span
           className={cn(
             'inline-flex gap-1.5',

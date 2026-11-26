@@ -3,7 +3,6 @@ package contracts
 
 import (
 	"context"
-	"encoding/json"
 )
 
 // SimCreateSessionRequest 是业务模块创建仿真会话时提交的稳定请求。
@@ -52,16 +51,6 @@ type SimReplayInfo struct {
 	Actions     []SimActionInfo `json:"actions"`
 }
 
-// SimCheckpointRequest 是业务模块上报仿真检查点结果的内部请求。
-type SimCheckpointRequest struct {
-	TenantID     int64           `json:"tenant_id"`
-	SessionID    int64           `json:"session_id"`
-	SourceRef    string          `json:"source_ref"`
-	CheckpointID string          `json:"checkpoint_id"`
-	Answer       json.RawMessage `json:"answer"`
-	Achieved     bool            `json:"achieved"`
-}
-
 // SimDestroySessionRequest 是业务模块按来源回收单个仿真会话的内部请求。
 type SimDestroySessionRequest struct {
 	TenantID  int64  `json:"tenant_id"`
@@ -88,12 +77,12 @@ type SimRecycleRequest struct {
 
 // SimService 是 M4 仿真引擎对 M6/M7 暴露的会话能力契约。
 type SimService interface {
+	// ValidatePackage 只读检查租户授权和锁定版本的可运行性，不创建会话或占用执行配额。
+	ValidatePackage(ctx context.Context, tenantID int64, packageCode, version string) error
 	// CreateSession 创建仿真会话并锁定仿真包版本。
 	CreateSession(ctx context.Context, req SimCreateSessionRequest) (SimSessionInfo, error)
 	// GetReplay 返回可复现的 seed、参数与操作序列。
 	GetReplay(ctx context.Context, tenantID, sessionID int64) (SimReplayInfo, error)
-	// ReportCheckpoint 保存仿真检查点结果快照,供 M3 后续判分读取。
-	ReportCheckpoint(ctx context.Context, req SimCheckpointRequest) error
 	// DestroySession 回收单个仿真会话,供来源模块显式关闭实例时释放资源。
 	DestroySession(ctx context.Context, req SimDestroySessionRequest) error
 	// UpdateSessionAuthorizedAccounts 原子替换共享仿真会话的授权账号集合,并关闭被撤销账号的在线流。

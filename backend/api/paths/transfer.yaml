@@ -39,6 +39,7 @@
   post:
     tags: [transfer]
     summary: 签发导入导出产物短时下载授权
+    description: 任务所有者或同租户学校管理员可申请，授权只可由申请账号消费。
     operationId: transferDownloadGrant
     x-chaimir-audience: platform-admin-or-user
     security:

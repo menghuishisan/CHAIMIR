@@ -1,10 +1,7 @@
-// teaching labels 文件维护 M6 教学模块枚举的用户向文案。
-
 import {
   AssignmentStatus,
   CourseStatus,
   CourseType,
-  CourseVisibility,
   GradeSource,
   JoinMode,
   LatePolicy,
@@ -123,16 +120,6 @@ const GRADE_SOURCE_LABELS: Record<GradeSource, string> = {
 /** gradeSourceLabel 返回成绩来源文案。 */
 export function gradeSourceLabel(source: GradeSource): string {
   return GRADE_SOURCE_LABELS[source]
-}
-
-const COURSE_VISIBILITY_LABELS: Record<CourseVisibility, string> = {
-  [CourseVisibility.PRIVATE]: '仅本校',
-  [CourseVisibility.SHARED]: '已共享到课程库',
-}
-
-/** courseVisibilityLabel 返回课程可见范围文案。 */
-export function courseVisibilityLabel(visibility: CourseVisibility): string {
-  return COURSE_VISIBILITY_LABELS[visibility]
 }
 
 const JOIN_MODE_LABELS: Record<JoinMode, string> = {

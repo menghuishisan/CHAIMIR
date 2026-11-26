@@ -14,13 +14,11 @@ WORKSPACE = Path("/workspace")
 
 
 def emit_failure(message: str, exit_code: int = 64) -> int:
-    """输出机器可读失败结果并返回受控错误码。"""
     print(json.dumps({"success": False, "error": message}, ensure_ascii=False))
     return exit_code
 
 
 def main() -> int:
-    """验证组合注入的版本后，逐个分析工作区 Solidity 文件。"""
     version = os.environ.get("SOLIDITY_VERSION", "").strip()
     if version not in SUPPORTED_VERSIONS:
         return emit_failure("SOLIDITY_VERSION 必须是组合声明的已支持版本")
@@ -46,8 +44,17 @@ def main() -> int:
             return emit_failure(f"Mythril 对 {source} 的输出不是 JSON: {result.stderr.strip()}")
         reports.append({"source": str(source), "exit_code": result.returncode, "report": report})
 
-    print(json.dumps({"success": True, "solidity_version": version, "files": reports}, ensure_ascii=False))
-    return 0 if all(item["exit_code"] in (0, 1) for item in reports) else 1
+    # Mythril 的分析错误也可能以退出码 0 返回，必须同时检查 JSON。
+    success = all(
+        item["exit_code"] in (0, 1)
+        and isinstance(item["report"], dict)
+        and item["report"].get("success") is True
+        and item["report"].get("error") is None
+        and isinstance(item["report"].get("issues"), list)
+        for item in reports
+    )
+    print(json.dumps({"success": success, "solidity_version": version, "files": reports}, ensure_ascii=False))
+    return 0 if success else 1
 
 
 if __name__ == "__main__":

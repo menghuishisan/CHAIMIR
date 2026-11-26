@@ -7,11 +7,11 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { useLocation, useNavigate } from 'react-router'
+import { useNavigate } from 'react-router'
 import type { LoginResponse, TenantOption } from '@chaimir/api-client'
 import { SmsScene } from '@chaimir/api-client'
 import { api } from '../../../../app/api'
-import { loginEntryPath, persistLoginTokens } from '../../../../utils/authSession'
+import { completeLogin } from '../../../../utils/authSession'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import {
   passwordRequiredError,
@@ -78,12 +78,10 @@ export interface LoginController {
 
 /**
  * useLoginController 持有登录页全部输入与提交流程。
- * 登录成功后的落点由服务端返回的角色与改密要求决定(loginEntryPath),前端不自行判定权限。
+ * 登录落点统一由会话能力按服务端角色、改密要求及待恢复地址决定。
  */
 export function useLoginController(): LoginController {
   const navigate = useNavigate()
-  const location = useLocation()
-  const returnPath = (location.state as { from?: string } | null)?.from
 
   const [query, setQuery] = useUrlState(LOGIN_QUERY)
   const view = query.view as LoginView
@@ -132,23 +130,22 @@ export function useLoginController(): LoginController {
     validate(['accountNo'])
   }, [validate])
 
-  /** completeLogin 持久化会话并按服务端改密要求或角色决定落点 */
-  const completeLogin = useCallback(
+  /** finishLogin 清除选校凭据并由会话能力决定登录落点。 */
+  const finishLogin = useCallback(
     (response: LoginResponse) => {
       clearPendingTenantLogin()
-      persistLoginTokens(response)
-      navigate(loginEntryPath(response, returnPath), { replace: true })
+      navigate(completeLogin(response), { replace: true })
     },
-    [navigate, returnPath],
+    [navigate],
   )
 
   /** enterTenantSelect 暂存凭证进入多学校选择(凭证仅存内存) */
   const enterTenantSelect = useCallback(
     (tenants: TenantOption[], method: Parameters<typeof setPendingTenantLogin>[0]['method']) => {
-      setPendingTenantLogin({ tenants, remember, returnPath, method })
+      setPendingTenantLogin({ tenants, remember, method })
       navigate('/auth/tenant-select')
     },
-    [navigate, remember, returnPath],
+    [navigate, remember],
   )
 
   /** sendSms 发送登录验证码并启动重发倒计时 */
@@ -181,14 +178,14 @@ export function useLoginController(): LoginController {
             enterTenantSelect(response.tenants, { type: 'phone', phone: phone.trim(), password })
             return
           }
-          completeLogin(response)
+          finishLogin(response)
         } else {
           const response = await api.identity.loginSMS({ phone: phone.trim(), code: smsCode.trim(), remember })
           if (response.need_select_tenant && response.tenants && response.tenants.length > 0) {
             enterTenantSelect(response.tenants, { type: 'sms', phone: phone.trim(), code: smsCode.trim() })
             return
           }
-          completeLogin(response)
+          finishLogin(response)
         }
       } catch (loginError) {
         setFormError(
@@ -201,7 +198,7 @@ export function useLoginController(): LoginController {
         setSubmitting(false)
       }
     },
-    [completeLogin, enterTenantSelect, password, phone, phoneMethod, remember, smsCode, validate],
+    [finishLogin, enterTenantSelect, password, phone, phoneMethod, remember, smsCode, validate],
   )
 
   /** submitAccount 学校代号 + 学号/工号登录(学校已定,不存在选校分支) */
@@ -219,14 +216,14 @@ export function useLoginController(): LoginController {
           password,
           remember,
         })
-        completeLogin(response)
+        finishLogin(response)
       } catch (loginError) {
         setFormError(userFacingErrorMessage(loginError, '登录失败,请检查学校代号、账号和密码后重试。'))
       } finally {
         setSubmitting(false)
       }
     },
-    [accountNo, completeLogin, password, remember, tenantCode, validate],
+    [accountNo, finishLogin, password, remember, tenantCode, validate],
   )
 
   /** submitSso 进入该学校的统一认证中转页(认证由学校侧完成) */

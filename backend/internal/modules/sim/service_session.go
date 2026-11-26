@@ -3,11 +3,12 @@ package sim
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -37,6 +38,9 @@ func (s *Service) ReportAction(ctx context.Context, tenantID, accountID, session
 	}
 	var out Action
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		if err := tx.LockSessionActions(ctx, tenantID, sessionID); err != nil {
+			return apperr.ErrSimActionSeqInvalid.WithCause(err)
+		}
 		session, err := tx.GetSessionWithPackage(ctx, tenantID, sessionID)
 		if err != nil {
 			return lookupError(err, apperr.ErrSimSessionNotFound, apperr.ErrSimSessionQueryFailed)
@@ -47,8 +51,14 @@ func (s *Service) ReportAction(ctx context.Context, tenantID, accountID, session
 		if err := s.requireSessionModules(ctx, tenantID, session.SourceRef); err != nil {
 			return err
 		}
-		if !canMutateSession(session.Status) {
+		if session.Status != SessionAvailable {
 			return apperr.ErrSimSessionStateInvalid
+		}
+		if session.Compute == ComputeIsolated {
+			return apperr.ErrSimActionSeqInvalid
+		}
+		if err := validateActionReplayPosition(req.Seq, req.AtTick, session.ScaleLimit); err != nil {
+			return err
 		}
 		if err := validateActionAgainstSchema(session.InteractionSchema, req.EventType, req.Payload); err != nil {
 			return err
@@ -76,7 +86,7 @@ func (s *Service) ReportAction(ctx context.Context, tenantID, accountID, session
 			if req.Seq != 1 {
 				return apperr.ErrSimActionSeqInvalid
 			}
-		} else if req.Seq != last.Seq+1 {
+		} else if req.Seq != last.Seq+1 || req.AtTick < last.AtTick {
 			return apperr.ErrSimActionSeqInvalid
 		}
 		out, err = tx.CreateAction(ctx, Action{ID: s.ids.Generate(), TenantID: tenantID, SessionID: sessionID, Seq: req.Seq, AtTick: req.AtTick, EventType: req.EventType, Payload: req.Payload})
@@ -105,21 +115,6 @@ func (s *Service) GetReplayForUser(ctx context.Context, tenantID, accountID, ses
 	return replayToResponse(session, actions), nil
 }
 
-// ReportCheckpointFromHTTP 保存 HTTP 内部接口上报的检查点。
-func (s *Service) ReportCheckpointFromHTTP(ctx context.Context, tenantID, sessionID int64, req ReportCheckpointRequest) error {
-	sourceRef, ok := auth.ServiceSourceRefFromContext(ctx)
-	if !ok {
-		return apperr.ErrServiceUnauthorized
-	}
-	if !auth.ValidSourceRef(sourceRef) {
-		return apperr.ErrSimCheckpointInvalid
-	}
-	if !auth.ServiceSourceRefAuthorized(ctx, sourceRef) {
-		return apperr.ErrServiceUnauthorized
-	}
-	return s.reportCheckpointRaw(ctx, tenantID, sessionID, sourceRef, req.CheckpointID, req.Answer, req.Achieved)
-}
-
 // ShareSession 为用户会话创建公开分享码。
 func (s *Service) ShareSession(ctx context.Context, tenantID, accountID, sessionID int64, expireAt time.Time) (SimShareResponse, error) {
 	if !expireAt.IsZero() && !expireAt.After(timex.Now()) {
@@ -127,6 +122,9 @@ func (s *Service) ShareSession(ctx context.Context, tenantID, accountID, session
 	}
 	var share Share
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		if err := tx.LockSessionActions(ctx, tenantID, sessionID); err != nil {
+			return apperr.ErrSimSessionStateInvalid.WithCause(err)
+		}
 		session, err := tx.GetSession(ctx, tenantID, sessionID)
 		if err != nil {
 			return lookupError(err, apperr.ErrSimSessionNotFound, apperr.ErrSimSessionQueryFailed)
@@ -137,7 +135,7 @@ func (s *Service) ShareSession(ctx context.Context, tenantID, accountID, session
 		if err := s.requireSessionModules(ctx, tenantID, session.SourceRef); err != nil {
 			return err
 		}
-		if session.Status == SessionFailed || session.Status == SessionArchived {
+		if session.Status != SessionAvailable {
 			return apperr.ErrSimSessionStateInvalid
 		}
 		var lastErr error
@@ -150,7 +148,7 @@ func (s *Service) ShareSession(ctx context.Context, tenantID, accountID, session
 			if err == nil {
 				return nil
 			}
-			if !isUniqueViolation(err) {
+			if !isNoRows(err) {
 				return apperr.ErrSimShareCodeInvalid.WithCause(err)
 			}
 			lastErr = err
@@ -241,52 +239,31 @@ func (s *Service) loadReplay(ctx context.Context, tenantID, sessionID int64) (Se
 	return session, actions, nil
 }
 
-// reportCheckpointRaw 在租户事务内保存检查点,不保存正确答案或判分规则。
-func (s *Service) reportCheckpointRaw(ctx context.Context, tenantID, sessionID int64, sourceRef, checkpointID string, answer []byte, achieved bool) error {
-	if err := validateCheckpoint(sessionID, checkpointID, answer); err != nil {
-		return err
-	}
-	return s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		session, err := tx.GetSession(ctx, tenantID, sessionID)
-		if err != nil {
-			return lookupError(err, apperr.ErrSimSessionNotFound, apperr.ErrSimSessionQueryFailed)
-		}
-		if strings.TrimSpace(sourceRef) != "" && session.SourceRef != strings.TrimSpace(sourceRef) {
-			return apperr.ErrServiceUnauthorized
-		}
-		if !auth.ServiceSourceRefAuthorized(ctx, session.SourceRef) {
-			return apperr.ErrServiceUnauthorized
-		}
-		if !canMutateSession(session.Status) {
-			return apperr.ErrSimSessionStateInvalid
-		}
-		_, err = tx.UpsertCheckpoint(ctx, Checkpoint{ID: s.ids.Generate(), TenantID: tenantID, SessionID: sessionID, CheckpointID: strings.TrimSpace(checkpointID), Answer: answer, Achieved: achieved})
-		if err != nil {
-			return lookupError(err, apperr.ErrSimCheckpointInvalid, apperr.ErrSimSessionQueryFailed)
-		}
-		return nil
-	})
-}
-
 // releaseBackendSessions 释放已归档隔离执行会话占用的 Pod 与命名空间,并让出租户并发额度。
 func (s *Service) releaseBackendSessions(ctx context.Context, tenantID int64, sessions []Session) error {
+	var failures []error
 	for _, archived := range sessions {
 		if archived.Compute != ComputeIsolated {
 			continue
 		}
+		if err := s.publishSessionChanged(ctx, tenantID, archived.ID); err != nil {
+			failures = append(failures, fmt.Errorf("session_id=%d: %w", archived.ID, err))
+		}
 		session, err := s.loadBackendReleaseSession(ctx, tenantID, archived.ID)
 		if err != nil {
-			return err
+			failures = append(failures, err)
+			continue
 		}
 		adapter := s.backends[strings.TrimSpace(session.BackendAdapter)]
 		if err := validateBackendAdapterConfig(session.Compute, session.BackendAdapter, session.BackendConfig, s.backends); err != nil {
-			return err
+			failures = append(failures, fmt.Errorf("session_id=%d: %w", session.ID, err))
+			continue
 		}
 		if err := adapter.Release(ctx, session); err != nil {
-			return apperr.ErrSimBackendComputeUnavailable.WithCause(err)
+			failures = append(failures, fmt.Errorf("session_id=%d: %w", session.ID, apperr.ErrSimBackendComputeUnavailable.WithCause(err)))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 // loadBackendReleaseSession 读取后端适配器释放资源所需的会话与包配置。

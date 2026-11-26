@@ -16,12 +16,11 @@ import (
 )
 
 var (
-	simCodePattern      = regexp.MustCompile(`^[a-z][a-z0-9_]{1,31}__[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`)
-	semverPattern       = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`)
-	categoryPattern     = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,31}$`)
-	eventTypePattern    = regexp.MustCompile(`^[a-z][a-z0-9_.:-]{0,63}$`)
-	checkpointIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}$`)
-	payloadKeyPattern   = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.:-]{0,63}$`)
+	simCodePattern    = regexp.MustCompile(`^[a-z][a-z0-9_]{1,31}__[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`)
+	semverPattern     = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`)
+	categoryPattern   = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,31}$`)
+	eventTypePattern  = regexp.MustCompile(`^[a-z][a-z0-9_.:-]{0,63}$`)
+	payloadKeyPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.:-]{0,63}$`)
 )
 
 // M4 协议与入库边界的规模上限统一放在这里:它们是协议常量(前后端同值、与数据库约束同源),
@@ -32,16 +31,8 @@ const (
 	// maxValidationMessageLength 限定审核报告里展示给包作者的单条原因长度。
 	// 原因文本来自隔离容器的输出,长度不可信,必须在入库前截断。
 	maxValidationMessageLength = 500
-	// maxFramePatterns 是单帧允许的封闭模式数量上限,与前端 assertValidTeachingFrame 同值。
-	maxFramePatterns = 3
 	// maxPreviewFrames 是隔离预览可写入报告的样例帧数量上限,兜住报告体积。
 	maxPreviewFrames = 32
-	// maxDescriptorInteractions 限定页面一次渲出的操作数量上限。
-	maxDescriptorInteractions = 64
-	// maxDescriptorNarrative 限定教学步骤数量上限。
-	maxDescriptorNarrative = 64
-	// maxDescriptorCheckpoints 限定检查点数量上限。
-	maxDescriptorCheckpoints = 64
 )
 
 // computeText 返回 API 对外稳定字符串。
@@ -121,34 +112,29 @@ func reviewResultFromQuery(value string) (int16, error) {
 	}
 }
 
-// normalizePackageRequest 修剪字段并给空 JSON 字段补默认对象。
 func normalizePackageRequest(req SubmitPackageRequest) SubmitPackageRequest {
 	req.Code = strings.TrimSpace(req.Code)
 	req.Version = strings.TrimSpace(req.Version)
 	req.Name = strings.TrimSpace(req.Name)
 	req.Category = strings.TrimSpace(req.Category)
-	if len(req.ScaleLimit) == 0 {
-		req.ScaleLimit = []byte(`{}`)
-	}
 	return req
 }
 
-// validatePackageRequest 校验仿真包元数据和命名空间边界。
-// 执行位置与运行能力不在此校验:它们由服务端按登录账号派生,请求结构里不存在这两个字段。
-func validatePackageRequest(req SubmitPackageRequest, authorID int64) error {
+func validatePackageRequest(req SubmitPackageRequest, authorID int64) (map[string]any, error) {
 	if !simCodePattern.MatchString(req.Code) || !semverPattern.MatchString(req.Version) || strings.TrimSpace(req.Name) == "" || !categoryPattern.MatchString(req.Category) {
-		return apperr.ErrSimPackageInvalid
+		return nil, apperr.ErrSimPackageInvalid
 	}
 	if len(req.Name) > 128 || len(req.Code) > 96 || len(req.Version) > 32 {
-		return apperr.ErrSimPackageInvalid
+		return nil, apperr.ErrSimPackageInvalid
 	}
-	if !jsonObject(req.ScaleLimit) {
-		return apperr.ErrSimPackageInvalid
+	scaleLimit, err := jsonx.ObjectMapStrict(req.ScaleLimit)
+	if err != nil || !validManifestScaleLimit(scaleLimit) {
+		return nil, apperr.ErrSimPackageInvalid
 	}
 	if authorID <= 0 || !strings.HasPrefix(req.Code, "teacher_"+ids.Format(authorID)+"__") {
-		return apperr.ErrSimPackageInvalid
+		return nil, apperr.ErrSimPackageInvalid
 	}
-	return nil
+	return scaleLimit, nil
 }
 
 // validateCreateSession 校验内部会话创建请求。
@@ -158,6 +144,14 @@ func validateCreateSession(req CreateSessionRequest, tenantID int64) error {
 	}
 	if req.InitParams == nil {
 		req.InitParams = map[string]any{}
+	}
+	return nil
+}
+
+// 时刻推进不单独入库；重放到这条用户操作共需 atTick + seq 条事件。
+func validateActionReplayPosition(seq, atTick int32, scaleLimit map[string]any) error {
+	if seq <= 0 || atTick < 0 || int64(atTick) > int64(jsonx.IntFromAny(scaleLimit["max_tick"])) || int64(atTick)+int64(seq) > int64(jsonx.IntFromAny(scaleLimit["max_events"])) {
+		return apperr.ErrSimActionSeqInvalid
 	}
 	return nil
 }
@@ -222,17 +216,13 @@ func validateActionContent(eventType string, payload map[string]any) error {
 	return nil
 }
 
-// validateCheckpoint 校验检查点上报内容。
-func validateCheckpoint(sessionID int64, checkpointID string, answer []byte) error {
-	if sessionID <= 0 || !checkpointIDPattern.MatchString(strings.TrimSpace(checkpointID)) || len(answer) == 0 || !jsonx.Valid(answer) {
-		return apperr.ErrSimCheckpointInvalid
-	}
-	return nil
-}
-
-// validateApprovalReport 校验审核通过所需的后端静态和受控预览门禁。
+// validateApprovalReport 校验上架所需的真实报告；非阻断扫描提示保留给人工判断。
 func validateApprovalReport(report ValidationReport, pkg Package) error {
-	if report.MetadataValidation.Status != validationPassed || report.StaticScan.Status != validationPassed || report.DeterminismCheck.Status != validationPassed || report.WorkerPreview.Status != validationPassed {
+	if report.MetadataValidation.Status != validationPassed || report.DeterminismCheck.Status != validationPassed || report.WorkerPreview.Status != validationPassed {
+		return apperr.ErrSimPackageValidationFailed
+	}
+	scan := report.StaticScan
+	if (scan.Status != validationPassed && (scan.Status != validationWarning || len(scan.Findings) == 0)) || hasBlockingFindings(scan.Findings) {
 		return apperr.ErrSimPackageValidationFailed
 	}
 	if !pkgcrypto.ValidSHA256Hex(report.BundleHash) || report.BundleHash != pkg.BundleHash {
@@ -427,30 +417,4 @@ func shareUsable(share Share, now time.Time) bool {
 		return false
 	}
 	return share.ExpireAt.IsZero() || now.Before(share.ExpireAt)
-}
-
-// canMutateSession 限制用户和内部服务只能修改活跃会话。
-func canMutateSession(status int16) bool {
-	switch status {
-	case SessionCreating, SessionRunning, SessionIdle:
-		return true
-	default:
-		return false
-	}
-}
-
-// canArchiveSession 落地会话归档状态机,终态不能重复迁移。
-func canArchiveSession(status int16) bool {
-	switch status {
-	case SessionCreating, SessionRunning, SessionIdle, SessionCompleted:
-		return true
-	default:
-		return false
-	}
-}
-
-// jsonObject 校验字段是 JSON 对象,避免数组或标量破坏 SDK 契约。
-func jsonObject(raw []byte) bool {
-	var value map[string]any
-	return len(raw) > 0 && jsonx.DecodeStrict(raw, &value) == nil
 }

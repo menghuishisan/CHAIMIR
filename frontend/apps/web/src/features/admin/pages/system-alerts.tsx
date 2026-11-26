@@ -1,23 +1,22 @@
-// 告警页(校管侧栏「学校告警」/ 平台侧栏「告警中心」共用一个实现)。设计 §7.7:
-// 标签「告警事件 / 告警规则」写进地址。事件:状态分段(待处理在前,带全量计数)+ 级别筛选;按时间倒序的事件列表,
-// 每条显示级别(图形加文字)、一句话说明、触发规则、时间,待处理的给「已处理」「忽略」。
-// 规则:规则列表 +「新建规则」,行内启用开关和编辑。指标条去掉。
-//
-// 告警事件与规则同页分 Tab(对齐清单 §3.3/§3.4:规则维护放在告警页内 Tab,不单独放侧栏)。
-// 事件是「已经发生的」,规则是「什么条件下发生」—— 处理事件时常要顺手调规则,
-// 拆成两页会让管理员来回跳。
-//
-// 校管与平台看的是同一套后端接口(M9 的 mixed 组),分叉只在作用范围:
-// 平台身份只能读写 scope=平台全局的规则、看到全平台事件;校管固定 scope=本校、只看本校事件
-// (后端 ListAlertRules/ListAlertEvents 按身份分叉,平台传非全局 scope 会被拒)。
-// 故这里由调用方通过 scope 显式声明,不复制第二份页面,也不在运行时判角色枚举。
-//
-// 规则的 condition 是 JSONB,按「比较方式 + 阈值 + 持续时间」三个显式字段组装;
-// 指标从已登记清单里选,不让管理员手写指标名(写错要等到告警不触发才发现)。
-
-import { useCallback, useMemo, useState } from 'react'
-import { BellRing, CircleCheck, CircleSlash, Info, OctagonAlert, Plus, Settings2, TriangleAlert } from 'lucide-react'
-import { AdminScope, AlertLevel, AlertStatus, type AlertEvent, type AlertRule } from '@chaimir/api-client'
+// 管理学校或平台告警；事件名称随已授权列表返回，规则按当前管理范围维护。
+import { useState } from 'react'
+import {
+  BellRing,
+  CircleCheck,
+  CircleSlash,
+  Info,
+  OctagonAlert,
+  Plus,
+  Settings2,
+  TriangleAlert,
+} from 'lucide-react'
+import {
+  AdminScope,
+  AlertLevel,
+  AlertStatus,
+  type AlertEvent,
+  type AlertRule,
+} from '@chaimir/api-client'
 import {
   Button,
   Callout,
@@ -48,7 +47,12 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../app/api'
 import { ResourceState } from '../../../components/ResourceState'
-import { type AsyncResourceState, useAsyncResource, usePagedResource, useUrlState } from '../../../hooks'
+import {
+  type AsyncResourceState,
+  useAsyncResource,
+  usePagedResource,
+  useUrlState,
+} from '../../../hooks'
 import { segmentCounts as segmentCountsOf } from '../../../utils/facets'
 import { useFormValidation } from '../../../hooks/useFormValidation'
 import { formatDateTime, formatRelativeOccurrence } from '../../../utils/formatters'
@@ -94,26 +98,20 @@ const LEVEL_ICON: Record<AlertLevel, typeof Info> = {
 const SCOPE_COPY: Record<
   AdminScope,
   {
-    group: string
     title: string
-    description: string
     eventScope: string
     ruleDescription: string
     ruleEmptyDescription: string
   }
 > = {
   [AdminScope.GLOBAL]: {
-    group: '底层资源',
     title: '告警中心',
-    description: '全平台的资源与业务异常告警。处理完标记为已处理,不需要跟进的可以忽略。',
     eventScope: '全平台',
     ruleDescription: '平台级规则对所有学校生效。学校自己还能加本校规则,两者互不覆盖。',
     ruleEmptyDescription: '建立平台级规则后,任一学校的指标异常都会产生告警。',
   },
   [AdminScope.TENANT]: {
-    group: '系统配置',
     title: '学校告警',
-    description: '本校范围的资源与业务异常告警。处理完标记为已处理,不需要跟进的可以忽略。',
     eventScope: '本校',
     ruleDescription: '指标超过阈值并持续一段时间才触发告警,避免瞬时波动造成误报。',
     ruleEmptyDescription: '建立规则后,指标异常时会自动产生告警。平台级规则由平台管理员维护。',
@@ -129,15 +127,15 @@ export interface SystemAlertsPageProps {
   scope: AdminScope
 }
 
-/**
- * SystemAlertsPage 承载告警事件处理与规则维护。
- */
+/** 按管理范围展示告警事件与规则。 */
 export default function SystemAlertsPage({ scope }: SystemAlertsPageProps) {
   const copy = SCOPE_COPY[scope]
   const [query, setQuery] = useUrlState(ALERTS_QUERY)
-  // 规则名:事件只带规则编号,用规则列表解析成名字(规则数量很小,接口不分页)
-  const rules = useAsyncResource(() => api.admin.listAlertRules({ scope }), [scope], () => false)
-  const ruleName = useMemo(() => new Map((rules.data ?? []).map((rule) => [rule.id, rule.name])), [rules.data])
+  const rules = useAsyncResource(
+    () => api.admin.listAlertRules({ scope }),
+    [scope],
+    () => false
+  )
 
   return (
     <PageScaffold>
@@ -148,7 +146,11 @@ export default function SystemAlertsPage({ scope }: SystemAlertsPageProps) {
           <TabsTrigger value="events" icon={BellRing}>
             告警事件
           </TabsTrigger>
-          <TabsTrigger value="rules" icon={Settings2} count={rules.status === 'success' ? rules.data?.length : undefined}>
+          <TabsTrigger
+            value="rules"
+            icon={Settings2}
+            count={rules.status === 'success' ? rules.data?.length : undefined}
+          >
             告警规则
           </TabsTrigger>
         </TabsList>
@@ -160,7 +162,6 @@ export default function SystemAlertsPage({ scope }: SystemAlertsPageProps) {
             level={query.level}
             onStatusChange={(value) => setQuery({ status: value })}
             onLevelChange={(value) => setQuery({ level: value })}
-            ruleName={(ruleId) => (rules.status === 'success' ? (ruleName.get(ruleId) ?? '已删除的规则') : undefined)}
           />
         </TabsContent>
         <TabsContent value="rules">
@@ -176,22 +177,22 @@ export default function SystemAlertsPage({ scope }: SystemAlertsPageProps) {
   )
 }
 
-/**
- * AlertEventsSection 列出告警事件并承载处理与忽略。
- * 事件覆盖面由服务端身份决定(平台看全平台、校管看本校),故这里只用文案说明范围。
- */
 interface AlertEventsSectionProps {
   eventScope: string
   status: string
   level: string
   onStatusChange: (value: string) => void
   onLevelChange: (value: string) => void
-  /** 规则名;规则还在读取时为 undefined */
-  ruleName: (ruleId: string) => string | undefined
 }
 
 /** AlertEventsSection 告警事件区:状态与级别筛选、事件表格,以及改变事件状态前的确认弹窗 */
-function AlertEventsSection({ eventScope, status, level, onStatusChange, onLevelChange, ruleName }: AlertEventsSectionProps) {
+function AlertEventsSection({
+  eventScope,
+  status,
+  level,
+  onStatusChange,
+  onLevelChange,
+}: AlertEventsSectionProps) {
   const [target, setTarget] = useState<{ event: AlertEvent; status: AlertStatus }>()
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string>()
@@ -205,10 +206,10 @@ function AlertEventsSection({ eventScope, status, level, onStatusChange, onLevel
         ...params,
       }),
     [level, status],
-    { urlPageKey: 'page' },
+    { urlPageKey: 'page' }
   )
 
-  const handle = useCallback(async () => {
+  const handle = async () => {
     if (!target) return
     setWorking(true)
     setActionError(undefined)
@@ -222,18 +223,25 @@ function AlertEventsSection({ eventScope, status, level, onStatusChange, onLevel
     } finally {
       setWorking(false)
     }
-  }, [events, target])
+  }
 
   // 分段计数取列表接口的 facets:套用级别筛选,不套用状态筛选
-  const facets = events.status === 'success' || events.status === 'empty' ? events.data?.facets : undefined
-  const segmentCounts = segmentCountsOf(facets, 'status', STATUS_SEGMENTS, (item) => ('status' in item ? item.status : undefined))
+  const facets =
+    events.status === 'success' || events.status === 'empty' ? events.data?.facets : undefined
+  const segmentCounts = segmentCountsOf(facets, 'status', STATUS_SEGMENTS, (item) =>
+    'status' in item ? item.status : undefined
+  )
 
   return (
     <>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <SegmentedControl
           aria-label="按处理状态筛选"
-          options={STATUS_SEGMENTS.map((item) => ({ value: item.value, label: item.label, count: segmentCounts[item.value] }))}
+          options={STATUS_SEGMENTS.map((item) => ({
+            value: item.value,
+            label: item.label,
+            count: segmentCounts[item.value],
+          }))}
           value={status}
           onValueChange={onStatusChange}
           className="max-w-full overflow-x-auto"
@@ -242,7 +250,10 @@ function AlertEventsSection({ eventScope, status, level, onStatusChange, onLevel
           aria-label="按告警级别筛选"
           value={level}
           onValueChange={onLevelChange}
-          options={[{ value: 'all', label: '全部级别' }, ...ALERT_LEVELS.map((item) => ({ value: String(item), label: alertLevelLabel(item) }))]}
+          options={[
+            { value: 'all', label: '全部级别' },
+            ...ALERT_LEVELS.map((item) => ({ value: String(item), label: alertLevelLabel(item) })),
+          ]}
           className="w-full sm:w-36"
         />
       </div>
@@ -256,15 +267,26 @@ function AlertEventsSection({ eventScope, status, level, onStatusChange, onLevel
       <ResourceState
         resource={events}
         emptyIcon={BellRing}
-        emptyTitle={status === 'pending' ? '没有待处理的告警' : status !== 'all' || level !== 'all' ? '这个筛选下没有告警' : '暂无告警'}
+        emptyTitle={
+          status === 'pending'
+            ? '没有待处理的告警'
+            : status !== 'all' || level !== 'all'
+              ? '这个筛选下没有告警'
+              : '暂无告警'
+        }
         emptyDescription={
-          status === 'all' && level === 'all' ? `${eventScope}的资源或业务指标超过规则阈值时会产生告警。` : '换个状态或级别看看。'
+          status === 'all' && level === 'all'
+            ? `${eventScope}的资源或业务指标超过规则阈值时会产生告警。`
+            : '换个状态或级别看看。'
         }
         skeleton={<Skeleton variant="line" lines={6} />}
       >
         {(page) => (
           <>
-            <ul aria-label={`告警事件,范围为${eventScope}`} className="divide-y divide-line rounded-lg bg-surface px-4 shadow-xs">
+            <ul
+              aria-label={`告警事件,范围为${eventScope}`}
+              className="divide-y divide-line rounded-lg bg-surface px-4"
+            >
               {page.list.map((event) => {
                 const pending = event.status === AlertStatus.PENDING
                 const tone = !pending
@@ -274,26 +296,49 @@ function AlertEventsSection({ eventScope, status, level, onStatusChange, onLevel
                     : event.level === AlertLevel.WARNING
                       ? 'text-warning'
                       : 'text-ink-sub'
-                const rule = ruleName(event.rule_id)
+                const rule = event.rule_name
                 return (
                   <li key={event.id} className="flex flex-wrap items-start gap-x-4 gap-y-2 py-3">
-                    <span className={`flex w-16 shrink-0 items-center gap-1.5 text-sm font-medium ${tone}`}>
+                    <span
+                      className={`flex w-16 shrink-0 items-center gap-1.5 text-sm font-medium ${tone}`}
+                    >
                       <Icon icon={LEVEL_ICON[event.level]} size="sm" />
                       {alertLevelLabel(event.level)}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className={pending ? 'block text-sm font-medium text-ink' : 'block text-sm text-ink'}>{event.message}</span>
+                      <span
+                        className={
+                          pending ? 'block text-sm font-medium text-ink' : 'block text-sm text-ink'
+                        }
+                      >
+                        {event.message}
+                      </span>
                       <span className="block text-xs text-ink-sub">
-                        触发规则:{rule ?? '…'} · <span title={formatDateTime(event.triggered_at)}>{formatRelativeOccurrence(event.triggered_at)}</span>
-                        {pending ? '' : ` · ${alertStatusLabel(event.status)}${event.handled_at ? `(${formatRelativeOccurrence(event.handled_at)})` : ''}`}
+                        触发规则:{rule ?? '…'} ·{' '}
+                        <span title={formatDateTime(event.triggered_at)}>
+                          {formatRelativeOccurrence(event.triggered_at)}
+                        </span>
+                        {pending
+                          ? ''
+                          : ` · ${alertStatusLabel(event.status)}${event.handled_at ? `(${formatRelativeOccurrence(event.handled_at)})` : ''}`}
                       </span>
                     </span>
                     {pending ? (
                       <span className="flex shrink-0 items-center gap-1">
-                        <Button variant="secondary" size="sm" leftIcon={CircleCheck} onClick={() => setTarget({ event, status: AlertStatus.HANDLED })}>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          leftIcon={CircleCheck}
+                          onClick={() => setTarget({ event, status: AlertStatus.HANDLED })}
+                        >
                           已处理
                         </Button>
-                        <Button variant="ghost" size="sm" leftIcon={CircleSlash} onClick={() => setTarget({ event, status: AlertStatus.IGNORED })}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          leftIcon={CircleSlash}
+                          onClick={() => setTarget({ event, status: AlertStatus.IGNORED })}
+                        >
                           忽略
                         </Button>
                       </span>
@@ -303,7 +348,12 @@ function AlertEventsSection({ eventScope, status, level, onStatusChange, onLevel
               })}
             </ul>
             <div className="mt-4">
-              <Pagination page={events.page} pageSize={events.pageSize} total={events.total} onPageChange={events.setPage} />
+              <Pagination
+                page={events.page}
+                pageSize={events.pageSize}
+                total={events.total}
+                onPageChange={events.setPage}
+              />
             </div>
           </>
         )}
@@ -319,8 +369,8 @@ function AlertEventsSection({ eventScope, status, level, onStatusChange, onLevel
                 </ModalTitle>
                 <ModalDescription>
                   {target.status === AlertStatus.HANDLED
-                    ? '确认这个问题已经处理完毕。同样的条件再次触发会产生新的告警。'
-                    : '忽略表示这次不需要跟进。规则不变,下次触发仍会产生告警。'}
+                    ? '确认这个问题已经处理完毕。指标恢复正常后再次异常，才会产生新的告警。'
+                    : '忽略表示这次不需要跟进。规则继续生效；指标恢复后再次异常仍会告警。'}
                 </ModalDescription>
               </ModalHeader>
               <ModalBody>
@@ -344,46 +394,44 @@ function AlertEventsSection({ eventScope, status, level, onStatusChange, onLevel
 
 interface AlertRulesSectionProps {
   scope: AdminScope
-  /** 规则列表(页面读一次,事件列表解析规则名也用它) */
+  /** 当前管理范围的规则列表 */
   rules: AsyncResourceState<AlertRule[]>
   description: string
   emptyDescription: string
 }
 
-/**
- * AlertRulesSection 维护告警规则。
- * scope 由页面按端声明:平台维护全局规则,校管维护本校规则 ——
- * 后端强制这一分叉,平台传本校 scope 会被拒,校管的 scope 一律被改写成本校。
- */
-function AlertRulesSection({ scope, rules, description, emptyDescription }: AlertRulesSectionProps) {
+/** 维护当前管理范围的规则，权限由服务端检查。 */
+function AlertRulesSection({
+  scope,
+  rules,
+  description,
+  emptyDescription,
+}: AlertRulesSectionProps) {
   const [formTarget, setFormTarget] = useState<{ rule?: AlertRule } | undefined>()
   const [togglingId, setTogglingId] = useState<string>()
   const [toggleError, setToggleError] = useState<string>()
 
   /** toggle 行内启用开关:按规则现有字段整条保存,只改 enabled */
-  const toggle = useCallback(
-    async (rule: AlertRule, enabled: boolean) => {
-      setTogglingId(rule.id)
-      setToggleError(undefined)
-      try {
-        await api.admin.updateAlertRule(rule.id, {
-          scope,
-          name: rule.name,
-          metric: rule.metric,
-          condition: rule.condition,
-          level: rule.level,
-          enabled,
-        })
-        toast.success(enabled ? `已启用「${rule.name}」` : `已停用「${rule.name}」`)
-        rules.reload()
-      } catch (error) {
-        setToggleError(userFacingErrorMessage(error, '切换没有成功,请稍后重试。'))
-      } finally {
-        setTogglingId(undefined)
-      }
-    },
-    [rules, scope],
-  )
+  const toggle = async (rule: AlertRule, enabled: boolean) => {
+    setTogglingId(rule.id)
+    setToggleError(undefined)
+    try {
+      await api.admin.updateAlertRule(rule.id, {
+        scope,
+        name: rule.name,
+        metric: rule.metric,
+        condition: rule.condition,
+        level: rule.level,
+        enabled,
+      })
+      toast.success(enabled ? `已启用「${rule.name}」` : `已停用「${rule.name}」`)
+      rules.reload()
+    } catch (error) {
+      setToggleError(userFacingErrorMessage(error, '切换没有成功,请稍后重试。'))
+    } finally {
+      setTogglingId(undefined)
+    }
+  }
 
   return (
     <PageSection
@@ -410,9 +458,11 @@ function AlertRulesSection({ scope, rules, description, emptyDescription }: Aler
         >
           {(list) =>
             list.length === 0 ? (
-              <p className="rounded-lg bg-surface px-4 py-8 text-center text-sm text-ink-sub shadow-xs">{emptyDescription}</p>
+              <p className="rounded-lg bg-surface px-4 py-8 text-center text-sm text-ink-sub">
+                {emptyDescription}
+              </p>
             ) : (
-              <ul className="divide-y divide-line rounded-lg bg-surface px-4 shadow-xs">
+              <ul className="divide-y divide-line rounded-lg bg-surface px-4 ">
                 {list.map((rule) => (
                   <AlertRuleRow
                     key={rule.id}
@@ -428,7 +478,9 @@ function AlertRulesSection({ scope, rules, description, emptyDescription }: Aler
         </ResourceState>
 
         {toggleError ? <Callout tone="danger">{toggleError}</Callout> : null}
-        <p className="text-sm text-ink-sub">规则改动对下一次评估生效,已产生的告警不受影响;停用规则不会删除历史告警。</p>
+        <p className="text-sm text-ink-sub">
+          规则改动对下一次评估生效,已产生的告警不受影响;停用规则不会删除历史告警。
+        </p>
       </div>
 
       {formTarget ? (
@@ -490,9 +542,7 @@ interface AlertRuleFormModalProps {
   onSaved: () => void
 }
 
-/**
- * AlertRuleFormModal 维护一条告警规则。
- */
+/** 编辑结构化告警条件，保留校验与保存错误。 */
 function AlertRuleFormModal({ rule, scope, onClose, onSaved }: AlertRuleFormModalProps) {
   const editing = rule !== undefined
   const [name, setName] = useState(rule?.name ?? '')
@@ -513,47 +563,51 @@ function AlertRuleFormModal({ rule, scope, onClose, onSaved }: AlertRuleFormModa
   const { errors, validate } = useFormValidation(() => ({
     name: name.trim() === '' ? '请输入规则名称' : null,
     // 先检查原文,显式0合法,空白不得转换为0。
-    threshold: threshold.trim() === '' ? '请输入阈值'
-      : !Number.isFinite(Number(threshold)) ? '阈值要是一个数字' : null,
-    duration: duration.trim() === '' ? '请输入持续时间'
-      : !Number.isInteger(Number(duration)) || Number(duration) < 0
-        ? '持续时间要是 0 或更大的整数秒' : null,
+    threshold:
+      threshold.trim() === ''
+        ? '请输入阈值'
+        : !Number.isFinite(Number(threshold))
+          ? '阈值要是一个数字'
+          : null,
+    duration:
+      duration.trim() === ''
+        ? '请输入持续时间'
+        : !Number.isInteger(Number(duration)) || Number(duration) < 0
+          ? '持续时间要是 0 或更大的整数秒'
+          : null,
   }))
 
-  const submit = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      if (working || !validate()) return
-      const thresholdValue = Number(threshold)
-      const durationValue = Number(duration)
-      setFormError(undefined)
-      setWorking(true)
-      try {
-        const payload = {
-          scope,
-          name: name.trim(),
-          metric,
-          // 条件按结构化字段组装,不接受用户手写 JSON
-          condition: {
-            [CONDITION_FIELDS.operator]: operator,
-            [CONDITION_FIELDS.threshold]: thresholdValue,
-            [CONDITION_FIELDS.durationSeconds]: durationValue,
-          },
-          level: Number(level),
-          enabled,
-        }
-        if (editing) await api.admin.updateAlertRule(rule.id, payload)
-        else await api.admin.createAlertRule(payload)
-        toast.success(editing ? '规则已更新' : '规则已创建')
-        onSaved()
-      } catch (error) {
-        setFormError(userFacingErrorMessage(error, '保存没有成功,请稍后重试。'))
-      } finally {
-        setWorking(false)
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (working || !validate()) return
+    const thresholdValue = Number(threshold)
+    const durationValue = Number(duration)
+    setFormError(undefined)
+    setWorking(true)
+    try {
+      const payload = {
+        scope,
+        name: name.trim(),
+        metric,
+        // 条件按结构化字段组装,不接受用户手写 JSON
+        condition: {
+          [CONDITION_FIELDS.operator]: operator,
+          [CONDITION_FIELDS.threshold]: thresholdValue,
+          [CONDITION_FIELDS.durationSeconds]: durationValue,
+        },
+        level: Number(level),
+        enabled,
       }
-    },
-    [duration, editing, enabled, level, metric, name, onSaved, operator, rule?.id, scope, threshold, validate, working]
-  )
+      if (editing) await api.admin.updateAlertRule(rule.id, payload)
+      else await api.admin.createAlertRule(payload)
+      toast.success(editing ? '规则已更新' : '规则已创建')
+      onSaved()
+    } catch (error) {
+      setFormError(userFacingErrorMessage(error, '保存没有成功,请稍后重试。'))
+    } finally {
+      setWorking(false)
+    }
+  }
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
@@ -606,7 +660,17 @@ function AlertRuleFormModal({ rule, scope, onClose, onSaved }: AlertRuleFormModa
                   onValueChange={setOperator}
                 />
               </FormField>
-              <FormField label="阈值" htmlFor="rule-threshold" required error={errors.threshold}>
+              <FormField
+                label="阈值"
+                htmlFor="rule-threshold"
+                required
+                error={errors.threshold}
+                helper={
+                  metric.endsWith('.failed_rate')
+                    ? '填 0 到 1 的比例，例如 0.2 表示 20%'
+                    : undefined
+                }
+              >
                 <Input
                   id="rule-threshold"
                   required
@@ -638,7 +702,7 @@ function AlertRuleFormModal({ rule, scope, onClose, onSaved }: AlertRuleFormModa
               </FormField>
             </div>
 
-            <FormField label="告警级别" required helper="级别决定列表里的排序与提示强度">
+            <FormField label="告警级别" required helper="级别表示需要关注的程度">
               <SegmentedControl
                 aria-label="告警级别"
                 options={ALERT_LEVELS.map((item) => ({

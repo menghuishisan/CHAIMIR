@@ -1,4 +1,3 @@
-// CompositionParameterFields 只渲染目录声明的参数控件,校验和映射统一由M2执行。
 import { FormField, Input, Select } from '@chaimir/ui'
 
 interface CompositionParameterFieldsProps {
@@ -8,12 +7,7 @@ interface CompositionParameterFieldsProps {
   onChange: (value: Record<string, unknown>) => void
 }
 
-/** parameterDescription 只读取目录中的用户向说明,不展示内部环境变量映射。 */
-function parameterDescription(property: Record<string, unknown>): string | undefined {
-  return typeof property.description === 'string' ? property.description : undefined
-}
-
-/** CompositionParameterFields 复用基础控件呈现当前目录标量,保留未设置、0与false的区别。 */
+/** 仅呈现目录参数，校验与环境变量映射由 M2 执行。 */
 export function CompositionParameterFields({ idPrefix, schema, value = {}, onChange }: CompositionParameterFieldsProps) {
   const properties = schema?.properties
   if (typeof properties !== 'object' || properties === null || Array.isArray(properties)) return null
@@ -39,7 +33,8 @@ export function CompositionParameterFields({ idPrefix, schema, value = {}, onCha
           : property.type === 'boolean' ? [true, false] : undefined
         const selectedIndex = choices?.findIndex((choice) => Object.is(choice, current)) ?? -1
         return (
-          <FormField key={name} label={label} htmlFor={fieldId} required={isRequired} helper={parameterDescription(property)}>
+          <FormField key={name} label={label} htmlFor={fieldId} required={isRequired}
+            helper={typeof property.description === 'string' ? property.description : undefined}>
             {choices !== undefined ? (
               <Select
                 id={fieldId}

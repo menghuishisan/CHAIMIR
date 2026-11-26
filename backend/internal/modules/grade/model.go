@@ -27,6 +27,14 @@ type CourseGradeInput struct {
 	Credits    float64 `json:"credits"`
 }
 
+// gradePublication 是最新课程锁事件的发布范围，不依赖 M6 异步写保护投影。
+type gradePublication struct {
+	CourseID   int64
+	SemesterID int64
+	Revision   int64
+	Published  bool
+}
+
 // GradeLockOutbox 是成绩锁定事件的生产者 outbox 记录。
 type GradeLockOutbox struct {
 	ID         int64

@@ -121,7 +121,7 @@ type CountSharedContentItemsByTypeRow struct {
 	Count int64 `json:"count"`
 }
 
-// 共享资源库「按题型」分段计数:只数其他学校已发布且共享的题目,套用关键词,不套用题型筛选。
+// 共享库按题型计数:仅已发布共享内容,沿用关键词,不套用题型筛选。
 func (q *Queries) CountSharedContentItemsByType(ctx context.Context, keyword string) ([]CountSharedContentItemsByTypeRow, error) {
 	rows, err := q.db.Query(ctx, countSharedContentItemsByType, keyword)
 	if err != nil {
@@ -176,7 +176,10 @@ func (q *Queries) CreateContentBody(ctx context.Context, arg CreateContentBodyPa
 
 const createContentCategory = `-- name: CreateContentCategory :one
 INSERT INTO content_category (id, tenant_id, parent_id, name, sort, created_at, updated_at, deleted_at)
-VALUES ($1, $2, $3, $4, $5, now(), now(), NULL)
+SELECT $1, $2, $3, $4, $5, now(), now(), NULL
+WHERE $3::bigint IS NULL OR ($3 <> $1 AND EXISTS (
+    SELECT 1 FROM content_category WHERE tenant_id = $2 AND id = $3 AND deleted_at IS NULL
+))
 RETURNING id, tenant_id, parent_id, name, sort, created_at, updated_at, deleted_at
 `
 
@@ -213,6 +216,7 @@ func (q *Queries) CreateContentCategory(ctx context.Context, arg CreateContentCa
 const createContentItem = `-- name: CreateContentItem :one
 INSERT INTO content_item (id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 0, $15, now(), now(), NULL)
+ON CONFLICT (tenant_id, code, version) WHERE deleted_at IS NULL DO NOTHING
 RETURNING id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
 `
 
@@ -398,10 +402,12 @@ func (q *Queries) CreatePaperItem(ctx context.Context, arg CreatePaperItemParams
 }
 
 const deleteContentCategory = `-- name: DeleteContentCategory :one
-UPDATE content_category
+UPDATE content_category AS c
 SET deleted_at = now(), updated_at = now()
-WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, parent_id, name, sort, created_at, updated_at, deleted_at
+WHERE c.tenant_id = $1 AND c.id = $2 AND c.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM content_category child WHERE child.tenant_id = c.tenant_id AND child.parent_id = c.id AND child.deleted_at IS NULL)
+  AND NOT EXISTS (SELECT 1 FROM content_item i WHERE i.tenant_id = c.tenant_id AND i.category_id = c.id AND i.deleted_at IS NULL)
+RETURNING c.id, c.tenant_id, c.parent_id, c.name, c.sort, c.created_at, c.updated_at, c.deleted_at
 `
 
 type DeleteContentCategoryParams struct {
@@ -494,6 +500,22 @@ func (q *Queries) DeprecateContentItem(ctx context.Context, arg DeprecateContent
 	return i, err
 }
 
+const getActiveContentCategory = `-- name: GetActiveContentCategory :one
+SELECT id FROM content_category WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+`
+
+type GetActiveContentCategoryParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) GetActiveContentCategory(ctx context.Context, arg GetActiveContentCategoryParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getActiveContentCategory, arg.TenantID, arg.ID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getContentItemByID = `-- name: GetContentItemByID :one
 SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
 FROM content_item
@@ -507,47 +529,6 @@ type GetContentItemByIDParams struct {
 
 func (q *Queries) GetContentItemByID(ctx context.Context, arg GetContentItemByIDParams) (ContentItem, error) {
 	row := q.db.QueryRow(ctx, getContentItemByID, arg.TenantID, arg.ID)
-	var i ContentItem
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.Code,
-		&i.Version,
-		&i.Type,
-		&i.Title,
-		&i.CategoryID,
-		&i.Difficulty,
-		&i.Tags,
-		&i.KnowledgePoints,
-		&i.AuthorID,
-		&i.AuthorType,
-		&i.Visibility,
-		&i.Status,
-		&i.UsageCount,
-		&i.VersionHash,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-	)
-	return i, err
-}
-
-const getContentItemByRef = `-- name: GetContentItemByRef :one
-SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
-FROM content_item
-WHERE code = $1 AND version = $2 AND deleted_at IS NULL AND (tenant_id = $3 OR (visibility = 3 AND status = 2))
-ORDER BY CASE WHEN tenant_id = $3 THEN 0 ELSE 1 END
-LIMIT 1
-`
-
-type GetContentItemByRefParams struct {
-	Code     string `json:"code"`
-	Version  string `json:"version"`
-	TenantID int64  `json:"tenant_id"`
-}
-
-func (q *Queries) GetContentItemByRef(ctx context.Context, arg GetContentItemByRefParams) (ContentItem, error) {
-	row := q.db.QueryRow(ctx, getContentItemByRef, arg.Code, arg.Version, arg.TenantID)
 	var i ContentItem
 	err := row.Scan(
 		&i.ID,
@@ -644,9 +625,7 @@ SELECT i.id, i.tenant_id, i.code, i.version, i.type, i.title, i.category_id, i.d
        b.body, b.sensitive_fields
 FROM content_item i
 JOIN content_body b ON b.tenant_id = i.tenant_id AND b.item_id = i.id
-WHERE i.code = $1 AND i.version = $2 AND i.deleted_at IS NULL AND (i.tenant_id = $3 OR (i.visibility = 3 AND i.status = 2))
-ORDER BY CASE WHEN i.tenant_id = $3 THEN 0 ELSE 1 END
-LIMIT 1
+WHERE i.code = $1 AND i.version = $2 AND i.tenant_id = $3 AND i.deleted_at IS NULL
 `
 
 type GetContentItemWithBodyByRefParams struct {
@@ -771,6 +750,73 @@ func (q *Queries) GetPublishedContentItemForUsage(ctx context.Context, arg GetPu
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const getVisibleContentItemWithBodyByID = `-- name: GetVisibleContentItemWithBodyByID :one
+SELECT i.id, i.tenant_id, i.code, i.version, i.type, i.title, i.category_id, i.difficulty, i.tags, i.knowledge_points, i.author_id, i.author_type, i.visibility, i.status, i.usage_count, i.version_hash, i.created_at, i.updated_at, i.deleted_at,
+       b.body, b.sensitive_fields
+FROM content_item i
+JOIN content_body b ON b.tenant_id = i.tenant_id AND b.item_id = i.id
+WHERE i.id = $2 AND i.deleted_at IS NULL
+  AND (i.tenant_id = $1 OR (i.visibility = 3 AND i.status = 2))
+`
+
+type GetVisibleContentItemWithBodyByIDParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+type GetVisibleContentItemWithBodyByIDRow struct {
+	ID              int64              `json:"id"`
+	TenantID        int64              `json:"tenant_id"`
+	Code            string             `json:"code"`
+	Version         string             `json:"version"`
+	Type            int16              `json:"type"`
+	Title           string             `json:"title"`
+	CategoryID      pgtype.Int8        `json:"category_id"`
+	Difficulty      int16              `json:"difficulty"`
+	Tags            []string           `json:"tags"`
+	KnowledgePoints []string           `json:"knowledge_points"`
+	AuthorID        int64              `json:"author_id"`
+	AuthorType      int16              `json:"author_type"`
+	Visibility      int16              `json:"visibility"`
+	Status          int16              `json:"status"`
+	UsageCount      int32              `json:"usage_count"`
+	VersionHash     string             `json:"version_hash"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	Body            []byte             `json:"body"`
+	SensitiveFields []string           `json:"sensitive_fields"`
+}
+
+func (q *Queries) GetVisibleContentItemWithBodyByID(ctx context.Context, arg GetVisibleContentItemWithBodyByIDParams) (GetVisibleContentItemWithBodyByIDRow, error) {
+	row := q.db.QueryRow(ctx, getVisibleContentItemWithBodyByID, arg.TenantID, arg.ID)
+	var i GetVisibleContentItemWithBodyByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Code,
+		&i.Version,
+		&i.Type,
+		&i.Title,
+		&i.CategoryID,
+		&i.Difficulty,
+		&i.Tags,
+		&i.KnowledgePoints,
+		&i.AuthorID,
+		&i.AuthorType,
+		&i.Visibility,
+		&i.Status,
+		&i.UsageCount,
+		&i.VersionHash,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.Body,
+		&i.SensitiveFields,
 	)
 	return i, err
 }
@@ -937,7 +983,7 @@ func (q *Queries) ListContentUsageItemIDsBySource(ctx context.Context, arg ListC
 const listContentVersions = `-- name: ListContentVersions :many
 SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
 FROM content_item
-WHERE code = $1 AND deleted_at IS NULL AND (tenant_id = $2 OR (visibility = 3 AND status = 2))
+WHERE code = $1 AND tenant_id = $2 AND deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
 `
 
@@ -1069,6 +1115,15 @@ func (q *Queries) ListPapers(ctx context.Context, arg ListPapersParams) ([]Paper
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockContentCategoryScope = `-- name: LockContentCategoryScope :exec
+SELECT pg_advisory_xact_lock(hashtextextended('content.category', $1::bigint))
+`
+
+func (q *Queries) LockContentCategoryScope(ctx context.Context, dollar_1 int64) error {
+	_, err := q.db.Exec(ctx, lockContentCategoryScope, dollar_1)
+	return err
 }
 
 const publishContentItem = `-- name: PublishContentItem :one
@@ -1336,10 +1391,21 @@ func (q *Queries) UpdateContentBody(ctx context.Context, arg UpdateContentBodyPa
 }
 
 const updateContentCategory = `-- name: UpdateContentCategory :one
-UPDATE content_category
+WITH RECURSIVE descendants AS (
+    SELECT id FROM content_category WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+    UNION
+    SELECT c.id FROM content_category c
+    JOIN descendants d ON c.parent_id = d.id
+    WHERE c.tenant_id = $1 AND c.deleted_at IS NULL
+)
+UPDATE content_category AS target
 SET parent_id = $3, name = $4, sort = $5, updated_at = now()
-WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, parent_id, name, sort, created_at, updated_at, deleted_at
+WHERE target.tenant_id = $1 AND target.id = $2 AND target.deleted_at IS NULL
+  AND ($3::bigint IS NULL OR (
+      EXISTS (SELECT 1 FROM content_category p WHERE p.tenant_id = $1 AND p.id = $3 AND p.deleted_at IS NULL)
+      AND NOT EXISTS (SELECT 1 FROM descendants WHERE id = $3)
+  ))
+RETURNING target.id, target.tenant_id, target.parent_id, target.name, target.sort, target.created_at, target.updated_at, target.deleted_at
 `
 
 type UpdateContentCategoryParams struct {

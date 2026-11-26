@@ -8,10 +8,12 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/upload"
@@ -32,6 +34,7 @@ const (
 type objectStorage interface {
 	Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error
 	Get(ctx context.Context, bucket, key string) (io.ReadCloser, error)
+	Delete(ctx context.Context, bucket, key string) error
 	BucketCode() string
 }
 
@@ -47,10 +50,9 @@ type BackendAdapter interface {
 	// ValidateConfig 在包进入审核前校验能力专属配置。
 	ValidateConfig(config map[string]any) error
 	// Serve 在已鉴权的 WebSocket 上执行隔离执行协议;bundle 为 nil 时表示算法固化在镜像内。
-	// recorded 是会话已登记的用户操作,连接建立时先在容器内重放到那个位置。
-	Serve(ctx context.Context, session SessionWithPackage, bundle *ExecutionBundle, recorded []Action, conn BackendConn) error
-	// Preview 在隔离容器内做上架前预览:同 seed 双跑比对确定性,并渲出样例教学帧。
-	Preview(ctx context.Context, pkg Package, bundle *ExecutionBundle, frameCount int) (PreviewResult, error)
+	Serve(ctx context.Context, session SessionWithPackage, bundle *ExecutionBundle, conn BackendConn) error
+	// Preview 在独立 runID 对应的隔离容器内做上架预览,避免重试之间共用环境。
+	Preview(ctx context.Context, pkg Package, runID int64, bundle *ExecutionBundle, frameCount int) (PreviewResult, error)
 	// Release 回收指定会话占用的隔离资源。
 	Release(ctx context.Context, session SessionWithPackage) error
 }
@@ -79,12 +81,14 @@ type PreviewResult struct {
 // 刻意不暴露通用 ReadJSON/SendJSON:适配器只能读到已过交互白名单的受控命令,
 // 只能写出协议校验过的教学帧,不得借连接把任意结构透传给浏览器。
 type BackendConn interface {
+	// LoadReplay 在取得执行权后复核当前授权和状态,并读取最新操作序列。
+	LoadReplay(ctx context.Context) ([]Action, error)
 	// ReadCommand 读取浏览器下发的下一条受控命令。
-	ReadCommand() (BackendCommand, error)
+	ReadCommand(ctx context.Context) (BackendCommand, error)
 	// RecordExecuted 在容器执行成功后登记这条命令的效果;时刻推进不入记录。
-	RecordExecuted(command BackendCommand) error
+	RecordExecuted(ctx context.Context, command BackendCommand) error
 	// SendFrame 推送一帧教学快照(首帧附带包自描述信息)。
-	SendFrame(message BackendStreamMessage) error
+	SendFrame(ctx context.Context, message BackendStreamMessage) error
 }
 
 // BackendRegistry 保存已装配的隔离执行能力。
@@ -100,6 +104,7 @@ type Service struct {
 	audit    audit.Writer
 	identity contracts.IdentityService
 	wsHub    *ws.Hub
+	bus      eventbus.FanoutBus
 	backends BackendRegistry
 	// packageRunnerCode 是扩展包通用运行器能力编号,服务端按作者类型自动绑定给教师/第三方包。
 	packageRunnerCode string
@@ -123,14 +128,21 @@ type ServiceDeps struct {
 	Audit           audit.Writer
 	Identity        contracts.IdentityService
 	WSHub           *ws.Hub
+	EventBus        eventbus.FanoutBus
 	BackendAdapters BackendRegistry
 	SimBackend      config.SimBackendConfig
 }
 
 // NewService 构造 sim 服务,不接收数据库连接,由装配层传入 Store。
 func NewService(deps ServiceDeps) (*Service, error) {
+	if deps.Upload.CleanupTimeoutSeconds <= 0 {
+		return nil, fmt.Errorf("上传清理超时必须大于 0")
+	}
 	if deps.Store == nil {
 		return nil, fmt.Errorf("sim service 缺少 store")
+	}
+	if deps.EventBus == nil || deps.WSHub == nil {
+		return nil, fmt.Errorf("sim service 缺少在线会话控制依赖")
 	}
 	if deps.IDs == nil {
 		return nil, fmt.Errorf("sim service 缺少 ID 生成器")
@@ -179,7 +191,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	}
 	return &Service{
 		store: deps.Store, ids: deps.IDs, upload: deps.Upload, storage: deps.Storage,
-		files: deps.FileService, audit: deps.Audit, identity: deps.Identity, wsHub: deps.WSHub,
+		files: deps.FileService, audit: deps.Audit, identity: deps.Identity, wsHub: deps.WSHub, bus: deps.EventBus,
 		backends: deps.BackendAdapters, packageRunnerCode: runnerCode,
 		previewFrameCount:            deps.SimBackend.PreviewFrameCount,
 		previewBatchSize:             deps.SimBackend.PreviewBatchSize,
@@ -201,6 +213,9 @@ func (s *Service) ensurePackageRunnerAvailable() error {
 // 内置包不走这条路径:它们在浏览器 Worker 内按 code 装配,没有归档字节。
 func (s *Service) loadBundleForExecution(ctx context.Context, session SessionWithPackage) (*ExecutionBundle, error) {
 	if strings.TrimSpace(session.Entry) == "" {
+		if session.BackendAdapter == s.packageRunnerCode {
+			return nil, apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包 %d 缺少归档入口", session.PackageID))
+		}
 		// 算法固化在镜像内的重计算能力没有归档,交 nil 表示"无需投递 bundle"。
 		return nil, nil
 	}
@@ -222,7 +237,7 @@ func (s *Service) loadBundleForExecution(ctx context.Context, session SessionWit
 		return nil, apperr.ErrSimBundleUnreadable.WithCause(err)
 	}
 	if sizeResult != upload.SizeOK {
-		return nil, apperr.ErrSimBundleUnreadable.WithCause(fmt.Errorf("仿真包归档超过上传上限"))
+		return nil, apperr.ErrSimBundleUnreadable.WithCause(fmt.Errorf("仿真包归档为空或超过大小上限"))
 	}
 	format, err := bundleFormat(data)
 	if err != nil {
@@ -257,12 +272,8 @@ type storedBundle struct {
 	CodeTrace         CodeTraceAudit
 }
 
-// storeBundle 执行归档校验与静态扫描,并规划对象引用。
-//
-// 静态扫描命中不再阻断进入审核:它是给审核人的信号而非隔离边界(见 07 安全设计 §5),
-// 真正的边界是隔离容器。命中项写进报告,由平台管理员在看样例帧时一并重点查看。
-// 只有归档结构、manifest 协议或表单一致性问题才拒绝入库 —— 那些是包本身不可运行。
-func (s *Service) storeBundle(ctx context.Context, tenantID, accountID, packageID int64, input BundleInput, req SubmitPackageRequest) (storedBundle, error) {
+// prepareBundle 校验归档并规划本次独立对象；危险调用仅作为审核信号，隔离容器负责执行安全。
+func (s *Service) prepareBundle(ctx context.Context, tenantID, accountID, packageID int64, input BundleInput, req SubmitPackageRequest, scale map[string]any) (storedBundle, error) {
 	limits := upload.ArchiveLimits{MaxFiles: s.upload.SimBundleMaxFiles, MaxUnpackedBytes: s.upload.SimBundleMaxUnpackedBytes}
 	bundleHash, staticScan, manifest, err := analyzeBundle(input, limits)
 	if err != nil {
@@ -272,12 +283,20 @@ func (s *Service) storeBundle(ctx context.Context, tenantID, accountID, packageI
 	if hasBlockingFindings(staticScan.Findings) {
 		return storedBundle{BundleHash: bundleHash, Report: report}, apperr.ErrSimPackageValidationFailed
 	}
-	if err := validateBundleManifestMatchesRequest(manifest, req); err != nil {
+	if err := validateBundleManifestMatchesRequest(manifest, req, scale); err != nil {
 		return storedBundle{BundleHash: bundleHash, Report: report}, err
 	}
-	plan, err := s.planBundleObject(ctx, tenantID, accountID, packageID, input)
+	plan, err := s.files.PlanUpload(ctx, storage.PlanUploadRequest{
+		TenantID: tenantID, AccountID: accountID,
+		Module: simModuleName, ResourceType: simBundleResourceType,
+		ResourceID: ids.Format(packageID), NestedResourceIDs: []string{ids.Format(s.ids.Generate())},
+		FileName: input.FileName, ContentType: input.ContentType, Size: int64(len(input.Data)),
+		MaxBytes: s.upload.SimBundleMaxBytes, ExpectedBucket: s.storage.BucketCode(),
+		AllowedFileName: true, Content: input.Data, KindValidator: simBundleKind,
+		ScanPolicy: upload.ScanPolicy{Required: s.upload.VirusScanRequired},
+	})
 	if err != nil {
-		return storedBundle{BundleHash: bundleHash, Report: report}, err
+		return storedBundle{}, apperr.ErrSimBundleUnreadable.WithCause(err)
 	}
 	return storedBundle{
 		ObjectRef:         plan.ObjectRef,
@@ -301,45 +320,34 @@ func hasBlockingFindings(findings []string) bool {
 	return false
 }
 
-// planBundleObject 规划 bundle 对象引用,调用方在数据库侧前置校验后再执行实际上传。
-func (s *Service) planBundleObject(ctx context.Context, tenantID, accountID, packageID int64, input BundleInput) (storage.UploadPlan, error) {
-	plan, err := s.files.PlanUpload(ctx, storage.PlanUploadRequest{
-		TenantID:        tenantID,
-		AccountID:       accountID,
-		Module:          simModuleName,
-		ResourceType:    simBundleResourceType,
-		ResourceID:      ids.Format(packageID),
-		FileName:        input.FileName,
-		ContentType:     input.ContentType,
-		Size:            int64(len(input.Data)),
-		MaxBytes:        s.upload.SimBundleMaxBytes,
-		ExpectedBucket:  s.storage.BucketCode(),
-		AllowedFileName: true,
-		Content:         input.Data,
-		KindValidator:   simBundleKind,
-		ScanPolicy:      upload.ScanPolicy{Required: s.upload.VirusScanRequired},
-	})
-	if err != nil {
-		return storage.UploadPlan{}, apperr.ErrSimBundleUnreadable.WithCause(err)
-	}
-	return plan, nil
-}
-
-// uploadBundleObject 写入已规划的 bundle 对象。
-func (s *Service) uploadBundleObject(ctx context.Context, plan storage.UploadPlan, input BundleInput) error {
-	if err := s.storage.Put(ctx, plan.Bucket, plan.Key, bytes.NewReader(input.Data), int64(len(input.Data)), input.ContentType); err != nil {
-		return apperr.ErrSimBundleUnreadable.WithCause(err)
-	}
-	return nil
-}
-
-// uploadPlannedBundle 解析统一对象引用并写入已被数据库接受的 bundle。
+// uploadPlannedBundle 写入本次独立对象，不覆盖当前包正文。
 func (s *Service) uploadPlannedBundle(ctx context.Context, objectRef string, input BundleInput) error {
 	ref, err := storage.ParseObjectRef(objectRef)
 	if err != nil {
 		return apperr.ErrSimBundleUnreadable.WithCause(err)
 	}
-	return s.uploadBundleObject(ctx, storage.UploadPlan{Bucket: ref.Bucket, Key: ref.Key}, input)
+	if err := s.storage.Put(ctx, ref.Bucket, ref.Key, bytes.NewReader(input.Data), int64(len(input.Data)), input.ContentType); err != nil {
+		return apperr.ErrSimBundleUnreadable.WithCause(err)
+	}
+	return nil
+}
+
+// discardPackageBundle 仅清理当前租户及包的对象，补偿不受请求取消影响。
+func (s *Service) discardPackageBundle(ctx context.Context, tenantID, packageID int64, objectRef string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(s.upload.CleanupTimeoutSeconds)*time.Second)
+	defer cancel()
+	ref, err := storage.ParseObjectRef(objectRef)
+	if err != nil {
+		return err
+	}
+	prefix, err := storage.ObjectKey(tenantID, simModuleName, simBundleResourceType, ids.Format(packageID))
+	if err != nil {
+		return err
+	}
+	if ref.Bucket != s.storage.BucketCode() || !strings.HasPrefix(ref.Key, prefix+"/") {
+		return fmt.Errorf("仿真包对象不属于当前上传范围")
+	}
+	return s.storage.Delete(ctx, ref.Bucket, ref.Key)
 }
 
 // simBundleKind 校验仿真包只能是 ZIP/TAR 归档。

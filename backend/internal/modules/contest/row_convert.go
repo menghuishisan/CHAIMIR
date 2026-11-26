@@ -3,11 +3,10 @@ package contest
 
 import (
 	"bytes"
-	"reflect"
 	"strings"
+	"time"
 
 	"chaimir/internal/contracts"
-	"time"
 
 	"chaimir/internal/modules/contest/internal/sqlcgen"
 	"chaimir/internal/platform/ids"
@@ -19,21 +18,13 @@ import (
 )
 
 // contestFromRow 转换竞赛定义行。
-func contestFromRow(row sqlcgen.Contest) (Contest, error) {
-	rules, err := decodeMap(row.Rules, apperr.ErrContestInvalid)
-	if err != nil {
-		return Contest{}, err
-	}
-	return Contest{ID: row.ID, TenantID: row.TenantID, OrganizerID: row.OrganizerID, Name: row.Name, Mode: row.Mode, MatchMode: pgtypex.Int2Value(row.MatchMode), TeamMode: row.TeamMode, SignupStart: timex.FromTimestamptz(row.SignupStart), SignupEnd: timex.FromTimestamptz(row.SignupEnd), StartAt: timex.FromTimestamptz(row.StartAt), EndAt: timex.FromTimestamptz(row.EndAt), FreezeMinutes: row.FreezeMinutes, Rules: rules, Status: row.Status, CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}, nil
+func contestFromRow(row sqlcgen.Contest) Contest {
+	return Contest{ID: row.ID, TenantID: row.TenantID, OrganizerID: row.OrganizerID, Name: row.Name, Mode: row.Mode, MatchMode: pgtypex.Int2Value(row.MatchMode), TeamMode: row.TeamMode, SignupStart: timex.FromTimestamptz(row.SignupStart), SignupEnd: timex.FromTimestamptz(row.SignupEnd), StartAt: timex.FromTimestamptz(row.StartAt), EndAt: timex.FromTimestamptz(row.EndAt), FreezeMinutes: row.FreezeMinutes, Status: row.Status, CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}
 }
 
 // problemFromRow 转换竞赛题目行。
 func problemFromRow(row sqlcgen.ContestProblem) (ContestProblem, error) {
 	dynamic, err := decodeOptionalJSON[DynamicScoreConfig](row.DynamicScore, apperr.ErrContestProblemInvalid)
-	if err != nil {
-		return ContestProblem{}, err
-	}
-	battleConfig, err := decodeOptionalJSON[BattleRuntimeConfig](row.BattleConfig, apperr.ErrContestProblemInvalid)
 	if err != nil {
 		return ContestProblem{}, err
 	}
@@ -51,7 +42,7 @@ func problemFromRow(row sqlcgen.ContestProblem) (ContestProblem, error) {
 			return ContestProblem{}, apperr.ErrContestProblemInvalid
 		}
 	}
-	return ContestProblem{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ItemCode: row.ItemCode, ItemVersion: row.ItemVersion, Score: row.Score, DynamicScore: dynamic, BattleConfig: battleConfig, BattleRule: pgtypex.Int2Value(row.BattleRule), Seq: row.Seq, CompositionDigest: digest, CompositionSnapshot: snapshot}, nil
+	return ContestProblem{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ItemCode: row.ItemCode, ItemVersion: row.ItemVersion, Score: row.Score, DynamicScore: dynamic, BattleRule: pgtypex.Int2Value(row.BattleRule), Seq: row.Seq, CompositionDigest: digest, CompositionSnapshot: snapshot}, nil
 }
 
 // decodeOptionalJSON 严格解析可空的固定 JSONB 结构。
@@ -267,73 +258,20 @@ func vulnSourceFromRow(row sqlcgen.VulnSource) (VulnSource, error) {
 }
 
 // vulnProblemFromRow 转换漏洞题草稿行。
-func vulnProblemFromRow(row any) (VulnProblem, error) {
-	v := reflect.ValueOf(row)
-	field := func(name string) reflect.Value {
-		if v.Kind() == reflect.Pointer {
-			v = v.Elem()
-		}
-		return v.FieldByName(name)
-	}
-	bytesField := func(name string) []byte {
-		f := field(name)
-		if f.IsValid() && f.CanInterface() {
-			if b, ok := f.Interface().([]byte); ok {
-				return b
-			}
-		}
-		return nil
-	}
-	textField := func(name string) string {
-		f := field(name)
-		if f.IsValid() && f.CanInterface() {
-			if t, ok := f.Interface().(pgtype.Text); ok {
-				return pgtypex.TextValue(t)
-			}
-		}
-		return ""
-	}
-	int16Field := func(name string) int16 {
-		f := field(name)
-		if f.IsValid() && f.Kind() == reflect.Int16 {
-			return int16(f.Int())
-		}
-		return 0
-	}
-	int64Field := func(name string) int64 {
-		f := field(name)
-		if f.IsValid() && f.CanInterface() {
-			if t, ok := f.Interface().(pgtype.Int8); ok {
-				return pgtypex.Int8Value(t)
-			}
-		}
-		if f.IsValid() && (f.Kind() == reflect.Int64 || f.Kind() == reflect.Int || f.Kind() == reflect.Int32) {
-			return f.Int()
-		}
-		return 0
-	}
-	timeField := func(name string) time.Time {
-		f := field(name)
-		if f.IsValid() && f.CanInterface() {
-			if t, ok := f.Interface().(pgtype.Timestamptz); ok {
-				return timex.FromTimestamptz(t)
-			}
-		}
-		return time.Time{}
-	}
-	body, err := decodeMap(bytesField("DraftBody"), apperr.ErrContestVulnProblemInvalid)
+func vulnProblemFromRow(row sqlcgen.VulnProblem) (VulnProblem, error) {
+	body, err := decodeMap(row.DraftBody, apperr.ErrContestVulnProblemInvalid)
 	if err != nil {
 		return VulnProblem{}, err
 	}
-	detail, err := decodeMap(bytesField("PrevalidateDetail"), apperr.ErrContestVulnProblemInvalid)
+	detail, err := decodeMap(row.PrevalidateDetail, apperr.ErrContestVulnProblemInvalid)
 	if err != nil {
 		return VulnProblem{}, err
 	}
-	snapshot, err := decodeOptionalJSON[contracts.SandboxCompositionSnapshot](bytesField("CompositionSnapshot"), apperr.ErrContestVulnProblemInvalid)
+	snapshot, err := decodeOptionalJSON[contracts.SandboxCompositionSnapshot](row.CompositionSnapshot, apperr.ErrContestVulnProblemInvalid)
 	if err != nil {
 		return VulnProblem{}, err
 	}
-	digest := strings.TrimSpace(textField("CompositionDigest"))
+	digest := strings.TrimSpace(pgtypex.TextValue(row.CompositionDigest))
 	if (digest == "") != (snapshot == nil) {
 		return VulnProblem{}, apperr.ErrContestVulnProblemInvalid
 	}
@@ -343,7 +281,7 @@ func vulnProblemFromRow(row any) (VulnProblem, error) {
 			return VulnProblem{}, apperr.ErrContestVulnProblemInvalid
 		}
 	}
-	return VulnProblem{ID: int64Field("ID"), TenantID: int64Field("TenantID"), SourceID: int64Field("SourceID"), ExternalRef: textField("ExternalRef"), Title: field("Title").String(), Level: int16Field("Level"), RuntimeMode: int16Field("RuntimeMode"), DraftBody: body, PrevalidateStatus: int16Field("PrevalidateStatus"), PrevalidateDetail: detail, CompositionDigest: digest, CompositionSnapshot: snapshot, InitCodeRef: textField("InitCodeRef"), InitScriptRef: textField("InitScriptRef"), ContentItemCode: textField("ContentItemCode"), ContentItemVersion: textField("ContentItemVersion"), Status: int16Field("Status"), CreatedAt: timeField("CreatedAt"), UpdatedAt: timeField("UpdatedAt")}, nil
+	return VulnProblem{ID: row.ID, TenantID: row.TenantID, SourceID: pgtypex.Int8Value(row.SourceID), ExternalRef: pgtypex.TextValue(row.ExternalRef), Title: row.Title, Level: row.Level, RuntimeMode: row.RuntimeMode, DraftBody: body, PrevalidateStatus: row.PrevalidateStatus, PrevalidateDetail: detail, CompositionDigest: digest, CompositionSnapshot: snapshot, ContentItemCode: pgtypex.TextValue(row.ContentItemCode), ContentItemVersion: pgtypex.TextValue(row.ContentItemVersion), Status: row.Status, CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}, nil
 }
 
 // recordFromRow 转换个人竞赛记录行。

@@ -66,11 +66,8 @@ if ($BuildTimeoutSeconds -le 0) {
 }
 
 Import-Module (Join-Path $PSScriptRoot "lib\ImageMetadata.psm1") -Force
+Assert-ChaimirImageSelection -Images $Images
 
-# 兼容文档中以逗号传入多个镜像的调用方式,避免参数被 PowerShell 当成单个镜像名而静默跳过构建。
-if ($Images.Count -eq 1 -and $Images[0] -match ',') {
-    $Images = @($Images[0].Split(',') | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-}
 
 if ([string]::IsNullOrWhiteSpace($Registry)) {
     $Registry = $env:SUPPLY_CHAIN_REGISTRY
@@ -100,38 +97,6 @@ if ($MaxAttempts -lt 1) {
     throw "MaxAttempts 必须大于等于 1"
 }
 
-# Get-LockedRef 返回构建参数需要的 Harbor digest 引用。
-function Get-LockedRef {
-    param(
-        [hashtable]$DigestLockItems,
-        [string]$Image
-    )
-    $digest = $DigestLockItems[$Image]
-    if ([string]::IsNullOrWhiteSpace($digest)) {
-        throw "digest 锁缺少 $Image,无法构建依赖它的镜像"
-    }
-    return "$RegistryEndpoint/$Image@$digest"
-}
-
-# Get-PinnedUpstreamRef 从 manifest 读取上游镜像与 digest,拒绝可变或不完整的运行基座。
-function Get-PinnedUpstreamRef {
-    param(
-        [string]$ManifestPath,
-        [string]$ImageKey,
-        [string]$DigestKey
-    )
-    $upstream = Get-ChaimirYamlBlock -Path $ManifestPath -BlockName "upstream"
-    $image = Get-ChaimirYamlValue -Lines $upstream -Key $ImageKey
-    $digest = Get-ChaimirYamlValue -Lines $upstream -Key $DigestKey
-    if ([string]::IsNullOrWhiteSpace($image) -or $digest -notmatch "^sha256:[0-9a-f]{64}$") {
-        throw "$ManifestPath`: upstream.$ImageKey 与 upstream.$DigestKey 必须组成不可变镜像引用"
-    }
-    if ($image.Contains("@")) {
-        throw "$ManifestPath`: upstream.$ImageKey 只填写镜像与版本,digest 必须单独写入 upstream.$DigestKey"
-    }
-    return "$image@$digest"
-}
-
 # Invoke-DockerCli 统一注入 Docker registry auth config。
 function Invoke-DockerCli {
     param([string[]]$Arguments)
@@ -142,72 +107,12 @@ function Invoke-DockerCli {
     & docker @baseArguments @Arguments
 }
 
-# ConvertTo-ProcessArgument 按 Windows 原生参数规则转义单个参数,供有界 Docker 进程调用复用。
-function ConvertTo-ProcessArgument([string]$Value) {
-    if ($null -eq $Value -or $Value.Length -eq 0) { return '""' }
-    if ($Value -notmatch '[\s"]') { return $Value }
-    $builder = [Text.StringBuilder]::new()
-    [void]$builder.Append('"')
-    $slashes = 0
-    foreach ($character in $Value.ToCharArray()) {
-        if ($character -eq '\') { $slashes++; continue }
-        if ($character -eq '"') {
-            if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
-            [void]$builder.Append('\').Append('"')
-            $slashes = 0
-            continue
-        }
-        if ($slashes -gt 0) { [void]$builder.Append(('\' * $slashes) -join '') }
-        [void]$builder.Append($character)
-        $slashes = 0
-    }
-    if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
-    [void]$builder.Append('"')
-    return $builder.ToString()
-}
-
-# Invoke-DockerCliWithTimeout 让构建在 Docker daemon 或网络无响应时有界返回,不允许无限等待。
 function Invoke-DockerCliWithTimeout {
-    param(
-        [string[]]$Arguments,
-        [int]$TimeoutSeconds
-    )
-    $baseArguments = @()
+    param([string[]]$Arguments, [int]$TimeoutSeconds)
     if (-not [string]::IsNullOrWhiteSpace($DockerConfig)) {
-        $baseArguments += @('--config', $DockerConfig)
+        $Arguments = @('--config', $DockerConfig) + $Arguments
     }
-    $cliArguments = @($baseArguments + $Arguments)
-    $process = [Diagnostics.Process]::new()
-    $process.StartInfo = [Diagnostics.ProcessStartInfo]::new()
-    $process.StartInfo.FileName = 'docker.exe'
-    $process.StartInfo.Arguments = (($cliArguments | ForEach-Object { ConvertTo-ProcessArgument ([string]$_) }) -join ' ')
-    $process.StartInfo.UseShellExecute = $false
-    $process.StartInfo.CreateNoWindow = $true
-    $process.StartInfo.RedirectStandardOutput = $true
-    $process.StartInfo.RedirectStandardError = $true
-    $process.StartInfo.StandardOutputEncoding = [Text.Encoding]::UTF8
-    $process.StartInfo.StandardErrorEncoding = [Text.Encoding]::UTF8
-    try {
-        if (-not $process.Start()) { throw 'Docker CLI 启动失败' }
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            # buildx 可能由 Docker CLI 派生子进程,只终止父进程会留下无主构建任务。
-            try { & taskkill.exe /PID $process.Id /T /F | Out-Null } catch {}
-            try { $process.Kill($true) } catch { try { $process.Kill() } catch {} }
-            $stdout = $stdoutTask.GetAwaiter().GetResult()
-            $stderr = $stderrTask.GetAwaiter().GetResult()
-            return [pscustomobject]@{
-                Code = 124
-                Text = ("Docker build 超时（{0} 秒）: {1}`n{2}`n{3}" -f $TimeoutSeconds, ($cliArguments -join ' '), $stdout, $stderr).Trim()
-            }
-        }
-        $stdout = $stdoutTask.GetAwaiter().GetResult()
-        $stderr = $stderrTask.GetAwaiter().GetResult()
-        return [pscustomobject]@{ Code = $process.ExitCode; Text = ((@($stdout, $stderr) | Where-Object { $_ }) -join "`n").Trim() }
-    } finally {
-        $process.Dispose()
-    }
+    Invoke-ChaimirDocker -Arguments $Arguments -TimeoutSeconds $TimeoutSeconds
 }
 
 # Get-DockerConfigBasicAuth 从 Docker config.json 读取 registry basic auth。
@@ -383,31 +288,21 @@ $rootPath = (Resolve-Path -LiteralPath $Root).Path
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $rootPath ".."))
 $digestLockItems = Read-ChaimirDigestLock -Path $DigestLock
 $catalog = Get-ChaimirImageCatalog -ImagesRoot $rootPath
-$manifests = Get-ChildItem -Path $rootPath -Recurse -Filter manifest.yaml | Sort-Object FullName
-$selected = New-Object System.Collections.Generic.List[object]
-$lockedArgumentImages = Get-ChaimirInternalImageBuildArguments
-
-foreach ($manifest in $manifests) {
-    $sourceType = Get-ChaimirImageSourceType -Path $manifest.FullName
-    if ($sourceType -notin @("platform-built", "thin-wrapper", "build-base")) {
-        continue
-    }
-    $lines = Get-Content -LiteralPath $manifest.FullName
-    $image = Get-ChaimirTopLevelYamlValue -Lines $lines -Key "image"
-    if ([string]::IsNullOrWhiteSpace($image)) {
-        throw "$($manifest.FullName): image 缺失"
-    }
-    if (-not $catalog[$image].Deployable) {
-        Write-Host "Skipping non-deployable image $image ($($catalog[$image].BlockReason))"
+$selected = [System.Collections.Generic.List[object]]::new()
+foreach ($entry in ($catalog.Values | Sort-Object Image)) {
+    if ($entry.SourceType -notin @('platform-built', 'thin-wrapper', 'build-base')) { continue }
+    $image = $entry.Image
+    if (-not $entry.Deployable) {
+        Write-Host "Skipping non-deployable image $image ($($entry.BlockReason))"
         continue
     }
     if ($Images.Count -gt 0 -and $image -notin $Images) {
         continue
     }
-    $build = Get-ChaimirYamlBlock -Path $manifest.FullName -BlockName "build"
+    $build = Get-ChaimirYamlBlock -Path $entry.Manifest -BlockName "build"
     $contextValue = Get-ChaimirYamlValue -Lines $build -Key "context"
     $dockerfileValue = Get-ChaimirYamlValue -Lines $build -Key "dockerfile"
-    $buildPaths = Resolve-ChaimirImageBuildPaths -RepoRoot $repoRoot -ManifestPath $manifest.FullName -ContextValue $contextValue -DockerfileValue $dockerfileValue
+    $buildPaths = Resolve-ChaimirImageBuildPaths -RepoRoot $repoRoot -ManifestPath $entry.Manifest -ContextValue $contextValue -DockerfileValue $dockerfileValue
     $contextPath = $buildPaths.Context
     $dockerfilePath = $buildPaths.Dockerfile
     if (-not (Test-Path -LiteralPath $contextPath)) {
@@ -417,48 +312,29 @@ foreach ($manifest in $manifests) {
         throw "$image Dockerfile 不存在: $dockerfilePath"
     }
     $dockerfileText = Get-Content -Raw -LiteralPath $dockerfilePath
-    $dependencies = [System.Collections.Generic.List[string]]::new()
-    foreach ($argumentName in $lockedArgumentImages.Keys) {
-        $logicalDependency = $lockedArgumentImages[$argumentName]
-        if ($image -ne $logicalDependency -and $dockerfileText -match "(?m)^\s*ARG\s+$argumentName\b") {
-            $dependencies.Add($logicalDependency)
-        }
-    }
+    $imageSources = Get-ChaimirImageBuildSources -ManifestPath $entry.Manifest -DockerfileText $dockerfileText
+    $dependencies = @($imageSources.Values | Where-Object { -not $_.Contains('@') })
     $selected.Add([pscustomobject]@{
         Image = $image
-        Manifest = $manifest.FullName
         Context = $contextPath
         Dockerfile = $dockerfilePath
         DockerfileText = $dockerfileText
-        Dependencies = $dependencies.ToArray()
+        ImageSources = $imageSources
+        Dependencies = $dependencies
         Ref = "$RegistryEndpoint/$image`:$Tag"
     })
 }
 
-# 构建内部依赖必须先于消费者产出新 digest;目录字母顺序不能表达该约束。
+# 先构建本批次里的依赖；未选中的镜像继续使用 digest 锁。
 $selectedByImage = @{}
+$dependenciesByImage = @{}
 foreach ($item in $selected) {
     $selectedByImage[$item.Image] = $item
+    $dependenciesByImage[$item.Image] = $item.Dependencies
 }
-$remaining = [System.Collections.Generic.HashSet[string]]::new([string[]]@($selectedByImage.Keys))
-$ordered = [System.Collections.Generic.List[object]]::new()
-while ($remaining.Count -gt 0) {
-    $progress = $false
-    foreach ($image in @($remaining | Sort-Object)) {
-        $item = $selectedByImage[$image]
-        $unresolved = @($item.Dependencies | Where-Object { $selectedByImage.ContainsKey($_) -and $remaining.Contains($_) })
-        if ($unresolved.Count -gt 0) {
-            continue
-        }
-        $ordered.Add($item)
-        [void]$remaining.Remove($image)
-        $progress = $true
-    }
-    if (-not $progress) {
-        throw "镜像内部构建依赖存在循环: $((@($remaining) | Sort-Object) -join ',')"
-    }
-}
-$selected = $ordered
+$selected = @(foreach ($wave in (Get-ChaimirImageBuildWaves -Dependencies $dependenciesByImage)) {
+    foreach ($image in $wave.Images) { $selectedByImage[$image] }
+})
 
 foreach ($item in $selected) {
     $args = @("buildx", "build")
@@ -473,43 +349,11 @@ foreach ($item in $selected) {
     if ($NoCache) {
         $args += "--no-cache"
     }
-    $buildArguments = @{}
-    foreach ($argumentName in $lockedArgumentImages.Keys) {
-        $logicalImage = $lockedArgumentImages[$argumentName]
-        if ($item.Image -ne $logicalImage -and $item.DockerfileText -match "(?m)^\s*ARG\s+$argumentName\b") {
-            $buildArguments[$argumentName] = Get-LockedRef -DigestLockItems $digestLockItems -Image $logicalImage
-        }
-    }
-    if ($item.DockerfileText -match "(?m)^\s*ARG\s+NGINX_RUNTIME_IMAGE\b") {
-        $buildArguments["NGINX_RUNTIME_IMAGE"] = Get-PinnedUpstreamRef -ManifestPath $item.Manifest -ImageKey "runtime" -DigestKey "runtime_digest"
-    }
-    $upstream = Get-ChaimirYamlBlock -Path $item.Manifest -BlockName "upstream"
-    $buildBaseArgument = Get-ChaimirYamlValue -Lines $upstream -Key "build_base_arg"
-    if (-not [string]::IsNullOrWhiteSpace($buildBaseArgument)) {
-        if ($buildBaseArgument -notmatch "^[A-Z0-9_]+_IMAGE$") {
-            throw "$($item.Image): upstream.build_base_arg 必须是 *_IMAGE Dockerfile ARG"
-        }
-        if ($item.DockerfileText -notmatch "(?m)^\s*ARG\s+$([regex]::Escape($buildBaseArgument))\b") {
-            throw "$($item.Image): upstream.build_base_arg 未在 Dockerfile 声明: $buildBaseArgument"
-        }
-        # 内部构建基座必须跟随本次候选 digest 锁;外部构建基座必须直接使用 manifest
-        # 中单独锁定的不可变引用,两者都不能退回可变 tag。
-        $buildBaseImage = Get-ChaimirYamlValue -Lines $upstream -Key "build_base_image"
-        $logicalBuildBaseImage = $lockedArgumentImages[$buildBaseArgument]
-        if (-not [string]::IsNullOrWhiteSpace($logicalBuildBaseImage)) {
-            $buildArguments[$buildBaseArgument] = Get-LockedRef -DigestLockItems $digestLockItems -Image $logicalBuildBaseImage
-        } else {
-            if ([string]::IsNullOrWhiteSpace($buildBaseImage)) {
-                throw "$($item.Image): upstream.build_base_image 不能为空: $buildBaseArgument"
-            }
-            $buildArguments[$buildBaseArgument] = Get-PinnedUpstreamRef -ManifestPath $item.Manifest -ImageKey "build_base_image" -DigestKey "build_base_digest"
-        }
-    }
+    $buildArguments = Resolve-ChaimirImageBuildArguments -Sources $item.ImageSources -Registry $RegistryEndpoint -DigestLock $digestLockItems
     if ($item.Image -eq "service/frontend") {
         $frontendEnvPath = Join-Path $repoRoot "frontend\.env"
-        if (-not (Test-Path -LiteralPath $frontendEnvPath)) {
-            throw "service/frontend 构建缺少前端构建配置: $frontendEnvPath"
-        }
+        $frontendArguments = Get-ChaimirFrontendBuildArguments -Path $frontendEnvPath -DockerfileText $item.DockerfileText
+        foreach ($key in $frontendArguments.Keys) { $buildArguments[$key] = $frontendArguments[$key] }
         # 将前端源码内容摘要作为构建参数,避免未提交改动被 BuildKit 错误复用旧的源码缓存层。
         $frontendRelativeFiles = @(& git -C $repoRoot ls-files --cached --others --exclude-standard -- "frontend/*")
         if ($LASTEXITCODE -ne 0) {
@@ -533,24 +377,6 @@ foreach ($item in $selected) {
             $buildArguments["CHAIMIR_FRONTEND_SOURCE_DIGEST"] = ([BitConverter]::ToString($frontendHasher.ComputeHash($frontendFingerprintBytes)).Replace('-', '')).ToLowerInvariant()
         } finally {
             $frontendHasher.Dispose()
-        }
-        foreach ($line in Get-Content -LiteralPath $frontendEnvPath) {
-            if ($line -match '^\s*(VITE_[A-Z0-9_]+)\s*=(.*)$') {
-                $buildArguments[$Matches[1]] = $Matches[2].Trim()
-            }
-        }
-        $requiredFrontendArgs = @(
-            "VITE_API_BASE_URL",
-            "VITE_API_TIMEOUT_MS",
-            "VITE_RUNTIME_SELFTEST_POLL_INTERVAL_MS",
-            "VITE_RUNTIME_SELFTEST_POLL_TIMEOUT_MS",
-            "VITE_SIM_WORKER_COMMAND_TIMEOUT_MS",
-            "VITE_SIM_STEP_INTERVAL_MS"
-        )
-        foreach ($argumentName in $requiredFrontendArgs) {
-            if (-not $buildArguments.ContainsKey($argumentName) -or [string]::IsNullOrWhiteSpace([string]$buildArguments[$argumentName])) {
-                throw "service/frontend 构建配置缺少 $argumentName"
-            }
         }
     }
     if ($item.DockerfileText -match "(?m)^\s*ARG\s+GO_MODULE_PROXY\b" -and -not [string]::IsNullOrWhiteSpace($env:GO_MODULE_PROXY)) {

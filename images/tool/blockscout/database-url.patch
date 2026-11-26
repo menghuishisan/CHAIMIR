@@ -1,0 +1,25 @@
+diff --git a/apps/explorer/lib/explorer/repo/config_helper.ex b/apps/explorer/lib/explorer/repo/config_helper.ex
+--- a/apps/explorer/lib/explorer/repo/config_helper.ex
++++ b/apps/explorer/lib/explorer/repo/config_helper.ex
+@@ -22,8 +22,7 @@ defmodule Explorer.Repo.ConfigHelper do
+   @ecto_ssl_modes ~w(disable allow prefer require verify-ca verify-full)
+ 
+   def get_db_config(opts) do
+-    url_encoded = opts[:url]
+-    url = url_encoded && URI.decode(url_encoded)
++    url = opts[:url]
+     env_function = opts[:env_func] || (&System.get_env/1)
+ 
+     @postgrex_env_vars
+@@ -122,9 +121,7 @@ defmodule Explorer.Repo.ConfigHelper do
+ 
+-  # sobelow_skip ["DOS.StringToAtom"]
+   def extract_parameters(database_url) do
+-    ~r/\w*:\/\/(?<username>[a-zA-Z0-9_-]*):(?<password>[a-zA-Z0-9-*#!%^&$_.]*)?@(?<hostname>(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])):(?<port>\d+)\/(?<database>[a-zA-Z0-9_\-]*)(\?.*search_path=(?<search_path>[a-zA-Z0-9_\-,]+))?/
+-    |> Regex.named_captures(database_url)
+-    |> Keyword.new(fn {k, v} -> {String.to_atom(k), v} end)
++    database_url
++    |> Ecto.Repo.Supervisor.parse_url()
+     |> Keyword.put(:url, database_url)
+     |> adjust_search_path()
+   end

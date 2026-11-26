@@ -40,6 +40,7 @@ import {
 } from '../../../../utils/labels/content'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
+import { nextFreeVersion } from '../../contentVersion'
 
 export interface ContentVersionsModalProps {
   item: ContentItem
@@ -134,7 +135,9 @@ export function ContentVersionsModal({ item, onClose, onCreated }: ContentVersio
               emptyIcon={History}
               emptyTitle="暂无版本记录"
               emptyDescription="这道题目只有当前版本。"
-              skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+              skeleton={
+                <Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />
+              }
             >
               {(list) => (
                 <Table
@@ -189,15 +192,23 @@ interface NewVersionFormProps {
  */
 function NewVersionForm({ item, versions, onDone }: NewVersionFormProps) {
   const [sourceVersion, setSourceVersion] = useState(item.version)
-  const [newVersion, setNewVersion] = useState(suggestNextVersion(item.version))
+  const [newVersion, setNewVersion] = useState(() =>
+    nextFreeVersion(
+      item.version,
+      versions.map((version) => version.version)
+    )
+  )
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
   const existingVersions = useMemo(() => new Set(versions.map((one) => one.version)), [versions])
   const { errors, validate } = useFormValidation(() => ({
     source: sourceVersion.trim() ? null : '请输入原版本号',
-    target: !/^\d+\.\d+\.\d+$/.test(newVersion.trim()) ? '版本号形如 1.0.1'
-      : existingVersions.has(newVersion.trim()) ? '这个版本号已存在,请换一个' : null,
+    target: !/^\d+\.\d+\.\d+$/.test(newVersion.trim())
+      ? '版本号形如 1.0.1'
+      : existingVersions.has(newVersion.trim())
+        ? '这个版本号已存在,请换一个'
+        : null,
   }))
 
   const submit = useCallback(async () => {
@@ -254,7 +265,12 @@ function NewVersionForm({ item, versions, onDone }: NewVersionFormProps) {
       </div>
 
       {formError ? <Callout tone="danger">{formError}</Callout> : null}
-      <Button variant="primary" leftIcon={GitBranch} loading={working} onClick={() => void submit()}>
+      <Button
+        variant="primary"
+        leftIcon={GitBranch}
+        loading={working}
+        onClick={() => void submit()}
+      >
         创建新版本
       </Button>
     </div>
@@ -287,7 +303,7 @@ function CloneForm({ item, onDone }: CloneFormProps) {
     setFormError(undefined)
     setWorking(true)
     try {
-      const draft = await api.content.cloneItem(item.code, item.version, {
+      const draft = await api.content.cloneItem(item.id, {
         new_code: code,
         new_version: newVersion.trim(),
       })
@@ -298,7 +314,7 @@ function CloneForm({ item, onDone }: CloneFormProps) {
     } finally {
       setWorking(false)
     }
-  }, [item.code, item.version, newCode, newVersion, onDone, validate, working])
+  }, [item.id, newCode, newVersion, onDone, validate, working])
 
   return (
     <div className="flex flex-col gap-4">
@@ -345,16 +361,4 @@ function CloneForm({ item, onDone }: CloneFormProps) {
       </div>
     </div>
   )
-}
-
-/**
- * suggestNextVersion 按语义化版本推荐下一个修订号。
- * 只推荐修订位加一:大版本变更由出题人自己决定,工具不替他判断改动幅度。
- */
-function suggestNextVersion(version: string): string {
-  const parts = version.split('.')
-  if (parts.length !== 3) return '1.0.1'
-  const patch = Number(parts[2])
-  if (!Number.isFinite(patch)) return '1.0.1'
-  return `${parts[0]}.${parts[1]}.${patch + 1}`
 }

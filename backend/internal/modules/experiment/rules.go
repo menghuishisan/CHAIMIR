@@ -86,7 +86,7 @@ func validateComponentConfig(cfg ComponentConfigRequest, collabMode int16, group
 	}
 	checkpointIDs := map[string]bool{}
 	for _, cp := range cfg.Checkpoints {
-		if !componentIDPattern.MatchString(cp.ID) || checkpointIDs[cp.ID] || strings.TrimSpace(cp.ItemCode) == "" || strings.TrimSpace(cp.ItemVersion) == "" || strings.TrimSpace(cp.JudgerCode) == "" || cp.Score <= 0 {
+		if !componentIDPattern.MatchString(cp.ID) || checkpointIDs[cp.ID] || strings.TrimSpace(cp.ItemCode) == "" || strings.TrimSpace(cp.ItemVersion) == "" || cp.Score <= 0 {
 			return apperr.ErrExperimentCheckpointInvalid
 		}
 		if cp.Mode != "" && !validJudgeMode(cp.Mode) {
@@ -133,7 +133,6 @@ func normalizeComponentConfig(cfg ComponentConfigRequest) ComponentConfigRequest
 	}
 	for idx := range cfg.Checkpoints {
 		cfg.Checkpoints[idx].ID = strings.TrimSpace(cfg.Checkpoints[idx].ID)
-		cfg.Checkpoints[idx].JudgerCode = strings.TrimSpace(cfg.Checkpoints[idx].JudgerCode)
 		cfg.Checkpoints[idx].ItemCode = strings.TrimSpace(cfg.Checkpoints[idx].ItemCode)
 		cfg.Checkpoints[idx].ItemVersion = strings.TrimSpace(cfg.Checkpoints[idx].ItemVersion)
 		cfg.Checkpoints[idx].Mode = strings.TrimSpace(cfg.Checkpoints[idx].Mode)
@@ -196,6 +195,7 @@ func componentConfigRequestFromModel(cfg ComponentConfig) ComponentConfigRequest
 		spec := env.CompositionSnapshot.Spec
 		out.Envs = append(out.Envs, EnvComponentRequest{
 			ID:                       env.ID,
+			WorkspaceRuntimeInstance: spec.WorkspaceRuntimeInstance,
 			Runtimes:                 append([]contracts.CompositionRuntimeRef(nil), spec.Runtimes...),
 			Infra:                    append([]contracts.CompositionComponentRef(nil), spec.Infra...),
 			Tools:                    append([]contracts.CompositionComponentRef(nil), spec.Tools...),
@@ -204,6 +204,7 @@ func componentConfigRequestFromModel(cfg ComponentConfig) ComponentConfigRequest
 			ResourceProfile:          spec.ResourceProfile,
 			NetworkProfile:           spec.NetworkProfile,
 			InitAssets:               append([]contracts.CompositionInitAsset(nil), spec.InitAssets...),
+			InitChainSteps:           append([]contracts.CompositionChainStep(nil), spec.InitChainSteps...),
 			InitCodeRef:              env.InitCodeRef,
 			InitScriptRef:            env.InitScriptRef,
 			KeepAlive:                env.KeepAlive,
@@ -386,7 +387,7 @@ func validateInstanceTransition(current, next int16) error {
 			return nil
 		}
 	case InstanceStatusRunning:
-		if current == InstanceStatusPaused || current == InstanceStatusReleased || current == InstanceStatusCreating || current == InstanceStatusError {
+		if current == InstanceStatusPaused || current == InstanceStatusReleased || current == InstanceStatusError {
 			return nil
 		}
 	case InstanceStatusFinished:

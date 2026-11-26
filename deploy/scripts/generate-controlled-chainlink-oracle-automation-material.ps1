@@ -11,71 +11,6 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 Import-Module (Join-Path $repoRoot 'images\lib\ImageMetadata.psm1') -Force
 
-function ConvertTo-ProcessArgument([string]$Value) {
-    if ($null -eq $Value -or $Value.Length -eq 0) { return '""' }
-    if ($Value -notmatch '[\s"]') { return $Value }
-    $builder = [Text.StringBuilder]::new()
-    [void]$builder.Append('"')
-    $slashes = 0
-    foreach ($character in $Value.ToCharArray()) {
-        if ($character -eq '\') { $slashes++; continue }
-        if ($character -eq '"') {
-            if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
-            [void]$builder.Append('\').Append('"')
-            $slashes = 0
-            continue
-        }
-        if ($slashes -gt 0) { [void]$builder.Append(('\' * $slashes) -join '') }
-        [void]$builder.Append($character)
-        $slashes = 0
-    }
-    if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
-    [void]$builder.Append('"')
-    return $builder.ToString()
-}
-
-function Invoke-Docker {
-    param(
-        [string[]]$Arguments,
-        [int]$TimeoutSeconds = 300
-    )
-    $process = [Diagnostics.Process]::new()
-    $process.StartInfo = [Diagnostics.ProcessStartInfo]::new()
-    $process.StartInfo.FileName = 'docker.exe'
-    $process.StartInfo.Arguments = (($Arguments | ForEach-Object { ConvertTo-ProcessArgument ([string]$_) }) -join ' ')
-    $process.StartInfo.UseShellExecute = $false
-    $process.StartInfo.CreateNoWindow = $true
-    $process.StartInfo.RedirectStandardOutput = $true
-    $process.StartInfo.RedirectStandardError = $true
-    $process.StartInfo.StandardOutputEncoding = [Text.Encoding]::UTF8
-    $process.StartInfo.StandardErrorEncoding = [Text.Encoding]::UTF8
-    try {
-        if (-not $process.Start()) { throw 'Docker CLI 启动失败' }
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            try {
-                & taskkill.exe /PID $process.Id /T /F | Out-Null
-            } catch {
-                Write-Warning ("Docker 超时后的进程树终止失败: {0}" -f $_.Exception.Message)
-            }
-            try {
-                $process.Kill($true)
-            } catch {
-                Write-Warning ("Docker 超时后的进程终止失败: {0}" -f $_.Exception.Message)
-            }
-            $stdout = $stdoutTask.GetAwaiter().GetResult()
-            $stderr = $stderrTask.GetAwaiter().GetResult()
-            return [pscustomobject]@{ Code = 124; Text = ("Docker CLI 超时（{0} 秒）: {1}{2}{3}" -f $TimeoutSeconds, ($Arguments -join ' '), [Environment]::NewLine, (@($stdout, $stderr) -join [Environment]::NewLine)).Trim() }
-        }
-        $stdout = $stdoutTask.GetAwaiter().GetResult()
-        $stderr = $stderrTask.GetAwaiter().GetResult()
-        return [pscustomobject]@{ Code = $process.ExitCode; Text = ((@($stdout, $stderr) | Where-Object { $_ }) -join [Environment]::NewLine).Trim() }
-    } finally {
-        $process.Dispose()
-    }
-}
-
 function Require-Value([hashtable]$Values, [string]$Name) {
     if (-not $Values.ContainsKey($Name) -or [string]::IsNullOrWhiteSpace($Values[$Name]) -or $Values[$Name] -match '^changeme') {
         throw "平台 Secret 源中的键无有效值: $Name"
@@ -98,7 +33,7 @@ function Get-ImageRef([hashtable]$Lock, [string]$Registry, [string]$Image) {
 function Wait-Running([string]$Name, [int]$Seconds = 180) {
     $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
     while ([DateTime]::UtcNow -lt $deadline) {
-        $state = Invoke-Docker @('inspect', '--format', '{{.State.Status}}|{{.State.ExitCode}}', $Name)
+        $state = Invoke-ChaimirDocker @('inspect', '--format', '{{.State.Status}}|{{.State.ExitCode}}', $Name)
         if ($state.Code -eq 0 -and $state.Text -match '^running\|0$') { return }
         if ($state.Code -eq 0 -and $state.Text -match '^exited\|[1-9][0-9]*$') {
             throw "容器提前退出: $Name $($state.Text)"
@@ -112,7 +47,7 @@ function Wait-Rpc([string]$Network, [string]$ToolsRef) {
     $body = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'))
     $deadline = [DateTime]::UtcNow.AddSeconds(180)
     while ([DateTime]::UtcNow -lt $deadline) {
-        $probe = Invoke-Docker @('run', '--rm', '--pull', 'never', '--network', $Network, '--entrypoint', 'sh', $ToolsRef, '-c', "printf '%s' '$body' | base64 -d >/tmp/rpc.json; curl --connect-timeout 2 --max-time 5 -fsS -H 'content-type: application/json' --data-binary @/tmp/rpc.json http://runtime:8545 | grep -Eq 'result.*0x[0-9a-fA-F]+'")
+        $probe = Invoke-ChaimirDocker @('run', '--rm', '--pull', 'never', '--network', $Network, '--entrypoint', 'sh', $ToolsRef, '-c', "printf '%s' '$body' | base64 -d >/tmp/rpc.json; curl --connect-timeout 2 --max-time 5 -fsS -H 'content-type: application/json' --data-binary @/tmp/rpc.json http://runtime:8545 | grep -Eq 'result.*0x[0-9a-fA-F]+'")
         if ($probe.Code -eq 0) { return }
         Start-Sleep -Seconds 1
     }
@@ -120,13 +55,13 @@ function Wait-Rpc([string]$Network, [string]$ToolsRef) {
 }
 
 function Invoke-ChainlinkApi([string]$Network, [string]$ToolsRef, [string]$StateVolume, [string]$ApiHost, [string]$Email, [string]$Password, [string]$Stage, [string]$Command) {
-    $result = Invoke-Docker @('run', '--rm', '--pull', 'never', '--network', $Network, '--entrypoint', 'sh', '--mount', ('source=' + $StateVolume + ',target=/runtime-state,readonly'), $ToolsRef, '-c', ($Command.Replace('__API_HOST__', 'chainlink-node').Replace('__API_CONNECT_TARGET__', $ApiHost)) )
+    $result = Invoke-ChaimirDocker @('run', '--rm', '--pull', 'never', '--network', $Network, '--entrypoint', 'sh', '--mount', ('source=' + $StateVolume + ',target=/runtime-state,readonly'), $ToolsRef, '-c', ($Command.Replace('__API_HOST__', 'chainlink-node').Replace('__API_CONNECT_TARGET__', $ApiHost)) )
     if ($result.Code -ne 0) { throw "Chainlink API 操作失败: stage=$Stage result=$($result.Text)" }
     return $result.Text
 }
 
 function Get-ChainlinkLogs([string]$Name) {
-    return (Invoke-Docker @('logs', '--tail', '500', $Name)).Text
+    return (Invoke-ChaimirDocker @('logs', '--tail', '500', $Name)).Text
 }
 
 $lock = Read-ChaimirDigestLock -Path (Resolve-Path -LiteralPath $DigestLockPath).Path -Required
@@ -172,7 +107,7 @@ for ($index = 1; $index -le $nodeCount; $index++) {
 }
 $runtimeRef = Get-ImageRef $lock $registry $RuntimeImage
 $chainlinkRef = Get-ImageRef $lock $registry 'infra/chainlink-node'
-$postgresRef = Get-ImageRef $lock $registry 'middleware/postgres'
+$postgresRef = Get-ImageRef $lock $registry 'infra/postgres'
 $toolsRef = Get-ImageRef $lock $registry 'base/chain-tools'
 $foundryRef = Get-ImageRef $lock $registry 'runtime/evm-foundry'
 $judgeRef = Get-ImageRef $lock $registry 'base/judge-min'
@@ -185,24 +120,24 @@ foreach ($path in @($postgresCertificate, $postgresPrivateKey)) { if (-not (Test
 
 New-Item -ItemType Directory -Path $workRoot, $outputParent -Force | Out-Null
 try {
-    foreach ($name in @($runtime) + $postgresNames + $chainlinkNames) { [void](Invoke-Docker @('rm', '-f', '-v', $name)) }
-    [void](Invoke-Docker @('network', 'rm', $network))
-    foreach ($volume in @($runtimeVolume) + $chainlinkVolumes + @($postgresTLSVolume)) { [void](Invoke-Docker @('volume', 'rm', $volume)) }
+    foreach ($name in @($runtime) + $postgresNames + $chainlinkNames) { [void](Invoke-ChaimirDocker @('rm', '-f', '-v', $name)) }
+    [void](Invoke-ChaimirDocker @('network', 'rm', $network))
+    foreach ($volume in @($runtimeVolume) + $chainlinkVolumes + @($postgresTLSVolume)) { [void](Invoke-ChaimirDocker @('volume', 'rm', $volume)) }
 
-    $networkResult = Invoke-Docker @('network', 'create', '--internal', $network)
+    $networkResult = Invoke-ChaimirDocker @('network', 'create', '--internal', $network)
     if ($networkResult.Code -ne 0) { throw "创建 Chainlink Oracle/Automation 网络失败: $($networkResult.Text)" }
     foreach ($volume in @($runtimeVolume) + $chainlinkVolumes + @($postgresTLSVolume)) {
-        $volumeResult = Invoke-Docker @('volume', 'create', $volume)
+        $volumeResult = Invoke-ChaimirDocker @('volume', 'create', $volume)
         if ($volumeResult.Code -ne 0) { throw "创建 Chainlink 测试卷失败: $($volumeResult.Text)" }
     }
-    $tlsSeed = Invoke-Docker @('run', '--rm', '--pull', 'never', '--user', '0:0', '--mount', ('type=bind,source=' + $postgresCertificate + ',target=/seed/tls.crt,readonly'), '--mount', ('type=bind,source=' + $postgresPrivateKey + ',target=/seed/tls.key,readonly'), '--mount', ('type=volume,source=' + $postgresTLSVolume + ',target=/tls'), '--entrypoint', 'sh', $postgresRef, '-c', 'set -eu; cp /seed/tls.crt /tls/tls.crt; cp /seed/tls.key /tls/tls.key; chown 70:70 /tls/tls.crt /tls/tls.key; chmod 644 /tls/tls.crt; chmod 600 /tls/tls.key')
+    $tlsSeed = Invoke-ChaimirDocker @('run', '--rm', '--pull', 'never', '--user', '0:0', '--mount', ('type=bind,source=' + $postgresCertificate + ',target=/seed/tls.crt,readonly'), '--mount', ('type=bind,source=' + $postgresPrivateKey + ',target=/seed/tls.key,readonly'), '--mount', ('type=volume,source=' + $postgresTLSVolume + ',target=/tls'), '--entrypoint', 'sh', $postgresRef, '-c', 'set -eu; cp /seed/tls.crt /tls/tls.crt; cp /seed/tls.key /tls/tls.key; chown 70:70 /tls/tls.crt /tls/tls.key; chmod 644 /tls/tls.crt; chmod 600 /tls/tls.key')
     if ($tlsSeed.Code -ne 0) { throw "注入 Chainlink PostgreSQL TLS 材料失败: $($tlsSeed.Text)" }
     foreach ($volume in $chainlinkVolumes) {
-        $statePrepare = Invoke-Docker @('run', '--rm', '--pull', 'never', '--user', '0:0', '--mount', ('source=' + $volume + ',target=/runtime-state'), '--entrypoint', 'sh', $judgeRef, '-c', 'mkdir -p /runtime-state; chown -R 1000:1000 /runtime-state')
+        $statePrepare = Invoke-ChaimirDocker @('run', '--rm', '--pull', 'never', '--user', '0:0', '--mount', ('source=' + $volume + ',target=/runtime-state'), '--entrypoint', 'sh', $judgeRef, '-c', 'mkdir -p /runtime-state; chown -R 1000:1000 /runtime-state')
         if ($statePrepare.Code -ne 0) { throw "准备 Chainlink runtime-state 权限失败: $($statePrepare.Text)" }
     }
     for ($index = 0; $index -lt $nodeCount; $index++) {
-        $postgresResult = Invoke-Docker @('run', '-d', '--pull', 'never', '--name', $postgresNames[$index], '--network', $network, '--network-alias', ('pg-' + ($index + 1)), '--mount', ('type=volume,source=' + $postgresTLSVolume + ',target=/etc/postgresql/tls,readonly'), '-e', 'POSTGRES_USER=chainlink', '-e', 'POSTGRES_DB=chainlink', '-e', "POSTGRES_PASSWORD=$($secrets['PG_PASSWORD'])", '-e', 'POSTGRES_INITDB_ARGS=--auth-local=scram-sha-256 --auth-host=scram-sha-256 -E UTF8 --locale=C', $postgresRef, 'postgres', '-c', 'ssl=on', '-c', 'ssl_cert_file=/etc/postgresql/tls/tls.crt', '-c', 'ssl_key_file=/etc/postgresql/tls/tls.key')
+        $postgresResult = Invoke-ChaimirDocker @('run', '-d', '--pull', 'never', '--name', $postgresNames[$index], '--network', $network, '--network-alias', ('pg-' + ($index + 1)), '--mount', ('type=volume,source=' + $postgresTLSVolume + ',target=/etc/postgresql/tls,readonly'), '-e', 'POSTGRES_USER=chainlink', '-e', 'POSTGRES_DB=chainlink', '-e', "POSTGRES_PASSWORD=$($secrets['PG_PASSWORD'])", '-e', 'POSTGRES_INITDB_ARGS=--auth-local=scram-sha-256 --auth-host=scram-sha-256 -E UTF8 --locale=C', $postgresRef, 'postgres', '-c', 'ssl=on', '-c', 'ssl_cert_file=/etc/postgresql/tls/tls.crt', '-c', 'ssl_key_file=/etc/postgresql/tls/tls.key')
         if ($postgresResult.Code -ne 0) { throw "启动 Chainlink PostgreSQL 节点 $($index + 1) 失败: $($postgresResult.Text)" }
     }
 
@@ -226,7 +161,7 @@ try {
         default { throw "不支持的 EVM runtime: $RuntimeImage" }
     }
     $runtimeArguments += $runtimeRef
-    $runtimeResult = Invoke-Docker $runtimeArguments
+    $runtimeResult = Invoke-ChaimirDocker $runtimeArguments
     if ($runtimeResult.Code -ne 0) { throw "启动受控 EVM runtime 失败: $($runtimeResult.Text)" }
     Wait-Running $runtime
     Wait-Rpc $network $toolsRef
@@ -235,19 +170,19 @@ try {
         $dbReady = $false
         $dbDeadline = [DateTime]::UtcNow.AddSeconds(180)
         while ([DateTime]::UtcNow -lt $dbDeadline) {
-            $db = Invoke-Docker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'psql', '-e', "PGPASSWORD=$($secrets['PG_PASSWORD'])", '-e', 'PGSSLMODE=require', $postgresRef, '-h', ('pg-' + ($index + 1)), '-U', 'chainlink', '-d', 'chainlink', '-At', '-c', 'SELECT 1;')
+            $db = Invoke-ChaimirDocker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'psql', '-e', "PGPASSWORD=$($secrets['PG_PASSWORD'])", '-e', 'PGSSLMODE=require', $postgresRef, '-h', ('pg-' + ($index + 1)), '-U', 'chainlink', '-d', 'chainlink', '-At', '-c', 'SELECT 1;')
             if ($db.Code -eq 0 -and $db.Text.Trim() -eq '1') { $dbReady = $true; break }
             Start-Sleep -Seconds 1
         }
         if (-not $dbReady) { throw "Chainlink PostgreSQL 节点 $($index + 1) 在限定时间内未就绪" }
     }
 
-    $chainIDText = (Invoke-Docker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'chain-id', '--rpc-url', 'http://runtime:8545')).Text.Trim()
+    $chainIDText = (Invoke-ChaimirDocker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'chain-id', '--rpc-url', 'http://runtime:8545')).Text.Trim()
     if ($chainIDText -notmatch '^[0-9]+$' -or [uint64]$chainIDText -eq 0) { throw "runtime 返回非法 chain id: $chainIDText" }
     $chainID = [uint64]$chainIDText
 
     for ($index = 0; $index -lt $nodeCount; $index++) {
-        $chainlinkResult = Invoke-Docker @(
+        $chainlinkResult = Invoke-ChaimirDocker @(
             'run', '-d', '--pull', 'never', '--name', $chainlinkNames[$index], '--network', $network,
             '--network-alias', $chainlinkHosts[$index], '--network-alias', ('chainlink-node-' + ($index + 1)),
             '--mount', ('source=' + $chainlinkVolumes[$index] + ',target=/runtime-state'),
@@ -279,11 +214,11 @@ try {
         $apiReady = $false
         $apiDeadline = [DateTime]::UtcNow.AddSeconds(180)
         while ([DateTime]::UtcNow -lt $apiDeadline) {
-            $chainlinkState = Invoke-Docker @('inspect', '--format', '{{.State.Status}}|{{.State.ExitCode}}', $chainlinkNames[$index])
+            $chainlinkState = Invoke-ChaimirDocker @('inspect', '--format', '{{.State.Status}}|{{.State.ExitCode}}', $chainlinkNames[$index])
             if ($chainlinkState.Code -eq 0 -and $chainlinkState.Text -match '^exited\|([1-9][0-9]*)$') {
                 throw "Chainlink 节点 $($index + 1) 提前退出: $($chainlinkState.Text)" + [Environment]::NewLine + (Get-ChainlinkLogs $chainlinkNames[$index])
             }
-            $apiProbe = Invoke-Docker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'sh', '--mount', ('source=' + $chainlinkVolumes[$index] + ',target=/runtime-state,readonly'), $toolsRef, '-c', ('test -s /runtime-state/chainlink/tls/server.crt && curl --fail --cacert /runtime-state/chainlink/tls/server.crt --connect-to chainlink-node:6688:' + $apiHost + ':6688 --connect-timeout 2 --max-time 4 https://chainlink-node:6688/readyz >/dev/null'))
+            $apiProbe = Invoke-ChaimirDocker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'sh', '--mount', ('source=' + $chainlinkVolumes[$index] + ',target=/runtime-state,readonly'), $toolsRef, '-c', ('test -s /runtime-state/chainlink/tls/server.crt && curl --fail --cacert /runtime-state/chainlink/tls/server.crt --connect-to chainlink-node:6688:' + $apiHost + ':6688 --connect-timeout 2 --max-time 4 https://chainlink-node:6688/readyz >/dev/null'))
             if ($apiProbe.Code -eq 0) { $apiReady = $true; break }
             Start-Sleep -Seconds 1
         }
@@ -291,7 +226,7 @@ try {
     }
     $invalidSessionBody = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((@{ email = $secrets['CHAINLINK_API_EMAIL']; password = 'invalid-chainlink-password' } | ConvertTo-Json -Compress)))
     $invalidAuthCommand = ('set -eu; cp /runtime-state/chainlink/tls/server.crt /tmp/chainlink-ca.crt; printf "%s" "__INVALID_SESSION_BODY__" | base64 -d >/tmp/invalid-session.json; code=$(curl --cacert /tmp/chainlink-ca.crt --connect-to chainlink-node:6688:' + $chainlinkHosts[0] + ':6688 -sS -o /tmp/invalid-session.response -w ''%{http_code}'' --connect-timeout 2 --max-time 4 -H ''content-type: application/json'' --data-binary ''@/tmp/invalid-session.json'' https://chainlink-node:6688/sessions); case "$code" in 401|403) ;; *) printf ''invalid_auth_http_status=%s\n'' "$code"; exit 1 ;; esac; printf ''invalid_auth_rejected\n''').Replace('__INVALID_SESSION_BODY__', $invalidSessionBody)
-    $invalidAuthResult = Invoke-Docker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'sh', '--mount', ('source=' + $chainlinkVolumes[0] + ',target=/runtime-state,readonly'), $toolsRef, '-c', $invalidAuthCommand)
+    $invalidAuthResult = Invoke-ChaimirDocker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'sh', '--mount', ('source=' + $chainlinkVolumes[0] + ',target=/runtime-state,readonly'), $toolsRef, '-c', $invalidAuthCommand)
     if ($invalidAuthResult.Code -ne 0 -or $invalidAuthResult.Text -notmatch 'invalid_auth_rejected') { throw "Chainlink 错误鉴权未被拒绝: $($invalidAuthResult.Text)" }
 
     $nodePublic = @()
@@ -313,7 +248,7 @@ try {
             ocr2_onchain_public_key = [string]$ocrKey.attributes.onChainPublicKey
             ocr2_key_id = [string]$ocrKey.id
         }
-        $oracleFunding = Invoke-Docker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'send', $ethKey.attributes.address, '--value', '5 ether', '--rpc-url', 'http://runtime:8545', '--private-key', $deployerKey, '--json')
+        $oracleFunding = Invoke-ChaimirDocker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'send', $ethKey.attributes.address, '--value', '5 ether', '--rpc-url', 'http://runtime:8545', '--private-key', $deployerKey, '--json')
         if ($oracleFunding.Code -ne 0) { throw "Chainlink EVM oracle 钱包 $($index + 1) 注资失败: $($oracleFunding.Text)" }
     }
     if ($nodePublic.Count -ne $nodeCount) { throw "Chainlink 节点公开身份数量错误: $($nodePublic.Count)" }
@@ -335,9 +270,9 @@ try {
     )
     $buildAndExport = 'set -eu; export GOPATH=/runtime-state/go GOMODCACHE=/runtime-state/go/pkg/mod GOCACHE=/tmp/go-cache; cd /work; /usr/local/go/bin/go build -mod=readonly -o /tmp/chainlink-material-export .; /tmp/chainlink-material-export -rpc http://runtime:8545 -private-key "$DEPLOYER_PRIVATE_KEY" -chain-id "$CHAIN_ID" -node-json /node-public.json -protocol __PROTOCOL__ -out /out/__OUTPUT__'
     $nodeMount = ($nodeJsonPath + ':/node-public.json:ro')
-    $ocrExport = Invoke-Docker -TimeoutSeconds 1200 ($exportBase + @('-v', $nodeMount, $builderRef, 'sh', '-c', $buildAndExport.Replace('__PROTOCOL__', 'ocr2').Replace('__OUTPUT__', 'chainlink-ocr2-material.json')))
+    $ocrExport = Invoke-ChaimirDocker -TimeoutSeconds 1200 ($exportBase + @('-v', $nodeMount, $builderRef, 'sh', '-c', $buildAndExport.Replace('__PROTOCOL__', 'ocr2').Replace('__OUTPUT__', 'chainlink-ocr2-material.json')))
     if ($ocrExport.Code -ne 0) { throw "Chainlink 官方 OCR2 材料部署失败: $($ocrExport.Text)" }
-    $automationExport = Invoke-Docker -TimeoutSeconds 1200 ($exportBase + @('-v', $nodeMount, $builderRef, 'sh', '-c', $buildAndExport.Replace('__PROTOCOL__', 'automation').Replace('__OUTPUT__', 'chainlink-automation-material.json')))
+    $automationExport = Invoke-ChaimirDocker -TimeoutSeconds 1200 ($exportBase + @('-v', $nodeMount, $builderRef, 'sh', '-c', $buildAndExport.Replace('__PROTOCOL__', 'automation').Replace('__OUTPUT__', 'chainlink-automation-material.json')))
     if ($automationExport.Code -ne 0) { throw "Chainlink 官方 Automation 材料部署失败: $($automationExport.Text)" }
     $ocrPath = Join-Path $workRoot 'chainlink-ocr2-material.json'
     $automationPath = Join-Path $workRoot 'chainlink-automation-material.json'
@@ -453,7 +388,7 @@ chainID = __CHAIN_ID__
         if ($replayResult -notmatch 'Replay started') { throw "Chainlink 节点 $($index + 1) 日志回放响应无效: $replayResult" }
     }
 
-    $deployerAddress = (Invoke-Docker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'wallet', 'address', '--private-key', $deployerKey)).Text.Trim()
+    $deployerAddress = (Invoke-ChaimirDocker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'wallet', 'address', '--private-key', $deployerKey)).Text.Trim()
     if ($deployerAddress -notmatch '^0x[0-9a-fA-F]{40}$') { throw "受控部署账户地址无效: $deployerAddress" }
     $ocrReady = $false
     $automationReady = $false
@@ -461,24 +396,24 @@ chainID = __CHAIN_ID__
     $headAdvanceCount = 0
     while ([DateTime]::UtcNow -lt $deadline) {
         if ($headAdvanceCount -lt 90) {
-            $advanceHead = Invoke-Docker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'send', $deployerAddress, '--value', '0', '--rpc-url', 'http://runtime:8545', '--private-key', $deployerKey, '--json')
+            $advanceHead = Invoke-ChaimirDocker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'send', $deployerAddress, '--value', '0', '--rpc-url', 'http://runtime:8545', '--private-key', $deployerKey, '--json')
             if ($advanceHead.Code -ne 0) { throw "推进受控链头的真实交易失败: $($advanceHead.Text)" }
             $headAdvanceCount++
         }
-        $answer = Invoke-Docker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'call', $ocr.aggregator, 'latestAnswer()(int256)', '--rpc-url', 'http://runtime:8545')
+        $answer = Invoke-ChaimirDocker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'call', $ocr.aggregator, 'latestAnswer()(int256)', '--rpc-url', 'http://runtime:8545')
         $answerMatch = [regex]::Match($answer.Text.Trim(), '^(?<value>-?[0-9]+)(?:\s|$)')
         if ($answer.Code -eq 0 -and $answerMatch.Success -and $answerMatch.Groups['value'].Value -eq '12345') { $ocrReady = $true }
-        $counter = Invoke-Docker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'call', $automation.upkeep, 'counter()(uint256)', '--rpc-url', 'http://runtime:8545')
+        $counter = Invoke-ChaimirDocker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'call', $automation.upkeep, 'counter()(uint256)', '--rpc-url', 'http://runtime:8545')
         $counterMatch = [regex]::Match($counter.Text.Trim(), '^(?<value>[1-9][0-9]*)(?:\s|$)')
         if ($counter.Code -eq 0 -and $counterMatch.Success) { $automationReady = $true }
         if ($ocrReady -and $automationReady) { break }
         Start-Sleep -Seconds 2
     }
     if (-not $ocrReady -or -not $automationReady) {
-        $latestBlock = (Invoke-Docker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'block', 'latest', '--rpc-url', 'http://runtime:8545', '--json')).Text
-        $ocrTransmission = (Invoke-Docker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'call', $ocr.aggregator, 'latestTransmissionDetails()(bytes32,uint32,uint8,int192,uint64)', '--rpc-url', 'http://runtime:8545')).Text.Trim()
-        $ocrRoundData = (Invoke-Docker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'call', $ocr.aggregator, 'latestRoundData()(uint80,int256,uint256,uint256,uint80)', '--rpc-url', 'http://runtime:8545')).Text.Trim()
-        $ocrEvents = (Invoke-Docker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'logs', '--address', $ocr.aggregator, '--from-block', '1', '--to-block', 'latest', '--rpc-url', 'http://runtime:8545')).Text.Trim()
+        $latestBlock = (Invoke-ChaimirDocker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'block', 'latest', '--rpc-url', 'http://runtime:8545', '--json')).Text
+        $ocrTransmission = (Invoke-ChaimirDocker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'call', $ocr.aggregator, 'latestTransmissionDetails()(bytes32,uint32,uint8,int192,uint64)', '--rpc-url', 'http://runtime:8545')).Text.Trim()
+        $ocrRoundData = (Invoke-ChaimirDocker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'call', $ocr.aggregator, 'latestRoundData()(uint80,int256,uint256,uint256,uint80)', '--rpc-url', 'http://runtime:8545')).Text.Trim()
+        $ocrEvents = (Invoke-ChaimirDocker @('run', '--rm', '--pull', 'never', '--network', $network, '--entrypoint', 'cast', $foundryRef, 'logs', '--address', $ocr.aggregator, '--from-block', '1', '--to-block', 'latest', '--rpc-url', 'http://runtime:8545')).Text.Trim()
         $logs = ($chainlinkNames | ForEach-Object { Get-ChainlinkLogs $_ }) -join [Environment]::NewLine
         throw "Chainlink OCR2/Automation 真实联动未在限定时间内完成: ocr=$ocrReady automation=$automationReady latest_block=$latestBlock ocr_transmission=$ocrTransmission ocr_round_data=$ocrRoundData ocr_events=$ocrEvents" + [Environment]::NewLine + $logs
     }
@@ -491,7 +426,7 @@ chainID = __CHAIN_ID__
         runtime_image = $RuntimeImage
         runtime_digest = $lock[$RuntimeImage]
         chainlink_digest = $lock['infra/chainlink-node']
-        postgres_digest = $lock['middleware/postgres']
+        postgres_digest = $lock['infra/postgres']
         ocr2 = $ocr
         automation = $automation
         jobs = @{
@@ -508,27 +443,27 @@ chainID = __CHAIN_ID__
     }
 } finally {
     foreach ($name in @($runtime) + $postgresNames + $chainlinkNames) {
-        $removed = Invoke-Docker @('rm', '-f', '-v', $name)
+        $removed = Invoke-ChaimirDocker @('rm', '-f', '-v', $name)
         if ($removed.Code -ne 0 -and $removed.Text -notmatch 'No such container') { throw "清理 Chainlink 测试容器失败: $name $($removed.Text)" }
     }
-    $networkRemoved = Invoke-Docker @('network', 'rm', $network)
+    $networkRemoved = Invoke-ChaimirDocker @('network', 'rm', $network)
     if ($networkRemoved.Code -ne 0 -and $networkRemoved.Text -notmatch 'No such network') { throw "清理 Chainlink 测试网络失败: $network $($networkRemoved.Text)" }
     foreach ($volume in @($runtimeVolume) + $chainlinkVolumes + @($postgresTLSVolume)) {
-        $removed = Invoke-Docker @('volume', 'rm', $volume)
+        $removed = Invoke-ChaimirDocker @('volume', 'rm', $volume)
         if ($removed.Code -ne 0 -and $removed.Text -notmatch 'No such volume') { throw "清理 Chainlink 测试卷失败: $volume $($removed.Text)" }
     }
     $leftovers = @()
     foreach ($name in @($runtime) + $postgresNames + $chainlinkNames) {
-        $state = Invoke-Docker @('ps', '-aq', '--filter', "name=^/$name`$")
+        $state = Invoke-ChaimirDocker @('ps', '-aq', '--filter', "name=^/$name`$")
         if ($state.Code -ne 0) { throw "核验 Chainlink 测试容器清理失败: $name $($state.Text)" }
         if (-not [string]::IsNullOrWhiteSpace($state.Text)) { $leftovers += "container:$name" }
     }
     foreach ($volume in @($runtimeVolume) + $chainlinkVolumes) {
-        $state = Invoke-Docker @('volume', 'ls', '-q', '--filter', "name=^$volume`$")
+        $state = Invoke-ChaimirDocker @('volume', 'ls', '-q', '--filter', "name=^$volume`$")
         if ($state.Code -ne 0) { throw "核验 Chainlink 测试卷清理失败: $volume $($state.Text)" }
         if (-not [string]::IsNullOrWhiteSpace($state.Text)) { $leftovers += "volume:$volume" }
     }
-    $networkState = Invoke-Docker @('network', 'ls', '-q', '--filter', "name=^$network`$")
+    $networkState = Invoke-ChaimirDocker @('network', 'ls', '-q', '--filter', "name=^$network`$")
     if ($networkState.Code -ne 0) { throw "核验 Chainlink 测试网络清理失败: $network $($networkState.Text)" }
     if (-not [string]::IsNullOrWhiteSpace($networkState.Text)) { $leftovers += "network:$network" }
     if ($leftovers.Count -gt 0) { throw "Chainlink 测试资源清理后仍有残留: $($leftovers -join ', ')" }

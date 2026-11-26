@@ -21,6 +21,7 @@ import (
 
 // Store 定义 service 所需的 judge 持久化能力,不暴露 sqlc 行类型。
 type Store interface {
+	GetJudgeTaskInfo(ctx context.Context, tenantID, taskID int64) (JudgeTaskInfo, error)
 	PlatformTx(ctx context.Context, fn func(context.Context, TxStore) error) error
 	TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
 	PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error
@@ -29,6 +30,7 @@ type Store interface {
 
 // TxStore 定义单个事务内可调用的 judge 数据访问能力。
 type TxStore interface {
+	ReadAlertMetrics(context.Context, contracts.AlertMetricQuery) (map[string]float64, error)
 	GetJudgerByCode(ctx context.Context, code string) (Judger, error)
 	GetJudgerByID(ctx context.Context, id int64) (Judger, error)
 	ListJudgers(ctx context.Context) ([]Judger, error)
@@ -60,7 +62,7 @@ type TxStore interface {
 	MarkOutboxFailed(ctx context.Context, tenantID, id int64, reason, leaseToken string) (JudgeEventOutbox, error)
 	CreateFingerprint(ctx context.Context, fp SubmissionFingerprint) (SubmissionFingerprint, error)
 	FindExactFingerprints(ctx context.Context, tenantID int64, problemRef, codeHash string) ([]SubmissionFingerprint, error)
-	ListFingerprintsForProblem(ctx context.Context, tenantID int64, problemRef, excludeSourceRef string) ([]SubmissionFingerprint, error)
+	ListFingerprintsForProblem(ctx context.Context, tenantID int64, problemRef, excludeSourceRef string, sourceRefs []string) ([]SubmissionFingerprint, error)
 }
 
 type store struct {
@@ -99,6 +101,20 @@ func (s *store) TenantTx(ctx context.Context, tenantID int64, fn func(context.Co
 	return s.database.WithTenantTxID(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
 	})
+}
+
+// GetJudgeTaskInfo 在同数据库、同租户事务中只读，避免调用方持锁时再占连接。
+func (s *store) GetJudgeTaskInfo(ctx context.Context, tenantID, taskID int64) (JudgeTaskInfo, error) {
+	if s == nil {
+		return JudgeTaskInfo{}, fmt.Errorf("judge store 未初始化")
+	}
+	var info JudgeTaskInfo
+	err := s.database.WithTenantReadTxID(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		info, err = (&txStore{q: sqlcgen.New(tx)}).GetJudgeTaskInfo(ctx, tenantID, taskID)
+		return err
+	})
+	return info, err
 }
 
 // PrivilegedTx 用于 worker 跨租户扫描队列和 outbox,不得作为普通业务路径使用。
@@ -526,9 +542,9 @@ func (s *txStore) FindExactFingerprints(ctx context.Context, tenantID int64, pro
 	return fingerprintsFromRows(rows)
 }
 
-// ListFingerprintsForProblem 查询同题指纹用于相似度计算。
-func (s *txStore) ListFingerprintsForProblem(ctx context.Context, tenantID int64, problemRef, excludeSourceRef string) ([]SubmissionFingerprint, error) {
-	rows, err := s.q.ListFingerprintsForProblem(ctx, sqlcgen.ListFingerprintsForProblemParams{TenantID: tenantID, ProblemRef: problemRef, Column3: excludeSourceRef})
+// ListFingerprintsForProblem 仅查询已授权来源集合中的同题指纹。
+func (s *txStore) ListFingerprintsForProblem(ctx context.Context, tenantID int64, problemRef, excludeSourceRef string, sourceRefs []string) ([]SubmissionFingerprint, error) {
+	rows, err := s.q.ListFingerprintsForProblem(ctx, sqlcgen.ListFingerprintsForProblemParams{TenantID: tenantID, ProblemRef: problemRef, Column3: excludeSourceRef, SourceRefs: sourceRefs})
 	if err != nil {
 		return nil, err
 	}

@@ -1,47 +1,29 @@
-// contest rules 文件集中放置 M8 输入校验、状态机、限频和来源引用规则。
 package contest
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"golang.org/x/net/http/httpguts"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/netx"
 	"chaimir/pkg/apperr"
 )
 
-var (
-	// contestModeRegistry 注册平台内置和后续扩展的竞赛类型。
-	contestModeRegistry = map[int16]string{ContestModeSolve: "solve", ContestModeBattle: "battle"}
-	// battleRuleRegistry 注册平台内置和后续扩展的对局规则。
-	battleRuleRegistry = map[int16]string{BattleRuleAttackDefense: "attack-defense", BattleRuleGame: "game"}
-)
-
-// registeredContestMode 判断竞赛类型是否已注册。
-func registeredContestMode(mode int16) bool {
-	_, ok := contestModeRegistry[mode]
-	return ok
-}
-
-// registeredBattleRule 判断对局规则是否已注册。
-func registeredBattleRule(rule int16) bool {
-	_, ok := battleRuleRegistry[rule]
-	return ok
-}
-
-// validateContestRequest 校验赛事管理输入和时间线。
 func validateContestRequest(req ContestRequest) (ContestRequest, error) {
 	req.Name = strings.TrimSpace(req.Name)
-	if req.Name == "" || len(req.Name) > 255 {
+	if req.Name == "" || utf8.RuneCountInString(req.Name) > 255 {
 		return ContestRequest{}, apperr.ErrContestInvalid
 	}
-	if req.Rules == nil {
-		req.Rules = map[string]any{}
-	}
-	if !registeredContestMode(req.Mode) {
+	if req.Mode != ContestModeSolve && req.Mode != ContestModeBattle {
 		return ContestRequest{}, apperr.ErrContestInvalid
 	}
 	if req.TeamMode != TeamModeSolo && req.TeamMode != TeamModeGroup {
@@ -62,38 +44,27 @@ func validateContestRequest(req ContestRequest) (ContestRequest, error) {
 	return req, nil
 }
 
-// validateProblemRequest 校验竞赛题目引用和赛内分值。
 func validateProblemRequest(req ProblemRequest, mode int16) (ProblemRequest, error) {
 	req.ItemCode = strings.TrimSpace(req.ItemCode)
 	req.ItemVersion = strings.TrimSpace(req.ItemVersion)
-	if req.ItemCode == "" || req.ItemVersion == "" || req.Score <= 0 {
+	if req.ItemCode == "" || req.ItemVersion == "" || req.Score <= 0 || req.Seq <= 0 {
 		return ProblemRequest{}, apperr.ErrContestProblemInvalid
 	}
 	if req.DynamicScore != nil {
-		if req.DynamicScore.MinScore <= 0 || req.DynamicScore.MinScore > req.Score || req.DynamicScore.DecayPerSolve <= 0 {
+		if mode != ContestModeSolve || req.DynamicScore.MinScore <= 0 || req.DynamicScore.MinScore > req.Score || req.DynamicScore.DecayPerSolve <= 0 {
 			return ProblemRequest{}, apperr.ErrContestProblemInvalid
 		}
 	}
 	if mode == ContestModeBattle {
-		if !registeredBattleRule(req.BattleRule) {
+		if req.BattleRule != BattleRuleAttackDefense && req.BattleRule != BattleRuleGame {
 			return ProblemRequest{}, apperr.ErrContestProblemInvalid
 		}
-		battleConfig, err := validateBattleConfig(req.BattleConfig)
-		if err != nil {
-			return ProblemRequest{}, err
-		}
-		req.BattleConfig = battleConfig
-	} else {
-		if req.BattleRule != 0 || req.BattleConfig != nil {
-			return ProblemRequest{}, apperr.ErrContestProblemInvalid
-		}
-		req.BattleRule = 0
-		req.BattleConfig = nil
+	} else if req.BattleRule != 0 {
+		return ProblemRequest{}, apperr.ErrContestProblemInvalid
 	}
 	return req, nil
 }
 
-// contestContentTypeAllowed enforces the M5 content types supported by each contest mode.
 func contestContentTypeAllowed(mode, contentType int16) bool {
 	switch mode {
 	case ContestModeSolve:
@@ -105,23 +76,6 @@ func contestContentTypeAllowed(mode, contentType int16) bool {
 	}
 }
 
-// validateBattleConfig 校验并规范化对抗题执行所需的沙箱运行时配置。
-func validateBattleConfig(cfg *BattleRuntimeConfig) (*BattleRuntimeConfig, error) {
-	if cfg == nil {
-		return nil, apperr.ErrContestProblemInvalid
-	}
-	normalized := BattleRuntimeConfig{
-		ExecutionProfile: strings.TrimSpace(cfg.ExecutionProfile),
-		EntryRoles:       append([]int16(nil), cfg.EntryRoles...),
-		ReplayProfile:    cfg.ReplayProfile,
-	}
-	if err := normalized.Validate(); err != nil {
-		return nil, apperr.ErrContestProblemInvalid
-	}
-	return &normalized, nil
-}
-
-// validateContestTransition 校验竞赛生命周期状态流转。
 func validateContestTransition(current, next int16) error {
 	switch next {
 	case ContestStatusSignup:
@@ -133,7 +87,7 @@ func validateContestTransition(current, next int16) error {
 			return nil
 		}
 	case ContestStatusEnded:
-		if current == ContestStatusRunning || current == ContestStatusFrozen {
+		if current == ContestStatusRunning || current == ContestStatusFrozen || current == ContestStatusEnded {
 			return nil
 		}
 	case ContestStatusArchived:
@@ -156,7 +110,6 @@ func validateCheatReviewContestStatus(status int16) error {
 	return nil
 }
 
-// validateContestTransitionWindow 在状态图基础上叠加竞赛时间窗口约束。
 func validateContestTransitionWindow(item Contest, next int16, now time.Time) error {
 	if err := validateContestTransition(item.Status, next); err != nil {
 		return err
@@ -174,7 +127,7 @@ func validateContestTransitionWindow(item Contest, next int16, now time.Time) er
 		if item.FreezeMinutes <= 0 {
 			return apperr.ErrContestStateInvalid
 		}
-		freezeStart := item.EndAt.Add(-time.Duration(item.FreezeMinutes) * time.Minute)
+		freezeStart := time.Unix(item.EndAt.Unix()-int64(item.FreezeMinutes)*60, int64(item.EndAt.Nanosecond()))
 		if now.Before(freezeStart) || !now.Before(item.EndAt) {
 			return apperr.ErrContestStateInvalid
 		}
@@ -186,7 +139,6 @@ func validateContestTransitionWindow(item Contest, next int16, now time.Time) er
 	return nil
 }
 
-// canManageContest 校验教师作者或学校管理员对竞赛的管理权限。
 func canManageContest(accountID int64, isSchoolAdmin bool, item Contest) error {
 	if isSchoolAdmin || item.OrganizerID == accountID {
 		return nil
@@ -194,7 +146,6 @@ func canManageContest(accountID int64, isSchoolAdmin bool, item Contest) error {
 	return apperr.ErrForbidden
 }
 
-// validateSignupWindow 校验当前时间处于报名期。
 func validateSignupWindow(item Contest, now time.Time) error {
 	if item.Status != ContestStatusSignup || now.Before(item.SignupStart) || now.After(item.SignupEnd) {
 		return apperr.ErrContestSignupClosed
@@ -210,36 +161,26 @@ func validateContestRunning(item Contest) error {
 	return nil
 }
 
-// contestSourceRef 生成竞赛级来源引用,用于结束归档级联回收。
-func contestSourceRef(contestID int64, now time.Time) string {
-	return fmt.Sprintf("contest:%04d:contest:%s", now.Year(), ids.Format(contestID))
-}
-
-// submissionSourceRef 生成解题提交来源引用。
 func submissionSourceRef(id int64, now time.Time) string {
 	return fmt.Sprintf("contest:%04d:submission:%s", now.Year(), ids.Format(id))
 }
 
-// battleSourceRef 生成对抗对局来源引用。
 func battleSourceRef(id int64, now time.Time) string {
 	return fmt.Sprintf("contest:%04d:battle:%s", now.Year(), ids.Format(id))
 }
 
-// validContestSourceRef 校验事件来源确属 M8。
 func validContestSourceRef(sourceRef string) bool {
 	return auth.ValidSourceRef(sourceRef) && strings.HasPrefix(strings.TrimSpace(sourceRef), "contest:")
 }
 
-// validateTeamName 校验队伍名称。
 func validateTeamName(name string) (string, error) {
 	name = strings.TrimSpace(name)
-	if name == "" || len(name) > 128 {
+	if name == "" || utf8.RuneCountInString(name) > 128 {
 		return "", apperr.ErrContestTeamInvalid
 	}
 	return name, nil
 }
 
-// validateBattleEntryRequest 校验参战题目、授权沙箱和角色。
 func validateBattleEntryRequest(req BattleEntryRequest) (BattleEntryRequest, error) {
 	if req.ProblemID <= 0 || req.SandboxID <= 0 {
 		return BattleEntryRequest{}, apperr.ErrContestBattleEntryInvalid
@@ -250,12 +191,12 @@ func validateBattleEntryRequest(req BattleEntryRequest) (BattleEntryRequest, err
 	return req, nil
 }
 
-// validateContestSolveRequest 校验代码题与答案题的互斥请求契约。
-func validateContestSolveRequest(req SubmitRequest, submitKey string, codeTask bool) error {
+// validateContestSolveRequest 校验环境提交与答案提交的互斥契约。
+func validateContestSolveRequest(req SubmitRequest, submitKey string, needsSandbox bool) error {
 	if req.ContentRef == nil {
 		return apperr.ErrContestSubmissionInvalid
 	}
-	if codeTask {
+	if needsSandbox {
 		if strings.TrimSpace(req.SandboxRef) == "" || len(req.ContentRef) != 0 {
 			return apperr.ErrContestSubmissionInvalid
 		}
@@ -268,7 +209,6 @@ func validateContestSolveRequest(req SubmitRequest, submitKey string, codeTask b
 	return nil
 }
 
-// validateBattleEntryRole 校验参战角色必须属于题目声明的对局规则。
 // 角色边界由题目规则唯一决定,不能让客户端选择一个撮合器永远无法配对的角色。
 func validateBattleEntryRole(rule, role int16) error {
 	switch rule {
@@ -284,7 +224,6 @@ func validateBattleEntryRole(rule, role int16) error {
 	return apperr.ErrContestBattleEntryInvalid
 }
 
-// validateCheatRequest 校验防作弊处理输入。
 func validateCheatRequest(req CheatRecordRequest) (CheatRecordRequest, error) {
 	if req.TeamID <= 0 || (req.Type != CheatTypeSimilarity && req.Type != CheatTypeBehavior && req.Type != CheatTypeEnvironment) || (req.Action != CheatActionWarn && req.Action != CheatActionPenalty && req.Action != CheatActionDisqualify) {
 		return CheatRecordRequest{}, apperr.ErrContestCheatInvalid
@@ -292,74 +231,376 @@ func validateCheatRequest(req CheatRecordRequest) (CheatRecordRequest, error) {
 	if req.Evidence == nil {
 		req.Evidence = map[string]any{}
 	}
-	if req.Action == CheatActionPenalty && float64FromMap(req.Evidence, "penalty_score", 0) <= 0 {
-		return CheatRecordRequest{}, apperr.ErrContestCheatInvalid
+	if req.Action == CheatActionPenalty {
+		score, ok := jsonx.Float64FromAnyOK(req.Evidence["penalty_score"])
+		_, text := req.Evidence["penalty_score"].(string)
+		if !ok || text || score <= 0 {
+			return CheatRecordRequest{}, apperr.ErrContestCheatInvalid
+		}
 	}
 	return req, nil
 }
 
-// float64FromMap 从结构化 evidence 读取数值。
-func float64FromMap(m map[string]any, key string, defaultValue float64) float64 {
-	switch v := m[key].(type) {
-	case float64:
-		return v
-	case float32:
-		return float64(v)
-	case int:
-		return float64(v)
-	case int32:
-		return float64(v)
-	case int64:
-		return float64(v)
-	default:
-		return defaultValue
-	}
-}
-
-// validateVulnProblemInput 校验漏洞题草稿输入。
-func validateVulnProblemInput(req ImportVulnProblemRequest) (ImportVulnProblemRequest, error) {
+func validateVulnProblemInput(req VulnProblemRequest) (VulnProblemRequest, error) {
 	req.Title = strings.TrimSpace(req.Title)
 	req.ExternalRef = strings.TrimSpace(req.ExternalRef)
-	if req.Title == "" || len(req.Title) > 255 || (req.Level != VulnLevelA && req.Level != VulnLevelB && req.Level != VulnLevelC) || (req.RuntimeMode != VulnRuntimeIsolated && req.RuntimeMode != VulnRuntimeForked) {
-		return ImportVulnProblemRequest{}, apperr.ErrContestVulnProblemInvalid
+	if req.Title == "" || utf8.RuneCountInString(req.Title) > 255 || utf8.RuneCountInString(req.ExternalRef) > 128 || req.SourceID < 0 || (req.Level != VulnLevelA && req.Level != VulnLevelB && req.Level != VulnLevelC) || (req.RuntimeMode != VulnRuntimeIsolated && req.RuntimeMode != VulnRuntimeForked) {
+		return VulnProblemRequest{}, apperr.ErrContestVulnProblemInvalid
 	}
-	if len(req.DraftBody) == 0 {
-		return ImportVulnProblemRequest{}, apperr.ErrContestVulnProblemInvalid
-	}
-	if !validateVulnDraftBody(req.DraftBody) {
-		return ImportVulnProblemRequest{}, apperr.ErrContestVulnProblemInvalid
+	if !validVulnDraftShape(req.DraftBody) {
+		return VulnProblemRequest{}, apperr.ErrContestVulnProblemInvalid
 	}
 	return req, nil
 }
 
-// validateVulnDraftBody 确保漏洞草稿固化时具备完整判题配置,不允许导入后才发现无法判题。
+// validVulnDraftShape 允许字段未填完，但拒绝无法恢复到编辑表单的已知字段类型。
+func validVulnDraftShape(body map[string]any) bool {
+	if body == nil {
+		return false
+	}
+	for _, key := range []string{"init_steps", "init_code_ref", "init_script_ref"} {
+		if _, exists := body[key]; exists {
+			return false
+		}
+	}
+	stringsOnly := func(row map[string]any, keys ...string) bool {
+		for _, key := range keys {
+			if value, exists := row[key]; exists {
+				if _, ok := value.(string); !ok {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	if !stringsOnly(body, "description", "contract_source") {
+		return false
+	}
+	for _, key := range []string{"positive_steps", "assertions"} {
+		value, exists := body[key]
+		if !exists {
+			continue
+		}
+		items, ok := value.([]any)
+		if !ok {
+			return false
+		}
+		for _, value := range items {
+			row, ok := value.(map[string]any)
+			if !ok || row == nil || !stringsOnly(row, "op", "runtime_instance", "target", "label", "field", "expected_label", "hint") {
+				return false
+			}
+		}
+	}
+	// 标准 JSON 解码负责数字和组合内部字段的类型；未知正文扩展仍保留原样。
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return false
+	}
+	var fields struct {
+		ForkBlock   *float64 `json:"fork_block"`
+		JudgeConfig *struct {
+			JudgerCode string   `json:"judger_code"`
+			MaxScore   *float64 `json:"max_score"`
+		} `json:"judge_config"`
+	}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return false
+	}
+	if value, exists := body["fork_block"]; exists && value == nil {
+		return false
+	}
+	if value, exists := body["judge_config"]; exists {
+		judge, ok := value.(map[string]any)
+		if !ok || judge == nil || !stringsOnly(judge, "judger_code") {
+			return false
+		}
+		if score, exists := judge["max_score"]; exists && score == nil {
+			return false
+		}
+	}
+	if value, exists := body["composition"]; exists {
+		composition, ok := value.(map[string]any)
+		if !ok || composition == nil || !stringsOnly(composition, "id", "workspace_runtime_instance") {
+			return false
+		}
+		for _, key := range []string{"runtimes", "tools", "infra", "links", "init_assets", "init_chain_steps"} {
+			if value, exists := composition[key]; exists {
+				items, ok := value.([]any)
+				if !ok {
+					return false
+				}
+				for _, value := range items {
+					row, ok := value.(map[string]any)
+					if !ok || row == nil || !stringsOnly(row, "instance_code", "runtime_code", "image_version", "code", "source_component", "source_endpoint", "target_component", "target_endpoint", "protocol", "access_scope", "config_binding", "runtime_instance", "op", "target") {
+						return false
+					}
+					if params, exists := row["params"]; exists {
+						if value, ok := params.(map[string]any); !ok || value == nil {
+							return false
+						}
+					}
+					if key == "tools" || key == "infra" {
+						selection, ok := row["selection"].(string)
+						if !ok || (selection != "explicit" && selection != "auto") || strings.TrimSpace(jsonx.StringValue(row["code"])) == "" {
+							return false
+						}
+					}
+					if flag, exists := row["required_at_start"]; exists {
+						if _, ok := flag.(bool); !ok {
+							return false
+						}
+					}
+				}
+			}
+		}
+		raw, err := json.Marshal(composition)
+		if err != nil {
+			return false
+		}
+		var spec contracts.SandboxCompositionSpec
+		if jsonx.DecodeStrictKnownFields(raw, &spec) != nil {
+			return false
+		}
+		names := make(map[string]struct{}, len(spec.Runtimes))
+		for _, runtime := range spec.Runtimes {
+			name := strings.TrimSpace(runtime.InstanceCode)
+			if name == "" {
+				continue
+			}
+			if _, exists := names[name]; exists {
+				return false
+			}
+			names[name] = struct{}{}
+		}
+	}
+	return true
+}
+
+// validateVulnDraftBody 在执行前检查判题配置；草稿暂存不要求可执行。
 func validateVulnDraftBody(body map[string]any) bool {
 	judgeConfig, ok := body["judge_config"].(map[string]any)
 	return ok && strings.TrimSpace(jsonx.StringFromAny(judgeConfig["judger_code"])) != "" && jsonx.Int32FromAny(judgeConfig["max_score"], 0) > 0
 }
 
-// validatePrevalidateRequest 校验漏洞预验证运行时参数。
-func validatePrevalidateRequest(req PrevalidateRequest) (PrevalidateRequest, error) {
-	req.InitCodeRef = strings.TrimSpace(req.InitCodeRef)
-	req.InitScriptRef = strings.TrimSpace(req.InitScriptRef)
-	req.Composition.ID = strings.TrimSpace(req.Composition.ID)
-	if req.Composition.ID == "" || len(req.Composition.Runtimes) == 0 {
-		return PrevalidateRequest{}, apperr.ErrContestVulnProblemInvalid
+// validationSteps 按声明顺序读取执行项，拒绝静默丢弃畸形步骤或断言。
+func validationSteps(body map[string]any, keys ...string) ([]map[string]any, error) {
+	var out []map[string]any
+	for _, key := range keys {
+		value, exists := body[key]
+		if !exists {
+			continue
+		}
+		items, ok := value.([]any)
+		if !ok {
+			return nil, apperr.ErrContestVulnProblemInvalid
+		}
+		for _, item := range items {
+			step, ok := item.(map[string]any)
+			if !ok || len(step) == 0 {
+				return nil, apperr.ErrContestVulnProblemInvalid
+			}
+			out = append(out, step)
+		}
 	}
-	for index := range req.Composition.Runtimes {
-		runtime := &req.Composition.Runtimes[index]
+	return out, nil
+}
+
+// vulnPrevalidateSpec 只从已保存草稿读取环境，执行前拒绝未完成的判题配置。
+func vulnPrevalidateSpec(body map[string]any) (contracts.SandboxCompositionSpec, error) {
+	if !validVulnDraftShape(body) || !validateVulnDraftBody(body) {
+		return contracts.SandboxCompositionSpec{}, apperr.ErrContestVulnProblemInvalid
+	}
+	raw, err := json.Marshal(body["composition"])
+	if err != nil {
+		return contracts.SandboxCompositionSpec{}, apperr.ErrContestVulnProblemInvalid.WithCause(err)
+	}
+	var spec contracts.SandboxCompositionSpec
+	if err := jsonx.DecodeStrictKnownFields(raw, &spec); err != nil {
+		return spec, apperr.ErrContestVulnProblemInvalid.WithCause(err)
+	}
+	spec.ID = strings.TrimSpace(spec.ID)
+	if spec.ID == "" || len(spec.Runtimes) == 0 {
+		return contracts.SandboxCompositionSpec{}, apperr.ErrContestVulnProblemInvalid
+	}
+	for index := range spec.Runtimes {
+		runtime := &spec.Runtimes[index]
 		runtime.InstanceCode = strings.TrimSpace(runtime.InstanceCode)
 		runtime.Code = strings.TrimSpace(runtime.Code)
 		runtime.ImageVersion = strings.TrimSpace(runtime.ImageVersion)
 		if runtime.InstanceCode == "" || runtime.Code == "" || runtime.ImageVersion == "" {
-			return PrevalidateRequest{}, apperr.ErrContestVulnProblemInvalid
+			return contracts.SandboxCompositionSpec{}, apperr.ErrContestVulnProblemInvalid
 		}
 	}
-	req.Composition.AccessProfile = contracts.SandboxAccessVulnerabilityPrevalidate
-	return req, nil
+	steps, err := validationSteps(body["composition"].(map[string]any), "init_chain_steps")
+	if err != nil {
+		return contracts.SandboxCompositionSpec{}, err
+	}
+	if _, err := validationSteps(body, "positive_steps", "assertions"); err != nil {
+		return contracts.SandboxCompositionSpec{}, err
+	}
+	for index, raw := range steps {
+		spec.InitChainSteps[index].RuntimeInstance, err = contracts.ChainRuntimeInstance(raw, spec.WorkspaceRuntimeInstance)
+		if err != nil {
+			return contracts.SandboxCompositionSpec{}, apperr.ErrContestVulnProblemInvalid.WithCause(err)
+		}
+	}
+	spec.AccessProfile = contracts.SandboxAccessVulnerabilityPrevalidate
+	return spec, nil
 }
 
-// stableContestCode 为漏洞题固化生成稳定内容 code。
 func stableContestCode(problem VulnProblem) string {
 	return "VULN-" + ids.Format(problem.ID)
+}
+
+func vulnSourceFromRequest(req VulnSourceRequest, tenantID, generatedID int64) (VulnSource, error) {
+	req.Name = strings.TrimSpace(req.Name)
+	if req.ID <= 0 {
+		req.ID = ids.ID(generatedID)
+	}
+	if (req.Type != VulnSourceTypeSWC && req.Type != VulnSourceTypeIntelligence && req.Type != VulnSourceTypeCVEOnchain) || req.Name == "" || utf8.RuneCountInString(req.Name) > 128 || req.Config == nil || (req.DefaultLevel != VulnLevelA && req.DefaultLevel != VulnLevelB && req.DefaultLevel != VulnLevelC) {
+		return VulnSource{}, apperr.ErrContestVulnSourceInvalid
+	}
+	return VulnSource{ID: req.ID.Int64(), TenantID: tenantID, Type: req.Type, Name: req.Name, Config: req.Config, DefaultLevel: req.DefaultLevel, Enabled: req.Enabled}, nil
+}
+
+// parseVulnSourceConfig 统一保存与执行的类型、默认值和空白处理，不修改原配置或凭据。
+func parseVulnSourceConfig(cfg map[string]any, defaultTimeout int) (vulnSourceHTTPConfig, error) {
+	parsed := vulnSourceHTTPConfig{timeoutSeconds: defaultTimeout}
+	for name, target := range map[string]*string{"endpoint": &parsed.endpoint, "method": &parsed.method, "cases_path": &parsed.casesPath} {
+		if value, exists := cfg[name]; exists {
+			text, ok := value.(string)
+			if !ok {
+				return vulnSourceHTTPConfig{}, apperr.ErrContestVulnSourceInvalid
+			}
+			*target = strings.TrimSpace(text)
+		}
+	}
+	endpoint, err := netx.ValidatePublicHTTPURL(parsed.endpoint)
+	if err != nil {
+		return vulnSourceHTTPConfig{}, apperr.ErrContestVulnSourceInvalid.WithCause(err)
+	}
+	parsed.endpoint = endpoint
+	parsed.method = strings.ToUpper(parsed.method)
+	if parsed.method == "" {
+		parsed.method = http.MethodGet
+	}
+	if parsed.method != http.MethodGet && parsed.method != http.MethodPost {
+		return vulnSourceHTTPConfig{}, apperr.ErrContestVulnSourceInvalid
+	}
+	if value, exists := cfg["timeout_seconds"]; exists {
+		if _, text := value.(string); text {
+			return vulnSourceHTTPConfig{}, apperr.ErrContestVulnSourceInvalid
+		}
+		parsed.timeoutSeconds = jsonx.IntFromAny(value)
+	}
+	if parsed.timeoutSeconds < 1 || parsed.timeoutSeconds > 60 {
+		return vulnSourceHTTPConfig{}, apperr.ErrContestVulnSourceInvalid
+	}
+	if raw, exists := cfg["headers"]; exists {
+		headers, ok := raw.(map[string]any)
+		if !ok {
+			return vulnSourceHTTPConfig{}, apperr.ErrContestVulnSourceInvalid
+		}
+		parsed.headers = make(map[string]string, len(headers))
+		for name, raw := range headers {
+			value, ok := raw.(string)
+			if !ok || !httpguts.ValidHeaderFieldName(name) || !httpguts.ValidHeaderFieldValue(value) {
+				return vulnSourceHTTPConfig{}, apperr.ErrContestVulnSourceInvalid
+			}
+			parsed.headers[name] = value
+		}
+	}
+	mapping, ok := cfg["mapping"].(map[string]any)
+	if !ok {
+		return vulnSourceHTTPConfig{}, apperr.ErrContestVulnSourceInvalid
+	}
+	parsed.mapping = make(map[string]string, len(mapping))
+	for name, raw := range mapping {
+		value, ok := raw.(string)
+		if !ok {
+			return vulnSourceHTTPConfig{}, apperr.ErrContestVulnSourceInvalid
+		}
+		parsed.mapping[name] = strings.TrimSpace(value)
+	}
+	for _, key := range []string{"external_ref", "title", "draft_body"} {
+		if parsed.mapping[key] == "" {
+			return vulnSourceHTTPConfig{}, apperr.ErrContestVulnSourceInvalid
+		}
+	}
+	return parsed, nil
+}
+
+// selectCases 读取完整案例数组，结构错误时不返回部分案例。
+func selectCases(payload any, path string) ([]map[string]any, error) {
+	current := payload
+	if path != "" {
+		root, ok := payload.(map[string]any)
+		if !ok {
+			return nil, apperr.ErrContestVulnSourceJSONInvalid
+		}
+		current = jsonx.ValueFromPath(root, path)
+	}
+	items, ok := current.([]any)
+	if !ok {
+		return nil, apperr.ErrContestVulnSourceJSONInvalid
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		obj, ok := item.(map[string]any)
+		if !ok {
+			return nil, apperr.ErrContestVulnSourceJSONInvalid
+		}
+		out = append(out, obj)
+	}
+	return out, nil
+}
+
+func vulnProblemFromExternal(item map[string]any, mapping map[string]string, defaultLevel int16) (VulnProblem, error) {
+	body, ok := jsonx.ValueFromPath(item, mapping["draft_body"]).(map[string]any)
+	if !ok || body == nil {
+		return VulnProblem{}, apperr.ErrContestVulnProblemInvalid
+	}
+	req := VulnProblemRequest{
+		ExternalRef: strings.TrimSpace(jsonx.StringFromPath(item, mapping["external_ref"])),
+		Title:       strings.TrimSpace(jsonx.StringFromPath(item, mapping["title"])),
+		Level:       vulnLevelFromAny(jsonx.ValueFromPath(item, mapping["level"]), defaultLevel),
+		RuntimeMode: vulnRuntimeFromAny(jsonx.ValueFromPath(item, mapping["runtime_mode"]), VulnRuntimeIsolated),
+		DraftBody:   body,
+	}
+	req, err := validateVulnProblemInput(req)
+	if err != nil {
+		return VulnProblem{}, err
+	}
+	return VulnProblem{ExternalRef: req.ExternalRef, Title: req.Title, Level: req.Level, RuntimeMode: req.RuntimeMode, DraftBody: req.DraftBody}, nil
+}
+
+// vulnLevelFromAny 解析 A/B/C 或 1/2/3 分级。
+func vulnLevelFromAny(v any, defaultValue int16) int16 {
+	if v == nil {
+		return defaultValue
+	}
+	switch strings.ToUpper(strings.TrimSpace(jsonx.StringValue(v))) {
+	case "A":
+		return VulnLevelA
+	case "B":
+		return VulnLevelB
+	case "C":
+		return VulnLevelC
+	}
+	return jsonx.Int16FromAny(v, 0)
+}
+
+// vulnRuntimeFromAny 解析 isolated/forked 或 1/2 运行时。
+func vulnRuntimeFromAny(v any, defaultValue int16) int16 {
+	if v == nil {
+		return defaultValue
+	}
+	switch strings.ToLower(strings.TrimSpace(jsonx.StringValue(v))) {
+	case "isolated":
+		return VulnRuntimeIsolated
+	case "forked":
+		return VulnRuntimeForked
+	}
+	return jsonx.Int16FromAny(v, 0)
 }

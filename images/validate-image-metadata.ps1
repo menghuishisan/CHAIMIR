@@ -3,7 +3,8 @@ param(
     [string]$RepoRoot = "",
     [string]$DigestLockPath = "",
     [string]$DeployConfigPath = "",
-    [switch]$SkipPlatformAttestations
+    [switch]$SkipPlatformAttestations,
+    [switch]$AllowUnpromoted
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,9 +22,8 @@ Import-Module (Join-Path $PSScriptRoot "lib\ImageMetadata.psm1") -Force
 $imagesRoot = (Resolve-Path (Join-Path $RepoRoot "images")).Path
 $catalog = Get-ChaimirImageCatalog -ImagesRoot $imagesRoot
 $lock = Read-ChaimirDigestLock -Path $DigestLockPath -Required
-$allowedCategories = @("service", "runtime", "infra", "tool", "judger", "sim", "sidecar", "init", "base", "middleware", "observability", "ingress", "network")
+$allowedCategories = @("service", "runtime", "infra", "tool", "judger", "sim", "sidecar", "init", "base")
 $buildSourceTypes = @("platform-built", "thin-wrapper", "build-base")
-$internalBuildArguments = Get-ChaimirInternalImageBuildArguments
 $errors = [System.Collections.Generic.List[string]]::new()
 $deployableImages = @($catalog.Values | Where-Object { $_.Deployable } | ForEach-Object { $_.Image })
 $expectedDigests = @{}
@@ -39,12 +39,11 @@ foreach ($catalogEntry in $catalog.Values) {
     $upstreamDigest = Get-ChaimirYamlValue -Lines $upstream -Key "digest"
     if ($catalogEntry.SourceType -eq "upstream-pinned" -and $upstreamDigest -match '^sha256:[0-9a-f]{64}$') {
         $expectedDigests[$catalogEntry.Image] = $upstreamDigest
-    } else {
+    } elseif (-not $AllowUnpromoted -or $catalogEntry.SourceType -eq "upstream-pinned") {
         $errors.Add("可部署镜像缺少正式 digest 期望值: $($catalogEntry.Image)")
     }
 }
 
-# Test-DockerfileImmutableSources 拒绝可变字面量基础镜像和可静默生效的镜像参数默认值。
 function Test-DockerfileImmutableSources {
     param(
         [string]$Image,
@@ -52,56 +51,85 @@ function Test-DockerfileImmutableSources {
         [string]$ManifestPath
     )
     $manifestContents = Get-Content -LiteralPath $ManifestPath -Raw
-    $upstream = Get-ChaimirYamlBlock -Path $ManifestPath -BlockName "upstream"
-    $buildBaseArgument = Get-ChaimirYamlValue -Lines $upstream -Key "build_base_arg"
-    $buildBaseImage = Get-ChaimirYamlValue -Lines $upstream -Key "build_base_image"
-    $buildBaseDigest = Get-ChaimirYamlValue -Lines $upstream -Key "build_base_digest"
-    if (-not [string]::IsNullOrWhiteSpace($buildBaseArgument)) {
-        if ($buildBaseArgument -notmatch "^[A-Z0-9_]+_IMAGE$") {
-            $errors.Add("upstream.build_base_arg 必须是 *_IMAGE Dockerfile ARG: $Image -> $buildBaseArgument")
-        }
-        if ([string]::IsNullOrWhiteSpace($buildBaseImage) -or $buildBaseImage.Contains("@") -or $buildBaseDigest -notmatch "^sha256:[0-9a-f]{64}$") {
-            $errors.Add("upstream.build_base_image/build_base_digest 必须组成不可变镜像引用: $Image")
-        }
+    try {
+        $imageSources = Get-ChaimirImageBuildSources -ManifestPath $ManifestPath -DockerfileText (Get-Content -LiteralPath $DockerfilePath -Raw)
+    } catch {
+        $errors.Add($_.Exception.Message)
+        return
     }
     $stageNames = @{}
     $dockerfileArguments = @{}
+    $stageCount = 0
     $lineNumber = 0
-    foreach ($line in Get-Content -LiteralPath $DockerfilePath) {
+    $instructionLine = 0
+    $pending = ''
+    foreach ($raw in Get-Content -LiteralPath $DockerfilePath) {
         $lineNumber++
-        if ($line -match "^\s*FROM\s+([^\s]+)(?:\s+AS\s+([A-Za-z0-9_.-]+))?\s*$") {
-            $source = $Matches[1]
-            $stageName = $Matches[2]
-            if ($stageNames.ContainsKey($source)) {
-                if (-not [string]::IsNullOrWhiteSpace($stageName)) {
-                    $stageNames[$stageName] = $true
-                }
-                continue
-            }
-            if ($source -ne "scratch" -and $source -notmatch "^\$\{" -and $source -notmatch "@sha256:[0-9a-f]{64}$") {
-                $errors.Add("Dockerfile 字面量基础镜像必须锁定 digest: $Image`:$lineNumber -> $source")
-            }
-            elseif ($source -match "@(sha256:[0-9a-f]{64})$" -and $manifestContents -notmatch [regex]::Escape($Matches[1])) {
-                $errors.Add("Dockerfile 基础镜像 digest 未同步到 manifest: $Image`:$lineNumber -> $source")
-            }
-            if (-not [string]::IsNullOrWhiteSpace($stageName)) {
-                $stageNames[$stageName] = $true
-            }
+        if ($raw -match '^\s*#\s*(?:syntax|escape)\s*=') {
+            $errors.Add("Dockerfile 必须使用正式 BuildKit 的默认前端与续行语法: ${Image}:$lineNumber")
+            continue
         }
-        if ($line -match "^\s*ARG\s+([A-Z0-9_]+_IMAGE)(?:=(.*))?\s*$") {
+        if ($raw -match '^\s*(?:#|$)') { continue }
+        if ($pending -eq '') { $instructionLine = $lineNumber }
+        $line = $pending + $raw.TrimEnd()
+        if ($line -match '(?<!\\)\\$') {
+            $pending = $line.Substring(0, $line.Length - 1)
+            continue
+        }
+        $pending = ''
+        $location = "${Image}:$instructionLine"
+        if ($line -match '^\s*ONBUILD(?:\s|$)' -or $line -match '^\s*RUN\s+(?:--\S+\s+)*?--mount=\S*?\bfrom=') {
+            $errors.Add("Dockerfile 不使用 ONBUILD 或跨镜像挂载，跨镜像取文件统一用 COPY --from: $location")
+            continue
+        }
+        if ($line -match '^\s*ARG\s+([A-Z0-9_]+_IMAGE)(?:=(.*))?\s*$') {
             $argument = $Matches[1]
             $default = $Matches[2]
-            $dockerfileArguments[$argument] = $true
-            if ([string]::IsNullOrWhiteSpace($default) -or $default -notmatch "^invalid\.invalid/.+:required$") {
-                $errors.Add("Dockerfile 镜像参数必须使用显式失败默认值: $Image`:$lineNumber -> $argument")
+            if ($stageCount -gt 0 -or $dockerfileArguments.ContainsKey($argument)) {
+                $errors.Add("Dockerfile 镜像参数只允许在首个 FROM 前声明一次: $location -> $argument")
             }
-            if (-not $internalBuildArguments.Contains($argument) -and $argument -ne "NGINX_RUNTIME_IMAGE" -and $argument -ne $buildBaseArgument) {
-                $errors.Add("Dockerfile 镜像参数没有统一注入映射: $Image`:$lineNumber -> $argument")
+            $dockerfileArguments[$argument] = $true
+            if ($default -notmatch '^invalid\.invalid/.+:required$') {
+                $errors.Add("Dockerfile 镜像参数必须使用显式失败默认值: $location -> $argument")
+            }
+            if (-not $imageSources.Contains($argument)) {
+                $errors.Add("Dockerfile 镜像参数没有统一注入映射: $location -> $argument")
+            }
+            continue
+        }
+
+        $stageName = $null
+        $isFrom = $line -match '^\s*FROM(?:\s|$)'
+        if ($isFrom) {
+            if ($line -notmatch '^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+([A-Za-z0-9_.-]+))?\s*$') {
+                $errors.Add("Dockerfile FROM 无法识别: $location")
+                continue
+            }
+            $source = $Matches[1]
+            $stageName = $Matches[2]
+        } elseif ($line -match '^\s*COPY\s+(?:--\S+\s+)*?--from=(\S+)') {
+            $source = $Matches[1]
+        } else {
+            continue
+        }
+
+        $localStage = $stageNames.ContainsKey($source) -or
+            (-not $isFrom -and $source -match '^\d{1,8}$' -and [int]$source -lt $stageCount)
+        $knownArg = $isFrom -and $source -match '^\$\{([A-Z0-9_]+_IMAGE)\}$' -and $dockerfileArguments.ContainsKey($Matches[1])
+        if (-not ($localStage -or $knownArg -or ($isFrom -and $source -eq 'scratch'))) {
+            if ($source -notmatch '@(sha256:[0-9a-f]{64})$') {
+                $errors.Add("Dockerfile 镜像来源必须锁定 digest 或引用已登记阶段/参数: $location -> $source")
+            } elseif ($manifestContents -notmatch [regex]::Escape($Matches[1])) {
+                $errors.Add("Dockerfile 镜像来源 digest 未同步到 manifest: $location -> $source")
             }
         }
+        if ($isFrom) {
+            $stageCount++
+            if ($stageName) { $stageNames[$stageName] = $true }
+        }
     }
-    if (-not [string]::IsNullOrWhiteSpace($buildBaseArgument) -and -not $dockerfileArguments.ContainsKey($buildBaseArgument)) {
-        $errors.Add("upstream.build_base_arg 未在 Dockerfile 声明: $Image -> $buildBaseArgument")
+    if ($pending -ne '') {
+        $errors.Add("Dockerfile 续行未结束: ${Image}:$instructionLine")
     }
 }
 
@@ -176,9 +204,14 @@ function Test-StructuredCapabilities {
     param(
         [string]$Image,
         [string]$Category,
+        [string]$Scope,
         [string]$ManifestPath
     )
-    if ($Category -notin @("runtime", "infra", "tool", "judger")) {
+    # infra 同时承载沙箱可编排组件和集群/平台设施。只有前者参与
+    # CompositionSpec 能力解析；平台设施沿用自身的扁平能力说明。
+    $requiresStructured = $Category -in @("runtime", "tool", "judger") -or
+        ($Category -eq "infra" -and $Scope -eq "sandbox")
+    if (-not $requiresStructured) {
         return
     }
     $lines = Get-Content -LiteralPath $ManifestPath
@@ -212,6 +245,7 @@ function Test-StructuredBindings {
     param(
         [string]$Image,
         [string]$Category,
+        [string]$Scope,
         [string]$ManifestPath
     )
     $lines = Get-Content -LiteralPath $ManifestPath
@@ -219,7 +253,9 @@ function Test-StructuredBindings {
     if ($contents -match '(?m)^\s+required_bindings:\s*$') {
         $errors.Add("$Category 镜像仍使用已删除的 required_bindings 字段: $Image")
     }
-    if ($Category -notin @("infra", "tool", "judger")) {
+    $requiresBindings = $Category -in @("tool", "judger") -or
+        ($Category -eq "infra" -and $Scope -eq "sandbox")
+    if (-not $requiresBindings) {
         return
     }
 
@@ -268,7 +304,7 @@ function Test-StructuredBindings {
         $current = [System.Collections.Generic.List[string]]::new()
         for ($cursor = $index + 1; $cursor -lt $lines.Count; $cursor++) {
             $line = $lines[$cursor]
-            if ($line -match '^[A-Za-z_][A-Za-z0-9_]*:\s*') {
+            if ($line -match '^ {0,2}[A-Za-z_][A-Za-z0-9_]*:\s*') {
                 break
             }
             if ($line -match '^    - name:\s*\S+') {
@@ -423,8 +459,10 @@ foreach ($entry in $catalog.Values) {
         Test-RuntimeCapabilityDeclaration -Image $entry.Image -ManifestPath $entry.Manifest
     }
     Test-DeclaredChecksumFile -Image $entry.Image -ManifestPath $entry.Manifest
-    Test-StructuredCapabilities -Image $entry.Image -Category $category -ManifestPath $entry.Manifest
-    Test-StructuredBindings -Image $entry.Image -Category $category -ManifestPath $entry.Manifest
+    $labels = Get-ChaimirYamlBlock -Path $entry.Manifest -BlockName "labels"
+    $scope = Get-ChaimirYamlValue -Lines $labels -Key "chaimir.io/scope"
+    Test-StructuredCapabilities -Image $entry.Image -Category $category -Scope $scope -ManifestPath $entry.Manifest
+    Test-StructuredBindings -Image $entry.Image -Category $category -Scope $scope -ManifestPath $entry.Manifest
 
     if (-not $entry.Deployable -and $lock.ContainsKey($entry.Image)) {
         $errors.Add("已阻断镜像不得保留在 digest lock: $($entry.Image)")
@@ -492,6 +530,9 @@ if (-not $SkipPlatformAttestations) {
         # 有当前环境的扫描、SBOM 和签名证明，不能把“未进入正式锁”误当成免检。
         foreach ($deployableImage in $deployableImages) {
             if (-not $seenAttestations.ContainsKey($deployableImage)) {
+                if ($AllowUnpromoted -and $catalog[$deployableImage].SourceType -ne "upstream-pinned" -and -not $lock.ContainsKey($deployableImage)) {
+                    continue
+                }
                 $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 缺少可部署镜像证明: $deployableImage")
             }
         }
@@ -503,4 +544,9 @@ if ($errors.Count -gt 0) {
     exit 1
 }
 
-Write-Output "Validated $($catalog.Count) manifests and $($lock.Count) immutable digest entries."
+$unpromoted = @($deployableImages | Where-Object { -not $lock.ContainsKey($_) })
+if ($unpromoted.Count -gt 0) {
+    Write-Output "Validated $($catalog.Count) manifests; $($unpromoted.Count) built images await digest promotion."
+} else {
+    Write-Output "Validated $($catalog.Count) manifests and $($lock.Count) immutable digest entries."
+}

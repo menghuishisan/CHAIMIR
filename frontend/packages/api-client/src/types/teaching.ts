@@ -1,4 +1,4 @@
-// ===== M6 Teaching 模块 =====
+// 课程、课时、作业和单课程成绩的请求与响应。
 
 import type { SnowflakeID } from './common'
 import type { ContentDifficulty, ContentType } from '../constants/content'
@@ -45,7 +45,7 @@ export interface Course {
 }
 
 /** 一门课的本人学习进度:有效课时数与已学完的课时数,与课程大纲同口径 */
-export interface CourseProgressSummary {
+interface CourseProgressSummary {
   lesson_count: number
   completed_count: number
 }
@@ -98,11 +98,7 @@ export interface Lesson {
   updated_at: string
 }
 
-/**
- * LessonMaterialAccess 是课时材料的投放授权。
- * mode 由课时 content_type 决定(视频回 stream、附件回 download),不接受客户端指定;
- * token 交给统一文件服务 GET /storage/download 消费。
- */
+/** 视频返回可续播授权，附件返回一次性下载授权；均由统一文件服务消费。 */
 export interface LessonMaterialAccess {
   token: string
   mode: 'download' | 'stream'
@@ -120,7 +116,7 @@ export interface LessonRequest {
 }
 
 /** LessonContentRef 是课时读取时按 content_type 解释的固定引用结构。 */
-export interface LessonContentRef {
+interface LessonContentRef {
   file_name?: string
   size?: number
   content_type?: string
@@ -145,11 +141,7 @@ export interface CourseCoverUpload {
   size: number
 }
 
-/**
- * CourseCoverAccess 是课程封面的投放授权。
- * 固定 mode=stream:封面由 img 元素直接取件,列表页同屏多张且浏览器可能重复请求同一地址,
- * 一次性令牌会在第一次请求后作废。
- */
+/** 封面由图片元素读取，授权允许重复请求。 */
 export interface CourseCoverAccess {
   token: string
   mode: 'stream'
@@ -201,13 +193,13 @@ export interface Assignment {
 }
 
 /** 一份作业的全班提交统计,按学生去重:交过的人数与最近一次提交在等老师评分的人数(与批改中心「待批改」同口径) */
-export interface AssignmentSubmissionStats {
+interface AssignmentSubmissionStats {
   submitted_count: number
   pending_count: number
 }
 
 /** 本人在一份作业上的提交情况:已用次数与最近一次提交的状态(还没交为 0) */
-export interface MyAssignmentSubmission {
+interface MyAssignmentSubmission {
   attempts: number
   latest_status: SubmissionStatus | 0
 }
@@ -274,7 +266,6 @@ export interface Submission {
   attempt_no: number
   content: Record<string, unknown>
   manual_max_score: number
-  judge_task_ref?: string
   auto_score?: number
   manual_score?: number
   final_score?: number

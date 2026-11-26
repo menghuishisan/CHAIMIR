@@ -1,4 +1,4 @@
-// contest service_battle_finalization 可靠交付对局终态后的回收、推送和审计。
+// contest service_battle_finalization 恢复对局终态后的回收与审计，榜单沿统一待推送流程交付。
 package contest
 
 import (
@@ -49,9 +49,6 @@ func (s *Service) finalizeBattleMatch(ctx context.Context, match BattleMatch) er
 		return apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
 	if match.Status == BattleMatchStatusDone {
-		if err := s.pushLeaderboard(deliveryCtx, match.TenantID, match.ContestID); err != nil {
-			return err
-		}
 		if err := s.writeAudit(deliveryCtx, match.TenantID, 0, audit.ActorRoleSystem, "contest.battle.finish", auditTargetBattleMatch, match.ID, battleScoreDeltaAuditDetail(match.ScoreDelta)); err != nil {
 			return err
 		}

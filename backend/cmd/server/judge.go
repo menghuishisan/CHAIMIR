@@ -21,7 +21,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// JudgeModuleDeps 汇总组合根装配 M3 需要的基础设施和跨模块契约。
+// JudgeModuleDeps 是 M3 装配所需的依赖。
 type JudgeModuleDeps struct {
 	Router   gin.IRouter
 	Database *db.DB
@@ -72,41 +72,18 @@ func RegisterJudgeModule(ctx context.Context, deps JudgeModuleDeps) (*judge.Serv
 	if err := judge.RegisterEventSubscriptions(deps.EventBus, svc); err != nil {
 		return nil, err
 	}
-	task, err := judgeWorkerTask(deps.Config, svc)
-	if err != nil {
+	if err := background.Start(ctx,
+		background.Task{
+			Name:     "judge.worker",
+			Interval: time.Duration(deps.Config.QueuePollIntervalMs) * time.Millisecond,
+			Run:      svc.RunWorkerOnce,
+		},
+		background.Task{
+			Name: "judge.catalog", Interval: time.Duration(deps.Config.CatalogReconcileIntervalMs) * time.Millisecond,
+			Run: svc.ReconcileJudgerCatalogOnce,
+		},
+	); err != nil {
 		return nil, err
 	}
-	catalogTask, err := judgeCatalogTask(deps.Config, svc)
-	if err != nil {
-		return nil, err
-	}
-	go background.Run(ctx, task)
-	go background.Run(ctx, catalogTask)
 	return svc, nil
-}
-
-// judgeCatalogTask 复用统一 runner 的启动即执行和周期恢复语义。
-func judgeCatalogTask(cfg config.JudgeConfig, svc *judge.Service) (background.Task, error) {
-	if svc == nil || cfg.CatalogReconcileIntervalMs <= 0 {
-		return background.Task{}, fmt.Errorf("judge catalog 缺少服务或有效 JUDGE_CATALOG_RECONCILE_INTERVAL_MS")
-	}
-	return background.Task{
-		Name: "judge.catalog", Interval: time.Duration(cfg.CatalogReconcileIntervalMs) * time.Millisecond,
-		Run: svc.ReconcileJudgerCatalogOnce,
-	}, nil
-}
-
-// judgeWorkerTask 把 M3 队列消费接入统一后台任务运行器。
-func judgeWorkerTask(cfg config.JudgeConfig, svc *judge.Service) (background.Task, error) {
-	if svc == nil {
-		return background.Task{}, fmt.Errorf("judge worker task 缺少 service")
-	}
-	if cfg.QueuePollIntervalMs <= 0 {
-		return background.Task{}, fmt.Errorf("JUDGE_QUEUE_POLL_INTERVAL_MS 必须大于 0")
-	}
-	return background.Task{
-		Name:     "judge.worker",
-		Interval: time.Duration(cfg.QueuePollIntervalMs) * time.Millisecond,
-		Run:      svc.RunWorkerOnce,
-	}, nil
 }

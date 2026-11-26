@@ -11,7 +11,7 @@
 
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
+import { dirname, join, posix, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { inflateRawSync } from 'node:zlib';
 
@@ -121,6 +121,9 @@ function readManifest(files: Map<string, Buffer>): Record<string, unknown> {
     throw new Error('仿真包归档根目录缺少 sim-package.json');
   }
   const prefix = topLevel[0].slice(0, -'sim-package.json'.length);
+  if ([...files.keys()].some((name) => !name.startsWith(prefix))) {
+    throw new Error('仿真包归档包含多个包根目录');
+  }
   for (const name of [...files.keys()]) {
     if (name.startsWith(prefix)) {
       const content = files.get(name);
@@ -177,7 +180,7 @@ function extractZip(bytes: Buffer): Map<string, Buffer> {
     const localExtraLength = bytes.readUInt16LE(localOffset + 28);
     const dataStart = localOffset + 30 + localNameLength + localExtraLength;
     const raw = bytes.subarray(dataStart, dataStart + compressedSize);
-    files.set(normalizeMemberName(name), inflateMember(method, raw));
+    addMember(files, name, inflateMember(method, raw));
   }
   if (files.size === 0) {
     throw new Error('仿真包归档为空');
@@ -228,7 +231,7 @@ function extractTar(bytes: Buffer): Map<string, Buffer> {
     const typeFlag = header.subarray(156, 157).toString('utf8');
     const dataStart = offset + 512;
     if (typeFlag === '0' || typeFlag === '\0') {
-      files.set(normalizeMemberName(name), Buffer.from(bytes.subarray(dataStart, dataStart + size)));
+      addMember(files, name, Buffer.from(bytes.subarray(dataStart, dataStart + size)));
     }
     offset = dataStart + Math.ceil(size / 512) * 512;
   }
@@ -239,12 +242,24 @@ function extractTar(bytes: Buffer): Map<string, Buffer> {
 }
 
 /**
- * normalizeMemberName 统一分隔符并拒绝逃逸成员名。
+ * normalizeMemberName 对齐上传归档原语的路径规范化，拒绝逃逸及盘符。
  */
 function normalizeMemberName(name: string): string {
-  const value = name.replace(/\\/g, '/').replace(/^\.\//, '');
-  if (value.startsWith('/') || value.split('/').includes('..')) {
+  const value = posix.normalize(name.trim().replace(/\\/g, '/'));
+  if (
+    value === '.' || value === '..' || value.startsWith('/') ||
+    value.startsWith('../') || value.includes(':')
+  ) {
     throw new Error(`仿真包归档包含非法成员路径: ${name}`);
   }
   return value;
+}
+
+/** addMember 拒绝规范化后的重名成员，防止不同解包器选择不同正文。 */
+function addMember(files: Map<string, Buffer>, name: string, content: Buffer): void {
+  const key = normalizeMemberName(name);
+  if (files.has(key)) {
+    throw new Error(`仿真包归档包含重复成员: ${name}`);
+  }
+  files.set(key, content);
 }

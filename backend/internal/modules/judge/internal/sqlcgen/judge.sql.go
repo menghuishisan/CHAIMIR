@@ -1301,13 +1301,15 @@ const listFingerprintsForProblem = `-- name: ListFingerprintsForProblem :many
 SELECT id, tenant_id, source_ref, problem_ref, submitter_id, submitter_tenant_id, code_hash, sim_vector, created_at
 FROM submission_fingerprint
 WHERE tenant_id = $1 AND problem_ref = $2 AND ($3::text = '' OR source_ref <> $3)
+  AND source_ref = ANY($4::text[])
 ORDER BY created_at DESC, id DESC
 `
 
 type ListFingerprintsForProblemParams struct {
-	TenantID   int64  `json:"tenant_id"`
-	ProblemRef string `json:"problem_ref"`
-	Column3    string `json:"column_3"`
+	TenantID   int64    `json:"tenant_id"`
+	ProblemRef string   `json:"problem_ref"`
+	Column3    string   `json:"column_3"`
+	SourceRefs []string `json:"source_refs"`
 }
 
 type ListFingerprintsForProblemRow struct {
@@ -1323,7 +1325,12 @@ type ListFingerprintsForProblemRow struct {
 }
 
 func (q *Queries) ListFingerprintsForProblem(ctx context.Context, arg ListFingerprintsForProblemParams) ([]ListFingerprintsForProblemRow, error) {
-	rows, err := q.db.Query(ctx, listFingerprintsForProblem, arg.TenantID, arg.ProblemRef, arg.Column3)
+	rows, err := q.db.Query(ctx, listFingerprintsForProblem,
+		arg.TenantID,
+		arg.ProblemRef,
+		arg.Column3,
+		arg.SourceRefs,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1791,6 +1798,29 @@ func (q *Queries) MarkJudgeOutboxPublished(ctx context.Context, arg MarkJudgeOut
 		&i.LeaseToken,
 		&i.LeaseUntil,
 	)
+	return i, err
+}
+
+const readJudgeAlertMetrics = `-- name: ReadJudgeAlertMetrics :one
+SELECT (SELECT count(*)::bigint FROM judge_task WHERE status=1) AS queue_length,
+ (SELECT COALESCE(count(*) FILTER (WHERE status=4)::float8 / NULLIF(count(*),0),0)::float8
+  FROM judge_task WHERE status IN (3,4) AND updated_at BETWEEN $1::timestamptz AND $2::timestamptz) AS failed_rate
+`
+
+type ReadJudgeAlertMetricsParams struct {
+	WindowFrom pgtype.Timestamptz `json:"window_from"`
+	ObservedAt pgtype.Timestamptz `json:"observed_at"`
+}
+
+type ReadJudgeAlertMetricsRow struct {
+	QueueLength int64   `json:"queue_length"`
+	FailedRate  float64 `json:"failed_rate"`
+}
+
+func (q *Queries) ReadJudgeAlertMetrics(ctx context.Context, arg ReadJudgeAlertMetricsParams) (ReadJudgeAlertMetricsRow, error) {
+	row := q.db.QueryRow(ctx, readJudgeAlertMetrics, arg.WindowFrom, arg.ObservedAt)
+	var i ReadJudgeAlertMetricsRow
+	err := row.Scan(&i.QueueLength, &i.FailedRate)
 	return i, err
 }
 

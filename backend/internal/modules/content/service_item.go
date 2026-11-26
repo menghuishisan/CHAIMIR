@@ -1,21 +1,13 @@
-// content service_item 文件实现内容创建、版本、共享、克隆与跨模块读取。
+// 管理内容创建、版本、题面读取与共享状态。
 package content
 
 import (
-	"bytes"
 	"context"
-	"log/slog"
 	"strings"
 
-	"chaimir/internal/contracts"
-	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
-	"chaimir/internal/platform/storage"
-	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
-	"chaimir/pkg/crypto"
-	"chaimir/pkg/logging"
 )
 
 // ListItems 查询教师侧内容分页。
@@ -33,7 +25,7 @@ func (s *Service) ListItems(ctx context.Context, filter ItemListFilter) ([]ItemD
 		items, total, err = tx.ListItems(ctx, id.TenantID, filter)
 		return err
 	}); err != nil {
-		return nil, 0, 0, 0, apperr.ErrContentQueryInvalid.WithCause(err)
+		return nil, 0, 0, 0, apperr.AsAppError(err)
 	}
 	out := make([]ItemDTO, 0, len(items))
 	for _, item := range items {
@@ -43,7 +35,7 @@ func (s *Service) ListItems(ctx context.Context, filter ItemListFilter) ([]ItemD
 }
 
 // CreateItem 创建教师草稿内容。
-func (s *Service) CreateItem(ctx context.Context, req CreateItemRequest) (ItemSnapshotDTO, error) {
+func (s *Service) CreateItem(ctx context.Context, actor auditActorSnapshot, req CreateItemRequest) (ItemSnapshotDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return ItemSnapshotDTO{}, err
@@ -56,23 +48,29 @@ func (s *Service) CreateItem(ctx context.Context, req CreateItemRequest) (ItemSn
 	if err != nil {
 		return ItemSnapshotDTO{}, apperr.ErrContentBodyInvalid.WithCause(err)
 	}
+	if err := actor.validate(id); err != nil {
+		return ItemSnapshotDTO{}, err
+	}
 	item := ItemWithBody{Item: Item{ID: s.ids.Generate(), TenantID: id.TenantID, Code: req.Code, Version: req.Version, Type: req.Type, Title: req.Title, CategoryID: req.CategoryID.Int64(), Difficulty: req.Difficulty, Tags: req.Tags, KnowledgePoints: req.KnowledgePoints, AuthorID: id.AccountID, AuthorType: AuthorTeacher, Visibility: req.Visibility, Status: StatusDraft}, Body: body, SensitiveFields: req.SensitiveFields}
 	item.VersionHash, err = versionHash(item.Item, item.Body, item.SensitiveFields)
 	if err != nil {
 		return ItemSnapshotDTO{}, apperr.ErrContentBodyInvalid.WithCause(err)
 	}
-	var created ItemWithBody
+	var out ItemSnapshotDTO
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		created, err = tx.CreateItem(ctx, item)
-		return err
+		created, err := tx.CreateItem(ctx, item)
+		if err != nil {
+			return err
+		}
+		out, err = itemSnapshotDTO(created, true)
+		if err != nil {
+			return apperr.ErrContentBodyInvalid.WithCause(err)
+		}
+		return s.writeAudit(ctx, id.TenantID, actor.accountID, actor.role, "content.create", contentAuditTargetItem, created.ID, map[string]any{"code": created.Code, "version": created.Version})
 	}); err != nil {
-		return ItemSnapshotDTO{}, apperr.ErrContentVersionConflict.WithCause(err)
+		return ItemSnapshotDTO{}, apperr.AsAppError(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "content.create", contentAuditTargetItem, created.ID, map[string]any{"code": created.Code, "version": created.Version}); err != nil {
-		return ItemSnapshotDTO{}, err
-	}
-	return itemSnapshotDTO(created, true)
+	return out, nil
 }
 
 // GetItemFaceForUser 读取题面视角内容,教师侧不返回敏感字段。
@@ -98,6 +96,36 @@ func (s *Service) GetItemFaceForUser(ctx context.Context, code, version string) 
 	return itemSnapshotDTO(face, false)
 }
 
+// GetSharedItemFace 按所选 ID 读取仍已发布且共享的题面。
+func (s *Service) GetSharedItemFace(ctx context.Context, itemID int64) (ItemSnapshotDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return ItemSnapshotDTO{}, err
+	}
+	if itemID <= 0 {
+		return ItemSnapshotDTO{}, apperr.ErrContentSharedNotFound
+	}
+	var item ItemWithBody
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		item, err = tx.GetVisibleItemWithBodyByID(ctx, id.TenantID, itemID)
+		return err
+	}); err != nil {
+		if isNoRows(err) {
+			return ItemSnapshotDTO{}, apperr.ErrContentSharedNotFound
+		}
+		return ItemSnapshotDTO{}, apperr.AsAppError(err)
+	}
+	if item.Visibility != VisibilityShared || item.Status != StatusPublished {
+		return ItemSnapshotDTO{}, apperr.ErrContentSharedNotFound
+	}
+	face, err := faceSnapshot(item)
+	if err != nil {
+		return ItemSnapshotDTO{}, apperr.ErrContentBodyInvalid.WithCause(err)
+	}
+	return itemSnapshotDTO(face, false)
+}
+
 // GetItemFullForUser 读取教师作者可见的全量内容,学校管理员也不得越过作者边界读取答案。
 func (s *Service) GetItemFullForUser(ctx context.Context, code, version string) (ItemSnapshotDTO, error) {
 	id, err := currentIdentity(ctx)
@@ -115,7 +143,7 @@ func (s *Service) GetItemFullForUser(ctx context.Context, code, version string) 
 }
 
 // UpdateDraftItem 编辑草稿内容,已发布版本不可变。
-func (s *Service) UpdateDraftItem(ctx context.Context, itemID int64, req UpdateItemRequest) (ItemSnapshotDTO, error) {
+func (s *Service) UpdateDraftItem(ctx context.Context, actor auditActorSnapshot, itemID int64, req UpdateItemRequest) (ItemSnapshotDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return ItemSnapshotDTO{}, err
@@ -124,7 +152,10 @@ func (s *Service) UpdateDraftItem(ctx context.Context, itemID int64, req UpdateI
 	if err != nil {
 		return ItemSnapshotDTO{}, err
 	}
-	var updated ItemWithBody
+	if err := actor.validate(id); err != nil {
+		return ItemSnapshotDTO{}, err
+	}
+	var out ItemSnapshotDTO
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		current, err := tx.GetItemWithBodyByID(ctx, id.TenantID, itemID)
 		if err != nil {
@@ -157,20 +188,24 @@ func (s *Service) UpdateDraftItem(ctx context.Context, itemID int64, req UpdateI
 		if err != nil {
 			return apperr.ErrContentBodyInvalid.WithCause(err)
 		}
-		updated, err = tx.UpdateDraftItem(ctx, current)
-		return mapContentMutationError(err)
+		updated, err := tx.UpdateDraftItem(ctx, current)
+		if err != nil {
+			return mapContentMutationError(err)
+		}
+		out, err = itemSnapshotDTO(updated, true)
+		if err != nil {
+			return apperr.ErrContentBodyInvalid.WithCause(err)
+		}
+		return s.writeAudit(ctx, id.TenantID, actor.accountID, actor.role, "content.update", contentAuditTargetItem, updated.ID, map[string]any{"code": updated.Code, "version": updated.Version})
 	}); err != nil {
 		return ItemSnapshotDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "content.update", contentAuditTargetItem, updated.ID, map[string]any{"code": updated.Code, "version": updated.Version}); err != nil {
-		return ItemSnapshotDTO{}, err
-	}
-	return itemSnapshotDTO(updated, true)
+	return out, nil
 }
 
 // PublishItem 发布草稿内容。
-func (s *Service) PublishItem(ctx context.Context, itemID int64) (ItemDTO, error) {
-	return s.itemStatusTransition(ctx, itemID, "content.publish", func(ctx context.Context, tx TxStore, tenantID, id int64) (Item, error) {
+func (s *Service) PublishItem(ctx context.Context, actor auditActorSnapshot, itemID int64) (ItemDTO, error) {
+	return s.itemStatusTransition(ctx, actor, itemID, "content.publish", func(ctx context.Context, tx TxStore, tenantID, id int64) (Item, error) {
 		item, err := tx.GetItemWithBodyByID(ctx, tenantID, id)
 		if err != nil {
 			return Item{}, mapContentReadError(err)
@@ -188,15 +223,15 @@ func (s *Service) PublishItem(ctx context.Context, itemID int64) (ItemDTO, error
 }
 
 // DeprecateItem 弃用已发布内容。
-func (s *Service) DeprecateItem(ctx context.Context, itemID int64) (ItemDTO, error) {
-	return s.itemStatusTransition(ctx, itemID, "content.deprecate", func(ctx context.Context, tx TxStore, tenantID, id int64) (Item, error) {
+func (s *Service) DeprecateItem(ctx context.Context, actor auditActorSnapshot, itemID int64) (ItemDTO, error) {
+	return s.itemStatusTransition(ctx, actor, itemID, "content.deprecate", func(ctx context.Context, tx TxStore, tenantID, id int64) (Item, error) {
 		return tx.DeprecateItem(ctx, tenantID, id)
 	})
 }
 
 // DeleteItem 删除无引用草稿。
-func (s *Service) DeleteItem(ctx context.Context, itemID int64) error {
-	_, err := s.itemStatusTransition(ctx, itemID, "content.delete", func(ctx context.Context, tx TxStore, tenantID, id int64) (Item, error) {
+func (s *Service) DeleteItem(ctx context.Context, actor auditActorSnapshot, itemID int64) error {
+	_, err := s.itemStatusTransition(ctx, actor, itemID, "content.delete", func(ctx context.Context, tx TxStore, tenantID, id int64) (Item, error) {
 		item, err := tx.GetItemByID(ctx, tenantID, id)
 		if err != nil {
 			return Item{}, mapContentReadError(err)
@@ -210,9 +245,12 @@ func (s *Service) DeleteItem(ctx context.Context, itemID int64) error {
 }
 
 // itemStatusTransition 执行需要作者归属校验的状态流转。
-func (s *Service) itemStatusTransition(ctx context.Context, itemID int64, action string, fn func(context.Context, TxStore, int64, int64) (Item, error)) (ItemDTO, error) {
+func (s *Service) itemStatusTransition(ctx context.Context, actor auditActorSnapshot, itemID int64, action string, fn func(context.Context, TxStore, int64, int64) (Item, error)) (ItemDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
+		return ItemDTO{}, err
+	}
+	if err := actor.validate(id); err != nil {
 		return ItemDTO{}, err
 	}
 	var out Item
@@ -225,17 +263,17 @@ func (s *Service) itemStatusTransition(ctx context.Context, itemID int64, action
 			return apperr.ErrContentForbidden
 		}
 		out, err = fn(ctx, tx, id.TenantID, itemID)
-		return mapContentMutationError(err)
+		if err != nil {
+			return mapContentMutationError(err)
+		}
+		return s.writeAudit(ctx, id.TenantID, actor.accountID, actor.role, action, contentAuditTargetItem, out.ID, map[string]any{"code": out.Code, "version": out.Version})
 	}); err != nil {
-		return ItemDTO{}, err
-	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, action, contentAuditTargetItem, out.ID, map[string]any{"code": out.Code, "version": out.Version}); err != nil {
 		return ItemDTO{}, err
 	}
 	return itemDTO(out), nil
 }
 
-// ListVersions 查询同 code 的版本列表。
+// ListVersions 查询本校同 code 的可见版本。
 func (s *Service) ListVersions(ctx context.Context, code string) ([]ItemDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
@@ -250,14 +288,11 @@ func (s *Service) ListVersions(ctx context.Context, code string) ([]ItemDTO, err
 		items, err = tx.ListVersions(ctx, id.TenantID, code)
 		return err
 	}); err != nil {
-		return nil, apperr.ErrContentQueryInvalid.WithCause(err)
+		return nil, apperr.AsAppError(err)
 	}
 	out := make([]ItemDTO, 0, len(items))
 	for _, item := range items {
 		if item.Visibility == VisibilityPrivate && item.AuthorID != id.AccountID {
-			continue
-		}
-		if item.TenantID != id.TenantID && item.Visibility != VisibilityShared {
 			continue
 		}
 		out = append(out, itemDTO(item))
@@ -266,17 +301,20 @@ func (s *Service) ListVersions(ctx context.Context, code string) ([]ItemDTO, err
 }
 
 // CreateNewVersion 从既有版本复制出新草稿。
-func (s *Service) CreateNewVersion(ctx context.Context, code string, req NewVersionRequest) (ItemSnapshotDTO, error) {
+func (s *Service) CreateNewVersion(ctx context.Context, actor auditActorSnapshot, code string, req NewVersionRequest) (ItemSnapshotDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return ItemSnapshotDTO{}, err
 	}
-	req.SourceVersion = stringsTrim(req.SourceVersion)
-	req.NewVersion = stringsTrim(req.NewVersion)
+	req.SourceVersion = strings.TrimSpace(req.SourceVersion)
+	req.NewVersion = strings.TrimSpace(req.NewVersion)
 	if !validCode(code) || !validVersion(req.SourceVersion) || !validVersion(req.NewVersion) || req.SourceVersion == req.NewVersion {
 		return ItemSnapshotDTO{}, apperr.ErrContentVersionInvalid
 	}
-	var created ItemWithBody
+	if err := actor.validate(id); err != nil {
+		return ItemSnapshotDTO{}, err
+	}
+	var out ItemSnapshotDTO
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		source, err := tx.GetItemWithBodyByRef(ctx, id.TenantID, code, req.SourceVersion)
 		if err != nil {
@@ -297,250 +335,38 @@ func (s *Service) CreateNewVersion(ctx context.Context, code string, req NewVers
 		if err != nil {
 			return apperr.ErrContentBodyInvalid.WithCause(err)
 		}
-		created, err = tx.CreateItem(ctx, source)
-		return err
-	}); err != nil {
-		return ItemSnapshotDTO{}, apperr.ErrContentVersionConflict.WithCause(err)
-	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "content.new_version", contentAuditTargetItem, created.ID, map[string]any{"code": created.Code, "version": created.Version, "source_version": req.SourceVersion}); err != nil {
-		return ItemSnapshotDTO{}, err
-	}
-	return itemSnapshotDTO(created, true)
-}
-
-// CloneItem 克隆本租户或共享库内容为独立草稿。
-func (s *Service) CloneItem(ctx context.Context, code, version string, req CloneItemRequest) (ItemSnapshotDTO, error) {
-	id, err := currentIdentity(ctx)
-	if err != nil {
-		return ItemSnapshotDTO{}, err
-	}
-	req.NewCode = stringsTrim(req.NewCode)
-	req.NewVersion = stringsTrim(req.NewVersion)
-	if !validCode(code) || !validVersion(version) || !validCode(req.NewCode) || !validVersion(req.NewVersion) {
-		return ItemSnapshotDTO{}, apperr.ErrContentCloneInvalid
-	}
-	var source ItemWithBody
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		source, err = tx.GetItemWithBodyByRef(ctx, id.TenantID, code, version)
-		return err
-	}); err != nil {
-		if isNoRows(err) {
-			return ItemSnapshotDTO{}, apperr.ErrContentSharedNotFound
-		}
-		if ae, ok := apperr.As(err); ok {
-			return ItemSnapshotDTO{}, ae
-		}
-		return ItemSnapshotDTO{}, apperr.ErrContentCloneInvalid.WithCause(err)
-	}
-	if source.TenantID != id.TenantID && source.Visibility != VisibilityShared {
-		return ItemSnapshotDTO{}, apperr.ErrContentSharedNotFound
-	}
-	if source.Status != StatusPublished {
-		return ItemSnapshotDTO{}, apperr.ErrContentCloneInvalid
-	}
-	sourceTenantID := source.TenantID
-	source.ID = s.ids.Generate()
-	source.TenantID = id.TenantID
-	source.Code = req.NewCode
-	source.Version = req.NewVersion
-	source.AuthorID = id.AccountID
-	source.AuthorType = AuthorTeacher
-	source.Visibility = VisibilityPrivate
-	source.Status = StatusDraft
-	source.UsageCount = 0
-	var copied []storage.ObjectRef
-	source.Body, copied, err = s.cloneBodyAttachments(ctx, source.Body, sourceTenantID, id.TenantID, source.ID, source.Code, source.Version)
-	if err != nil {
-		if ae, ok := apperr.As(err); ok {
-			return ItemSnapshotDTO{}, ae
-		}
-		return ItemSnapshotDTO{}, apperr.ErrContentCloneInvalid.WithCause(err)
-	}
-	source.VersionHash, err = versionHash(source.Item, source.Body, source.SensitiveFields)
-	if err != nil {
-		s.cleanupClonedAttachments(ctx, copied)
-		return ItemSnapshotDTO{}, apperr.ErrContentBodyInvalid.WithCause(err)
-	}
-	var created ItemWithBody
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		created, err = tx.CreateItem(ctx, source)
-		return err
-	}); err != nil {
-		s.cleanupClonedAttachments(ctx, copied)
-		if ae, ok := apperr.As(err); ok {
-			return ItemSnapshotDTO{}, ae
-		}
-		return ItemSnapshotDTO{}, apperr.ErrContentCloneInvalid.WithCause(err)
-	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "content.clone", contentAuditTargetItem, created.ID, map[string]any{"source_code": code, "source_version": version, "code": created.Code}); err != nil {
-		return ItemSnapshotDTO{}, err
-	}
-	return itemSnapshotDTO(created, true)
-}
-
-// cloneBodyAttachments 把正文内属于 M5 附件前缀的对象引用复制到目标租户,保证克隆副本独立。
-func (s *Service) cloneBodyAttachments(ctx context.Context, body map[string]any, sourceTenantID, targetTenantID, targetItemID int64, targetCode, targetVersion string) (map[string]any, []storage.ObjectRef, error) {
-	cloned, err := jsonx.CloneObjectStrict(body)
-	if err != nil {
-		return nil, nil, apperr.ErrContentBodyInvalid.WithCause(err)
-	}
-	resourceID := targetCode + "-" + targetVersion
-	copied := make([]storage.ObjectRef, 0)
-	out, err := s.rewriteAttachmentRefs(ctx, cloned, sourceTenantID, targetTenantID, targetItemID, resourceID, &copied)
-	if err != nil {
-		s.cleanupClonedAttachments(ctx, copied)
-		return nil, nil, err
-	}
-	if mapped, ok := out.(map[string]any); ok {
-		return mapped, copied, nil
-	}
-	s.cleanupClonedAttachments(ctx, copied)
-	return nil, nil, apperr.ErrContentBodyInvalid
-}
-
-// rewriteAttachmentRefs 递归复制并替换 JSON 正文中的附件 object_ref。
-func (s *Service) rewriteAttachmentRefs(ctx context.Context, value any, sourceTenantID, targetTenantID, targetItemID int64, resourceID string, copied *[]storage.ObjectRef) (any, error) {
-	switch node := value.(type) {
-	case map[string]any:
-		for key, child := range node {
-			rewritten, err := s.rewriteAttachmentRefs(ctx, child, sourceTenantID, targetTenantID, targetItemID, resourceID, copied)
-			if err != nil {
-				return nil, err
-			}
-			node[key] = rewritten
-		}
-		return node, nil
-	case []any:
-		for i, child := range node {
-			rewritten, err := s.rewriteAttachmentRefs(ctx, child, sourceTenantID, targetTenantID, targetItemID, resourceID, copied)
-			if err != nil {
-				return nil, err
-			}
-			node[i] = rewritten
-		}
-		return node, nil
-	case string:
-		ref, ok, err := parseContentAttachmentRef(node, s.storage.BucketAttach(), sourceTenantID)
+		created, err := tx.CreateItem(ctx, source)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if !ok {
-			return node, nil
-		}
-		newRef, copiedRef, err := s.copyAttachmentObject(ctx, ref, targetTenantID, targetItemID, resourceID)
+		out, err = itemSnapshotDTO(created, true)
 		if err != nil {
-			return nil, err
+			return apperr.ErrContentBodyInvalid.WithCause(err)
 		}
-		*copied = append(*copied, copiedRef)
-		return newRef, nil
-	default:
-		return value, nil
+		return s.writeAudit(ctx, id.TenantID, actor.accountID, actor.role, "content.new_version", contentAuditTargetItem, created.ID, map[string]any{"code": created.Code, "version": created.Version, "source_version": req.SourceVersion})
+	}); err != nil {
+		return ItemSnapshotDTO{}, apperr.AsAppError(err)
 	}
-}
-
-// parseContentAttachmentRef 识别正文中属于源租户 M5 附件边界的对象引用。
-func parseContentAttachmentRef(raw, expectedBucket string, sourceTenantID int64) (storage.ObjectRef, bool, error) {
-	ref, err := storage.ParseObjectRef(strings.TrimSpace(raw))
-	if err != nil {
-		if strings.HasPrefix(strings.TrimSpace(raw), "s3://") {
-			return storage.ObjectRef{}, false, apperr.ErrContentBodyInvalid.WithCause(err)
-		}
-		return storage.ObjectRef{}, false, nil
-	}
-	if ref.Bucket != strings.TrimSpace(expectedBucket) {
-		return ref, false, nil
-	}
-	expectedPrefix, err := storage.ObjectKey(sourceTenantID, contentModuleName, contentAttachmentResourceType)
-	if err != nil {
-		return storage.ObjectRef{}, false, apperr.ErrContentBodyInvalid.WithCause(err)
-	}
-	if ref.Key == expectedPrefix || strings.HasPrefix(ref.Key, expectedPrefix+"/") {
-		return ref, true, nil
-	}
-	return ref, false, nil
-}
-
-// copyAttachmentObject 复制附件对象到目标租户的 M5 附件边界并返回新 object_ref。
-func (s *Service) copyAttachmentObject(ctx context.Context, ref storage.ObjectRef, targetTenantID, targetItemID int64, resourceID string) (string, storage.ObjectRef, error) {
-	reader, err := s.storage.Get(ctx, ref.Bucket, ref.Key)
-	if err != nil {
-		return "", storage.ObjectRef{}, apperr.ErrContentCloneInvalid.WithCause(err)
-	}
-	defer logging.CloseContext(ctx, "关闭题库克隆附件对象失败", reader)
-	fileName := attachmentFileName(ref.Key)
-	key, err := storage.ObjectKey(targetTenantID, contentModuleName, contentAttachmentResourceType, resourceID, attachmentCopyName(targetItemID, ref.Key, fileName))
-	if err != nil {
-		return "", storage.ObjectRef{}, apperr.ErrContentCloneInvalid.WithCause(err)
-	}
-	content, sizeResult, err := upload.ReadBounded(reader, s.contentAttachmentMaxBytes)
-	if err != nil {
-		return "", storage.ObjectRef{}, apperr.ErrContentCloneInvalid.WithCause(err)
-	}
-	if len(content) == 0 || sizeResult != upload.SizeOK {
-		return "", storage.ObjectRef{}, apperr.ErrContentCloneInvalid
-	}
-	if err := s.storage.Put(ctx, s.storage.BucketAttach(), key, bytes.NewReader(content), int64(len(content)), "application/octet-stream"); err != nil {
-		return "", storage.ObjectRef{}, apperr.ErrContentCloneInvalid.WithCause(err)
-	}
-	newRef, err := storage.ObjectRefString(s.storage.BucketAttach(), key)
-	if err != nil {
-		return "", storage.ObjectRef{}, apperr.ErrContentCloneInvalid.WithCause(err)
-	}
-	copiedRef := storage.ObjectRef{Bucket: s.storage.BucketAttach(), Key: key}
-	return newRef, copiedRef, nil
-}
-
-// cleanupClonedAttachments 清理克隆失败时已复制的对象,清理失败只进结构化日志。
-func (s *Service) cleanupClonedAttachments(ctx context.Context, refs []storage.ObjectRef) {
-	for _, ref := range refs {
-		if err := s.storage.Delete(ctx, ref.Bucket, ref.Key); err != nil {
-			logging.ErrorContext(ctx, "清理题库克隆附件失败", err.Error(), slog.String("bucket", ref.Bucket), slog.String("key", ref.Key))
-		}
-	}
-}
-
-// attachmentFileName 从受控对象 key 中取单段文件名。
-func attachmentFileName(key string) string {
-	parts := strings.Split(key, "/")
-	if len(parts) == 0 {
-		return "attachment"
-	}
-	name := strings.TrimSpace(parts[len(parts)-1])
-	if name == "" {
-		return "attachment"
-	}
-	return name
-}
-
-// attachmentCopyName 为克隆附件生成稳定且不会与源文件同名覆盖的单段文件名。
-func attachmentCopyName(targetItemID int64, sourceKey, fileName string) string {
-	name := strings.TrimSpace(fileName)
-	if name == "" {
-		name = "attachment"
-	}
-	hash := crypto.SHA256Hex([]byte(sourceKey))
-	if len(hash) > 12 {
-		hash = hash[:12]
-	}
-	return ids.Format(targetItemID) + "-" + hash + "-" + name
+	return out, nil
 }
 
 // ShareItem 把已发布内容放入共享库。
-func (s *Service) ShareItem(ctx context.Context, itemID int64) (ItemDTO, error) {
-	return s.setItemVisibility(ctx, itemID, VisibilityShared, "content.share")
+func (s *Service) ShareItem(ctx context.Context, actor auditActorSnapshot, itemID int64) (ItemDTO, error) {
+	return s.setItemVisibility(ctx, actor, itemID, VisibilityShared, "content.share")
 }
 
 // UnshareItem 取消后续共享浏览和克隆。
-func (s *Service) UnshareItem(ctx context.Context, itemID int64) (ItemDTO, error) {
-	return s.setItemVisibility(ctx, itemID, VisibilityTenant, "content.unshare")
+func (s *Service) UnshareItem(ctx context.Context, actor auditActorSnapshot, itemID int64) (ItemDTO, error) {
+	return s.setItemVisibility(ctx, actor, itemID, VisibilityTenant, "content.unshare")
 }
 
 // setItemVisibility 执行共享状态流转。
-func (s *Service) setItemVisibility(ctx context.Context, itemID int64, visibility int16, action string) (ItemDTO, error) {
+func (s *Service) setItemVisibility(ctx context.Context, actor auditActorSnapshot, itemID int64, visibility int16, action string) (ItemDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
+		return ItemDTO{}, err
+	}
+	if err := actor.validate(id); err != nil {
 		return ItemDTO{}, err
 	}
 	var out Item
@@ -559,11 +385,11 @@ func (s *Service) setItemVisibility(ctx context.Context, itemID int64, visibilit
 			return apperr.ErrContentStateInvalid
 		}
 		out, err = tx.SetVisibility(ctx, id.TenantID, itemID, visibility)
-		return mapContentMutationError(err)
+		if err != nil {
+			return mapContentMutationError(err)
+		}
+		return s.writeAudit(ctx, id.TenantID, actor.accountID, actor.role, action, contentAuditTargetItem, out.ID, map[string]any{"code": out.Code, "version": out.Version})
 	}); err != nil {
-		return ItemDTO{}, err
-	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, action, contentAuditTargetItem, out.ID, map[string]any{"code": out.Code, "version": out.Version}); err != nil {
 		return ItemDTO{}, err
 	}
 	return itemDTO(out), nil
@@ -578,7 +404,6 @@ func (s *Service) ListShared(ctx context.Context, filter ItemListFilter) ([]Item
 	filter.Visibility = VisibilityShared
 	filter.Status = StatusPublished
 	filter.OnlyShared = true
-	filter.PublishedShared = true
 	filter.Page, filter.Size = pagex.Normalize(filter.Page, filter.Size)
 	var items []Item
 	var total int64
@@ -593,7 +418,7 @@ func (s *Service) ListShared(ctx context.Context, filter ItemListFilter) ([]Item
 		byType, err = tx.CountSharedItemsByType(ctx, filter.Keyword)
 		return err
 	}); err != nil {
-		return nil, 0, 0, 0, nil, apperr.ErrContentQueryInvalid.WithCause(err)
+		return nil, 0, 0, 0, nil, apperr.AsAppError(err)
 	}
 	out := make([]ItemDTO, 0, len(items))
 	for _, item := range items {
@@ -616,9 +441,4 @@ func (s *Service) getItemWithBody(ctx context.Context, tenantID int64, code, ver
 		return ItemWithBody{}, mapContentReadError(err)
 	}
 	return item, nil
-}
-
-// stringsTrim 避免 service 文件散落 strings 依赖。
-func stringsTrim(value string) string {
-	return strings.TrimSpace(value)
 }

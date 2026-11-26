@@ -1,4 +1,3 @@
-// contest service 文件定义 M8 服务依赖注入和通用业务编排,不接收数据库连接。
 package contest
 
 import (
@@ -6,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
@@ -21,46 +21,51 @@ import (
 
 // Service 承载 contest 模块业务编排,依赖 repo 接口和跨模块 contracts。
 type Service struct {
-	store         Store
-	ids           snowflake.Generator
-	cfg           config.ContestConfig
-	audit         audit.Writer
-	roles         contracts.IdentityService
-	content       contracts.ContentReadService
-	contentImport contracts.ContentImportService
-	sandbox       contracts.SandboxService
-	judge         contracts.JudgeService
-	fingerprint   contracts.FingerprintService
-	files         fileService
-	replayStore   replayObjectStore
-	replayBucket  string
-	bus           eventbus.Bus
-	wsHub         *ws.Hub
-	cipher        *crypto.Cipher
+	cleanupTimeout time.Duration
+	store          Store
+	ids            snowflake.Generator
+	cfg            config.ContestConfig
+	audit          audit.Writer
+	roles          contracts.IdentityService
+	content        contracts.ContentReadService
+	contentImport  contracts.ContentImportService
+	sandbox        contracts.SandboxService
+	judge          contracts.JudgeService
+	fingerprint    contracts.FingerprintService
+	files          fileService
+	replayStore    replayObjectStore
+	replayBucket   string
+	bus            eventbus.Bus
+	wsHub          *ws.Hub
+	cipher         *crypto.Cipher
 }
 
 // ServiceDeps 是 contest service 的装配依赖集合。
 type ServiceDeps struct {
-	Store         Store
-	IDs           snowflake.Generator
-	Config        config.ContestConfig
-	Audit         audit.Writer
-	Roles         contracts.IdentityService
-	Content       contracts.ContentReadService
-	ContentImport contracts.ContentImportService
-	Sandbox       contracts.SandboxService
-	Judge         contracts.JudgeService
-	Fingerprint   contracts.FingerprintService
-	FileService   fileService
-	ReplayStore   replayObjectStore
-	ReplayBucket  string
-	Bus           eventbus.Bus
-	WSHub         *ws.Hub
-	Cipher        *crypto.Cipher
+	CleanupTimeout time.Duration
+	Store          Store
+	IDs            snowflake.Generator
+	Config         config.ContestConfig
+	Audit          audit.Writer
+	Roles          contracts.IdentityService
+	Content        contracts.ContentReadService
+	ContentImport  contracts.ContentImportService
+	Sandbox        contracts.SandboxService
+	Judge          contracts.JudgeService
+	Fingerprint    contracts.FingerprintService
+	FileService    fileService
+	ReplayStore    replayObjectStore
+	ReplayBucket   string
+	Bus            eventbus.Bus
+	WSHub          *ws.Hub
+	Cipher         *crypto.Cipher
 }
 
 // NewService 构造 contest 服务,不接收数据库连接,由装配层传入 Store。
 func NewService(deps ServiceDeps) (*Service, error) {
+	if deps.CleanupTimeout <= 0 {
+		return nil, fmt.Errorf("上传清理超时必须大于 0")
+	}
 	if deps.Store == nil {
 		return nil, fmt.Errorf("contest service 缺少 store")
 	}
@@ -109,7 +114,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Config.VulnSourceMaxResponseBytes <= 0 || deps.Config.VulnSourceTimeoutSeconds <= 0 || deps.Config.MatchmakerPollIntervalSeconds <= 0 || deps.Config.AutoArchivePollIntervalSeconds <= 0 || deps.Config.BattleSandboxReadyTimeoutSeconds <= 0 || deps.Config.BattleSandboxReadyPollIntervalMs <= 0 || deps.Config.MatchmakerBatchSize <= 0 || deps.Config.SubmitRateLimitSeconds <= 0 || deps.Config.FailedCooldownSeconds <= 0 || deps.Config.MatchmakerLeaseDurationMs <= 0 || deps.Config.AutoArchiveLeaseDurationMs <= 0 || deps.Config.MatchmakerMaxAttempts <= 0 || deps.Config.BattleELOInitialScore <= 0 || deps.Config.BattleELOKFactor <= 0 {
 		return nil, fmt.Errorf("contest service 配置不完整")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, cfg: deps.Config, audit: deps.Audit, roles: deps.Roles, content: deps.Content, contentImport: deps.ContentImport, sandbox: deps.Sandbox, judge: deps.Judge, fingerprint: deps.Fingerprint, files: deps.FileService, replayStore: deps.ReplayStore, replayBucket: deps.ReplayBucket, bus: deps.Bus, wsHub: deps.WSHub, cipher: deps.Cipher}, nil
+	return &Service{cleanupTimeout: deps.CleanupTimeout, store: deps.Store, ids: deps.IDs, cfg: deps.Config, audit: deps.Audit, roles: deps.Roles, content: deps.Content, contentImport: deps.ContentImport, sandbox: deps.Sandbox, judge: deps.Judge, fingerprint: deps.Fingerprint, files: deps.FileService, replayStore: deps.ReplayStore, replayBucket: deps.ReplayBucket, bus: deps.Bus, wsHub: deps.WSHub, cipher: deps.Cipher}, nil
 }
 
 // fileService 描述竞赛复用统一文件服务签发受控下载授权所需能力。
@@ -197,16 +202,9 @@ func (s *Service) resolveContestTenantForProblemRead(ctx context.Context, id ten
 	return id.TenantID, nil
 }
 
-// contestReadAccessAllowed 判断当前身份是否具备已发布竞赛的读取资格。
-// 同租户账号可读取本租户竞赛;跨租户账号必须先成为该竞赛队伍成员。
-func contestReadAccessAllowed(id tenant.Identity, organizerTenantID int64, teamMember bool) bool {
-	return id.TenantID == organizerTenantID || teamMember
-}
-
-// ensurePublishedContestReadAccess 校验跨租户竞赛详情和题面读取权限。
-// 未加入组织方竞赛的跨租户账号统一返回竞赛不存在,避免泄露资源存在性。
+// ensurePublishedContestReadAccess 允许本校读取，跨校须当前队员；未授权时隐藏赛事存在性。
 func (s *Service) ensurePublishedContestReadAccess(ctx context.Context, tx TxStore, organizerTenantID, contestID int64, id tenant.Identity) error {
-	if contestReadAccessAllowed(id, organizerTenantID, false) {
+	if id.TenantID == organizerTenantID {
 		return nil
 	}
 	if _, err := tx.GetTeamForAccount(ctx, organizerTenantID, contestID, id.TenantID, id.AccountID); err != nil {

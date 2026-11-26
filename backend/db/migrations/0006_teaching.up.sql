@@ -16,15 +16,19 @@ CREATE TABLE IF NOT EXISTS course (
     end_at TIMESTAMPTZ NOT NULL,
     invite_code VARCHAR(16) NOT NULL,
     status SMALLINT NOT NULL CHECK (status IN (1, 2, 3, 4, 5)),
+    ended_event_pending_at TIMESTAMPTZ,
     visibility SMALLINT NOT NULL CHECK (visibility IN (1, 2)),
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, id),
-    FOREIGN KEY (tenant_id, teacher_id) REFERENCES account(tenant_id, id)
+    FOREIGN KEY (tenant_id, teacher_id) REFERENCES account(tenant_id, id),
+    CHECK (ended_event_pending_at IS NULL OR status IN (4, 5))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_course_invite_code_active ON course(invite_code) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_course_pending_end_event ON course(ended_event_pending_at, id)
+WHERE ended_event_pending_at IS NOT NULL AND deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS chapter (
     id BIGINT PRIMARY KEY,
@@ -107,7 +111,6 @@ CREATE TABLE IF NOT EXISTS submission (
     student_id BIGINT NOT NULL,
     attempt_no INT NOT NULL CHECK (attempt_no > 0),
     content_ref JSONB NOT NULL DEFAULT '{}'::jsonb,
-    judge_task_ref VARCHAR(64),
     auto_score INT,
     manual_score INT,
     final_score INT,
@@ -337,7 +340,6 @@ CREATE INDEX IF NOT EXISTS idx_course_member_student ON course_member(tenant_id,
 CREATE INDEX IF NOT EXISTS idx_assignment_course ON assignment(tenant_id, course_id, status) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_assignment_item_assignment ON assignment_item(tenant_id, assignment_id, seq);
 CREATE INDEX IF NOT EXISTS idx_submission_assignment_student ON submission(tenant_id, assignment_id, student_id);
-CREATE INDEX IF NOT EXISTS idx_submission_judge_ref ON submission(tenant_id, judge_task_ref);
 CREATE INDEX IF NOT EXISTS idx_submission_outbox_status ON submission_judge_outbox(tenant_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_lesson_progress_student ON lesson_progress(tenant_id, student_id);
 CREATE INDEX IF NOT EXISTS idx_discussion_course_parent ON discussion_post(tenant_id, course_id, parent_id) WHERE deleted_at IS NULL;

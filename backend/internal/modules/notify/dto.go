@@ -1,4 +1,3 @@
-// notify dto 文件定义 M10 HTTP 请求结构。
 package notify
 
 import (
@@ -72,13 +71,11 @@ type SubscribeMessage struct {
 	Topics []string `json:"topics"`
 }
 
-// PreferenceDTO 表示用户通知偏好响应。
-// Force 来自通知模板:强制类通知不允许关闭,前端据此渲染为不可操作并说明原因。
-// 不输出模板标题/正文/投递通道 —— 那些是服务端渲染细节,不进浏览器。
+// PreferenceDTO 返回用户偏好；模板正文和投递通道仅供服务端使用。
 type PreferenceDTO struct {
 	Type    string `json:"type"`
 	Enabled bool   `json:"enabled"`
-	Force   bool   `json:"force"`
+	Force   bool   `json:"force"` // 强制通知不允许关闭。
 }
 
 // UnreadDTO 表示站内信未读数量响应。

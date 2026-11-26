@@ -1,18 +1,13 @@
-// 漏洞题工坊页(教师深页,/teacher/vuln-workshop)。设计 §7.4:
-// 页头 +「手工录入漏洞题」;页头下一条四步流程说明(还没有任何漏洞题时展开,之后收成一行);
-// 左栏「漏洞来源」列表(启用状态、上次同步时间、「同步案例」、「修改配置」,「添加来源」);
-// 右栏漏洞题表格(名称、状态、验证结果),状态与验证结果各一个筛选(都写进地址);
-// 行内按状态给一个下一步:未验证或未通过→「预验证」,验证通过的草稿→「固化到题库」。
-// 预验证在右侧大抽屉中进行,显示过程和结果;整行也打开它(已固化的只读查看验证记录)。
-//
-// 边界:同步、预验证、固化都是租户内的出题工作流(后端 teacher 组),
-// 平台端只做全局漏洞源的查看与新增,不出现这三个动作。
+// 教师同步漏洞案例、预验证并固化为本校题目；共享来源配置只读。
 
 import { useCallback, useMemo, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router'
 import { Bug, Database, FlaskConical, Plus, RefreshCw, Settings2, ShieldCheck } from 'lucide-react'
 import {
   VulnProblemStatus,
   VulnPrevalidateStatus,
+  VulnLevel,
+  VulnRuntimeMode,
   type VulnProblem,
   type VulnSource,
 } from '@chaimir/api-client'
@@ -100,10 +95,33 @@ function canFinalize(problem: VulnProblem): boolean {
 export default function TeacherVulnWorkshopPage() {
   const [query, setQuery] = useUrlState(WORKSHOP_QUERY)
   const [sourceForm, setSourceForm] = useState<{ source?: VulnSource } | undefined>()
-  const [problemFormOpen, setProblemFormOpen] = useState(false)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const problemId = searchParams.get('draft') ?? ''
+  const [creating, setCreating] = useState(false)
   const [prevalidateTarget, setPrevalidateTarget] = useState<VulnProblem>()
   const [finalizingId, setFinalizingId] = useState<string>()
   const [actionError, setActionError] = useState<string>()
+
+  // 编辑记录进地址；不改变列表筛选和页码。
+  function editProblem(id?: string) {
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous)
+      if (id) next.set('draft', id)
+      else next.delete('draft')
+      return next
+    }, { replace: true })
+  }
+
+  async function createProblem() {
+    setCreating(true); setActionError(undefined)
+    try {
+      const problem = await api.contest.createVulnProblem({ title: '未命名漏洞题', level: VulnLevel.A, runtime_mode: VulnRuntimeMode.ISOLATED, draft_body: { judge_config: { max_score: 100 } } })
+      editProblem(problem.id)
+      problems.reload()
+    } catch (error) { setActionError(userFacingErrorMessage(error, '草稿创建没有成功，请重试。')) }
+    finally { setCreating(false) }
+  }
 
   const sources = useAsyncResource(() => api.contest.listVulnSources(), [], () => false)
   const sourceList = useMemo(() => sources.data ?? [], [sources.data])
@@ -222,7 +240,7 @@ export default function TeacherVulnWorkshopPage() {
       <PageHeader
         title="漏洞题工坊"
         actions={
-          <Button variant="primary" leftIcon={Plus} onClick={() => setProblemFormOpen(true)}>
+          <Button variant="primary" leftIcon={Plus} loading={creating} onClick={() => void createProblem()}>
             手工录入漏洞题
           </Button>
         }
@@ -315,7 +333,8 @@ export default function TeacherVulnWorkshopPage() {
                 data={page.list}
                 rowKey={(item) => item.id}
                 elevated={false}
-                onRowClick={setPrevalidateTarget}
+                getRowHref={(item) => { const next = new URLSearchParams(searchParams); next.set('draft', item.id); return `?${next.toString()}` }}
+                onNavigate={navigate}
                 // <md 换行卡(§6.4.1 规则 3):题名一行、状态与验证结果一行,下一步在右
                 mobileCard={(item) => ({
                   title: item.title,
@@ -339,14 +358,13 @@ export default function TeacherVulnWorkshopPage() {
         />
       ) : null}
 
-      {problemFormOpen ? (
+      {problemId ? (
         <VulnProblemFormModal
+          key={problemId}
+          problemId={problemId}
           sources={sourceList}
-          onClose={() => setProblemFormOpen(false)}
-          onSaved={() => {
-            setProblemFormOpen(false)
-            problems.reload()
-          }}
+          onClose={() => editProblem()}
+          onSaved={problems.reload}
         />
       ) : null}
 
@@ -450,16 +468,12 @@ interface SourceRowProps {
   onSynced: () => void
 }
 
-/**
- * SourceRow 一个漏洞来源:名称与启用状态、类型与上次同步时间、「同步案例」「修改配置」。
- * 同步是拉取外部数据的动作,可能耗时,按钮带加载态,完成后提示新增条数;失败就近显示在这一行。
- * 停用或没配来源地址时不能同步,原因写在按钮旁。
- */
+/** SourceRow 按归属展示配置操作，共享来源仍可同步为本校草稿。 */
 function SourceRow({ source, onEdit, onSynced }: SourceRowProps) {
   const [syncing, setSyncing] = useState(false)
   const [syncError, setSyncError] = useState<string>()
   const endpoint = readString(source.config, VULN_SOURCE_CONFIG_FIELDS.endpoint)
-  const blocked = !source.enabled ? '来源已停用,启用后才能同步' : endpoint === '' ? '补充来源地址后才能同步' : undefined
+  const blocked = !source.enabled ? '来源已停用' : endpoint === '' ? '来源地址未配置' : undefined
 
   const sync = useCallback(async () => {
     setSyncing(true)
@@ -469,7 +483,7 @@ function SourceRow({ source, onEdit, onSynced }: SourceRowProps) {
       toast.success(created.length > 0 ? `已同步 ${created.length} 条漏洞案例` : '同步完成,来源里没有新案例')
       onSynced()
     } catch (error) {
-      setSyncError(userFacingErrorMessage(error, '同步没有成功,请检查来源配置后重试。'))
+      setSyncError(userFacingErrorMessage(error, '同步没有成功,请稍后重试。'))
     } finally {
       setSyncing(false)
     }
@@ -480,13 +494,17 @@ function SourceRow({ source, onEdit, onSynced }: SourceRowProps) {
       <div className="flex items-start justify-between gap-2">
         <span className="min-w-0">
           <span className="block truncate text-sm font-medium text-ink">{source.name}</span>
-          <span className="block text-xs text-ink-sub">{vulnSourceTypeLabel(source.type)}</span>
+          <span className="block text-xs text-ink-sub">
+            {source.is_shared ? '平台共享' : '本校来源'} · {vulnSourceTypeLabel(source.type)}
+          </span>
         </span>
         <Badge tone={source.enabled ? 'success' : 'neutral'}>{source.enabled ? '已启用' : '已停用'}</Badge>
       </div>
-      <p className="text-xs text-ink-sub" title={source.last_sync_at ? formatDateTime(source.last_sync_at) : undefined}>
-        {source.last_sync_at ? `上次同步 ${formatRelativeOccurrence(source.last_sync_at)}` : '尚未同步'}
-      </p>
+      {!source.is_shared ? (
+        <p className="text-xs text-ink-sub" title={source.last_sync_at ? formatDateTime(source.last_sync_at) : undefined}>
+          {source.last_sync_at ? `上次同步 ${formatRelativeOccurrence(source.last_sync_at)}` : '尚未同步'}
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           variant="outline"
@@ -498,11 +516,17 @@ function SourceRow({ source, onEdit, onSynced }: SourceRowProps) {
         >
           同步案例
         </Button>
-        <Button variant="ghost" size="sm" leftIcon={Settings2} onClick={onEdit}>
-          修改配置
-        </Button>
+        {!source.is_shared ? (
+          <Button variant="ghost" size="sm" leftIcon={Settings2} onClick={onEdit}>
+            修改配置
+          </Button>
+        ) : null}
       </div>
-      {blocked ? <p className="text-xs text-ink-sub">{blocked}</p> : null}
+      {blocked ? (
+        <p className="text-xs text-ink-sub">
+          {blocked}{source.is_shared ? ',请联系平台管理员。' : ',请修改配置后再同步。'}
+        </p>
+      ) : null}
       {syncError ? <p className="text-xs text-danger">{syncError}</p> : null}
     </li>
   )

@@ -3,6 +3,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/modules/content"
@@ -43,6 +44,7 @@ func RegisterContentModule(deps ContentModuleDeps) (*content.Service, error) {
 	}
 	store := content.NewStore(deps.Database)
 	svc, err := content.NewService(content.ServiceDeps{
+		CleanupTimeout:            time.Duration(deps.Upload.CleanupTimeoutSeconds) * time.Second,
 		Store:                     store,
 		IDs:                       deps.IDs,
 		Audit:                     deps.Audit,

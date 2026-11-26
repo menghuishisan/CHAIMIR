@@ -14,7 +14,7 @@ labels:
   chaimir.io/sensitivity: build-base
   chaimir.io/scope: build
   chaimir.io/source: build-base
-description: 仅用于构建运行时 JSON helper 和平台网络诊断的公共基座镜像,不提供沙箱工作区或学生入口。
+description: 通用 CLI 与平台网络诊断基座，不包含链动作代理或运行期学生入口。
 source:
   type: build-base
 upstream:
@@ -26,7 +26,6 @@ data_driven: false
 capabilities:
   - toolchain-base
   - blockchain-cli-tooling
-  - runtime-json-helper-build
 ports: []
 security:
   run_as_non_root: true
@@ -47,15 +46,15 @@ resources:
   memory_limit: 512Mi
   ephemeral_storage_limit: 2Gi
 build:
-  context: ../../..
-  dockerfile: images/base/chain-tools/Dockerfile
+  context: images/base/chain-tools
+  dockerfile: Dockerfile
 selftest:
   commands:
     - name: common-tools
       command:
         - bash
         - -lc
-        - "curl --version >/dev/null && jq --version >/dev/null && /usr/local/bin/chaimir-chain --version"
+        - "curl --version >/dev/null && jq --version >/dev/null && tar --version >/dev/null"
 supply_chain:
   sbom: true
   trivy_required: true

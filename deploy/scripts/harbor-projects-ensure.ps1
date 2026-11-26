@@ -217,11 +217,7 @@ $projects = @(
     "sim",
     "sidecar",
     "init",
-    "base",
-    "middleware",
-    "observability",
-    "ingress",
-    "network"
+    "base"
 )
 
 foreach ($project in $projects) {

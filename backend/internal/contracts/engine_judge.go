@@ -9,7 +9,7 @@ const (
 
 	// JudgeSandboxModeFresh 表示使用全新判题沙箱执行。
 	JudgeSandboxModeFresh = "fresh"
-	// JudgeSandboxModeReuse 表示复用业务现场沙箱只读状态执行断言。
+	// JudgeSandboxModeReuse 使用既有沙箱；学生现场只读，私有对局执行锁定程序。
 	JudgeSandboxModeReuse = "reuse"
 )
 
@@ -25,6 +25,19 @@ const (
 	// JudgeTaskStatusCanceled 表示任务已取消。
 	JudgeTaskStatusCanceled int16 = 5
 )
+
+// JudgeInputContext 用于提交前的能力校验，不授予沙箱权限。
+type JudgeInputContext struct {
+	SandboxMode     string
+	AccessProfile   SandboxAccessProfile
+	RequiresOutcome bool
+}
+
+// JudgeInputRequirements 由 M3 根据锁定判题配置决定提交方式。
+type JudgeInputRequirements struct {
+	SandboxMode  string `json:"sandbox_mode"`
+	RequiresCode bool   `json:"requires_code"`
+}
 
 // JudgeSubmitRequest 是业务模块提交判题任务时使用的稳定契约。
 type JudgeSubmitRequest struct {
@@ -45,26 +58,44 @@ type JudgeSubmitRequest struct {
 	SandboxMode       string `json:"sandbox_mode"`
 	TargetSandboxRef  string `json:"target_sandbox_ref"`
 	// SandboxSourceRef 是 reuse 模式目标沙箱真实来源;任务 SourceRef 仍保持本次判题事件唯一。
-	SandboxSourceRef string         `json:"sandbox_source_ref"`
-	ExtraInput       map[string]any `json:"extra_input"`
-	Priority         int16          `json:"priority"`
+	SandboxSourceRef         string         `json:"sandbox_source_ref"`
+	SandboxCompositionDigest string         `json:"sandbox_composition_digest,omitempty"`
+	RequiresOutcome          bool           `json:"-"`
+	ExtraInput               map[string]any `json:"extra_input"`
+	Priority                 int16          `json:"priority"`
+}
+
+// JudgeOutcome 是锁定对局程序产生的机器结果，与展示摘要无关。
+type JudgeOutcome string
+
+const (
+	JudgeOutcomeAWin JudgeOutcome = "a_win"
+	JudgeOutcomeBWin JudgeOutcome = "b_win"
+	JudgeOutcomeDraw JudgeOutcome = "draw"
+)
+
+// Valid 拒绝未声明、别名和未知结果。
+func (outcome JudgeOutcome) Valid() bool {
+	return outcome == JudgeOutcomeAWin || outcome == JudgeOutcomeBWin || outcome == JudgeOutcomeDraw
 }
 
 // JudgeResultDetail 是评测结果中的单条可解释详情。
 type JudgeResultDetail struct {
-	Case          string `json:"case"`
-	Passed        bool   `json:"passed"`
-	ExpectedLabel string `json:"expected_label"`
-	Actual        string `json:"actual"`
-	Hint          string `json:"hint"`
+	Case          string       `json:"case"`
+	Passed        bool         `json:"passed"`
+	ExpectedLabel string       `json:"expected_label,omitempty"`
+	Actual        string       `json:"actual"`
+	Hint          string       `json:"hint,omitempty"`
+	Outcome       JudgeOutcome `json:"outcome,omitempty"`
 }
 
-// JudgeReplayAction 是链上回放中一条按执行顺序记录的状态变更动作。
+// JudgeReplayAction 按执行顺序记录链上操作，查询同样保留目标与脱敏结果。
 type JudgeReplayAction struct {
-	Seq     int32          `json:"seq"`
-	Op      string         `json:"op"`
-	Payload map[string]any `json:"payload,omitempty"`
-	Output  map[string]any `json:"output,omitempty"`
+	Seq             int32          `json:"seq"`
+	RuntimeInstance string         `json:"runtime_instance"`
+	Op              string         `json:"op"`
+	Payload         map[string]any `json:"payload,omitempty"`
+	Output          map[string]any `json:"output,omitempty"`
 }
 
 // JudgeReplayTrace 是 M3 从 M2 链能力调用中收集的可复现交易序列。
@@ -95,12 +126,13 @@ type JudgeTaskInfo struct {
 
 // FingerprintSimilarityRequest 是查重服务的相似度比对请求。
 type FingerprintSimilarityRequest struct {
-	TenantID         int64   `json:"tenant_id"`
-	ProblemRef       string  `json:"problem_ref"`
-	CodeStorageKey   string  `json:"code_storage_key"`
-	CodeHash         string  `json:"code_hash"`
-	ExcludeSourceRef string  `json:"exclude_source_ref"`
-	Threshold        float64 `json:"threshold"`
+	TenantID   int64  `json:"tenant_id"`
+	ProblemRef string `json:"problem_ref"`
+	// SourceRefs 由调用方按业务权限确定；空集合不匹配任何提交。
+	SourceRefs       []string `json:"source_refs"`
+	CodeHash         string   `json:"code_hash"`
+	ExcludeSourceRef string   `json:"exclude_source_ref"`
+	Threshold        float64  `json:"threshold"`
 }
 
 // FingerprintMatch 是查重返回的一条相似提交命中。
@@ -115,8 +147,8 @@ type FingerprintMatch struct {
 type JudgeService interface {
 	// SubmitJudgeTask 创建判题任务并返回初始任务摘要。JudgerCode 为空时必须使用 M5 锁定题目版本的 judge_config.judger_code,业务模块不得硬编码题目判题器别名。
 	SubmitJudgeTask(ctx context.Context, req JudgeSubmitRequest) (JudgeTaskInfo, error)
-	// ValidateJudgeMode 预校验锁定题目版本的判题配置是否支持指定沙箱模式,供业务模块在创建沙箱或发布赛题前走 M3 契约做能力判定。
-	ValidateJudgeMode(ctx context.Context, tenantID int64, itemCode, itemVersion, sandboxMode string) error
+	// GetJudgeInputRequirements 校验锁定题目的输入要求；执行权限仍以 M2 真实沙箱为准。
+	GetJudgeInputRequirements(ctx context.Context, tenantID int64, itemCode, itemVersion string, input JudgeInputContext) (JudgeInputRequirements, error)
 	// GetJudgeTask 读取任务状态与结果摘要。
 	GetJudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTaskInfo, error)
 	// CancelJudgeTask 取消仍在排队中的判题任务,供业务流程补偿或撤回使用。
@@ -131,6 +163,6 @@ type JudgeService interface {
 type FingerprintService interface {
 	// FindExactMatch 按题目与代码哈希查找完全相同的提交。
 	FindExactMatch(ctx context.Context, tenantID int64, problemRef, codeHash string) ([]FingerprintMatch, error)
-	// FindSimilarity 读取对象并生成特征向量,返回超过阈值的相似提交。
+	// FindSimilarity 在已授权来源集合内选择已存指纹基准和候选，返回达到阈值的提交。
 	FindSimilarity(ctx context.Context, req FingerprintSimilarityRequest) ([]FingerprintMatch, error)
 }

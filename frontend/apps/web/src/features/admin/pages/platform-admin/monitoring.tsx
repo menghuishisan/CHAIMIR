@@ -1,10 +1,4 @@
-// 监控面板(平台侧栏,/platform-admin/monitoring)。设计 §7.6:
-// 跳转到外部监控系统看基础设施。一句说明「监控画面在外部监控系统里」+ 监控面板卡片网格
-// (面板名、所在地址、「在新窗口打开」);未配置面板时说明由运维在部署时配置;底部相关入口(告警中心、备份记录、平台看板)。
-//
-// 不内嵌画面:外部监控系统通常禁止被嵌入,而且把第三方页面放进管理端同一个浏览环境会削弱隔离。
-// 打开时断开来源与窗口引用,不把管理端地址带给外部系统;地址不是安全的 https 地址时不给打开。
-// 接口只返回面板名与地址,没有用途说明,所以卡片上写面板所在的站点,便于认出是哪套系统。
+// 展示受控外部监控入口及相关运维页面。
 
 import { Link } from 'react-router'
 import { ExternalLink, Monitor } from 'lucide-react'
@@ -86,7 +80,7 @@ function PanelCard({ panel }: { panel: MonitoringPanel }) {
         <span className="min-w-0">
           <span className="block text-lg font-bold text-ink">{panel.name}</span>
           <span className="block truncate font-mono text-xs text-ink-sub">
-            {host ?? '地址不是安全的 https 地址,不能打开'}
+            {host ?? '监控地址暂不可用，请联系运维检查'}
           </span>
         </span>
       </span>

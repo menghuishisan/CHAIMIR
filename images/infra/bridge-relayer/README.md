@@ -53,6 +53,7 @@
 - student_access：{"enabled":false}。
 - 网络只允许 manifest binding/link 所需目标，默认拒绝；禁止宿主机路径、hostNetwork、ServiceAccount token 和越权写入。
 - 持久化例外仅用于 relayer 数据库；签名私钥只存在 Secret 投影和临时配置文件，不写入 `runtime-state`。
+- 合并配置使用新建的 `0600` 临时文件，写入与关闭成功后原子替换；失败保留上一份文件并清理临时产物。配置目录强制为 `0700`，交接官方 agent 前清除原始签名私钥环境变量。
 
 ## source/destination 配置校验
 
@@ -61,6 +62,7 @@
 - 每个链的 `chainId` 必须与该链显式 RPC binding 返回的 `eth_chainId` 一致；Mailbox `localDomain()` 必须与 `domainId` 一致。
 - mailbox、interchainGasPaymaster、validatorAnnounce 和 merkleTreeHook 必须是非零 EVM 地址，且在对应 runtime 上 `eth_getCode` 返回已部署合约字节码。
 - RPC 检查使用显式 source/destination binding；任一查询错误、错链、错域或未部署地址均严格失败，不启动 relayer。
+- RPC 地址禁止查询和片段，包括空的 `?` 或 `#`；响应成员名称区分大小写，成功响应不得含 `error` 字段，重复键、错误编号、读取或关闭失败均拒绝。
 
 ## readiness / health
 

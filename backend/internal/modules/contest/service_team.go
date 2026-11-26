@@ -5,7 +5,6 @@ import (
 	"context"
 	"strings"
 
-	"chaimir/internal/contracts"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
@@ -23,49 +22,45 @@ func (s *Service) Signup(ctx context.Context, contestID int64, req SignupRequest
 	if err != nil {
 		return TeamDTO{}, err
 	}
-	var contest Contest
 	var team Team
 	if err := s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		contest, err = tx.GetContest(ctx, organizerTenantID, contestID)
+		contest, err := tx.GetContestForUpdate(ctx, organizerTenantID, contestID)
 		if err != nil {
 			return err
 		}
 		if err := validateSignupWindow(contest, timex.Now()); err != nil {
 			return err
 		}
-		if existing, err := tx.GetTeamForAccount(ctx, organizerTenantID, contestID, id.TenantID, id.AccountID); err == nil {
-			team, err = tx.GetTeam(ctx, organizerTenantID, existing.ID)
-			return err
-		} else if !isNoRows(err) {
+		team, err = tx.GetTeamForAccount(ctx, organizerTenantID, contestID, id.TenantID, id.AccountID)
+		if err != nil && !isNoRows(err) {
 			return err
 		}
-		// 个人赛的队伍名称就是选手在排行榜上的参赛名称,与组队赛一样必填并校验
-		name := strings.TrimSpace(req.TeamName)
-		name, err = validateTeamName(name)
-		if err != nil {
-			return err
-		}
-		inviteCode, err := newInviteCode()
-		if err != nil {
-			return err
-		}
-		if contest.TeamMode == TeamModeSolo {
-			inviteCode = ""
-		}
-		team, err = tx.CreateTeam(ctx, Team{ID: s.ids.Generate(), TenantID: organizerTenantID, ContestID: contestID, Name: name, InviteCode: inviteCode})
-		if err != nil {
-			return err
-		}
-		if _, err = tx.AddTeamMember(ctx, TeamMember{ID: s.ids.Generate(), TenantID: organizerTenantID, TeamID: team.ID, AccountID: id.AccountID, MemberTenantID: id.TenantID, IsLeader: true}); err != nil {
-			return err
+		if isNoRows(err) {
+			name, err := validateTeamName(req.TeamName)
+			if err != nil {
+				return err
+			}
+			var inviteCode string
+			if contest.TeamMode == TeamModeGroup {
+				inviteCode, err = newInviteCode()
+				if err != nil {
+					return err
+				}
+			}
+			team, err = tx.CreateTeam(ctx, Team{ID: s.ids.Generate(), TenantID: organizerTenantID, ContestID: contestID, Name: name, InviteCode: inviteCode})
+			if err != nil {
+				return err
+			}
+			if _, err = tx.AddTeamMember(ctx, TeamMember{ID: s.ids.Generate(), TenantID: organizerTenantID, TeamID: team.ID, AccountID: id.AccountID, MemberTenantID: id.TenantID, IsLeader: true}); err != nil {
+				return err
+			}
 		}
 		team, err = tx.GetTeam(ctx, organizerTenantID, team.ID)
-		return err
+		if err != nil {
+			return err
+		}
+		return s.writeStudentAudit(ctx, organizerTenantID, id, "contest.signup", auditTargetContestTeam, team.ID, map[string]any{"contest_id": contestID})
 	}); err != nil {
-		return TeamDTO{}, err
-	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "contest.signup", auditTargetContestTeam, team.ID, map[string]any{"contest_id": contestID}); err != nil {
 		return TeamDTO{}, err
 	}
 	return teamDTOFromModel(team), nil
@@ -87,7 +82,7 @@ func (s *Service) JoinTeam(ctx context.Context, contestID int64, req JoinTeamReq
 	}
 	var team Team
 	if err := s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
-		contest, err := tx.GetContest(ctx, organizerTenantID, contestID)
+		contest, err := tx.GetContestForUpdate(ctx, organizerTenantID, contestID)
 		if err != nil {
 			return err
 		}
@@ -97,27 +92,30 @@ func (s *Service) JoinTeam(ctx context.Context, contestID int64, req JoinTeamReq
 		if err := validateSignupWindow(contest, timex.Now()); err != nil {
 			return err
 		}
-		if ids, err := tx.AccountTeamIDs(ctx, organizerTenantID, contestID, id.TenantID, id.AccountID); err != nil {
-			return err
-		} else if len(ids) > 0 {
+		if _, err := tx.GetTeamForAccount(ctx, organizerTenantID, contestID, id.TenantID, id.AccountID); err == nil {
 			return apperr.ErrContestTeamInvalid
+		} else if !isNoRows(err) {
+			return err
 		}
-		team, err = tx.GetTeamByInviteCode(ctx, organizerTenantID, code)
+		team, err = tx.GetTeamByInviteCode(ctx, organizerTenantID, contestID, code)
 		if err != nil {
 			return err
 		}
-		if team.ContestID != contestID || team.Status != TeamStatusBuilding {
+		if team.Status != TeamStatusBuilding {
 			return apperr.ErrContestTeamInvalid
 		}
 		if _, err = tx.AddTeamMember(ctx, TeamMember{ID: s.ids.Generate(), TenantID: organizerTenantID, TeamID: team.ID, AccountID: id.AccountID, MemberTenantID: id.TenantID, IsLeader: false}); err != nil {
 			return err
 		}
 		team, err = tx.GetTeam(ctx, organizerTenantID, team.ID)
-		return err
+		if err != nil {
+			return err
+		}
+		return s.writeStudentAudit(ctx, organizerTenantID, id, "contest.team.join", auditTargetContestTeam, team.ID, map[string]any{"contest_id": contestID})
 	}); err != nil {
 		return TeamDTO{}, err
 	}
-	return teamDTOFromModel(team), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "contest.team.join", auditTargetContestTeam, team.ID, map[string]any{"contest_id": contestID})
+	return teamDTOFromModel(team), nil
 }
 
 // GetTeam 读取当前账号可访问的队伍。
@@ -160,6 +158,9 @@ func (s *Service) LockTeam(ctx context.Context, teamID int64) (TeamDTO, error) {
 		if err != nil {
 			return err
 		}
+		if _, err := tx.GetContestForUpdate(ctx, organizerTenantID, current.ContestID); err != nil {
+			return err
+		}
 		if !isTeamLeader(id.TenantID, id.AccountID, current) {
 			return apperr.ErrContestTeamAccessDenied
 		}
@@ -168,11 +169,14 @@ func (s *Service) LockTeam(ctx context.Context, teamID int64) (TeamDTO, error) {
 			return err
 		}
 		team.Members, err = tx.ListTeamMembers(ctx, organizerTenantID, teamID)
-		return err
+		if err != nil {
+			return err
+		}
+		return s.writeStudentAudit(ctx, organizerTenantID, id, "contest.team.lock", auditTargetContestTeam, team.ID, nil)
 	}); err != nil {
 		return TeamDTO{}, err
 	}
-	return teamDTOFromModel(team), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "contest.team.lock", auditTargetContestTeam, team.ID, nil)
+	return teamDTOFromModel(team), nil
 }
 
 // currentAccountTeam 读取当前账号在竞赛内的队伍并带成员列表。

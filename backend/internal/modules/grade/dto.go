@@ -7,15 +7,14 @@ import (
 	"chaimir/internal/platform/ids"
 )
 
-// GradeSummaryDTO 是学生成绩聚合响应。
+// GradeSummaryDTO 返回已计算的学期 GPA、累计 GPA 和学分。
 type GradeSummaryDTO struct {
-	StudentID     ids.ID             `json:"student_id"`
-	SemesterID    ids.ID             `json:"semester_id,omitempty"`
-	TotalCredits  float64            `json:"total_credits"`
-	GPA           float64            `json:"gpa"`
-	CumulativeGPA float64            `json:"cumulative_gpa"`
-	CourseGrades  []CourseGradeInput `json:"course_grades"`
-	ComputedAt    time.Time          `json:"computed_at"`
+	StudentID     ids.ID    `json:"student_id"`
+	SemesterID    ids.ID    `json:"semester_id,omitempty"`
+	TotalCredits  float64   `json:"total_credits"`
+	GPA           float64   `json:"gpa"`
+	CumulativeGPA float64   `json:"cumulative_gpa"`
+	ComputedAt    time.Time `json:"computed_at"`
 }
 
 // StudentGradePageDTO 是学生成绩页面的有界课程明细与当前范围汇总。

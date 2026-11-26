@@ -1,6 +1,7 @@
 -- name: CreateContentItem :one
 INSERT INTO content_item (id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 0, $15, now(), now(), NULL)
+ON CONFLICT (tenant_id, code, version) WHERE deleted_at IS NULL DO NOTHING
 RETURNING id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at;
 
 -- name: CreateContentBody :one
@@ -34,21 +35,12 @@ SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags,
 FROM content_item
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL;
 
--- name: GetContentItemByRef :one
-SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
-FROM content_item
-WHERE code = $1 AND version = $2 AND deleted_at IS NULL AND (tenant_id = $3 OR (visibility = 3 AND status = 2))
-ORDER BY CASE WHEN tenant_id = $3 THEN 0 ELSE 1 END
-LIMIT 1;
-
 -- name: GetContentItemWithBodyByRef :one
 SELECT i.id, i.tenant_id, i.code, i.version, i.type, i.title, i.category_id, i.difficulty, i.tags, i.knowledge_points, i.author_id, i.author_type, i.visibility, i.status, i.usage_count, i.version_hash, i.created_at, i.updated_at, i.deleted_at,
        b.body, b.sensitive_fields
 FROM content_item i
 JOIN content_body b ON b.tenant_id = i.tenant_id AND b.item_id = i.id
-WHERE i.code = $1 AND i.version = $2 AND i.deleted_at IS NULL AND (i.tenant_id = $3 OR (i.visibility = 3 AND i.status = 2))
-ORDER BY CASE WHEN i.tenant_id = $3 THEN 0 ELSE 1 END
-LIMIT 1;
+WHERE i.code = $1 AND i.version = $2 AND i.tenant_id = $3 AND i.deleted_at IS NULL;
 
 -- name: GetContentItemWithBodyByID :one
 SELECT i.id, i.tenant_id, i.code, i.version, i.type, i.title, i.category_id, i.difficulty, i.tags, i.knowledge_points, i.author_id, i.author_type, i.visibility, i.status, i.usage_count, i.version_hash, i.created_at, i.updated_at, i.deleted_at,
@@ -56,6 +48,14 @@ SELECT i.id, i.tenant_id, i.code, i.version, i.type, i.title, i.category_id, i.d
 FROM content_item i
 JOIN content_body b ON b.tenant_id = i.tenant_id AND b.item_id = i.id
 WHERE i.tenant_id = $1 AND i.id = $2 AND i.deleted_at IS NULL;
+
+-- name: GetVisibleContentItemWithBodyByID :one
+SELECT i.id, i.tenant_id, i.code, i.version, i.type, i.title, i.category_id, i.difficulty, i.tags, i.knowledge_points, i.author_id, i.author_type, i.visibility, i.status, i.usage_count, i.version_hash, i.created_at, i.updated_at, i.deleted_at,
+       b.body, b.sensitive_fields
+FROM content_item i
+JOIN content_body b ON b.tenant_id = i.tenant_id AND b.item_id = i.id
+WHERE i.id = $2 AND i.deleted_at IS NULL
+  AND (i.tenant_id = $1 OR (i.visibility = 3 AND i.status = 2));
 
 -- name: ListContentItems :many
 SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
@@ -92,7 +92,7 @@ WHERE deleted_at IS NULL
   AND (visibility <> 1 OR author_id = $12);
 
 -- name: CountSharedContentItemsByType :many
--- 共享资源库「按题型」分段计数:只数其他学校已发布且共享的题目,套用关键词,不套用题型筛选。
+-- 共享库按题型计数:仅已发布共享内容,沿用关键词,不套用题型筛选。
 SELECT type, COUNT(*)::bigint AS count
 FROM content_item
 WHERE deleted_at IS NULL
@@ -103,7 +103,7 @@ GROUP BY type;
 -- name: ListContentVersions :many
 SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
 FROM content_item
-WHERE code = $1 AND deleted_at IS NULL AND (tenant_id = $2 OR (visibility = 3 AND status = 2))
+WHERE code = $1 AND tenant_id = $2 AND deleted_at IS NULL
 ORDER BY created_at DESC, id DESC;
 
 -- name: PublishContentItem :one
@@ -162,20 +162,42 @@ RETURNING id, tenant_id, code, version, type, title, category_id, difficulty, ta
 
 -- name: CreateContentCategory :one
 INSERT INTO content_category (id, tenant_id, parent_id, name, sort, created_at, updated_at, deleted_at)
-VALUES ($1, $2, $3, $4, $5, now(), now(), NULL)
+SELECT $1, $2, $3, $4, $5, now(), now(), NULL
+WHERE $3::bigint IS NULL OR ($3 <> $1 AND EXISTS (
+    SELECT 1 FROM content_category WHERE tenant_id = $2 AND id = $3 AND deleted_at IS NULL
+))
 RETURNING id, tenant_id, parent_id, name, sort, created_at, updated_at, deleted_at;
 
 -- name: UpdateContentCategory :one
-UPDATE content_category
+WITH RECURSIVE descendants AS (
+    SELECT id FROM content_category WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+    UNION
+    SELECT c.id FROM content_category c
+    JOIN descendants d ON c.parent_id = d.id
+    WHERE c.tenant_id = $1 AND c.deleted_at IS NULL
+)
+UPDATE content_category AS target
 SET parent_id = $3, name = $4, sort = $5, updated_at = now()
-WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, parent_id, name, sort, created_at, updated_at, deleted_at;
+WHERE target.tenant_id = $1 AND target.id = $2 AND target.deleted_at IS NULL
+  AND ($3::bigint IS NULL OR (
+      EXISTS (SELECT 1 FROM content_category p WHERE p.tenant_id = $1 AND p.id = $3 AND p.deleted_at IS NULL)
+      AND NOT EXISTS (SELECT 1 FROM descendants WHERE id = $3)
+  ))
+RETURNING target.id, target.tenant_id, target.parent_id, target.name, target.sort, target.created_at, target.updated_at, target.deleted_at;
 
 -- name: DeleteContentCategory :one
-UPDATE content_category
+UPDATE content_category AS c
 SET deleted_at = now(), updated_at = now()
-WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, parent_id, name, sort, created_at, updated_at, deleted_at;
+WHERE c.tenant_id = $1 AND c.id = $2 AND c.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM content_category child WHERE child.tenant_id = c.tenant_id AND child.parent_id = c.id AND child.deleted_at IS NULL)
+  AND NOT EXISTS (SELECT 1 FROM content_item i WHERE i.tenant_id = c.tenant_id AND i.category_id = c.id AND i.deleted_at IS NULL)
+RETURNING c.id, c.tenant_id, c.parent_id, c.name, c.sort, c.created_at, c.updated_at, c.deleted_at;
+
+-- name: LockContentCategoryScope :exec
+SELECT pg_advisory_xact_lock(hashtextextended('content.category', $1::bigint));
+
+-- name: GetActiveContentCategory :one
+SELECT id FROM content_category WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL;
 
 -- name: ListContentCategories :many
 SELECT id, tenant_id, parent_id, name, sort, created_at, updated_at, deleted_at

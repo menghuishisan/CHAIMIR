@@ -26,6 +26,7 @@ Optimism OP Labs 官方 OP Geth 源码重建执行层镜像，并内置平台受
 
 - rpc：8545/TCP，暴露边界 internal，用途：L2 JSON-RPC。
 - engine：8551/TCP，暴露边界 internal，用途：authenticated Engine API for op-node。
+- 服务端口由镜像和组合端点契约固定，不在编排表单中提供改端口选项。
 - 组件：无 resource_spec 组件。
 
 ## command / args 语义

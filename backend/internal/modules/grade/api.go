@@ -36,8 +36,8 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	admin.POST("/reviews/:id/approve", api.approveReview)
 	admin.POST("/reviews/:id/reject", api.rejectReview)
 	admin.POST("/reviews/:id/unlock", api.unlockReview)
-	all.GET("/students/:id/grades", api.studentGrades)
-	all.GET("/students/:id/gpa", api.studentGPA)
+	studentAdmin.GET("/students/:id/grades", api.studentGrades)
+	studentAdmin.GET("/students/:id/gpa", api.studentGPA)
 	admin.POST("/students/:id/recompute", api.recomputeStudentGrade)
 	student.POST("/appeals", api.createAppeal)
 	// 申诉列表师生同路由按身份分视角:学生只见本人,教师见授课课程,校管见全校
@@ -49,9 +49,9 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	studentAdmin.GET("/warnings", api.listWarnings)
 	student.POST("/warnings/:id/ack", api.ackWarning)
 	admin.POST("/warnings/scan", api.scanWarnings)
-	all.POST("/transcripts", api.generateTranscript)
+	studentAdmin.POST("/transcripts", api.generateTranscript)
 	admin.POST("/transcripts/batch", api.generateTranscriptBatch)
-	all.GET("/transcripts/:id", api.downloadTranscript)
+	studentAdmin.GET("/transcripts/:id", api.downloadTranscript)
 	return nil
 }
 

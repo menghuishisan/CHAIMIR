@@ -25,11 +25,7 @@ export function notificationTypeLabel(type: string): string {
   return NOTIFICATION_TYPE_LABELS[type] ?? '平台通知'
 }
 
-/**
- * FORCED_PREFERENCE_HINT 是强制类通知不可关闭的原因说明。
- * 按组说明一次(不再逐条重复):后端把账号安全、成绩流转与平台可用性三类都标成强制,
- * 因此文案要覆盖这三类,不能只写「账号安全与成绩」把系统维护类漏在外面。
- */
+/** 必要提醒的不可关闭说明。 */
 export const FORCED_PREFERENCE_HINT =
   '以下提醒关系到账号安全、成绩流转与平台可用性,不能关闭。'
 

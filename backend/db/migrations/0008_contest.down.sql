@@ -1,6 +1,7 @@
 -- 0008_contest.down.sql 回滚 M8 竞赛模块自有表和 RLS 策略。
 DROP POLICY IF EXISTS vuln_problem_tenant_rls ON vuln_problem;
-DROP POLICY IF EXISTS vuln_source_tenant_rls ON vuln_source;
+DROP POLICY IF EXISTS vuln_source_write_rls ON vuln_source;
+DROP POLICY IF EXISTS vuln_source_read_rls ON vuln_source;
 DROP POLICY IF EXISTS cheat_record_tenant_rls ON cheat_record;
 DROP POLICY IF EXISTS contest_ladder_snapshot_tenant_rls ON contest_ladder_snapshot;
 DROP POLICY IF EXISTS ladder_rank_tenant_rls ON ladder_rank;

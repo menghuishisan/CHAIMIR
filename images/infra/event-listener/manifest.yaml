@@ -27,6 +27,7 @@ env_keys:
     - CHAIMIR_IMAGE_PORT
     - CHAIMIR_HTTP_TIMEOUT_SECONDS
     - CHAIMIR_IMAGE_SERVICE_AUTH_MAX_SKEW_SECONDS
+    - CHAIMIR_IMAGE_SERVICE_AUTH_MAX_NONCES
     - CHAIMIR_EVENT_RPC_URL
     - CHAIMIR_EVENT_CONTRACT_ADDRESS
     - CHAIMIR_EVENT_TOPIC
@@ -80,6 +81,7 @@ infra:
   eco_tags:
     - evm
   resource_spec:
+    volume_source: binding:chain
     components:
       - name: infra
         image_url: "@self"
@@ -90,6 +92,8 @@ infra:
             value: "30"
           - name: CHAIMIR_IMAGE_SERVICE_AUTH_MAX_SKEW_SECONDS
             value: "300"
+          - name: CHAIMIR_IMAGE_SERVICE_AUTH_MAX_NONCES
+            value: "4096"
           - name: CHAIMIR_EVENT_CONFIRMATIONS
             value: "1"
           - name: CHAIMIR_EVENT_MAX_BLOCK_RANGE

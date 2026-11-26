@@ -1,10 +1,10 @@
-// upload 提供跨模块上传安全边界,只表达通用校验结果,不持有业务错误码或用户文案。
 package upload
 
 import (
 	"bytes"
 	"errors"
 	"io"
+	"math"
 	"path"
 	"path/filepath"
 	"strings"
@@ -51,7 +51,7 @@ func CheckSize(size, maxBytes int64) SizeResult {
 	return SizeOK
 }
 
-// ReadBounded 最多读取 maxBytes+1 字节,让调用方能判定超限而不会无界占用内存。
+// ReadBounded 最多读取上限及一个探测字节；最大 int64 上限不再增加，避免溢出。
 func ReadBounded(r io.Reader, maxBytes int64) ([]byte, SizeResult, error) {
 	if r == nil {
 		return nil, SizeEmpty, nil
@@ -60,7 +60,9 @@ func ReadBounded(r io.Reader, maxBytes int64) ([]byte, SizeResult, error) {
 		return nil, SizeTooLarge, nil
 	}
 	limit := maxBytes
-	limit++
+	if limit < math.MaxInt64 {
+		limit++
+	}
 	data, err := io.ReadAll(io.LimitReader(r, limit))
 	if err != nil {
 		return nil, SizeOK, err
@@ -123,9 +125,7 @@ func AttachmentKindValid(fileName, contentType string, content []byte) bool {
 }
 
 // BrandImageKindValid 校验品牌图片(校徽、课程封面)的扩展名、声明 MIME 与内容魔数。
-// 只放行 JPEG/PNG/WEBP:这三种是浏览器普遍支持、且能在小体积下表达标识与封面的位图格式。
-// 不复用 AttachmentKindValid —— 后者还放行 GIF、PDF、纯文本和 JSON,把它用在图片位上,
-// 等于让一份 PDF 或动图挂到校徽和封面槽位;品牌位的类型面必须比通用附件窄。
+// 品牌位只放行 JPEG/PNG/WEBP，不使用通用附件的宽类型集合。
 func BrandImageKindValid(fileName, contentType string, content []byte) bool {
 	ext := strings.ToLower(filepath.Ext(fileName))
 	declared := baseContentType(contentType)
@@ -144,9 +144,8 @@ func BrandImageKindValid(fileName, contentType string, content []byte) bool {
 	}
 }
 
-// BrandImageContentType 按内容魔数判定品牌图片的 MIME,内容不是受支持图片时返回空串。
-// 投放前重新按魔数判定,而不是沿用上传时声明的 MIME:声明值来自客户端,
-// 而这个返回值会进入响应头或 data URI,必须由内容本身决定。
+// BrandImageContentType 按内容魔数判定品牌图片的 MIME，不支持时返回空串。
+// 返回值进入响应头或 data URI，不能沿用客户端声明。
 func BrandImageContentType(content []byte) string {
 	switch {
 	case looksLikeJPEG(content):
@@ -194,37 +193,30 @@ func LooksLikeZip(content []byte) bool {
 	return len(content) >= 4 && content[0] == 'P' && content[1] == 'K' && content[2] == 0x03 && content[3] == 0x04
 }
 
-// looksLikeJPEG 识别 JPEG SOI 魔数。
 func looksLikeJPEG(content []byte) bool {
 	return len(content) >= 3 && content[0] == 0xff && content[1] == 0xd8 && content[2] == 0xff
 }
 
-// looksLikePNG 识别 PNG 文件签名。
 func looksLikePNG(content []byte) bool {
 	return len(content) >= 8 && bytes.Equal(content[:8], []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a})
 }
 
-// looksLikeGIF 识别 GIF87a/GIF89a 文件签名。
 func looksLikeGIF(content []byte) bool {
 	return len(content) >= 6 && (bytes.Equal(content[:6], []byte("GIF87a")) || bytes.Equal(content[:6], []byte("GIF89a")))
 }
 
-// looksLikeWEBP 识别 RIFF WEBP 容器签名。
 func looksLikeWEBP(content []byte) bool {
 	return len(content) >= 12 && bytes.Equal(content[:4], []byte("RIFF")) && bytes.Equal(content[8:12], []byte("WEBP"))
 }
 
-// looksLikeMP4 识别 ISO Base Media File Format 的 ftyp box。
 func looksLikeMP4(content []byte) bool {
 	return len(content) >= 12 && bytes.Equal(content[4:8], []byte("ftyp"))
 }
 
-// looksLikeWebM 识别 WebM 使用的 EBML 文件头。
 func looksLikeWebM(content []byte) bool {
 	return len(content) >= 4 && bytes.Equal(content[:4], []byte{0x1a, 0x45, 0xdf, 0xa3})
 }
 
-// looksLikeText 拒绝二进制控制字符,用于文本类附件的轻量内容校验。
 func looksLikeText(content []byte) bool {
 	for _, b := range content {
 		if b == 0 {
@@ -264,7 +256,6 @@ func SafeArchiveDirectoryName(name string) bool {
 	return clean != ".." && !path.IsAbs(clean) && !strings.HasPrefix(clean, "../") && !strings.Contains(clean, ":")
 }
 
-// baseContentType 去掉 MIME 参数并规整大小写。
 func baseContentType(contentType string) string {
 	return strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
 }

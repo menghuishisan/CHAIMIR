@@ -1,4 +1,3 @@
-// contest service_cheat 文件实现防作弊线索查询和人工处理记录。
 package contest
 
 import (
@@ -8,6 +7,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
 )
@@ -24,7 +24,7 @@ func (s *Service) CreateCheatRecord(ctx context.Context, contestID int64, req Ch
 	}
 	item := CheatRecord{ID: s.ids.Generate(), TenantID: id.TenantID, ContestID: contestID, TeamID: req.TeamID.Int64(), Type: req.Type, Evidence: req.Evidence, Action: req.Action, OperatorID: id.AccountID}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		contest, err := s.loadContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID)
+		contest, err := s.lockContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID)
 		if err != nil {
 			return err
 		}
@@ -36,25 +36,28 @@ func (s *Service) CreateCheatRecord(ctx context.Context, contestID int64, req Ch
 			return err
 		}
 		if team.ContestID != contestID {
-			return validateCheatTeamError()
+			return apperr.ErrContestCheatInvalid
 		}
 		item, err = tx.CreateCheatRecord(ctx, item)
 		if err != nil {
 			return err
 		}
-		if item.Action == CheatActionPenalty {
-			if err := s.applyCheatPenalty(ctx, tx, id.TenantID, contestID, item.TeamID, float64FromMap(item.Evidence, "penalty_score", 0)); err != nil {
-				return err
+		switch item.Action {
+		case CheatActionPenalty:
+			if contest.Mode == ContestModeSolve {
+				err = s.refreshTeamRank(ctx, tx, id.TenantID, contestID, item.TeamID)
+			} else {
+				penalty, _ := jsonx.Float64FromAnyOK(item.Evidence["penalty_score"])
+				err = s.applyBattlePenalty(ctx, tx, id.TenantID, contestID, item.TeamID, penalty)
 			}
+		case CheatActionDisqualify:
+			err = tx.RefreshContestRanks(ctx, id.TenantID, contestID)
 		}
-		if item.Action == CheatActionDisqualify {
-			return tx.RefreshContestRanks(ctx, id.TenantID, contestID)
+		if err != nil {
+			return err
 		}
-		return err
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.cheat.record", auditTargetCheatRecord, item.ID, map[string]any{"contest_id": contestID, "team_id": req.TeamID})
 	}); err != nil {
-		return CheatRecordDTO{}, err
-	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.cheat.record", auditTargetCheatRecord, item.ID, map[string]any{"contest_id": contestID, "team_id": req.TeamID}); err != nil {
 		return CheatRecordDTO{}, err
 	}
 	return cheatDTOFromModel(item), nil
@@ -106,6 +109,7 @@ func (s *Service) ListCheatSuspects(ctx context.Context, contestID, problemID in
 	codeHash = strings.TrimSpace(codeHash)
 	excludeSourceRef = strings.TrimSpace(excludeSourceRef)
 	var problem ContestProblem
+	var sourceRefs []string
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		contest, err := s.loadContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID)
 		if err != nil {
@@ -119,13 +123,17 @@ func (s *Service) ListCheatSuspects(ctx context.Context, contestID, problemID in
 			return err
 		}
 		if problem.ContestID != contestID {
-			return validateCheatTeamError()
+			return apperr.ErrContestCheatInvalid
 		}
-		return nil
+		sourceRefs, err = tx.ListSolveSubmissionSourceRefs(ctx, id.TenantID, contestID, problemID)
+		return err
 	}); err != nil {
 		return nil, err
 	}
-	matches, err := s.fingerprint.FindSimilarity(ctx, contracts.FingerprintSimilarityRequest{TenantID: id.TenantID, ProblemRef: fmt.Sprintf("%s:%s", problem.ItemCode, problem.ItemVersion), CodeHash: codeHash, ExcludeSourceRef: excludeSourceRef, Threshold: threshold})
+	if len(sourceRefs) == 0 {
+		return []CheatSuspectDTO{}, nil
+	}
+	matches, err := s.fingerprint.FindSimilarity(ctx, contracts.FingerprintSimilarityRequest{TenantID: id.TenantID, ProblemRef: fmt.Sprintf("%s:%s", problem.ItemCode, problem.ItemVersion), SourceRefs: sourceRefs, CodeHash: codeHash, ExcludeSourceRef: excludeSourceRef, Threshold: threshold})
 	if err != nil {
 		return nil, err
 	}
@@ -136,20 +144,12 @@ func (s *Service) ListCheatSuspects(ctx context.Context, contestID, problemID in
 	return out, nil
 }
 
-// validateCheatTeamError 保持违规上下文校验错误码统一。
-func validateCheatTeamError() error {
-	return apperr.ErrContestCheatInvalid
-}
-
-// applyCheatPenalty 将人工确认的扣分处罚写入排行榜投影。
-func (s *Service) applyCheatPenalty(ctx context.Context, tx TxStore, tenantID, contestID, teamID int64, penalty float64) error {
-	if penalty <= 0 {
-		return apperr.ErrContestCheatInvalid
-	}
+// applyBattlePenalty 在赛事锁内对当前 ELO 扣分，罚分已在请求边界校验。
+func (s *Service) applyBattlePenalty(ctx context.Context, tx TxStore, tenantID, contestID, teamID int64, penalty float64) error {
 	rank, err := tx.GetLadderByTeam(ctx, tenantID, contestID, teamID)
 	if err != nil {
 		if isNoRows(err) {
-			rank = LadderRank{ID: s.ids.Generate(), TenantID: tenantID, ContestID: contestID, TeamID: teamID}
+			rank = LadderRank{TenantID: tenantID, ContestID: contestID, TeamID: teamID, Score: s.cfg.BattleELOInitialScore}
 		} else {
 			return err
 		}

@@ -3,6 +3,7 @@ package identity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -181,6 +183,7 @@ func (s *Service) LoginSMS(ctx context.Context, req LoginSMSRequest, device, ip 
 		return LoginResponse{}, err
 	}
 	var account Account
+	var authErr error
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		tenantSnapshot, err := tx.GetTenantByID(ctx, tenantID)
 		if err != nil {
@@ -200,12 +203,19 @@ func (s *Service) LoginSMS(ctx context.Context, req LoginSMSRequest, device, ip 
 			return apperr.ErrIdentityAccountDisabled
 		}
 		if err := s.verifySMSCodeInTx(ctx, tx, tenantID, phoneHash, SMSSceneLogin, codeHash); err != nil {
-			return err
+			if !errors.Is(err, apperr.ErrIdentitySMSInvalid) && !errors.Is(err, apperr.ErrIdentitySMSAttemptsLimited) {
+				return err
+			}
+			authErr = err
+			return s.auditLoginFailure(ctx, a, "sms")
 		}
 		account = a
 		return nil
 	}); err != nil {
 		return LoginResponse{}, apperr.AsAppError(err)
+	}
+	if authErr != nil {
+		return LoginResponse{}, authErr
 	}
 	return s.issueTenantLogin(ctx, account, device, ip)
 }
@@ -587,14 +597,16 @@ func (s *Service) handlePlatformRefreshReplay(ctx context.Context, old PlatformA
 
 // recordPasswordFailure 记录失败次数并在达到阈值时锁定账号。
 func (s *Service) recordPasswordFailure(ctx context.Context, account Account) error {
-	count := account.PwdFailedCount + 1
-	var lockedUntil *time.Time
-	if int(count) >= s.cfg.PasswordMaxFailedCount {
-		t := timex.Now().Add(time.Duration(s.cfg.PasswordLockMinutes) * time.Minute)
-		lockedUntil = &t
+	limit, ok := intx.Int16(s.cfg.PasswordMaxFailedCount)
+	if !ok || limit <= 0 {
+		return apperr.ErrInternal
 	}
+	lockedUntil := timex.Now().Add(time.Duration(s.cfg.PasswordLockMinutes) * time.Minute)
 	return s.store.TenantTx(ctx, account.TenantID, func(ctx context.Context, tx TxStore) error {
-		return tx.RecordPasswordFailure(ctx, account.ID, account.TenantID, count, lockedUntil)
+		if err := tx.RecordPasswordFailure(ctx, account.ID, account.TenantID, limit, &lockedUntil); err != nil {
+			return err
+		}
+		return s.auditLoginFailure(ctx, account, "password")
 	})
 }
 
@@ -631,6 +643,15 @@ func (s *Service) auditLogout(ctx context.Context, tenantID, accountID int64, ro
 	entry, err := audit.BuildEntry(ctx, tenantID, accountID, role, "auth.logout", "identity.auth_session", accountID, map[string]any{"result": "success"})
 	if err != nil {
 		return fmt.Errorf("构造登出审计失败: %w", err)
+	}
+	return s.auditWriter.Write(ctx, entry)
+}
+
+// auditLoginFailure 与失败计数同事务保存认证失败事实，不保存密码或验证码。
+func (s *Service) auditLoginFailure(ctx context.Context, account Account, method string) error {
+	entry, err := audit.BuildEntry(ctx, account.TenantID, account.ID, audit.ActorRoleSystem, "auth.login.failed", "identity.account", account.ID, map[string]any{"method": method})
+	if err != nil {
+		return err
 	}
 	return s.auditWriter.Write(ctx, entry)
 }

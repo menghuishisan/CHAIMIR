@@ -12,8 +12,8 @@ CREATE TABLE IF NOT EXISTS contest (
     start_at TIMESTAMPTZ NOT NULL,
     end_at TIMESTAMPTZ NOT NULL,
     freeze_minutes INT NOT NULL DEFAULT 0 CHECK (freeze_minutes >= 0),
-    rules JSONB NOT NULL DEFAULT '{}'::jsonb,
     status SMALLINT NOT NULL CHECK (status IN (1, 2, 3, 4, 5, 6)),
+    is_leaderboard_push_pending BOOLEAN NOT NULL DEFAULT false,
     archive_lease_token VARCHAR(64) NOT NULL DEFAULT '',
     archive_lease_until TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -23,6 +23,9 @@ CREATE TABLE IF NOT EXISTS contest (
     FOREIGN KEY (tenant_id, organizer_id) REFERENCES account(tenant_id, id),
     CHECK (signup_start < signup_end AND signup_end <= start_at AND start_at < end_at)
 );
+
+CREATE INDEX IF NOT EXISTS idx_contest_leaderboard_pending ON contest(id)
+    WHERE is_leaderboard_push_pending AND deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS contest_problem (
     id BIGINT PRIMARY KEY,
@@ -38,21 +41,14 @@ CREATE TABLE IF NOT EXISTS contest_problem (
             AND dynamic_score - ARRAY['min_score', 'decay_per_solve'] = '{}'::jsonb
             AND jsonb_typeof(dynamic_score->'min_score') = 'number'
             AND jsonb_typeof(dynamic_score->'decay_per_solve') = 'number'
-        )
-    ),
-    battle_config JSONB CHECK (
-        battle_config IS NULL OR (
-            jsonb_typeof(battle_config) = 'object'
-            AND battle_config ?& ARRAY['execution_profile', 'entry_roles', 'replay_profile']
-            AND battle_config - ARRAY['execution_profile', 'entry_roles', 'replay_profile'] = '{}'::jsonb
-            AND jsonb_typeof(battle_config->'execution_profile') = 'string'
-            AND battle_config->>'execution_profile' = 'contest-battle'
-            AND jsonb_typeof(battle_config->'entry_roles') = 'array'
-            AND jsonb_typeof(battle_config->'replay_profile') = 'object'
+            AND (dynamic_score->>'min_score')::numeric BETWEEN 1 AND score
+            AND (dynamic_score->>'min_score')::numeric = (dynamic_score->>'min_score')::integer
+            AND (dynamic_score->>'decay_per_solve')::integer > 0
+            AND (dynamic_score->>'decay_per_solve')::numeric = (dynamic_score->>'decay_per_solve')::integer
         )
     ),
     battle_rule SMALLINT CHECK (battle_rule IS NULL OR battle_rule > 0),
-    seq INT NOT NULL DEFAULT 0,
+    seq INT NOT NULL CHECK (seq > 0),
     composition_digest VARCHAR(128),
     composition_snapshot JSONB,
     CHECK ((composition_digest IS NULL AND composition_snapshot IS NULL) OR (composition_digest IS NOT NULL AND composition_snapshot IS NOT NULL)),
@@ -284,8 +280,6 @@ CREATE TABLE IF NOT EXISTS vuln_problem (
     prevalidate_detail JSONB NOT NULL DEFAULT '{}'::jsonb,
     composition_digest VARCHAR(128),
     composition_snapshot JSONB,
-    init_code_ref VARCHAR(255),
-    init_script_ref VARCHAR(255),
     CHECK ((composition_digest IS NULL AND composition_snapshot IS NULL) OR (composition_digest IS NOT NULL AND composition_snapshot IS NOT NULL)),
     content_item_code VARCHAR(96),
     content_item_version VARCHAR(32),
@@ -336,5 +330,11 @@ CREATE POLICY battle_match_tenant_rls ON battle_match USING (tenant_id = current
 CREATE POLICY ladder_rank_tenant_rls ON ladder_rank USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY contest_ladder_snapshot_tenant_rls ON contest_ladder_snapshot USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY cheat_record_tenant_rls ON cheat_record USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY vuln_source_tenant_rls ON vuln_source USING (tenant_id IS NULL OR tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY vuln_source_read_rls ON vuln_source FOR SELECT
+    USING (tenant_id IS NULL OR tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT);
+CREATE POLICY vuln_source_write_rls ON vuln_source FOR ALL
+    USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT
+        OR (tenant_id IS NULL AND NULLIF(current_setting('app.tenant_id', true), '')::BIGINT = 0))
+    WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT
+        OR (tenant_id IS NULL AND NULLIF(current_setting('app.tenant_id', true), '')::BIGINT = 0));
 CREATE POLICY vuln_problem_tenant_rls ON vuln_problem USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);

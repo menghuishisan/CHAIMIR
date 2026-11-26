@@ -4,14 +4,18 @@ package experiment
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
+
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -51,15 +55,25 @@ func (s *Service) ActivateStage(ctx context.Context, instanceID int64, stageNo i
 		}
 		var ok bool
 		stage, ok = stageByNumber(exp.Components.Stages, stageNo)
-		if !ok || !stageUnlocked(stage, checkpoints) {
+		if !ok {
 			return apperr.ErrExperimentInstanceStateInvalid
 		}
 		return nil
 	}); err != nil {
 		return InstanceDTO{}, err
 	}
+	checkpoints, err = s.currentCheckpointResults(ctx, inst, exp, checkpoints)
+	if err != nil {
+		return InstanceDTO{}, err
+	}
+	if !stageUnlocked(stage, checkpoints) {
+		return InstanceDTO{}, apperr.ErrExperimentInstanceStateInvalid
+	}
 	if stageResourcesCreated(inst, stage.Stage) {
-		return instanceDTOFromModel(inst, checkpointDefaults(exp, checkpoints), stageDTOs(exp, inst, checkpoints)), nil
+		return instanceDTOFromModel(inst, checkpoints, stageDTOs(exp, inst, checkpoints)), nil
+	}
+	if inst.Status == InstanceStatusPaused {
+		return InstanceDTO{}, apperr.ErrExperimentInstanceStateInvalid
 	}
 	envs, sims, err := componentsForStage(exp.Components, stage, checkpoints)
 	if err != nil {
@@ -67,6 +81,9 @@ func (s *Service) ActivateStage(ctx context.Context, instanceID int64, stageNo i
 	}
 	sandboxes, simRefs, err := s.createEngineResourcesForStage(ctx, inst, stage.Stage, envs, sims)
 	if err != nil {
+		if cleanupErr := s.destroyCreatedStageResources(ctx, inst, sandboxes, simRefs); cleanupErr != nil {
+			return InstanceDTO{}, apperr.ErrExperimentRecycleFailed.WithCause(errors.Join(err, cleanupErr))
+		}
 		return InstanceDTO{}, err
 	}
 	duplicateActivation := false
@@ -78,13 +95,28 @@ func (s *Service) ActivateStage(ctx context.Context, instanceID int64, stageNo i
 		if err := ensureInstanceAccess(ctx, tx, id.AccountID, latest); err != nil {
 			return err
 		}
-		if latest.Status != InstanceStatusRunning && latest.Status != InstanceStatusPaused {
+		if latest.Status != InstanceStatusRunning || latest.SourceRef != inst.SourceRef || latest.ScopeRef != inst.ScopeRef {
 			return apperr.ErrExperimentInstanceStateInvalid
 		}
 		if stageResourcesCreated(latest, stage.Stage) {
 			inst = latest
 			duplicateActivation = true
 			return nil
+		}
+		current, err := tx.ListCheckpoints(ctx, id.TenantID, instanceID)
+		if err != nil {
+			return err
+		}
+		current, err = s.currentCheckpointResults(ctx, latest, exp, current)
+		if err != nil {
+			return err
+		}
+		_, currentSims, err := componentsForStage(exp.Components, stage, current)
+		if err != nil {
+			return err
+		}
+		if !stageUnlocked(stage, current) || !reflect.DeepEqual(sims, currentSims) {
+			return apperr.ErrExperimentInstanceStateInvalid
 		}
 		if err := s.reconcileCreatedResourceAuthorizations(ctx, tx, latest, sandboxes, simRefs); err != nil {
 			return err
@@ -104,11 +136,13 @@ func (s *Service) ActivateStage(ctx context.Context, instanceID int64, stageNo i
 			return InstanceDTO{}, cleanupErr
 		}
 	}
-	checkpoints, err = s.loadInstanceCheckpoints(ctx, inst.TenantID, inst.ID)
-	if err != nil {
+	if err := s.store.TenantTx(ctx, inst.TenantID, func(ctx context.Context, tx TxStore) error {
+		checkpoints, err = tx.ListCheckpoints(ctx, inst.TenantID, inst.ID)
+		return err
+	}); err != nil {
 		return InstanceDTO{}, err
 	}
-	return instanceDTOFromModel(inst, checkpointDefaults(exp, checkpoints), stageDTOs(exp, inst, checkpoints)), nil
+	return s.instanceWithCurrentJudgements(ctx, inst, exp, checkpoints)
 }
 
 // reconcileCreatedResourceAuthorizations 在实例引用落库前锁住小组并读取最新成员。
@@ -156,71 +190,48 @@ func (s *Service) createEngineResourcesForStage(ctx context.Context, inst Experi
 		return nil, nil, err
 	}
 	var mu sync.Mutex
-	var wg sync.WaitGroup
-	var firstErr error
+	var group errgroup.Group
 	sandboxes := []SandboxRef{}
 	simRefs := []SimSessionRef{}
-	setErr := func(err error) {
-		if err == nil {
-			return
-		}
-		mu.Lock()
-		defer mu.Unlock()
-		if firstErr == nil {
-			firstErr = err
-		}
-	}
 	for _, env := range envs {
 		componentID := strings.TrimSpace(env.ID)
-		wg.Add(1)
-		go func(env EnvComponent, componentID string) {
-			defer wg.Done()
+		group.Go(func() error {
 			if s.sandbox == nil {
-				setErr(apperr.ErrExperimentSandboxUnavailable)
-				return
+				return apperr.ErrExperimentSandboxUnavailable
 			}
-			snapshot := env.CompositionSnapshot
-			info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: inst.TenantID, CompositionSnapshot: snapshot, InitCodeRef: env.InitCodeRef, InitScriptRef: env.InitScriptRef, OwnerAccountID: inst.OwnerAccountID, AuthorizedAccountIDs: authorizedAccountIDs, SourceRef: inst.SourceRef, ScopeRef: inst.ScopeRef, KeepAlive: env.KeepAlive, SnapshotEnabled: env.SnapshotEnabled, KeepAliveMinutes: env.KeepAliveMinutes, SnapshotRetentionMinutes: env.SnapshotRetentionMinutes})
+			info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: inst.TenantID, CompositionSnapshot: env.CompositionSnapshot, InitCodeRef: env.InitCodeRef, InitScriptRef: env.InitScriptRef, OwnerAccountID: inst.OwnerAccountID, AuthorizedAccountIDs: authorizedAccountIDs, SourceRef: inst.SourceRef, ScopeRef: inst.ScopeRef, KeepAlive: env.KeepAlive, SnapshotEnabled: env.SnapshotEnabled, KeepAliveMinutes: env.KeepAliveMinutes, SnapshotRetentionMinutes: env.SnapshotRetentionMinutes})
 			if err != nil {
-				setErr(apperr.ErrExperimentSandboxUnavailable.WithCause(err))
-				return
+				return apperr.ErrExperimentSandboxUnavailable.WithCause(err)
 			}
 			ref := sandboxRefFromContract(componentID, info)
 			ref.Stage = stageNo
 			mu.Lock()
 			sandboxes = append(sandboxes, ref)
 			mu.Unlock()
-		}(env, componentID)
+			return nil
+		})
 	}
 	for _, sim := range sims {
 		componentID := strings.TrimSpace(sim.ID)
-		wg.Add(1)
-		go func(sim SimComponent, componentID string) {
-			defer wg.Done()
+		group.Go(func() error {
 			if s.sim == nil {
-				setErr(apperr.ErrExperimentSimUnavailable)
-				return
+				return apperr.ErrExperimentSimUnavailable
 			}
 			info, err := s.sim.CreateSession(ctx, contracts.SimCreateSessionRequest{TenantID: inst.TenantID, PackageCode: sim.PackageCode, Version: sim.Version, Seed: sim.Seed, InitParams: sim.Params, OwnerAccountID: inst.OwnerAccountID, AuthorizedAccountIDs: authorizedAccountIDs, SourceRef: inst.SourceRef, ScopeRef: inst.ScopeRef})
 			if err != nil {
-				setErr(apperr.ErrExperimentSimUnavailable.WithCause(err))
-				return
+				return apperr.ErrExperimentSimUnavailable.WithCause(err)
 			}
 			ref := simRefFromContract(componentID, info)
 			ref.Stage = stageNo
 			mu.Lock()
 			simRefs = append(simRefs, ref)
 			mu.Unlock()
-		}(sim, componentID)
+			return nil
+		})
 	}
-	wg.Wait()
-	if firstErr != nil {
-		if cleanupErr := s.destroyCreatedStageResources(ctx, inst, sandboxes, simRefs); cleanupErr != nil {
-			return nil, nil, apperr.ErrExperimentRecycleFailed.WithCause(errors.Join(firstErr, cleanupErr))
-		}
-		return nil, nil, firstErr
-	}
-	return sandboxes, simRefs, nil
+	// 等待全部创建结束后再读取结果，失败时也保留成功资源供补偿。
+	err = group.Wait()
+	return sandboxes, simRefs, err
 }
 
 // instanceAuthorizedAccountIDs 在创建阶段资源前固定小组账号集合,避免各环境并发读取出不同授权快照。
@@ -255,31 +266,25 @@ func (s *Service) createInitialEngineResources(ctx context.Context, exp Experime
 	}
 	sandboxes := []SandboxRef{}
 	sims := []SimSessionRef{}
-	current := inst
 	for _, stage := range sortedStages(exp.Components.Stages) {
 		if stage.UnlockCondition != nil {
 			continue
 		}
 		envs, stageSims, err := componentsForStage(exp.Components, stage, nil)
 		if err != nil {
-			return nil, nil, err
+			return sandboxes, sims, err
 		}
 		stageSandboxes, stageSimRefs, err := s.createEngineResourcesForStage(ctx, inst, stage.Stage, envs, stageSims)
-		if err != nil {
-			if cleanupErr := s.destroyCreatedStageResources(ctx, current, sandboxes, sims); cleanupErr != nil {
-				return nil, nil, apperr.ErrExperimentRecycleFailed.WithCause(errors.Join(err, cleanupErr))
-			}
-			return nil, nil, err
-		}
 		sandboxes = append(sandboxes, stageSandboxes...)
 		sims = append(sims, stageSimRefs...)
-		current.SandboxRefs = sandboxes
-		current.SimSessionRefs = sims
+		if err != nil {
+			// 调用者按本次作用域统一补偿，失败时须保留残余引用供重试。
+			return sandboxes, sims, err
+		}
 	}
 	return sandboxes, sims, nil
 }
 
-// componentsForStage 解析阶段组件并把参数绑定注入到对应仿真。
 func componentsForStage(cfg ComponentConfig, stage StageConfig, checkpoints []CheckpointResult) ([]EnvComponent, []SimComponent, error) {
 	envByID := envComponentsByID(cfg.Envs)
 	simByID := simComponentsByID(cfg.Sims)
@@ -306,7 +311,6 @@ func componentsForStage(cfg ComponentConfig, stage StageConfig, checkpoints []Ch
 	return envs, sims, nil
 }
 
-// applyStageBindings 复制仿真参数并注入阶段绑定值。
 func applyStageBindings(sim SimComponent, bindings []ParamBinding, checkpoints []CheckpointResult) (SimComponent, error) {
 	out := sim
 	params, err := jsonx.CloneObjectStrict(sim.Params)
@@ -327,13 +331,12 @@ func applyStageBindings(sim SimComponent, bindings []ParamBinding, checkpoints [
 	return out, nil
 }
 
-// resolveBindingValue 从常量或检查点绑定输出中提取参数值。
 func resolveBindingValue(binding ParamBinding, checkpoints []CheckpointResult) (any, error) {
 	switch strings.TrimSpace(binding.SourceType) {
 	case "constant":
 		return binding.ConstantValue, nil
 	case "checkpoint":
-		source, ok := checkpointResultByID(checkpoints)[strings.TrimSpace(binding.SourceRef)]
+		source, ok := checkpointResultByID(checkpoints, strings.TrimSpace(binding.SourceRef))
 		if !ok {
 			return nil, apperr.ErrExperimentCheckpointInvalid
 		}
@@ -362,7 +365,6 @@ func resolveBindingValue(binding ParamBinding, checkpoints []CheckpointResult) (
 	}
 }
 
-// stageDTOs 计算工作台可展示的阶段状态。
 func stageDTOs(exp Experiment, inst ExperimentInstance, checkpoints []CheckpointResult) []StageDTO {
 	if len(exp.Components.Stages) == 0 {
 		return nil
@@ -380,7 +382,6 @@ func stageDTOs(exp Experiment, inst ExperimentInstance, checkpoints []Checkpoint
 	return out
 }
 
-// stageUnlocked 判断阶段解锁条件是否满足。
 func stageUnlocked(stage StageConfig, checkpoints []CheckpointResult) bool {
 	cond := stage.UnlockCondition
 	if cond == nil || strings.TrimSpace(cond.Type) == "manual" {
@@ -389,11 +390,10 @@ func stageUnlocked(stage StageConfig, checkpoints []CheckpointResult) bool {
 	if strings.TrimSpace(cond.Type) != "checkpoint" {
 		return false
 	}
-	cp, ok := checkpointResultByID(checkpoints)[strings.TrimSpace(cond.CheckpointID)]
-	return ok && cp.Score >= cond.MinScore
+	cp, ok := checkpointResultByID(checkpoints, strings.TrimSpace(cond.CheckpointID))
+	return ok && cp.JudgeStatus == contracts.JudgeTaskStatusDone && cp.Score >= cond.MinScore
 }
 
-// stageResourcesCreated 判断阶段资源是否已经落库。
 func stageResourcesCreated(inst ExperimentInstance, stageNo int32) bool {
 	for _, ref := range inst.SandboxRefs {
 		if ref.Stage == stageNo {
@@ -408,20 +408,6 @@ func stageResourcesCreated(inst ExperimentInstance, stageNo int32) bool {
 	return false
 }
 
-// loadInstanceCheckpoints 在阶段激活落库后重新读取检查点,保证响应展示最新状态。
-func (s *Service) loadInstanceCheckpoints(ctx context.Context, tenantID, instanceID int64) ([]CheckpointResult, error) {
-	var checkpoints []CheckpointResult
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		checkpoints, err = tx.ListCheckpoints(ctx, tenantID, instanceID)
-		return err
-	}); err != nil {
-		return nil, err
-	}
-	return checkpoints, nil
-}
-
-// stageByNumber 按编号查找阶段配置。
 func stageByNumber(stages []StageConfig, stageNo int32) (StageConfig, bool) {
 	for _, stage := range stages {
 		if stage.Stage == stageNo {
@@ -431,23 +417,21 @@ func stageByNumber(stages []StageConfig, stageNo int32) (StageConfig, bool) {
 	return StageConfig{}, false
 }
 
-// sortedStages 返回按阶段号升序排列的副本。
 func sortedStages(stages []StageConfig) []StageConfig {
 	out := append([]StageConfig{}, stages...)
 	sort.Slice(out, func(i, j int) bool { return out[i].Stage < out[j].Stage })
 	return out
 }
 
-// checkpointResultByID 生成检查点结果索引。
-func checkpointResultByID(items []CheckpointResult) map[string]CheckpointResult {
-	out := map[string]CheckpointResult{}
+func checkpointResultByID(items []CheckpointResult, id string) (CheckpointResult, bool) {
 	for _, item := range items {
-		out[item.CheckpointID] = item
+		if item.CheckpointID == id {
+			return item, true
+		}
 	}
-	return out
+	return CheckpointResult{}, false
 }
 
-// envComponentsByID 按显式稳定 ID 生成环境组件索引。
 func envComponentsByID(items []EnvComponent) map[string]EnvComponent {
 	out := map[string]EnvComponent{}
 	for _, item := range items {
@@ -456,7 +440,6 @@ func envComponentsByID(items []EnvComponent) map[string]EnvComponent {
 	return out
 }
 
-// simComponentsByID 按显式稳定 ID 生成仿真组件索引。
 func simComponentsByID(items []SimComponent) map[string]SimComponent {
 	out := map[string]SimComponent{}
 	for _, item := range items {
@@ -517,22 +500,30 @@ func setParamValue(params map[string]any, path string, value any) {
 
 // destroyCreatedStageResources 补偿释放阶段创建中已成功的资源。
 func (s *Service) destroyCreatedStageResources(ctx context.Context, inst ExperimentInstance, sandboxes []SandboxRef, sims []SimSessionRef) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(s.cfg.CleanupTimeoutSeconds)*time.Second)
+	defer cancel()
+	var failures []error
 	for _, ref := range sandboxes {
 		if s.sandbox == nil {
-			return apperr.ErrExperimentRecycleFailed
+			failures = append(failures, apperr.ErrExperimentSandboxUnavailable)
+			break
 		}
 		if err := s.sandbox.DestroySandbox(ctx, contracts.SandboxControlRequest{TenantID: inst.TenantID, SandboxID: ref.SandboxID.Int64(), SourceRef: inst.SourceRef}); err != nil {
-			return apperr.ErrExperimentRecycleFailed.WithCause(err)
+			failures = append(failures, err)
 		}
 	}
 	for _, ref := range sims {
 		if s.sim == nil {
-			return apperr.ErrExperimentRecycleFailed
+			failures = append(failures, apperr.ErrExperimentSimUnavailable)
+			break
 		}
 		req := contracts.SimDestroySessionRequest{TenantID: inst.TenantID, SessionID: ref.SessionID.Int64(), SourceRef: inst.SourceRef}
 		if err := s.sim.DestroySession(ctx, req); err != nil {
-			return apperr.ErrExperimentRecycleFailed.WithCause(err)
+			failures = append(failures, err)
 		}
+	}
+	if err := errors.Join(failures...); err != nil {
+		return apperr.ErrExperimentRecycleFailed.WithCause(err)
 	}
 	return nil
 }

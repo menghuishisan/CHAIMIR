@@ -11,6 +11,34 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const advanceCourseStatuses = `-- name: AdvanceCourseStatuses :exec
+WITH due AS (
+    SELECT id FROM course
+    WHERE deleted_at IS NULL AND status IN (2, 3)
+      AND (end_at <= $1::timestamptz
+        OR (status = 2 AND start_at <= $1::timestamptz))
+    ORDER BY CASE WHEN end_at <= $1::timestamptz THEN 0 ELSE 1 END,
+      CASE WHEN end_at <= $1::timestamptz THEN end_at ELSE start_at END, id
+    LIMIT $2::int
+    FOR UPDATE SKIP LOCKED
+)
+UPDATE course c
+SET status = CASE WHEN end_at <= $1::timestamptz THEN 4 ELSE 3 END,
+    ended_event_pending_at = CASE WHEN end_at <= $1::timestamptz THEN $1::timestamptz ELSE NULL END,
+    updated_at = now()
+FROM due WHERE c.id = due.id
+`
+
+type AdvanceCourseStatusesParams struct {
+	ObservedAt pgtype.Timestamptz `json:"observed_at"`
+	BatchSize  int32              `json:"batch_size"`
+}
+
+func (q *Queries) AdvanceCourseStatuses(ctx context.Context, arg AdvanceCourseStatusesParams) error {
+	_, err := q.db.Exec(ctx, advanceCourseStatuses, arg.ObservedAt, arg.BatchSize)
+	return err
+}
+
 const batchGetCourses = `-- name: BatchGetCourses :many
 SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
@@ -228,6 +256,34 @@ func (q *Queries) ClaimJudgeOutboxAcrossTenants(ctx context.Context, arg ClaimJu
 		return nil, err
 	}
 	return items, nil
+}
+
+const claimNextCourseEndedEvent = `-- name: ClaimNextCourseEndedEvent :one
+SELECT tenant_id, id AS course_id, status, ended_event_pending_at
+FROM course
+WHERE ended_event_pending_at IS NOT NULL AND deleted_at IS NULL
+ORDER BY ended_event_pending_at, id
+LIMIT 1
+FOR UPDATE SKIP LOCKED
+`
+
+type ClaimNextCourseEndedEventRow struct {
+	TenantID            int64              `json:"tenant_id"`
+	CourseID            int64              `json:"course_id"`
+	Status              int16              `json:"status"`
+	EndedEventPendingAt pgtype.Timestamptz `json:"ended_event_pending_at"`
+}
+
+func (q *Queries) ClaimNextCourseEndedEvent(ctx context.Context) (ClaimNextCourseEndedEventRow, error) {
+	row := q.db.QueryRow(ctx, claimNextCourseEndedEvent)
+	var i ClaimNextCourseEndedEventRow
+	err := row.Scan(
+		&i.TenantID,
+		&i.CourseID,
+		&i.Status,
+		&i.EndedEventPendingAt,
+	)
+	return i, err
 }
 
 const claimPendingTeachingGradeEventOutbox = `-- name: ClaimPendingTeachingGradeEventOutbox :many
@@ -1444,9 +1500,9 @@ func (q *Queries) CreateLesson(ctx context.Context, arg CreateLessonParams) (Les
 }
 
 const createSubmission = `-- name: CreateSubmission :one
-INSERT INTO submission (id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at)
-VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, NULL, $7, NULL, $8, $9, now())
-RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
+INSERT INTO submission (id, tenant_id, assignment_id, student_id, attempt_no, content_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at)
+VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, $7, NULL, $8, $9, now())
+RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
 `
 
 type CreateSubmissionParams struct {
@@ -1481,7 +1537,6 @@ func (q *Queries) CreateSubmission(ctx context.Context, arg CreateSubmissionPara
 		&i.StudentID,
 		&i.AttemptNo,
 		&i.ContentRef,
-		&i.JudgeTaskRef,
 		&i.AutoScore,
 		&i.ManualScore,
 		&i.FinalScore,
@@ -1932,6 +1987,67 @@ func (q *Queries) GetCourseExperimentScoreRevision(ctx context.Context, arg GetC
 	return column_1, err
 }
 
+const getCourseForUpdate = `-- name: GetCourseForUpdate :one
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+FROM course
+WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+FOR UPDATE
+`
+
+type GetCourseForUpdateParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+type GetCourseForUpdateRow struct {
+	ID          int64              `json:"id"`
+	TenantID    int64              `json:"tenant_id"`
+	TeacherID   int64              `json:"teacher_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Type        int16              `json:"type"`
+	Difficulty  int16              `json:"difficulty"`
+	CoverRef    pgtype.Text        `json:"cover_ref"`
+	Semester    string             `json:"semester"`
+	Credits     float64            `json:"credits"`
+	Schedule    []byte             `json:"schedule"`
+	StartAt     pgtype.Timestamptz `json:"start_at"`
+	EndAt       pgtype.Timestamptz `json:"end_at"`
+	InviteCode  string             `json:"invite_code"`
+	Status      int16              `json:"status"`
+	Visibility  int16              `json:"visibility"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
+}
+
+func (q *Queries) GetCourseForUpdate(ctx context.Context, arg GetCourseForUpdateParams) (GetCourseForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getCourseForUpdate, arg.TenantID, arg.ID)
+	var i GetCourseForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.TeacherID,
+		&i.Name,
+		&i.Description,
+		&i.Type,
+		&i.Difficulty,
+		&i.CoverRef,
+		&i.Semester,
+		&i.Credits,
+		&i.Schedule,
+		&i.StartAt,
+		&i.EndAt,
+		&i.InviteCode,
+		&i.Status,
+		&i.Visibility,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const getCourseGrade = `-- name: GetCourseGrade :one
 SELECT g.id, g.tenant_id, g.course_id, g.student_id, g.auto_total::float8 AS auto_total, COALESCE(g.override_total::float8, 0)::float8 AS override_total, g.is_overridden, c.grades_locked AS is_locked, g.updated_at
 FROM course_grade g
@@ -2086,6 +2202,36 @@ func (q *Queries) GetLesson(ctx context.Context, arg GetLessonParams) (Lesson, e
 	return i, err
 }
 
+const getLessonForUpdate = `-- name: GetLessonForUpdate :one
+SELECT id, tenant_id, chapter_id, title, content_type, content_ref, sort, created_at, updated_at, deleted_at
+FROM lesson
+WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+FOR UPDATE
+`
+
+type GetLessonForUpdateParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) GetLessonForUpdate(ctx context.Context, arg GetLessonForUpdateParams) (Lesson, error) {
+	row := q.db.QueryRow(ctx, getLessonForUpdate, arg.TenantID, arg.ID)
+	var i Lesson
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ChapterID,
+		&i.Title,
+		&i.ContentType,
+		&i.ContentRef,
+		&i.Sort,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const getLessonProgress = `-- name: GetLessonProgress :one
 SELECT id, tenant_id, lesson_id, student_id, status, video_pos, duration_sec, updated_at
 FROM lesson_progress
@@ -2115,7 +2261,7 @@ func (q *Queries) GetLessonProgress(ctx context.Context, arg GetLessonProgressPa
 }
 
 const getSubmission = `-- name: GetSubmission :one
-SELECT id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
+SELECT id, tenant_id, assignment_id, student_id, attempt_no, content_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
 FROM submission
 WHERE tenant_id = $1 AND id = $2
 FOR UPDATE
@@ -2136,7 +2282,6 @@ func (q *Queries) GetSubmission(ctx context.Context, arg GetSubmissionParams) (S
 		&i.StudentID,
 		&i.AttemptNo,
 		&i.ContentRef,
-		&i.JudgeTaskRef,
 		&i.AutoScore,
 		&i.ManualScore,
 		&i.FinalScore,
@@ -2149,7 +2294,7 @@ func (q *Queries) GetSubmission(ctx context.Context, arg GetSubmissionParams) (S
 }
 
 const getSubmissionBySourceRef = `-- name: GetSubmissionBySourceRef :one
-SELECT s.id, s.tenant_id, s.assignment_id, s.student_id, s.attempt_no, s.content_ref, s.judge_task_ref, s.auto_score, s.manual_score, s.final_score, s.comment, s.is_late, s.status, s.submitted_at
+SELECT s.id, s.tenant_id, s.assignment_id, s.student_id, s.attempt_no, s.content_ref, s.auto_score, s.manual_score, s.final_score, s.comment, s.is_late, s.status, s.submitted_at
 FROM submission s
 JOIN submission_judge_outbox o ON o.tenant_id = s.tenant_id AND o.submission_id = s.id
 WHERE o.tenant_id = $1 AND o.source_ref = $2
@@ -2171,7 +2316,6 @@ func (q *Queries) GetSubmissionBySourceRef(ctx context.Context, arg GetSubmissio
 		&i.StudentID,
 		&i.AttemptNo,
 		&i.ContentRef,
-		&i.JudgeTaskRef,
 		&i.AutoScore,
 		&i.ManualScore,
 		&i.FinalScore,
@@ -2623,144 +2767,6 @@ func (q *Queries) ListCourseMembers(ctx context.Context, arg ListCourseMembersPa
 			&i.StudentID,
 			&i.JoinedAt,
 			&i.JoinMode,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listCoursesDueToEnd = `-- name: ListCoursesDueToEnd :many
-SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
-FROM course
-WHERE deleted_at IS NULL AND status IN (2, 3) AND end_at <= $1
-ORDER BY end_at ASC, id ASC
-`
-
-type ListCoursesDueToEndRow struct {
-	ID          int64              `json:"id"`
-	TenantID    int64              `json:"tenant_id"`
-	TeacherID   int64              `json:"teacher_id"`
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	Type        int16              `json:"type"`
-	Difficulty  int16              `json:"difficulty"`
-	CoverRef    pgtype.Text        `json:"cover_ref"`
-	Semester    string             `json:"semester"`
-	Credits     float64            `json:"credits"`
-	Schedule    []byte             `json:"schedule"`
-	StartAt     pgtype.Timestamptz `json:"start_at"`
-	EndAt       pgtype.Timestamptz `json:"end_at"`
-	InviteCode  string             `json:"invite_code"`
-	Status      int16              `json:"status"`
-	Visibility  int16              `json:"visibility"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
-}
-
-func (q *Queries) ListCoursesDueToEnd(ctx context.Context, endAt pgtype.Timestamptz) ([]ListCoursesDueToEndRow, error) {
-	rows, err := q.db.Query(ctx, listCoursesDueToEnd, endAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListCoursesDueToEndRow{}
-	for rows.Next() {
-		var i ListCoursesDueToEndRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.TenantID,
-			&i.TeacherID,
-			&i.Name,
-			&i.Description,
-			&i.Type,
-			&i.Difficulty,
-			&i.CoverRef,
-			&i.Semester,
-			&i.Credits,
-			&i.Schedule,
-			&i.StartAt,
-			&i.EndAt,
-			&i.InviteCode,
-			&i.Status,
-			&i.Visibility,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.DeletedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listCoursesDueToRun = `-- name: ListCoursesDueToRun :many
-SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
-FROM course
-WHERE deleted_at IS NULL AND status = 2 AND start_at <= $1
-ORDER BY start_at ASC, id ASC
-`
-
-type ListCoursesDueToRunRow struct {
-	ID          int64              `json:"id"`
-	TenantID    int64              `json:"tenant_id"`
-	TeacherID   int64              `json:"teacher_id"`
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	Type        int16              `json:"type"`
-	Difficulty  int16              `json:"difficulty"`
-	CoverRef    pgtype.Text        `json:"cover_ref"`
-	Semester    string             `json:"semester"`
-	Credits     float64            `json:"credits"`
-	Schedule    []byte             `json:"schedule"`
-	StartAt     pgtype.Timestamptz `json:"start_at"`
-	EndAt       pgtype.Timestamptz `json:"end_at"`
-	InviteCode  string             `json:"invite_code"`
-	Status      int16              `json:"status"`
-	Visibility  int16              `json:"visibility"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
-}
-
-func (q *Queries) ListCoursesDueToRun(ctx context.Context, startAt pgtype.Timestamptz) ([]ListCoursesDueToRunRow, error) {
-	rows, err := q.db.Query(ctx, listCoursesDueToRun, startAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListCoursesDueToRunRow{}
-	for rows.Next() {
-		var i ListCoursesDueToRunRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.TenantID,
-			&i.TeacherID,
-			&i.Name,
-			&i.Description,
-			&i.Type,
-			&i.Difficulty,
-			&i.CoverRef,
-			&i.Semester,
-			&i.Credits,
-			&i.Schedule,
-			&i.StartAt,
-			&i.EndAt,
-			&i.InviteCode,
-			&i.Status,
-			&i.Visibility,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -3421,7 +3427,7 @@ func (q *Queries) ListStudentProgressByCourse(ctx context.Context, arg ListStude
 }
 
 const listSubmissionsByAssignment = `-- name: ListSubmissionsByAssignment :many
-SELECT id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
+SELECT id, tenant_id, assignment_id, student_id, attempt_no, content_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
 FROM submission
 WHERE tenant_id = $1
   AND assignment_id = $2
@@ -3469,7 +3475,6 @@ func (q *Queries) ListSubmissionsByAssignment(ctx context.Context, arg ListSubmi
 			&i.StudentID,
 			&i.AttemptNo,
 			&i.ContentRef,
-			&i.JudgeTaskRef,
 			&i.AutoScore,
 			&i.ManualScore,
 			&i.FinalScore,
@@ -3626,6 +3631,24 @@ func (q *Queries) LockCourseGradeWrites(ctx context.Context, arg LockCourseGrade
 	var grades_locked bool
 	err := row.Scan(&grades_locked)
 	return grades_locked, err
+}
+
+const markCourseEndedEventPublished = `-- name: MarkCourseEndedEventPublished :execrows
+UPDATE course SET ended_event_pending_at = NULL
+WHERE tenant_id = $1 AND id = $2 AND ended_event_pending_at IS NOT NULL
+`
+
+type MarkCourseEndedEventPublishedParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) MarkCourseEndedEventPublished(ctx context.Context, arg MarkCourseEndedEventPublishedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markCourseEndedEventPublished, arg.TenantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const markJudgeOutboxFailedResult = `-- name: MarkJudgeOutboxFailedResult :one
@@ -4070,7 +4093,7 @@ SET auto_score = NULL,
     final_score = NULL,
     status = 1
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
+RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
 `
 
 type RevokeSubmissionAutoScoreParams struct {
@@ -4088,7 +4111,6 @@ func (q *Queries) RevokeSubmissionAutoScore(ctx context.Context, arg RevokeSubmi
 		&i.StudentID,
 		&i.AttemptNo,
 		&i.ContentRef,
-		&i.JudgeTaskRef,
 		&i.AutoScore,
 		&i.ManualScore,
 		&i.FinalScore,
@@ -4157,7 +4179,8 @@ func (q *Queries) SetCourseGradesLock(ctx context.Context, arg SetCourseGradesLo
 
 const setCourseStatus = `-- name: SetCourseStatus :one
 UPDATE course
-SET status = $3, updated_at = now()
+SET status = $3, updated_at = now(),
+    ended_event_pending_at = CASE WHEN status <> $3 AND $3 IN (4, 5) THEN now() ELSE ended_event_pending_at END
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 `
@@ -4300,67 +4323,6 @@ func (q *Queries) SoftDeleteChapter(ctx context.Context, arg SoftDeleteChapterPa
 		&i.CourseID,
 		&i.Title,
 		&i.Sort,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-	)
-	return i, err
-}
-
-const softDeleteCourse = `-- name: SoftDeleteCourse :one
-UPDATE course
-SET deleted_at = now(), updated_at = now()
-WHERE tenant_id = $1 AND id = $2 AND status = 1 AND deleted_at IS NULL
-RETURNING id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
-`
-
-type SoftDeleteCourseParams struct {
-	TenantID int64 `json:"tenant_id"`
-	ID       int64 `json:"id"`
-}
-
-type SoftDeleteCourseRow struct {
-	ID          int64              `json:"id"`
-	TenantID    int64              `json:"tenant_id"`
-	TeacherID   int64              `json:"teacher_id"`
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	Type        int16              `json:"type"`
-	Difficulty  int16              `json:"difficulty"`
-	CoverRef    pgtype.Text        `json:"cover_ref"`
-	Semester    string             `json:"semester"`
-	Credits     float64            `json:"credits"`
-	Schedule    []byte             `json:"schedule"`
-	StartAt     pgtype.Timestamptz `json:"start_at"`
-	EndAt       pgtype.Timestamptz `json:"end_at"`
-	InviteCode  string             `json:"invite_code"`
-	Status      int16              `json:"status"`
-	Visibility  int16              `json:"visibility"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
-}
-
-func (q *Queries) SoftDeleteCourse(ctx context.Context, arg SoftDeleteCourseParams) (SoftDeleteCourseRow, error) {
-	row := q.db.QueryRow(ctx, softDeleteCourse, arg.TenantID, arg.ID)
-	var i SoftDeleteCourseRow
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.TeacherID,
-		&i.Name,
-		&i.Description,
-		&i.Type,
-		&i.Difficulty,
-		&i.CoverRef,
-		&i.Semester,
-		&i.Credits,
-		&i.Schedule,
-		&i.StartAt,
-		&i.EndAt,
-		&i.InviteCode,
-		&i.Status,
-		&i.Visibility,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
@@ -4721,32 +4683,26 @@ func (q *Queries) UpdateLesson(ctx context.Context, arg UpdateLessonParams) (Les
 
 const updateSubmissionAutoScore = `-- name: UpdateSubmissionAutoScore :one
 UPDATE submission
-SET auto_score = $3,
-    final_score = CASE
-        WHEN COALESCE((content_ref->>'manual_max_score')::integer, 0) > 0 AND manual_score IS NULL THEN NULL
-        ELSE $4
-    END,
-    status = CASE
-        WHEN COALESCE((content_ref->>'manual_max_score')::integer, 0) > 0 AND manual_score IS NULL THEN 2
-        ELSE 3
-    END
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
+SET auto_score = $1,
+    final_score = $2::integer,
+    status = CASE WHEN $2::integer IS NULL THEN 2 ELSE 3 END
+WHERE tenant_id = $3 AND id = $4
+RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
 `
 
 type UpdateSubmissionAutoScoreParams struct {
-	TenantID   int64       `json:"tenant_id"`
-	ID         int64       `json:"id"`
-	AutoScore  pgtype.Int4 `json:"auto_score"`
-	FinalScore pgtype.Int4 `json:"final_score"`
+	AutoScore    pgtype.Int4 `json:"auto_score"`
+	FinalScore   pgtype.Int4 `json:"final_score"`
+	TenantID     int64       `json:"tenant_id"`
+	SubmissionID int64       `json:"submission_id"`
 }
 
 func (q *Queries) UpdateSubmissionAutoScore(ctx context.Context, arg UpdateSubmissionAutoScoreParams) (Submission, error) {
 	row := q.db.QueryRow(ctx, updateSubmissionAutoScore,
-		arg.TenantID,
-		arg.ID,
 		arg.AutoScore,
 		arg.FinalScore,
+		arg.TenantID,
+		arg.SubmissionID,
 	)
 	var i Submission
 	err := row.Scan(
@@ -4756,42 +4712,6 @@ func (q *Queries) UpdateSubmissionAutoScore(ctx context.Context, arg UpdateSubmi
 		&i.StudentID,
 		&i.AttemptNo,
 		&i.ContentRef,
-		&i.JudgeTaskRef,
-		&i.AutoScore,
-		&i.ManualScore,
-		&i.FinalScore,
-		&i.Comment,
-		&i.IsLate,
-		&i.Status,
-		&i.SubmittedAt,
-	)
-	return i, err
-}
-
-const updateSubmissionJudgeRef = `-- name: UpdateSubmissionJudgeRef :one
-UPDATE submission
-SET judge_task_ref = $3
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
-`
-
-type UpdateSubmissionJudgeRefParams struct {
-	TenantID     int64       `json:"tenant_id"`
-	ID           int64       `json:"id"`
-	JudgeTaskRef pgtype.Text `json:"judge_task_ref"`
-}
-
-func (q *Queries) UpdateSubmissionJudgeRef(ctx context.Context, arg UpdateSubmissionJudgeRefParams) (Submission, error) {
-	row := q.db.QueryRow(ctx, updateSubmissionJudgeRef, arg.TenantID, arg.ID, arg.JudgeTaskRef)
-	var i Submission
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.AssignmentID,
-		&i.StudentID,
-		&i.AttemptNo,
-		&i.ContentRef,
-		&i.JudgeTaskRef,
 		&i.AutoScore,
 		&i.ManualScore,
 		&i.FinalScore,
@@ -4805,41 +4725,29 @@ func (q *Queries) UpdateSubmissionJudgeRef(ctx context.Context, arg UpdateSubmis
 
 const updateSubmissionManualGrade = `-- name: UpdateSubmissionManualGrade :one
 UPDATE submission
-SET manual_score = $3,
-    final_score = CASE
-        WHEN auto_score IS NULL AND EXISTS (
-            SELECT 1 FROM submission_judge_outbox o
-            WHERE o.tenant_id = $1 AND o.submission_id = $2
-        ) THEN NULL
-        ELSE $4
-    END,
-    comment = $5,
-    status = CASE
-        WHEN auto_score IS NULL AND EXISTS (
-            SELECT 1 FROM submission_judge_outbox o
-            WHERE o.tenant_id = $1 AND o.submission_id = $2
-        ) THEN status
-        ELSE 3
-    END
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
+SET manual_score = $1,
+    final_score = $2::integer,
+    comment = $3,
+    status = CASE WHEN $2::integer IS NULL THEN status ELSE 3 END
+WHERE tenant_id = $4 AND id = $5
+RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
 `
 
 type UpdateSubmissionManualGradeParams struct {
-	TenantID     int64       `json:"tenant_id"`
-	SubmissionID int64       `json:"submission_id"`
 	ManualScore  pgtype.Int4 `json:"manual_score"`
 	FinalScore   pgtype.Int4 `json:"final_score"`
 	Comment      pgtype.Text `json:"comment"`
+	TenantID     int64       `json:"tenant_id"`
+	SubmissionID int64       `json:"submission_id"`
 }
 
 func (q *Queries) UpdateSubmissionManualGrade(ctx context.Context, arg UpdateSubmissionManualGradeParams) (Submission, error) {
 	row := q.db.QueryRow(ctx, updateSubmissionManualGrade,
-		arg.TenantID,
-		arg.SubmissionID,
 		arg.ManualScore,
 		arg.FinalScore,
 		arg.Comment,
+		arg.TenantID,
+		arg.SubmissionID,
 	)
 	var i Submission
 	err := row.Scan(
@@ -4849,7 +4757,6 @@ func (q *Queries) UpdateSubmissionManualGrade(ctx context.Context, arg UpdateSub
 		&i.StudentID,
 		&i.AttemptNo,
 		&i.ContentRef,
-		&i.JudgeTaskRef,
 		&i.AutoScore,
 		&i.ManualScore,
 		&i.FinalScore,

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -30,8 +31,16 @@ type Bus interface {
 	Publish(ctx context.Context, subject string, payload any) error
 	// Subscribe 以主题和稳定队列标识注册持久订阅。
 	Subscribe(subject, queue string, handler Handler) (Subscription, error)
-	// Close 关闭底层连接。
-	Close()
+	// Close 关闭底层连接并返回释放失败。
+	Close() error
+}
+
+// FanoutBus 把控制信号送到每个在线副本,订阅进度不按副本持久化。
+type FanoutBus interface {
+	// PublishFanout 等待 JetStream 持久接收控制信号。
+	PublishFanout(ctx context.Context, subject string, payload any) error
+	// SubscribeFanout 为当前进程建立独立的临时消费,各进程都收到新信号。
+	SubscribeFanout(subject string, handler Handler) (Subscription, error)
 }
 
 // Handler 处理一条事件消息。
@@ -51,7 +60,7 @@ type natsBus struct {
 	cancel context.CancelFunc
 	mu     sync.Mutex
 	closed bool
-	subs   []*durableSubscription
+	subs   []Subscription
 }
 
 // durableSubscription 仅停止当前进程消费,保留broker端durable与确认进度。
@@ -59,6 +68,32 @@ type durableSubscription struct {
 	consume jetstream.ConsumeContext
 	cancel  context.CancelFunc
 	once    sync.Once
+}
+
+type fanoutSubscription struct {
+	consume      jetstream.ConsumeContext
+	cancel       context.CancelFunc
+	js           jetstream.JetStream
+	stream       string
+	consumerName string
+	timeout      time.Duration
+	once         sync.Once
+	err          error
+}
+
+// Unsubscribe 停止本地投递并删除临时消费。
+func (s *fanoutSubscription) Unsubscribe() error {
+	s.once.Do(func() {
+		s.cancel()
+		s.consume.Stop()
+		ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
+		defer cancel()
+		s.err = s.js.DeleteConsumer(ctx, s.stream, s.consumerName)
+		if errors.Is(s.err, jetstream.ErrConsumerNotFound) {
+			s.err = nil
+		}
+	})
+	return s.err
 }
 
 // Unsubscribe 取消本地处理,不删除consumer或尚未确认的事件。
@@ -104,8 +139,8 @@ func New(cfg config.NATSConfig) (Bus, error) {
 		_, err = js.CreateOrUpdateStream(requestCtx, stream)
 		requestCancel()
 		if err != nil {
-			b.Close()
-			return nil, fmt.Errorf("建立持久事件流 %s 失败: %w", stream.Name, err)
+			closeErr := b.Close()
+			return nil, errors.Join(fmt.Errorf("建立持久事件流 %s 失败: %w", stream.Name, err), closeErr)
 		}
 	}
 	return b, nil
@@ -130,6 +165,11 @@ func (b *natsBus) Publish(ctx context.Context, subject string, payload any) erro
 		return fmt.Errorf("持久发布事件 %s 失败: %w", subject, err)
 	}
 	return nil
+}
+
+// PublishFanout 向该主题的所有在线进程发送控制信号。
+func (b *natsBus) PublishFanout(ctx context.Context, subject string, payload any) error {
+	return b.Publish(ctx, subject, payload)
 }
 
 // Subscribe 使用主题和队列的稳定摘要创建durable,从保留事件最早处恢复。
@@ -177,24 +217,84 @@ func (b *natsBus) Subscribe(subject, queue string, handler Handler) (Subscriptio
 	return sub, nil
 }
 
-// Close 取消当前处理并关闭连接,未确认消息仍由broker保留重投。
-func (b *natsBus) Close() {
-	if b == nil || b.conn == nil {
-		return
+// SubscribeFanout 为当前进程建立独立临时消费,确保所有在线进程都收到信号。
+func (b *natsBus) SubscribeFanout(subject string, handler Handler) (Subscription, error) {
+	if b == nil || b.js == nil {
+		return nil, fmt.Errorf("事件总线未初始化")
+	}
+	subject = strings.TrimSpace(subject)
+	if !concreteSubject(subject) {
+		return nil, fmt.Errorf("广播主题非法")
+	}
+	if handler == nil {
+		return nil, fmt.Errorf("广播处理器不能为空")
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed {
-		return
+		return nil, fmt.Errorf("事件总线已关闭")
+	}
+	requestCtx, requestCancel := b.requestContext(b.ctx)
+	consumer, err := b.js.CreateConsumer(requestCtx, b.cfg.stream, jetstream.ConsumerConfig{
+		FilterSubject: subject, DeliverPolicy: jetstream.DeliverNewPolicy, AckPolicy: jetstream.AckExplicitPolicy,
+		AckWait: b.cfg.ackWait, MaxDeliver: -1, InactiveThreshold: b.cfg.inactiveThreshold,
+	})
+	requestCancel()
+	if err != nil {
+		return nil, fmt.Errorf("建立广播消费 %s 失败: %w", subject, err)
+	}
+	info := consumer.CachedInfo()
+	if info == nil || info.Name == "" {
+		return nil, fmt.Errorf("广播消费 %s 缺少服务端名称", subject)
+	}
+	subCtx, cancel := context.WithCancel(b.ctx)
+	consume, err := consumer.Consume(func(msg jetstream.Msg) {
+		b.handleMessage(subCtx, subject, "fanout", msg, handler)
+	}, jetstream.PullMaxMessages(1), jetstream.ConsumeErrHandler(func(_ jetstream.ConsumeContext, err error) {
+		logging.ErrorContext(subCtx, "广播消费连接异常", err.Error(), slog.String("subject", subject))
+	}))
+	if err != nil {
+		cancel()
+		requestCtx, requestCancel := b.requestContext(context.Background())
+		deleteErr := b.js.DeleteConsumer(requestCtx, b.cfg.stream, info.Name)
+		requestCancel()
+		failures := []error{fmt.Errorf("订阅广播事件 %s 失败: %w", subject, err)}
+		if deleteErr != nil && !errors.Is(deleteErr, jetstream.ErrConsumerNotFound) {
+			failures = append(failures, fmt.Errorf("删除未使用的广播消费失败: %w", deleteErr))
+		}
+		return nil, errors.Join(failures...)
+	}
+	wrapped := &fanoutSubscription{
+		consume: consume, cancel: cancel, js: b.js, stream: b.cfg.stream,
+		consumerName: info.Name, timeout: b.cfg.requestTimeout,
+	}
+	b.subs = append(b.subs, wrapped)
+	return wrapped, nil
+}
+
+// Close 取消当前处理并关闭连接,未确认消息仍由broker保留重投。
+func (b *natsBus) Close() error {
+	if b == nil || b.conn == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return nil
 	}
 	b.closed = true
 	b.cancel()
+	var closeErr error
 	for _, sub := range b.subs {
 		if err := sub.Unsubscribe(); err != nil {
-			logging.ErrorContext(b.ctx, "停止持久订阅失败", err.Error())
+			closeErr = errors.Join(closeErr, fmt.Errorf("停止持久订阅失败: %w", err))
 		}
 	}
+	if err := b.conn.FlushTimeout(b.cfg.requestTimeout); err != nil {
+		closeErr = errors.Join(closeErr, fmt.Errorf("刷新事件总线连接失败: %w", err))
+	}
 	b.conn.Close()
+	return closeErr
 }
 
 // durableName 在不同副本/重启间保持同一主题与队列的唯一消费身份。

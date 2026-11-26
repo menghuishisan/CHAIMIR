@@ -130,7 +130,6 @@ type Submission struct {
 	StudentID    int64              `json:"student_id"`
 	AttemptNo    int32              `json:"attempt_no"`
 	ContentRef   []byte             `json:"content_ref"`
-	JudgeTaskRef pgtype.Text        `json:"judge_task_ref"`
 	AutoScore    pgtype.Int4        `json:"auto_score"`
 	ManualScore  pgtype.Int4        `json:"manual_score"`
 	FinalScore   pgtype.Int4        `json:"final_score"`

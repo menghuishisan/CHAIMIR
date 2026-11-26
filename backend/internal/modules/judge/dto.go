@@ -50,19 +50,21 @@ type CatalogJudgerResponse struct {
 
 // SubmitTaskRequest 是内部服务提交判题任务的请求。
 type SubmitTaskRequest struct {
-	JudgerCode       string         `json:"judger_code"`
-	ItemCode         string         `json:"item_code"`
-	ItemVersion      string         `json:"item_version"`
-	CodeStorageKey   string         `json:"code_storage_key"`
-	CodeHash         string         `json:"code_hash"`
-	SubmitterID      ids.ID         `json:"submitter_id"`
-	SourceOwnerID    ids.ID         `json:"source_owner_id"`
-	SourceCourseID   ids.ID         `json:"source_course_id"`
-	SourceScope      string         `json:"source_scope"`
-	SandboxMode      string         `json:"sandbox_mode"`
-	TargetSandboxRef string         `json:"target_sandbox_ref"`
-	ExtraInput       map[string]any `json:"extra_input"`
-	Priority         int16          `json:"priority"`
+	JudgerCode               string         `json:"judger_code"`
+	ItemCode                 string         `json:"item_code"`
+	ItemVersion              string         `json:"item_version"`
+	CodeStorageKey           string         `json:"code_storage_key"`
+	CodeHash                 string         `json:"code_hash"`
+	SubmitterID              ids.ID         `json:"submitter_id"`
+	SourceOwnerID            ids.ID         `json:"source_owner_id"`
+	SourceCourseID           ids.ID         `json:"source_course_id"`
+	SourceScope              string         `json:"source_scope"`
+	SandboxMode              string         `json:"sandbox_mode"`
+	TargetSandboxRef         string         `json:"target_sandbox_ref"`
+	SandboxSourceRef         string         `json:"sandbox_source_ref"`
+	SandboxCompositionDigest string         `json:"sandbox_composition_digest"`
+	ExtraInput               map[string]any `json:"extra_input"`
+	Priority                 int16          `json:"priority"`
 }
 
 // ManualScoreRequest 是教师录入人工评分的请求。
@@ -98,13 +100,14 @@ type JudgeTaskResultDTO struct {
 
 // JudgeResultDetailDTO 是单条脱敏的判题可解释详情。
 type JudgeResultDetailDTO struct {
-	Case          string `json:"case,omitempty"`
-	Source        string `json:"source,omitempty"`
-	Target        string `json:"target,omitempty"`
-	Passed        bool   `json:"passed"`
-	ExpectedLabel string `json:"expected_label,omitempty"`
-	Actual        string `json:"actual,omitempty"`
-	Hint          string `json:"hint,omitempty"`
+	Case          string                 `json:"case,omitempty"`
+	Source        string                 `json:"source,omitempty"`
+	Target        string                 `json:"target,omitempty"`
+	Passed        bool                   `json:"passed"`
+	ExpectedLabel string                 `json:"expected_label,omitempty"`
+	Actual        string                 `json:"actual,omitempty"`
+	Hint          string                 `json:"hint,omitempty"`
+	Outcome       contracts.JudgeOutcome `json:"outcome,omitempty"`
 }
 
 // RejudgeBatchRequest 是按来源批量重判的请求。
@@ -114,9 +117,9 @@ type RejudgeBatchRequest struct {
 
 // FingerprintSimilarityRequest 是相似度查重请求。
 type FingerprintSimilarityRequest struct {
-	ProblemRef       string  `json:"problem_ref"`
-	CodeStorageKey   string  `json:"code_storage_key"`
-	CodeHash         string  `json:"code_hash"`
-	ExcludeSourceRef string  `json:"exclude_source_ref"`
-	Threshold        float64 `json:"threshold"`
+	ProblemRef       string   `json:"problem_ref"`
+	SourceRefs       []string `json:"source_refs"`
+	CodeHash         string   `json:"code_hash"`
+	ExcludeSourceRef string   `json:"exclude_source_ref"`
+	Threshold        float64  `json:"threshold"`
 }

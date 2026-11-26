@@ -1,7 +1,3 @@
-// clipboard 提供全站唯一的复制入口:邀请码、分享链接、操作编号等都走这里。
-// 剪贴板是浏览器能力,权限被拒或非安全上下文都会失败,因此必须显式处理失败而不是静默(CLAUDE.md §8);
-// 失败属前端自身错误,只给场景化用户向文案、不生成编号,技术原因进 console(规范 §6.7 B)。
-
 import { toast } from '@chaimir/ui'
 import { errorDiagnostics } from './userFacingError'
 
@@ -13,9 +9,8 @@ export interface CopyTextOptions {
 }
 
 /**
- * copyText 把文本写入剪贴板。
- * 失败时给用户向 Toast 并留结构化日志;成功与否由返回值交回调用方,
- * 让调用方自行决定成功反馈(就近的「已复制」标记或 Toast),不在这里替它选。
+ * copyText 复制文本，失败时提示并记录脱敏原因，返回是否成功。
+ * 成功反馈由调用方决定；前端自身失败不生成报障编号。
  */
 export async function copyText(text: string, { what, operation }: CopyTextOptions): Promise<boolean> {
   try {

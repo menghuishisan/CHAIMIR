@@ -1,7 +1,11 @@
-// Content API：题库与模板中心,对应后端 M5 模块。
-
+// 封装题库、共享资源、分类和组卷接口。
 import { ApiClient, encodePathSegment } from '../client'
-import type { ContentAuthorType, ContentDifficulty, ContentStatus, ContentType, ContentVisibility } from '../constants/content'
+import type {
+  ContentDifficulty,
+  ContentStatus,
+  ContentType,
+  ContentVisibility,
+} from '../constants/content'
 import type { PaginatedResponse, SnowflakeID } from '../types/common'
 import type {
   CloneItemRequest,
@@ -29,7 +33,7 @@ export class ContentApi {
    */
   constructor(private client: ApiClient) {}
 
-  // getItems 查询内容列表。
+  /** getItems 按条件查询题目；author 指向作者账号，不是来源枚举。 */
   async getItems(params?: {
     type?: ContentType
     category?: SnowflakeID
@@ -39,74 +43,71 @@ export class ContentApi {
     keyword?: string
     visibility?: ContentVisibility
     status?: ContentStatus
-    author?: ContentAuthorType
+    author?: SnowflakeID
     page?: number
     size?: number
   }): Promise<PaginatedResponse<ContentItem>> {
     return this.client.get('/content/items', params)
   }
 
-  // getItemFace 查询题面视角内容。
   async getItemFace(code: string, version: string): Promise<ContentItemSnapshot> {
-    return this.client.get(`/content/items/${encodePathSegment(code)}/${encodePathSegment(version)}`)
+    return this.client.get(
+      `/content/items/${encodePathSegment(code)}/${encodePathSegment(version)}`
+    )
   }
 
-  // getItemFull 查询全量内容。
   async getItemFull(code: string, version: string): Promise<ContentItemSnapshot> {
-    return this.client.get(`/content/items/${encodePathSegment(code)}/${encodePathSegment(version)}/full`)
+    return this.client.get(
+      `/content/items/${encodePathSegment(code)}/${encodePathSegment(version)}/full`
+    )
   }
 
-  // createItem 创建内容草稿。
   async createItem(data: CreateItemRequest): Promise<ContentItemSnapshot> {
     return this.client.post('/content/items', data)
   }
 
-  // updateItem 更新内容草稿。
   async updateItem(itemId: string, data: UpdateItemRequest): Promise<ContentItemSnapshot> {
     return this.client.patch(`/content/items/${encodePathSegment(itemId)}`, data)
   }
 
-  // publishItem 发布内容。
   async publishItem(itemId: string): Promise<ContentItem> {
     return this.client.post(`/content/items/${encodePathSegment(itemId)}/publish`)
   }
 
-  // deprecateItem 弃用已发布内容。
   async deprecateItem(itemId: string): Promise<ContentItem> {
     return this.client.post(`/content/items/${encodePathSegment(itemId)}/deprecate`)
   }
 
-  // deleteItem 删除草稿内容。
   async deleteItem(itemId: string): Promise<void> {
     return this.client.delete(`/content/items/${encodePathSegment(itemId)}`)
   }
 
-  // getVersions 查询版本列表。
   async getVersions(code: string): Promise<ContentItem[]> {
     return this.client.get(`/content/items/${encodePathSegment(code)}/versions`)
   }
 
-  // createNewVersion 基于现有版本创建新草稿。
   async createNewVersion(code: string, data: NewVersionRequest): Promise<ContentItemSnapshot> {
     return this.client.post(`/content/items/${encodePathSegment(code)}/new-version`, data)
   }
 
-  // cloneItem 克隆内容为独立草稿。
-  async cloneItem(code: string, version: string, data: CloneItemRequest): Promise<ContentItemSnapshot> {
-    return this.client.post(`/content/items/${encodePathSegment(code)}/${encodePathSegment(version)}/clone`, data)
+  /** cloneItem 按所选内容 ID 复制，避免同名版本混淆来源。 */
+  async cloneItem(itemId: SnowflakeID, data: CloneItemRequest): Promise<ContentItemSnapshot> {
+    return this.client.post(`/content/items/${encodePathSegment(itemId)}/clone`, data)
   }
 
-  // shareItem 设为共享库可见。
   async shareItem(itemId: string): Promise<ContentItem> {
     return this.client.post(`/content/items/${encodePathSegment(itemId)}/share`)
   }
 
-  // unshareItem 取消共享库可见。
   async unshareItem(itemId: string): Promise<ContentItem> {
     return this.client.post(`/content/items/${encodePathSegment(itemId)}/unshare`)
   }
 
-  // listShared 浏览共享库。
+  /** getSharedItemFace 精确预览仍在共享库中的题面，不读取答案。 */
+  async getSharedItemFace(itemId: SnowflakeID): Promise<ContentItemSnapshot> {
+    return this.client.get(`/content/shared/${encodePathSegment(itemId)}`)
+  }
+
   async listShared(params?: {
     type?: ContentType
     keyword?: string
@@ -116,7 +117,6 @@ export class ContentApi {
     return this.client.get('/content/shared', params)
   }
 
-  // uploadAttachment 上传题库附件。
   async uploadAttachment(
     file: File,
     resourceId?: string,
@@ -127,52 +127,43 @@ export class ContentApi {
     if (resourceId) {
       formData.append('resource_id', resourceId)
     }
-    return this.client.postFormData('/content/attachments', formData, onProgress)
+    return this.client.sendFormData('POST', '/content/attachments', formData, onProgress)
   }
 
-  // issueAttachmentDownloadGrant 签发附件短时下载授权。
   async issueAttachmentDownloadGrant(
     data: ContentAttachmentDownloadGrantRequest
   ): Promise<ContentAttachmentDownloadGrant> {
     return this.client.post('/content/attachments/download-grant', data)
   }
 
-  // listCategories 查询分类树。
   async listCategories(): Promise<ContentCategory[]> {
     return this.client.get('/content/categories')
   }
 
-  // createCategory 创建分类。
   async createCategory(data: ContentCategoryRequest): Promise<ContentCategory> {
     return this.client.post('/content/categories', data)
   }
 
-  // updateCategory 更新分类。
   async updateCategory(id: string, data: ContentCategoryRequest): Promise<ContentCategory> {
     return this.client.patch(`/content/categories/${encodePathSegment(id)}`, data)
   }
 
-  // deleteCategory 删除分类。
   async deleteCategory(id: string): Promise<ContentCategory> {
     return this.client.delete(`/content/categories/${encodePathSegment(id)}`)
   }
 
-  // listPapers 查询试卷分页。
   async listPapers(params?: { page?: number; size?: number }): Promise<PaginatedResponse<Paper>> {
     return this.client.get('/content/papers', params)
   }
 
-  // createPaper 创建试卷。
   async createPaper(data: CreatePaperRequest): Promise<PaperDetail> {
     return this.client.post('/content/papers', data)
   }
 
-  // getPaper 查询试卷详情。
   async getPaper(id: string): Promise<PaperDetail> {
     return this.client.get(`/content/papers/${encodePathSegment(id)}`)
   }
 
-  // regeneratePaper 重新随机组卷。
   async regeneratePaper(id: string): Promise<PaperDetail> {
     return this.client.post(`/content/papers/${encodePathSegment(id)}/regenerate`)
   }

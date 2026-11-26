@@ -1,10 +1,4 @@
-// 链运行时(平台侧栏,/platform-admin/runtimes)。设计 §7.6:
-// 登记学生做实验用的链环境,走完「填写配置 → 登记镜像 → 自检 → 开放」。十几个。
-// 页头 +「登记运行时」;分段「可用 / 接入中 / 已停用 / 全部」(带数字,写进地址);
-// 卡片网格,每张卡显示名称与短码、生态、状态、自检结果和接入进度链,没走完的写出下一步;整卡链向运行时详情。
-// 登记与修改配置用右侧大抽屉。指标条与常驻说明卡去掉。运行时接口一次返回全部(不分页),计数在本页完成。
-
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router'
 import { Plus, Server } from 'lucide-react'
 import { RuntimeStatus, type SandboxRuntime } from '@chaimir/api-client'
@@ -27,7 +21,6 @@ import { runtimeDisabledReason } from '../../runtimeSpec'
 import { runtimeSelftestStatusTone, runtimeStatusTone } from '../../statusPresentation'
 import { RuntimeFormModal } from './runtime-form'
 
-/** 地址参数:status 分段(默认全部) */
 const RUNTIMES_QUERY = {
   status: { defaultValue: 'all', allowed: ['available', 'onboarding', 'disabled', 'all'] },
 } as const
@@ -39,7 +32,6 @@ const STATUS_SEGMENTS = [
   { value: 'all', label: '全部' },
 ] as const
 
-/** PlatformRuntimesPage 运行时卡片网格:一眼看出每条卡在哪一步 */
 export default function PlatformRuntimesPage() {
   const [query, setQuery] = useUrlState(RUNTIMES_QUERY)
   const [formOpen, setFormOpen] = useState(false)
@@ -48,16 +40,11 @@ export default function PlatformRuntimesPage() {
     [],
     (list) => list.length === 0
   )
-  const all = useMemo(() => runtimes.data ?? [], [runtimes.data])
-
-  const counts = useMemo(() => {
-    const result: Record<string, number> = { all: all.length }
-    for (const segment of STATUS_SEGMENTS) {
-      if ('status' in segment)
-        result[segment.value] = all.filter((item) => item.status === segment.status).length
-    }
-    return result
-  }, [all])
+  const all = runtimes.data ?? []
+  const counts = Object.fromEntries(STATUS_SEGMENTS.map((segment) => [
+    segment.value,
+    'status' in segment ? all.filter((item) => item.status === segment.status).length : all.length,
+  ]))
   const segment = STATUS_SEGMENTS.find((item) => item.value === query.status)
   const visible =
     segment && 'status' in segment ? all.filter((item) => item.status === segment.status) : all
@@ -128,7 +115,6 @@ export default function PlatformRuntimesPage() {
   )
 }
 
-/** RuntimeCard 一条运行时:名称与短码(整卡链接)、生态、状态、自检结果、接入进度链与下一步 */
 function RuntimeCard({ runtime }: { runtime: SandboxRuntime }) {
   const progress = runtimeOnboarding({
     status: runtime.status,

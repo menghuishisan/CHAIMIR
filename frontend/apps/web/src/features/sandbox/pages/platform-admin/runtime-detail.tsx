@@ -1,14 +1,4 @@
-// 运行时详情(平台深页,/platform-admin/runtimes/:runtimeId)。设计 §7.6:
-// 页头为运行时名 + 状态 +「教师可否选用」,主操作按状态给:没有镜像时「登记镜像版本」,有镜像未自检时「运行自检」,
-// 已可用时不给;下方接入流程条,卡住的一步高亮并写原因;主体三个分组:
-// 「镜像版本」表格(版本、镜像摘要、组合预拉取状态与进度、「预拉取」「停用」)、
-// 「接入自检」(运行自检、上次结果逐项列出)、「接入配置」只读摘要 +「修改配置」。指标条和「返回运行时列表」去掉。
-//
-// 后端口径:自检只要求有一个可用镜像版本,停用的运行时不能自检;预拉取按「镜像 + 已发布组合摘要」进行,
-// 学生开环境时才校验对应组合的预拉取 —— 所以预拉取放在镜像表里按组合做,不算运行时开放的前置。
-// 预拉取与自检都是长操作:先触发,再轮询真实状态,离开页面只停止观察,不打断服务端任务。
-
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router'
 import {
   CircleSlash,
@@ -22,6 +12,7 @@ import {
 } from 'lucide-react'
 import {
   ImagePrepullStatus,
+  RuntimeAdapterLevel,
   RuntimeImageStatus,
   RuntimeSelftestStatus,
   RuntimeStatus,
@@ -87,21 +78,14 @@ import {
 } from '../../statusPresentation'
 import { RuntimeFormModal } from './runtime-form'
 
-/** 适配层级的一句话说明 */
 const ADAPTER_LEVEL_LABELS: Record<number, string> = {
-  1: '只托管环境',
-  2: '声明标准链能力',
-  3: '自带插件实现',
+  [RuntimeAdapterLevel.HOSTED]: '只托管环境',
+  [RuntimeAdapterLevel.STANDARD]: '声明标准链能力',
+  [RuntimeAdapterLevel.PLUGIN]: '自带插件实现',
 }
 
-/** PlatformRuntimeDetailPage 一条运行时的镜像、自检与接入配置 */
 export default function PlatformRuntimeDetailPage() {
   const { runtimeId = '' } = useParams<{ runtimeId: string }>()
-  // 自检结果由页面持有:运行时重新读取时不丢失刚拿到的分步结果
-  const [selftestResult, setSelftestResult] = useState<SandboxRuntimeSelftestStatus>()
-  const [imageFormOpen, setImageFormOpen] = useState(false)
-  const [configOpen, setConfigOpen] = useState(false)
-
   const runtime = useAsyncResource(
     () => api.sandbox.getRuntime(runtimeId),
     [runtimeId],
@@ -112,13 +96,43 @@ export default function PlatformRuntimeDetailPage() {
     [runtimeId],
     (value) => value.length === 0
   )
-  const reloadAll = useCallback(() => {
+  usePageLocation([{ label: locationLabel(runtime, (data) => data.name, '运行时详情') }])
+
+  const data = runtime.data
+  // 普通刷新保留结果；执行声明或可用镜像变化时卸载旧观察流程，隔离迟到响应。
+  const executionKey = JSON.stringify([
+    runtimeId,
+    data?.eco.trim().toLowerCase(),
+    data?.adapter_level,
+    data?.adapter_spec,
+    data?.capability_impl.trim(),
+    data?.plugin_ref.trim(),
+    images.data
+      ?.filter((image) => image.status === RuntimeImageStatus.AVAILABLE)
+      .map((image) => [image.id, image.image_url] as const)
+      .sort(([a], [b]) => a.localeCompare(b)),
+  ])
+  return (
+    <RuntimeDetail key={executionKey} runtimeId={runtimeId} runtime={runtime} images={images} />
+  )
+}
+
+function RuntimeDetail({
+  runtimeId,
+  runtime,
+  images,
+}: {
+  runtimeId: string
+  runtime: ReturnType<typeof useAsyncResource<SandboxRuntime>>
+  images: ReturnType<typeof useAsyncResource<SandboxRuntimeImage[]>>
+}) {
+  const [imageFormOpen, setImageFormOpen] = useState(false)
+  const [configOpen, setConfigOpen] = useState(false)
+  const reloadAll = () => {
     runtime.reload()
     images.reload()
-  }, [images, runtime])
-  const selftest = useRuntimeSelftest(runtimeId, setSelftestResult, reloadAll)
-
-  usePageLocation([{ label: locationLabel(runtime, (data) => data.name, '运行时详情') }])
+  }
+  const selftest = useRuntimeSelftest(runtimeId, reloadAll)
 
   return (
     <PageScaffold>
@@ -146,12 +160,9 @@ export default function PlatformRuntimeDetailPage() {
             availableImages: imagesKnown ? availableImages : undefined,
             disabledReason: runtimeDisabledReason(data.adapter_spec),
           })
-          const selectable =
-            data.status === RuntimeStatus.AVAILABLE &&
-            data.selftest_status === RuntimeSelftestStatus.PASSED
+          const selectable = imagesKnown && progress.done === ONBOARDING_STEPS.length
           const disabled = data.status === RuntimeStatus.DISABLED
           const blockers = selftestBlockers(data, availableImages)
-          // 主操作按状态:没有镜像 → 登记镜像版本;有镜像未通过自检 → 运行自检;可用或已停用 → 不给
           const primary =
             disabled || selectable || !imagesKnown ? null : availableImages === 0 ? (
               <Button variant="primary" leftIcon={Plus} onClick={() => setImageFormOpen(true)}>
@@ -210,7 +221,7 @@ export default function PlatformRuntimeDetailPage() {
                 <div className="grid gap-6 lg:grid-cols-2">
                   <SelftestCard
                     runtime={data}
-                    result={selftestResult?.runtime_id === data.id ? selftestResult : undefined}
+                    result={selftest.result}
                     blockers={blockers}
                     working={selftest.working}
                     actionError={selftest.actionError}
@@ -220,36 +231,34 @@ export default function PlatformRuntimeDetailPage() {
                   <ConfigCard runtime={data} onEdit={() => setConfigOpen(true)} />
                 </div>
               </div>
-
-              {imageFormOpen ? (
-                <ImageFormModal
-                  runtimeId={runtimeId}
-                  onClose={() => setImageFormOpen(false)}
-                  onSaved={() => {
-                    setImageFormOpen(false)
-                    reloadAll()
-                  }}
-                />
-              ) : null}
-              {configOpen ? (
-                <RuntimeFormModal
-                  runtime={data}
-                  onClose={() => setConfigOpen(false)}
-                  onSaved={() => {
-                    setConfigOpen(false)
-                    reloadAll()
-                  }}
-                />
-              ) : null}
             </>
           )
         }}
       </ResourceState>
+      {imageFormOpen ? (
+        <ImageFormModal
+          runtimeId={runtimeId}
+          onClose={() => setImageFormOpen(false)}
+          onSaved={() => {
+            setImageFormOpen(false)
+            reloadAll()
+          }}
+        />
+      ) : null}
+      {configOpen && runtime.data ? (
+        <RuntimeFormModal
+          runtime={runtime.data}
+          onClose={() => setConfigOpen(false)}
+          onSaved={() => {
+            setConfigOpen(false)
+            reloadAll()
+          }}
+        />
+      ) : null}
     </PageScaffold>
   )
 }
 
-/** selftestBlockers 自检的前置不满足时说明缺什么(与后端同一口径),不让人点了才看到失败 */
 function selftestBlockers(runtime: SandboxRuntime, availableImages: number): string[] {
   const out: string[] = []
   if (runtime.status === RuntimeStatus.DISABLED)
@@ -260,7 +269,6 @@ function selftestBlockers(runtime: SandboxRuntime, availableImages: number): str
   return out
 }
 
-/** OnboardingFlow 接入流程条:走完的打勾,卡住的一步高亮并写原因 */
 function OnboardingFlow({
   done,
   reason,
@@ -292,10 +300,6 @@ interface ImagesSectionProps {
   onChanged: () => void
 }
 
-/**
- * ImagesSection 镜像版本:登记、按组合预拉取(轮询真实节点状态)与停用。
- * 预拉取只针对一个已发布组合的完整镜像闭包,所以先填组合摘要;进度只属于当前摘要。
- */
 function ImagesSection({ runtimeId, images, onRegister, onChanged }: ImagesSectionProps) {
   const [busyKey, setBusyKey] = useState<string>()
   const [compositionDigest, setCompositionDigest] = useState('')
@@ -313,139 +317,131 @@ function ImagesSection({ runtimeId, images, onRegister, onChanged }: ImagesSecti
     }
   }, [])
 
-  /** prepull 触发预拉取并轮询真实节点状态,避免长请求被入口层中止后误报失败。 */
-  const prepull = useCallback(
-    async (image: SandboxRuntimeImage) => {
-      if (actionInFlightRef.current) return
-      actionInFlightRef.current = true
-      setBusyKey(`prepull/${image.id}`)
-      setActionError(undefined)
-      try {
-        const digest = compositionDigest.trim()
-        if (!digest) {
-          setActionError('请先填写已发布组合摘要,再执行预拉取。')
-          return
-        }
-        let triggeredStatus: SandboxPrepullStatus | undefined
-        let started = false
-        const triggerPromise = api.sandbox
-          .prepullRuntimeImage(runtimeId, image.id, digest)
-          .then((status) => {
-            triggeredStatus = status
-            return status
-          })
-        let triggerError: unknown
-        let queryError: unknown
-        const quickStatus = await Promise.race<SandboxPrepullStatus | undefined>([
-          triggerPromise,
-          wait(500).then(() => undefined),
-        ])
-        // 立即接住长请求失败;状态轮询负责展示任务结果,离页后不再写回旧界面。
-        triggerPromise.catch((error) => {
-          triggerError = error
+  const prepull = async (image: SandboxRuntimeImage) => {
+    if (actionInFlightRef.current) return
+    actionInFlightRef.current = true
+    setBusyKey(`prepull/${image.id}`)
+    setActionError(undefined)
+    try {
+      const digest = compositionDigest.trim()
+      if (!digest) {
+        setActionError('请先填写冻结组合摘要,再执行预拉取。')
+        return
+      }
+      let triggeredStatus: SandboxPrepullStatus | undefined
+      let started = false
+      const triggerPromise = api.sandbox
+        .prepullRuntimeImage(runtimeId, image.id, digest)
+        .then((status) => {
+          triggeredStatus = status
+          return status
         })
-        if (!mountedRef.current) return
-        if (quickStatus) {
-          setPrepullStates((current) => ({ ...current, [image.id]: quickStatus }))
-        }
+      let triggerError: unknown
+      let queryError: unknown
+      const quickStatus = await Promise.race<SandboxPrepullStatus | undefined>([
+        triggerPromise,
+        wait(500).then(() => undefined),
+      ])
+      // 立即接住长请求失败;状态轮询负责展示任务结果,离页后不再写回旧界面。
+      triggerPromise.catch((error) => {
+        triggerError = error
+      })
+      if (!mountedRef.current) return
+      if (quickStatus) {
+        setPrepullStates((current) => ({ ...current, [image.id]: quickStatus }))
+      }
 
-        const deadline = Date.now() + appConfig.runtimeSelftestPollTimeoutMs
-        let lastStatus: SandboxPrepullStatus | undefined = quickStatus
-        while (mountedRef.current && Date.now() < deadline) {
-          try {
-            const queriedStatus =
-              triggeredStatus ??
-              (await api.sandbox.getRuntimeImagePrepull(runtimeId, image.id, digest))
-            if (!mountedRef.current) return
-            lastStatus = triggeredStatus ?? queriedStatus
-            queryError = undefined
-          } catch (error) {
-            if (!mountedRef.current) return
-            if (triggerError && !started) throw triggerError
-            if (queryError) throw error
-            queryError = error
-            await wait(appConfig.runtimeSelftestPollIntervalMs)
-            continue
-          }
-
-          if (lastStatus.prepull_status === ImagePrepullStatus.RUNNING) started = true
-          // 触发尚未落库时GET可能先读到上次终态,不能把它当作本次任务结果。
-          if (!started && !triggeredStatus) {
-            if (triggerError) throw triggerError
-            await wait(appConfig.runtimeSelftestPollIntervalMs)
-            continue
-          }
-          setPrepullStates((current) => ({ ...current, [image.id]: lastStatus! }))
-
-          if (lastStatus.prepull_status === ImagePrepullStatus.SUCCEEDED) {
-            toast.success(`预拉取完成,${lastStatus.ready_nodes} 个节点已就绪`)
-            return
-          }
-          if (lastStatus.prepull_status === ImagePrepullStatus.FAILED) {
-            if (triggerError) throw triggerError
-            throw new Error('预拉取没有完成,请读取进度后重试。')
-          }
+      const deadline = Date.now() + appConfig.runtimeSelftestPollTimeoutMs
+      let lastStatus: SandboxPrepullStatus | undefined = quickStatus
+      while (mountedRef.current && Date.now() < deadline) {
+        try {
+          const queriedStatus =
+            triggeredStatus ??
+            (await api.sandbox.getRuntimeImagePrepull(runtimeId, image.id, digest))
+          if (!mountedRef.current) return
+          lastStatus = triggeredStatus ?? queriedStatus
+          queryError = undefined
+        } catch (error) {
+          if (!mountedRef.current) return
+          if (triggerError && !started) throw triggerError
+          if (queryError) throw error
+          queryError = error
           await wait(appConfig.runtimeSelftestPollIntervalMs)
+          continue
         }
 
-        if (!mountedRef.current) return
-        if (queryError) throw queryError
-        if (lastStatus?.prepull_status === ImagePrepullStatus.RUNNING) {
-          toast.info('预拉取仍在进行,请稍后查看进度。')
-          return
+        if (lastStatus.prepull_status === ImagePrepullStatus.RUNNING) started = true
+        // 触发尚未落库时GET可能先读到上次终态,不能把它当作本次任务结果。
+        if (!started && !triggeredStatus) {
+          if (triggerError) throw triggerError
+          await wait(appConfig.runtimeSelftestPollIntervalMs)
+          continue
         }
-        if (triggerError) throw triggerError
-        throw new Error('预拉取仍在进行,请稍后刷新进度。')
-      } catch (error) {
-        if (mountedRef.current) {
-          setActionError(userFacingErrorMessage(error, '预拉取没有完成,请稍后查看进度。'))
-        }
-      } finally {
-        actionInFlightRef.current = false
-        if (mountedRef.current) setBusyKey(undefined)
-      }
-    },
-    [compositionDigest, runtimeId]
-  )
+        setPrepullStates((current) => ({ ...current, [image.id]: lastStatus! }))
 
-  /** refreshPrepull 只查询当前组合进度,不能重新触发或覆盖正在进行的尝试。 */
-  const refreshPrepull = useCallback(
-    async (image: SandboxRuntimeImage) => {
-      if (actionInFlightRef.current) return
-      actionInFlightRef.current = true
-      setBusyKey(`query/${image.id}`)
-      setActionError(undefined)
-      try {
-        const digest = compositionDigest.trim()
-        if (!digest) {
-          setActionError('请先填写已发布组合摘要,再查询预拉取进度。')
+        if (lastStatus.prepull_status === ImagePrepullStatus.SUCCEEDED) {
+          toast.success(`预拉取完成,${lastStatus.ready_nodes} 个节点已就绪`)
           return
         }
-        const status = await api.sandbox.getRuntimeImagePrepull(runtimeId, image.id, digest)
-        if (!mountedRef.current) return
-        setPrepullStates((current) => ({ ...current, [image.id]: status }))
-        if (status.prepull_status === ImagePrepullStatus.SUCCEEDED) {
-          toast.success(`预拉取完成,${status.ready_nodes} 个节点已就绪`)
-        } else if (status.prepull_status === ImagePrepullStatus.FAILED) {
-          setActionError('预拉取没有完成,请重新发起预拉取。')
-        } else {
-          toast.info(
-            status.prepull_status === ImagePrepullStatus.RUNNING
-              ? '预拉取仍在进行,请稍后查看进度。'
-              : '这份组合还未预拉取,请先发起预拉取。'
-          )
+        if (lastStatus.prepull_status === ImagePrepullStatus.FAILED) {
+          if (triggerError) throw triggerError
+          throw new Error('预拉取没有完成,请读取进度后重试。')
         }
-      } catch (error) {
-        if (mountedRef.current) {
-          setActionError(userFacingErrorMessage(error, '没能读到预拉取进度,请稍后重试。'))
-        }
-      } finally {
-        actionInFlightRef.current = false
-        if (mountedRef.current) setBusyKey(undefined)
+        await wait(appConfig.runtimeSelftestPollIntervalMs)
       }
-    },
-    [compositionDigest, runtimeId]
-  )
+
+      if (!mountedRef.current) return
+      if (queryError) throw queryError
+      if (lastStatus?.prepull_status === ImagePrepullStatus.RUNNING) {
+        toast.info('预拉取仍在进行,请稍后查看进度。')
+        return
+      }
+      if (triggerError) throw triggerError
+      throw new Error('预拉取仍在进行,请稍后刷新进度。')
+    } catch (error) {
+      if (mountedRef.current) {
+        setActionError(userFacingErrorMessage(error, '预拉取没有完成,请稍后查看进度。'))
+      }
+    } finally {
+      actionInFlightRef.current = false
+      if (mountedRef.current) setBusyKey(undefined)
+    }
+  }
+
+  const refreshPrepull = async (image: SandboxRuntimeImage) => {
+    if (actionInFlightRef.current) return
+    actionInFlightRef.current = true
+    setBusyKey(`query/${image.id}`)
+    setActionError(undefined)
+    try {
+      const digest = compositionDigest.trim()
+      if (!digest) {
+        setActionError('请先填写冻结组合摘要,再查询预拉取进度。')
+        return
+      }
+      const status = await api.sandbox.getRuntimeImagePrepull(runtimeId, image.id, digest)
+      if (!mountedRef.current) return
+      setPrepullStates((current) => ({ ...current, [image.id]: status }))
+      if (status.prepull_status === ImagePrepullStatus.SUCCEEDED) {
+        toast.success(`预拉取完成,${status.ready_nodes} 个节点已就绪`)
+      } else if (status.prepull_status === ImagePrepullStatus.FAILED) {
+        setActionError('预拉取没有完成,请重新发起预拉取。')
+      } else {
+        toast.info(
+          status.prepull_status === ImagePrepullStatus.RUNNING
+            ? '预拉取仍在进行,请稍后查看进度。'
+            : '这份组合还未预拉取,请先发起预拉取。'
+        )
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setActionError(userFacingErrorMessage(error, '没能读到预拉取进度,请稍后重试。'))
+      }
+    } finally {
+      actionInFlightRef.current = false
+      if (mountedRef.current) setBusyKey(undefined)
+    }
+  }
 
   const columns: TableColumn<SandboxRuntimeImage>[] = [
     {
@@ -542,7 +538,7 @@ function ImagesSection({ runtimeId, images, onRegister, onChanged }: ImagesSecti
     <Card>
       <CardHeader
         title="镜像版本"
-        description="镜像要来自平台私有仓库并通过签名与漏洞扫描。预拉取按已发布组合进行,完成后学生开这个组合的环境不用等下载。"
+        description="镜像要来自平台私有仓库并通过签名与漏洞扫描。预拉取按冻结组合进行,完成后学生开这个组合的环境不用等下载。"
         actions={
           <Button variant="outline" size="sm" leftIcon={Plus} onClick={onRegister}>
             登记镜像版本
@@ -551,7 +547,7 @@ function ImagesSection({ runtimeId, images, onRegister, onChanged }: ImagesSecti
       />
       <CardBody className="flex flex-col gap-4">
         <FormField
-          label="已发布组合摘要"
+          label="冻结组合摘要"
           htmlFor="prepull-digest"
           helper="预拉取与进度只针对这个组合锁定的完整镜像"
         >
@@ -593,18 +589,7 @@ function ImagesSection({ runtimeId, images, onRegister, onChanged }: ImagesSecti
               data={list}
               rowKey={(item) => item.id}
               elevated={false}
-              // <md 换行卡:版本一行、摘要一行,状态在右
-              mobileCard={(item) => ({
-                title: item.version,
-                meta: digestFromImageUrl(item.image_url) || '没有摘要',
-                badge: (
-                  <StatusIndicator
-                    appearance="text"
-                    tone={item.status === RuntimeImageStatus.AVAILABLE ? 'success' : 'neutral'}
-                    label={runtimeImageStatusLabel(item.status)}
-                  />
-                ),
-              })}
+              className="whitespace-nowrap"
             />
           )}
         </ResourceState>
@@ -625,7 +610,6 @@ function ImagesSection({ runtimeId, images, onRegister, onChanged }: ImagesSecti
   )
 }
 
-/** PrepullCell 当前组合的预拉取状态;进行中显示节点就绪进度 */
 function PrepullCell({ status }: { status?: SandboxPrepullStatus }) {
   if (!status) return <span className="text-sm text-ink-sub">未查询</span>
   const share = status.desired_nodes > 0 ? (status.ready_nodes / status.desired_nodes) * 100 : 0
@@ -657,10 +641,6 @@ interface SelftestCardProps {
   onLoad: () => void
 }
 
-/**
- * SelftestCard 接入自检:起一个一次性环境跑通工作区与链能力后立即销毁,通过后运行时才对学校开放。
- * 分步结果逐项列出;原因码转成用户向文案,不直接抛到界面上。
- */
 function SelftestCard({
   runtime,
   result,
@@ -670,17 +650,16 @@ function SelftestCard({
   onRun,
   onLoad,
 }: SelftestCardProps) {
-  const detailItems = useMemo(() => {
-    const detail = result?.detail
-    if (!detail) return []
-    const out: { term: string; description: string; mono?: boolean }[] = []
-    if (detail.result)
-      out.push({ term: '自检结果', description: selftestResultText(detail.result) })
-    if (detail.stage) out.push({ term: '停在哪一步', description: selftestStageText(detail.stage) })
-    if (detail.reason) out.push({ term: '原因', description: selftestReasonText(detail.reason) })
-    if (detail.trace_id) out.push({ term: '报障编号', description: detail.trace_id, mono: true })
-    return out
-  }, [result])
+  const detail = result?.detail
+  const detailItems: { term: string; description: string; mono?: boolean }[] = []
+  if (detail?.result)
+    detailItems.push({ term: '自检结果', description: selftestResultText(detail.result) })
+  if (detail?.stage)
+    detailItems.push({ term: '停在哪一步', description: selftestStageText(detail.stage) })
+  if (detail?.reason)
+    detailItems.push({ term: '原因', description: selftestReasonText(detail.reason) })
+  if (detail?.trace_id)
+    detailItems.push({ term: '报障编号', description: detail.trace_id, mono: true })
 
   const selftestStatus = result?.selftest_status ?? runtime.selftest_status
   const running = result?.detail.result === 'running'
@@ -737,7 +716,6 @@ function SelftestCard({
   )
 }
 
-/** ConfigCard 接入配置的只读摘要;改动在大抽屉里完成 */
 function ConfigCard({ runtime, onEdit }: { runtime: SandboxRuntime; onEdit: () => void }) {
   return (
     <Card>
@@ -780,26 +758,15 @@ function ConfigCard({ runtime, onEdit }: { runtime: SandboxRuntime; onEdit: () =
   )
 }
 
-/**
- * capabilitySourceLabel 说明这条运行时的链能力从哪来。
- * 三种来源(内置实现 / 插件 / 声明的能力命令)由后端三选一要求,界面直接说结论。
- */
 function capabilitySourceLabel(runtime: SandboxRuntime): string {
-  if (runtime.plugin_ref.trim() !== '') return '运行时插件'
+  if (runtime.adapter_level === RuntimeAdapterLevel.PLUGIN) return '运行时插件'
   if (runtime.capability_impl.trim() !== '') return '平台内置实现'
   if (runtimeHasDeployCommand(runtime.adapter_spec)) return '声明的链能力命令'
   return '只托管环境,链操作由学生自己完成'
 }
 
-/**
- * useRuntimeSelftest 触发自检并轮询结果;读取上次结果。
- * 触发请求可能被入口层中止,所以先短暂等待触发结果,再按查询接口轮询真实状态;离页后不再写回界面。
- */
-function useRuntimeSelftest(
-  runtimeId: string,
-  onResult: (result: SandboxRuntimeSelftestStatus) => void,
-  onDone: () => void
-) {
+function useRuntimeSelftest(runtimeId: string, onDone: () => void) {
+  const [result, setResult] = useState<SandboxRuntimeSelftestStatus>()
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string>()
   const actionInFlightRef = useRef(false)
@@ -812,19 +779,16 @@ function useRuntimeSelftest(
     }
   }, [])
 
-  const showSelftestResult = useCallback(
-    (status: RuntimeSelftestStatus) => {
-      if (status === RuntimeSelftestStatus.PASSED) {
-        toast.success('自检通过,运行时已开放给学校')
-      } else {
-        toast.error('自检没有通过,请查看接入自检里的原因。')
-      }
-      onDone()
-    },
-    [onDone]
-  )
+  const showSelftestResult = (status: RuntimeSelftestStatus) => {
+    if (status === RuntimeSelftestStatus.PASSED) {
+      toast.success('自检通过,运行时已开放给学校')
+    } else {
+      toast.error('自检没有通过,请查看接入自检里的原因。')
+    }
+    onDone()
+  }
 
-  const run = useCallback(async () => {
+  const run = async () => {
     if (actionInFlightRef.current) return
     actionInFlightRef.current = true
     setWorking(true)
@@ -871,7 +835,7 @@ function useRuntimeSelftest(
           await wait(appConfig.runtimeSelftestPollIntervalMs)
           continue
         }
-        onResult(lastResult)
+        setResult(lastResult)
         if (lastResult.selftest_status !== RuntimeSelftestStatus.PENDING) {
           showSelftestResult(lastResult.selftest_status)
           return
@@ -895,9 +859,9 @@ function useRuntimeSelftest(
       actionInFlightRef.current = false
       if (mountedRef.current) setWorking(false)
     }
-  }, [onResult, runtimeId, showSelftestResult])
+  }
 
-  const load = useCallback(async () => {
+  const load = async () => {
     if (actionInFlightRef.current) return
     actionInFlightRef.current = true
     setWorking(true)
@@ -905,7 +869,7 @@ function useRuntimeSelftest(
     try {
       const status = await api.sandbox.getRuntimeSelftest(runtimeId)
       if (!mountedRef.current) return
-      onResult(status)
+      setResult(status)
       if (status.selftest_status === RuntimeSelftestStatus.PENDING) {
         toast.info(
           status.detail.result === 'running'
@@ -923,9 +887,9 @@ function useRuntimeSelftest(
       actionInFlightRef.current = false
       if (mountedRef.current) setWorking(false)
     }
-  }, [onResult, runtimeId, showSelftestResult])
+  }
 
-  return { working, actionError, run, load }
+  return { result, working, actionError, run, load }
 }
 
 interface ImageFormModalProps {
@@ -934,10 +898,6 @@ interface ImageFormModalProps {
   onSaved: () => void
 }
 
-/**
- * ImageFormModal 登记一个镜像版本。
- * 摘要从镜像地址里解析,不让人手填:后端要求两者完全一致,抄两遍只会引入错误。
- */
 function ImageFormModal({ runtimeId, onClose, onSaved }: ImageFormModalProps) {
   const [imageUrl, setImageUrl] = useState('')
   const [version, setVersion] = useState('')
@@ -945,50 +905,39 @@ function ImageFormModal({ runtimeId, onClose, onSaved }: ImageFormModalProps) {
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
-  const digest = useMemo(() => digestFromImageUrl(imageUrl), [imageUrl])
+  const digest = digestFromImageUrl(imageUrl)
 
-  const { errors, validate } = useFormValidation(
-    useCallback(
-      () => ({
-        imageUrl:
-          digest === ''
-            ? '镜像地址要带内容摘要,形如 harbor.example.com/chain/geth@sha256:...'
-            : null,
-        version: version.trim() === '' ? '请填写版本号' : null,
-      }),
-      [digest, version]
-    )
-  )
+  const { errors, validate } = useFormValidation(() => ({
+    imageUrl: digest === '' ? '镜像地址要包含 @sha256 内容摘要' : null,
+    version: version.trim() === '' ? '请填写版本号' : null,
+  }))
 
-  const submit = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      if (!validate()) return
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!validate()) return
 
-      setFormError(undefined)
-      setWorking(true)
-      try {
-        await api.sandbox.registerRuntimeImage(runtimeId, {
-          image_url: imageUrl.trim(),
-          version: version.trim(),
-          digest,
-          genesis_baked: genesisBaked,
-        })
-        toast.success('镜像版本已登记,接下来运行自检')
-        onSaved()
-      } catch (error) {
-        setFormError(
-          userFacingErrorMessage(
-            error,
-            '登记没有成功。请确认镜像来自平台私有仓库,且已完成签名与漏洞扫描。'
-          )
+    setFormError(undefined)
+    setWorking(true)
+    try {
+      await api.sandbox.registerRuntimeImage(runtimeId, {
+        image_url: imageUrl.trim(),
+        version: version.trim(),
+        digest,
+        genesis_baked: genesisBaked,
+      })
+      toast.success('镜像版本已登记,接下来运行自检')
+      onSaved()
+    } catch (error) {
+      setFormError(
+        userFacingErrorMessage(
+          error,
+          '登记没有成功。请确认镜像来自平台私有仓库,且已完成签名与漏洞扫描。'
         )
-      } finally {
-        setWorking(false)
-      }
-    },
-    [digest, genesisBaked, imageUrl, onSaved, runtimeId, validate, version]
-  )
+      )
+    } finally {
+      setWorking(false)
+    }
+  }
 
   return (
     <Modal open onOpenChange={(open) => !open && !working && onClose()}>
@@ -1063,12 +1012,11 @@ interface DisableImageModalProps {
   onDone: () => void
 }
 
-/** DisableImageModal 停用一个镜像版本:不再用于新建环境,已在运行的环境不受影响 */
 function DisableImageModal({ runtimeId, image, onClose, onDone }: DisableImageModalProps) {
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
-  const submit = useCallback(async () => {
+  const submit = async () => {
     setFormError(undefined)
     setWorking(true)
     try {
@@ -1080,7 +1028,7 @@ function DisableImageModal({ runtimeId, image, onClose, onDone }: DisableImageMo
     } finally {
       setWorking(false)
     }
-  }, [image.id, onDone, runtimeId])
+  }
 
   return (
     <Modal open onOpenChange={(open) => !open && !working && onClose()}>
@@ -1108,7 +1056,6 @@ function DisableImageModal({ runtimeId, image, onClose, onDone }: DisableImageMo
   )
 }
 
-/** wait 等待下一次状态查询,避免高频请求占用平台接口。 */
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }

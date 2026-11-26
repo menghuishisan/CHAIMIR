@@ -1,70 +1,17 @@
-# tool/contract-ui
+﻿# tool/contract-ui
 
-## 镜像职责
+读取 EVM ABI 并生成调用数据，供实验工作台交给当前链运行时执行。工具本身不连接节点、不保管账户，也不广播交易。
 
-合约 ABI 交互面板工具镜像。
+- `GET /`：交互页面；`GET /healthz`：就绪检查。
+- `POST /abi/methods`：输入 ABI，返回方法名、规范签名、状态可变性和参数类型。
+- `POST /call-data`：输入 `abi`、`method` 和 `args` 数组，返回规范签名与 calldata。
+- 方法可使用唯一函数名；重载方法必须使用规范签名，例如 `set(uint256)`。不按参数试探或猜选重载。
+- 支持基础类型、定长/动态数组、嵌套 tuple 与 tuple 数组。二进制参数使用 `0x` 十六进制字符串，大整数可使用十进制或十六进制字符串，tuple 使用按字段顺序排列的数组。非法类型、参数数量、数值范围和编码必须显式失败。
 
-## 能力边界
+ABI 类型与编码复用镜像已固定的 eth-utils 和 eth-abi，不自建 ABI 编码器。
 
-- 支持 capability：contract-ui, abi-form
-- 明确不支持：manifest 未声明的能力、协议动作和跨镜像联动；入口和编排必须严格失败，不使用 generic fallback。
-- conflicts：无；cardinality：one；placement：sandbox。
+页面请求使用工具入口的相对路径，保留实验或竞赛网关前缀及其授权范围。
 
-## 合法 runtime / provider
+运行配置为 `CHAIMIR_IMAGE_PORT`、`CHAIMIR_MAX_BODY_BYTES`、`CHAIMIR_HTTP_TIMEOUT_SECONDS`，均须为正整数。端口、资源、供应链、挂载和隔离声明以 `manifest.yaml` 为准；容器保持非 root、只读根文件系统及默认拒绝网络。
 
-- 生态或适配范围：evm
-- 必需 provider 能力：无。
-- provider 只能通过 manifest 能力和显式 CompositionSpec link 选择；多个候选必须显式指定，不能按名称猜测。
-
-## bindings 与 links
-
-- 必需 bindings：无。
-- 必需 links：无；本镜像不声明跨组件 link。
-- binding 的 endpoint、协议、配置键和启动前置以 manifest 为准；缺失、重复、错误能力或错误 provider 均拒绝编排。
-
-## 端口与服务
-
-- http：8080/TCP，暴露边界 proxy，用途：Contract UI API。
-- 组件：无 resource_spec 组件。
-
-## command / args 语义
-
-- 镜像默认 CMD：["python3.13", "/app/contract_ui.py"]；manifest 未覆盖组件 command/args，使用该入口语义。
-
-## 初始化材料与运行时注入
-
-- 镜像层不内置租户、链、协议或私有材料；声明的 init_assets：无。
-- genesis、rollup、checkpoint、Hyperlane、Chainlink、合约或 subgraph 材料必须由平台受控对象存储、初始化资产和 CompositionSpec 注入并校验来源及 SHA-256；缺失时严格失败。
-- 数据卷声明：无顶层 data_volumes 声明。
-
-## Secret / KMS
-
-- Secret 环境键：无。
-- 必需材料映射：无；该镜像不得自行生成或写入密钥。
-- Secret 只来自平台 Secret/KMS 运行时注入，不能写入 Dockerfile、manifest、README、镜像层或测试输出。
-
-## 持久化与隔离边界
-
-- 持久化目录：由组件 mount_domains 决定；未声明持久化数据时不得自行落盘。
-- 组件挂载与文件系统：无
-## 安全边界
-
-- 安全声明：{"run_as_non_root":true,"read_only_root_filesystem":true,"allow_privilege_escalation":false,"privileged":false,"host_network":false,"automount_service_account_token":false,"drop_capabilities":["ALL"],"network_policy":"deny-all"}
-- student_access：{"enabled":true,"shell":"restricted","allowed_mounts":["workspace","public-assets"]}。
-- 网络只允许 manifest binding/link 所需目标，默认拒绝；禁止宿主机路径、hostNetwork、ServiceAccount token 和越权写入。
-
-## readiness / health
-
-- 未声明组件 readiness probe；容器运行不等于就绪或业务成功。
-- 镜像自检 calldata-generation：["python","-c","import importlib.util; spec=importlib.util.spec_from_file_location('contract_ui','/app/contract_ui.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); abi=[{'type':'function','name':'transfer','inputs':[{'name':'to','type':'address'},{'name':'amount','type':'uint256'}]}]; r=m.build_call_data(abi,'transfer',['0x0000000000000000000000000000000000000001',5]); assert r['calldata'].startswith('0xa9059cbb')"]。
-
-## 清理
-
-- 验收后按 CompositionSpec 所属租户/实例和项目 owner 标签删除容器、Pod、Service、NetworkPolicy、临时卷、Secret 投影和临时材料；保留平台长期资源。
-- 不使用 broad prune，不删除 kind-chaimir-cilium 节点、正式锁引用或其他项目资源。
-
-## 验收条件
-
-- 先按 digest lock 启动合法 CompositionSpec，核对 command/args、bindings、links、材料和 Secret 投影，再执行 manifest selftest。
-- selftest 只证明镜像布局和声明入口正确；协议、链、存储、索引、签名或跨镜像能力必须追加真实 provider 联动、正向业务、错误输入拒绝、重启/持久化（若声明）和清理证据。
-- 未执行或只完成探活的项目不得标记为业务通过。
+验收先执行 manifest 自检，再在真实组合中用生成的调用数据完成链调用，并验证错误输入和资源回收。纯函数检查不能替代镜像、链与浏览器验收。

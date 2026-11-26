@@ -6,7 +6,7 @@
 // 两种组卷方式:手动选题(逐题选定并给分)与按条件抽题(设定类型、难度、知识点与题数,
 // 由后端随机抽取)。按条件抽题可以重新抽取,手动选题不需要 —— 重抽会打乱教师的选择。
 //
-// 抽题条件按结构化字段渲染,不给裸 JSON(旧前端组卷条件是裸 JSON 文本域)。
+// 抽题条件使用结构化字段,页面不接收原始 JSON。
 
 import { useCallback, useState } from 'react'
 import { FileText, Plus, RefreshCw } from 'lucide-react'

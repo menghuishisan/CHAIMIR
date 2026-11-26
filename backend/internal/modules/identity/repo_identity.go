@@ -643,13 +643,13 @@ func (t *txStore) UpdateAccountPhone(ctx context.Context, tenantID, accountID in
 	return t.GetAccount(ctx, accountID)
 }
 
-// RecordPasswordFailure 写入密码失败次数和可选锁定截止时间。
-func (t *txStore) RecordPasswordFailure(ctx context.Context, accountID, tenantID int64, count int16, lockedUntil *time.Time) error {
+// RecordPasswordFailure 原子累计失败次数，达到阈值后锁定账号。
+func (t *txStore) RecordPasswordFailure(ctx context.Context, accountID, tenantID int64, maxFailures int16, lockedUntil *time.Time) error {
 	_, err := t.q.RecordPasswordFailure(ctx, sqlcgen.RecordPasswordFailureParams{
-		ID:             accountID,
-		TenantID:       tenantID,
-		PwdFailedCount: count,
-		LockedUntil:    pgtypex.TimestamptzPtr(lockedUntil),
+		AccountID:   accountID,
+		TenantID:    tenantID,
+		MaxFailures: maxFailures,
+		LockUntil:   pgtypex.TimestamptzPtr(lockedUntil),
 	})
 	return err
 }

@@ -20,6 +20,7 @@ exec bitcoind \
   -regtest=1 \
   -datadir="${DATA_DIR}" \
   -server=1 \
+  -txindex=1 \
   -rpcbind=0.0.0.0 \
   -rpcallowip=0.0.0.0/0 \
   -rpcport="${CHAIMIR_RUNTIME_RPC_PORT}" \

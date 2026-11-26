@@ -1,18 +1,8 @@
-// 漏洞题预验证(漏洞题工坊页内)。设计 §7.4:在右侧大抽屉中进行,显示过程和结果。
-//
-// 预验证在隔离沙箱里跑两遍:正向执行 PoC 应让全部断言成立,反向不执行 PoC 应让全部断言不成立。
-// 双向通过才算这道题「可解可判」,才能固化进题库。
-//
-// 验证环境按声明式组合提交(后端要求至少一个 runtime 实例及镜像版本),从 M2 编排目录里选,
-// 不让教师手填 —— 拼错要等验证跑完才发现。访问边界固定为漏洞预验证,由后端二次确认。
-//
-// 验证结果里的 actual 是后端已脱敏的短文本(chainassert.ShortJSON),
-// 页面原样呈现即可,不再二次解析。
+// 漏洞题预验证抽屉；初始化随组合执行，只有正向验证追加官方攻击。
 
-import { useCallback, useState } from 'react'
+import { useState } from 'react'
 import { CircleCheck, CircleX, FlaskConical } from 'lucide-react'
 import {
-  SANDBOX_ACCESS_PROFILE,
   VulnProblemStatus,
   VulnPrevalidateStatus,
   type VulnProblem,
@@ -33,14 +23,6 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { CompositionDeclarationFields } from '../../../sandbox/components/CompositionDeclarationFields'
-import {
-  compositionDeclarationError,
-  compositionSpecFromDeclaration,
-  declarationFromSpec,
-  emptyCompositionDeclaration,
-  readScenarioNeutralSpec,
-} from '../../../sandbox/composition'
 import {
   vulnLevelLabel,
   vulnPrevalidateStatusLabel,
@@ -49,20 +31,6 @@ import {
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { vulnPrevalidateStatusTone } from '../../statusPresentation'
 import { readString } from '../../jsonReaders'
-
-/** 验证明细里的两段:后端 runVulnPrevalidation 固定写入这两个键。 */
-const DETAIL_POSITIVE = 'positive'
-const DETAIL_NEGATIVE = 'negative'
-
-/** 单段验证结果里的键。 */
-const CASE_ASSERTIONS = 'assertions'
-
-/** 单条断言结果里的键(后端 checkVulnAssertions 写入)。 */
-const ASSERTION_CASE = 'case'
-const ASSERTION_PASSED = 'passed'
-const ASSERTION_EXPECTED = 'expected_label'
-const ASSERTION_ACTUAL = 'actual'
-const ASSERTION_HINT = 'hint'
 
 export interface VulnPrevalidateModalProps {
   problem: VulnProblem
@@ -73,8 +41,8 @@ export interface VulnPrevalidateModalProps {
 /** isVulnPrevalidateDetailConsistent 校验状态是否与正反向断言明细一致。 */
 export function isVulnPrevalidateDetailConsistent(problem: VulnProblem): boolean {
   if (problem.prevalidate_status !== VulnPrevalidateStatus.PASSED) return false
-  const positive = readSection(problem.prevalidate_detail, DETAIL_POSITIVE)
-  const negative = readSection(problem.prevalidate_detail, DETAIL_NEGATIVE)
+  const positive = readSection(problem.prevalidate_detail, 'positive')
+  const negative = readSection(problem.prevalidate_detail, 'negative')
   return positive?.passed === true && negative?.passed === true
 }
 
@@ -82,42 +50,15 @@ export function isVulnPrevalidateDetailConsistent(problem: VulnProblem): boolean
  * VulnPrevalidateModal 触发预验证并呈现双向验证结果。
  */
 export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalidateModalProps) {
-  // 预验证必须复用题目草稿里已经锁定的环境声明,否则打开弹窗时会把真实运行时清空,
-  // 让教师在没有任何可选项的表单上重新拼一遍,也会丢失编译器生成的连接与基础设施。
-  const savedComposition = readScenarioNeutralSpec(problem.draft_body, 'composition')
-  const savedInitCodeRef = readString(problem.draft_body, 'init_code_ref')
-  const savedInitScriptRef = readString(problem.draft_body, 'init_script_ref')
-  const [declaration, setDeclaration] = useState(() =>
-    savedComposition === undefined
-      ? emptyCompositionDeclaration()
-      : declarationFromSpec(savedComposition)
-  )
   const [result, setResult] = useState<VulnProblem>(problem)
   const [formError, setFormError] = useState<string>()
   const [running, setRunning] = useState(false)
 
-  const run = useCallback(async () => {
-    const declarationError = compositionDeclarationError(declaration)
-    if (declarationError !== undefined) {
-      setFormError(declarationError)
-      return
-    }
+  async function run() {
     setFormError(undefined)
     setRunning(true)
     try {
-      const updated = await api.contest.prevalidateVulnProblem(problem.id, {
-        // 组合标识按漏洞题固定,验证环境用后即毁,不需要教师另起名字
-        composition: compositionSpecFromDeclaration({
-          id: `vuln-${problem.id}`,
-          declaration,
-          accessProfile: SANDBOX_ACCESS_PROFILE.VULNERABILITY_PREVALIDATE,
-          base: savedComposition,
-          initCodeRef: savedInitCodeRef,
-          initScriptRef: savedInitScriptRef,
-        }),
-        init_code_ref: savedInitCodeRef || undefined,
-        init_script_ref: savedInitScriptRef || undefined,
-      })
+      const updated = await api.contest.prevalidateVulnProblem(problem.id)
       setResult(updated)
       if (updated.prevalidate_status === VulnPrevalidateStatus.PASSED) {
         toast.success('双向验证通过,可以固化到题库了')
@@ -128,10 +69,10 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
     } finally {
       setRunning(false)
     }
-  }, [declaration, onDone, problem.id, savedInitCodeRef, savedInitScriptRef, savedComposition])
+  }
 
-  const positive = readSection(result.prevalidate_detail, DETAIL_POSITIVE)
-  const negative = readSection(result.prevalidate_detail, DETAIL_NEGATIVE)
+  const positive = readSection(result.prevalidate_detail, 'positive')
+  const negative = readSection(result.prevalidate_detail, 'negative')
   const detailError = readString(result.prevalidate_detail, 'error')
   const detailTraceId = readString(result.prevalidate_detail, 'trace_id')
   const detailConsistent = isVulnPrevalidateDetailConsistent(result)
@@ -165,12 +106,7 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
             ]}
           />
 
-          <CompositionDeclarationFields
-            idPrefix="prevalidate"
-            value={declaration}
-            onChange={setDeclaration}
-            toolsHelper="按攻击步骤的需要勾选;不确定就不勾"
-          />
+          <Callout tone="info">验证将读取服务器上已保存的题目与运行环境。需要调整时，请先编辑草稿并保存。</Callout>
 
           {running ? (
             <Callout tone="info" title="正在验证">
@@ -182,7 +118,7 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
           {result.prevalidate_status === VulnPrevalidateStatus.PENDING &&
           Object.keys(result.prevalidate_detail).length === 0 ? (
             <Callout tone="info">
-              还没有验证过。选好运行环境后开始验证,过程会真实起一个隔离沙箱,用后即毁。
+              还没有验证过。请先在草稿中保存运行环境，再开始验证。
             </Callout>
           ) : (
             <div className="flex flex-col gap-4">
@@ -230,7 +166,6 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
               variant="primary"
               leftIcon={FlaskConical}
               loading={running}
-              disabled={compositionDeclarationError(declaration) !== undefined}
               onClick={() => void run()}
             >
               {Object.keys(result.prevalidate_detail).length === 0 ? '开始验证' : '重新验证'}
@@ -347,7 +282,7 @@ function readSection(
   if (typeof raw !== 'object' || raw === null) return undefined
   const section = raw as Record<string, unknown>
   if (Object.keys(section).length === 0) return undefined
-  const assertions = readAssertions(section[CASE_ASSERTIONS])
+  const assertions = readAssertions(section.assertions)
   return { passed: assertions.length > 0 && assertions.every((item) => item.passed), assertions }
 }
 
@@ -357,10 +292,10 @@ function readAssertions(raw: unknown): AssertionResult[] {
   return raw
     .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
     .map((item) => ({
-      name: readString(item, ASSERTION_CASE),
-      passed: item[ASSERTION_PASSED] === true,
-      expected: readString(item, ASSERTION_EXPECTED),
-      actual: readString(item, ASSERTION_ACTUAL),
-      hint: readString(item, ASSERTION_HINT),
+      name: readString(item, 'case'),
+      passed: item.passed === true,
+      expected: readString(item, 'expected_label'),
+      actual: readString(item, 'actual'),
+      hint: readString(item, 'hint'),
     }))
 }

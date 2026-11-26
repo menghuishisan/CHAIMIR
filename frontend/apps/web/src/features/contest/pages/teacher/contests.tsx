@@ -1,11 +1,4 @@
-// 赛事组织页(教师侧栏,/teacher/contests)。设计 §7.4:
-// 页头 +「新建赛事」,次要入口「漏洞题工坊」;分段按状态(进行中 / 报名中 / 未发布 / 已结束 / 全部)与搜索都写进地址;
-// 表格(名称、赛制、状态、当前阶段的关键时间及倒计时),整行链向赛事详情;行内只给「下一步」一个按钮
-// (草稿→发布、报名中→开赛、进行中→封榜或结束、已结束→归档),确认弹窗写清会发生什么。
-//
-// 列表接口只接受单个状态,而「进行中」「已结束」各对应两个状态,且排序要跨页(进行中的最前);
-// 一所学校的赛事通常几场到十几场,故按页取完后在浏览器里分段、排序、分页(与学生端竞赛列表同一做法)。
-// 列表接口返回本校全部赛事,详情与状态流转却只对组织者和学校管理员开放,所以只列自己能管的赛事。
+// 教师赛事列表只展示本人可管理的赛事，完整读取后按正式状态筛选并跨页排序。
 
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
@@ -31,11 +24,11 @@ import { SearchBox } from '../../../../components/SearchBox'
 import { useAsyncResource, useUrlState } from '../../../../hooks'
 import { collectAllPages } from '../../../../utils/allPages'
 import { formatDateTime } from '../../../../utils/formatters'
-import { contestModeLabel, contestStatusLabel, teamModeLabel } from '../../../../utils/labels/contest'
+import { CONTEST_STATUS_OPTIONS, contestModeLabel, contestStatusLabel, teamModeLabel } from '../../../../utils/labels/contest'
 import { readPage } from '../../../../utils/urlQuery'
 import { ContestFormModal } from '../../components/ContestFormModal'
 import { ContestNextStepButton } from '../../components/ContestNextStep'
-import { sortTeacherContests, teacherContestSegmentOf, type TeacherContestSegment } from '../../contestOrder'
+import { sortTeacherContests } from '../../contestOrder'
 import { contestTimeHint, contestTimeline } from '../../contestTimeline'
 import { canManageContest } from '../../rules'
 import { contestStatusTone } from '../../statusPresentation'
@@ -43,17 +36,14 @@ import { contestStatusTone } from '../../statusPresentation'
 /** 前端分页的每页行数(与后端默认页大小一致) */
 const PAGE_SIZE = 20
 
-const SEGMENTS: { value: 'all' | TeacherContestSegment; label: string }[] = [
-  { value: 'running', label: '进行中' },
-  { value: 'signup', label: '报名中' },
-  { value: 'draft', label: '未发布' },
-  { value: 'ended', label: '已结束' },
+const STATUS_OPTIONS = [
+  ...CONTEST_STATUS_OPTIONS,
   { value: 'all', label: '全部' },
 ]
 
 /** 地址参数:status 是分段,q 是搜索词;页码在 page */
 const CONTESTS_QUERY = {
-  status: { defaultValue: 'all', allowed: ['running', 'signup', 'draft', 'ended', 'all'] },
+  status: { defaultValue: 'all', allowed: STATUS_OPTIONS.map((option) => option.value) },
   q: { defaultValue: '' },
 } as const
 
@@ -84,11 +74,9 @@ export default function TeacherContestsPage() {
   )
 
   const counts = useMemo(() => {
-    const result = { running: 0, signup: 0, draft: 0, ended: 0, all: 0 }
+    const result: Record<string, number> = { all: 0 }
     for (const contest of manageable) {
-      const segment = teacherContestSegmentOf(contest.status)
-      if (!segment) continue
-      result[segment] += 1
+      result[contest.status] = (result[contest.status] ?? 0) + 1
       result.all += 1
     }
     return result
@@ -98,7 +86,7 @@ export default function TeacherContestsPage() {
     () =>
       sortTeacherContests(
         manageable.filter(
-          (contest) => query.status === 'all' || teacherContestSegmentOf(contest.status) === query.status,
+          (contest) => query.status === 'all' || String(contest.status) === query.status,
         ),
       ),
     [manageable, query.status],
@@ -179,10 +167,9 @@ export default function TeacherContestsPage() {
       <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <SegmentedControl
           aria-label="按赛事状态筛选"
-          options={SEGMENTS.map((segment) => ({
-            value: segment.value,
-            label: segment.label,
-            count: loaded ? counts[segment.value] : undefined,
+          options={STATUS_OPTIONS.map((option) => ({
+            ...option,
+            count: loaded ? counts[option.value] ?? 0 : undefined,
           }))}
           value={query.status}
           onValueChange={(value) => setQuery({ status: value })}

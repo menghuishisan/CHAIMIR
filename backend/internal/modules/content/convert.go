@@ -101,7 +101,7 @@ func paperDetailDTO(detail PaperWithItems) (PaperDetailDTO, error) {
 	return PaperDetailDTO{Paper: paperDTO(detail.Paper), Items: items}, nil
 }
 
-// versionHash 对外壳关键字段和正文生成稳定 SHA-256 摘要,用于发布版本完整性校验。
+// versionHash 对不可变版本内容生成摘要,可见范围单独鉴权。
 func versionHash(item Item, body map[string]any, sensitive []string) (string, error) {
 	payload := map[string]any{
 		"code":             item.Code,
@@ -112,7 +112,6 @@ func versionHash(item Item, body map[string]any, sensitive []string) (string, er
 		"difficulty":       item.Difficulty,
 		"tags":             normalizedStrings(item.Tags),
 		"knowledge_points": normalizedStrings(item.KnowledgePoints),
-		"visibility":       item.Visibility,
 		"body":             body,
 		"sensitive_fields": normalizedStrings(sensitive),
 	}

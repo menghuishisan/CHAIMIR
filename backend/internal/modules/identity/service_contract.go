@@ -267,8 +267,30 @@ func ensureAccountVisibleInContext(ctx context.Context, accountTenantID int64) e
 
 // auditTenantFilter 把平台级审计范围转换为 repo 层全量查询,租户路径固定收敛到本租户。
 func auditTenantFilter(query contracts.AuditQuery) int64 {
-	if query.IncludePlatform {
+	if query.IncludePlatform && query.TenantID == 0 {
 		return -1
 	}
 	return query.TenantID
+}
+
+// AlertMetrics 供 M9 只读聚合，不暴露业务明细。
+func (s *Service) AlertMetrics(ctx context.Context, q contracts.AlertMetricQuery) (map[string]float64, error) {
+	var out map[string]float64
+	err := s.store.TenantTx(ctx, q.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		out, err = tx.ReadAlertMetrics(ctx, q)
+		return err
+	})
+	return out, err
+}
+
+// AlertRecipients 为本校告警解析当前有效管理员。
+func (s *Service) AlertRecipients(ctx context.Context, tenantID int64) ([]int64, error) {
+	var out []int64
+	err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		out, err = tx.AlertRecipients(ctx, tenantID)
+		return err
+	})
+	return out, err
 }

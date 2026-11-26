@@ -47,6 +47,7 @@ env_keys:
     - CHAIMIR_CHAIN_RPC_URL
     - CHAIMIR_RUNTIME_RPC_PORT
     - CHAIMIR_CHAIN_STATE_DIR
+    - FOUNDRY_TRANSACTION_TIMEOUT
   secret:
     - CHAIMIR_EVM_DEPLOYER_MNEMONIC
 secrets_required:
@@ -76,6 +77,8 @@ runtime:
         value: /runtime-state
       - name: CHAIMIR_RUNTIME_RPC_PORT
         value: "8545"
+      - name: FOUNDRY_TRANSACTION_TIMEOUT
+        value: "60"
   native:
     helper: /usr/local/bin/chaimir-hardhat-adapter
     profile: evm-json-rpc
@@ -120,7 +123,7 @@ selftest:
       command:
         - sh
         - -lc
-        - "hardhat --version && anvil --version"
+        - "hardhat --version && anvil --version && cast publish --help >/dev/null && timeout --version >/dev/null"
     - name: solidity-compilers
       command:
         - sh
@@ -129,7 +132,6 @@ selftest:
 capability_selftest:
   deploy_payload:
     bytecode: "0x6005600c60003960056000f3600060005500"
-    from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
   query_target: chainId
 supply_chain:
   sbom: true

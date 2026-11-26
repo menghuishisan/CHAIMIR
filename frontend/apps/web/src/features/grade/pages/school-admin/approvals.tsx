@@ -142,7 +142,7 @@ export default function SchoolAdminApprovalsPage() {
    * 成绩审核的动作是「逐条把报送处理完」,不是「找一条记录」——
    * 详情与处理动作常驻右侧、键盘上下切条、处理完自动进下一条待审核项。
    */
-  const list = useMemo(() => reviews.data?.list ?? [], [reviews.data])
+  const list = reviews.data?.list ?? []
   const [selectedId, setSelectedId] = useState<string>()
   /** <lg 走两级页面(§6.4.1 规则 4) */
   const [mobileView, setMobileView] = useState<'queue' | 'detail'>('queue')

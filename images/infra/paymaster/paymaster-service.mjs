@@ -9,10 +9,11 @@ const httpTimeoutSeconds = requiredPositiveInteger("CHAIMIR_HTTP_TIMEOUT_SECONDS
 const rpcUrl = requireHttpUrl("CHAIMIR_EVM_RPC_URL", process.env.CHAIMIR_EVM_RPC_URL);
 const entryPointAddress = requireAddress("CHAIMIR_ENTRYPOINT_ADDRESS", process.env.CHAIMIR_ENTRYPOINT_ADDRESS);
 const paymasterAddress = requireAddress("CHAIMIR_PAYMASTER_ADDRESS", process.env.CHAIMIR_PAYMASTER_ADDRESS);
-const signerKey = requireConfig("CHAIMIR_PAYMASTER_PRIVATE_KEY", process.env.CHAIMIR_PAYMASTER_PRIVATE_KEY);
+const signerKey = requiredSecret("CHAIMIR_PAYMASTER_PRIVATE_KEY");
 const configuredSignerAddress = requireAddress("CHAIMIR_PAYMASTER_SIGNER_ADDRESS", process.env.CHAIMIR_PAYMASTER_SIGNER_ADDRESS);
-const serviceSecret = requireConfig("CHAIMIR_PAYMASTER_SERVICE_AUTH_SECRET", process.env.CHAIMIR_PAYMASTER_SERVICE_AUTH_SECRET);
+const serviceSecret = requiredSecret("CHAIMIR_PAYMASTER_SERVICE_AUTH_SECRET");
 const maxSkewSeconds = requiredPositiveInteger("CHAIMIR_IMAGE_SERVICE_AUTH_MAX_SKEW_SECONDS");
+const maxNonces = requiredPositiveInteger("CHAIMIR_IMAGE_SERVICE_AUTH_MAX_NONCES");
 const bodyLimit = requiredPositiveInteger("CHAIMIR_MAX_BODY_BYTES");
 const validitySeconds = requiredPositiveInteger("CHAIMIR_PAYMASTER_VALIDITY_SECONDS");
 const maxUserOperationBytes = requiredPositiveInteger("CHAIMIR_PAYMASTER_MAX_USER_OPERATION_BYTES");
@@ -28,7 +29,13 @@ function requireConfig(name, value) {
 
 function requiredPositiveInteger(name) {
   const value = Number(requireConfig(name, process.env[name]));
-  if (!Number.isInteger(value) || value <= 0) throw new Error(`${name} must be a positive integer`);
+  if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${name} must be a positive safe integer`);
+  return value;
+}
+
+function requiredSecret(name) {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required`);
   return value;
 }
 
@@ -59,14 +66,12 @@ function requireAddress(name, value) {
 }
 
 function timingSafeEqualHex(left, right) {
-  const leftBuffer = Buffer.from(left || "", "hex");
-  const rightBuffer = Buffer.from(right || "", "hex");
-  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+  if (!/^[0-9a-f]{64}$/i.test(left || "") || !/^[0-9a-f]{64}$/i.test(right || "")) return false;
+  return crypto.timingSafeEqual(Buffer.from(left, "hex"), Buffer.from(right, "hex"));
 }
 
 function pruneNonces(now) {
-  for (const [nonce, timestamp] of seenNonces.entries()) if (Math.abs(now - timestamp) > maxSkewSeconds) seenNonces.delete(nonce);
-  while (seenNonces.size > 4096) seenNonces.delete(seenNonces.keys().next().value);
+  for (const [nonce, timestamp] of seenNonces.entries()) if (now - timestamp > maxSkewSeconds) seenNonces.delete(nonce);
 }
 
 async function verifyServiceSignature(request, reply) {
@@ -75,11 +80,12 @@ async function verifyServiceSignature(request, reply) {
   const signature = String(request.headers["x-chaimir-signature"] || "");
   const now = Math.floor(Date.now() / 1000);
   pruneNonces(now);
-  if (!Number.isInteger(timestamp) || Math.abs(now - timestamp) > maxSkewSeconds || !nonce || seenNonces.has(nonce)) return reply.code(401).send({ error: "unauthorized" });
+  if (!Number.isSafeInteger(timestamp) || Math.abs(now - timestamp) > maxSkewSeconds || !/^[A-Za-z0-9_-]{16,128}$/.test(nonce) || seenNonces.has(nonce)) return reply.code(401).send({ error: "unauthorized" });
   const bodyHash = crypto.createHash("sha256").update(JSON.stringify(request.body ?? null)).digest("hex");
   const canonical = [request.method, request.url, timestamp, nonce, bodyHash].join("\n");
   const expected = crypto.createHmac("sha256", serviceSecret).update(canonical).digest("hex");
   if (!timingSafeEqualHex(signature, expected)) return reply.code(401).send({ error: "unauthorized" });
+  if (seenNonces.size >= maxNonces) return reply.code(503).send({ error: "authentication_capacity_exceeded" });
   seenNonces.set(nonce, timestamp);
 }
 

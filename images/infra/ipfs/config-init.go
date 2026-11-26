@@ -2,6 +2,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -47,12 +48,10 @@ func main() {
 		fail("create temporary Kubo config: %v", err)
 	}
 	if _, err := file.Write(data); err != nil {
-		_ = file.Close()
-		fail("write temporary Kubo config: %v", err)
+		fail("write temporary Kubo config: %v", errors.Join(err, file.Close()))
 	}
 	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		fail("sync temporary Kubo config: %v", err)
+		fail("sync temporary Kubo config: %v", errors.Join(err, file.Close()))
 	}
 	if err := file.Close(); err != nil {
 		fail("close temporary Kubo config: %v", err)

@@ -24,7 +24,7 @@ upstream:
   reuse_policy: thin-wrapper
 env_keys:
   config:
-    - CHAIMIR_RPC_UPSTREAM_URL
+    - CHAIMIR_RPC_UPSTREAM_URLS
   secret: []
 data_driven: true
 capabilities:
@@ -46,7 +46,7 @@ infra:
       - name: infra
         image_url: "@self"
         ports:
-          - name: http
+          - name: rpc
             container_port: 8080
             service_port: 8080
             protocol: TCP
@@ -59,7 +59,7 @@ infra:
             memory: 256Mi
         readiness_probe:
           type: tcp
-          port: http
+          port: rpc
           period_seconds: 2
           failure_threshold: 30
         read_only_root_filesystem: true
@@ -68,12 +68,12 @@ infra:
           - name: gateway-tmp
             mount_path: /tmp
     services:
-      - name: infra-rpc-gateway-http
+      - name: infra-rpc-gateway-rpc
         component: infra
         ports:
-          - name: http
+          - name: rpc
             port: 8080
-            target_port: http
+            target_port: rpc
             protocol: TCP
   bindings:
     - name: upstream
@@ -82,12 +82,13 @@ infra:
       endpoint: rpc
       protocol: HTTP
       required_at_start: true
-      config_binding: env:CHAIMIR_RPC_UPSTREAM_URL
+      config_binding: env:CHAIMIR_RPC_UPSTREAM_URLS
+      multiple: true
   roles:
     - rpc-proxy
     - load-balancer
 ports:
-  - name: http
+  - name: rpc
     container_port: 8080
     protocol: TCP
     expose: proxy
@@ -119,11 +120,10 @@ selftest:
       command:
         - envoy
         - --version
-    - name: entrypoint-syntax
+    - name: entrypoint-version
       command:
-        - sh
-        - -n
         - /usr/local/bin/chaimir-rpc-gateway-entrypoint
+        - --version
 supply_chain:
   sbom: true
   trivy_required: true

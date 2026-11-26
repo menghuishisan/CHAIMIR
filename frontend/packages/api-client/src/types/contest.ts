@@ -1,8 +1,8 @@
 // ===== M8 Contest 模块 =====
 
 import type { SnowflakeID } from './common'
-import type { SandboxCompositionSpec } from './composition'
-import type { SandboxAccessProfile } from '../constants/composition'
+import type { JudgeOutcome } from './judge'
+import type { JudgeTaskStatusCode } from '../constants/judge'
 import type {
   BattleMatchStatus,
   BattleResult,
@@ -16,6 +16,7 @@ import type {
   TeamMode,
   TeamStatus,
   VulnLevel,
+  VulnChainOperation,
   VulnPrevalidateStatus,
   VulnProblemStatus,
   VulnRuntimeMode,
@@ -61,6 +62,7 @@ export type ContestSandboxChainResponse = SandboxChainResponse
 export interface Contest {
   id: SnowflakeID
   organizer_id: SnowflakeID
+  leaderboard_topic: string
   name: string
   mode: ContestMode
   match_mode?: MatchMode
@@ -70,7 +72,6 @@ export interface Contest {
   start_at: string
   end_at: string
   freeze_minutes: number
-  rules: Record<string, unknown>
   status: ContestStatus
   created_at: string
   updated_at: string
@@ -86,7 +87,6 @@ export interface ContestRequest {
   start_at: string
   end_at: string
   freeze_minutes: number
-  rules: Record<string, unknown>
 }
 
 export interface ContestProblem {
@@ -97,7 +97,6 @@ export interface ContestProblem {
   item_version: string
   score: number
   dynamic_score?: ContestDynamicScoreConfig
-  battle_config?: ContestBattleRuntimeConfig
   battle_rule?: BattleRule
   seq: number
   composition_digest?: string
@@ -109,27 +108,14 @@ export interface ContestProblemRequest {
   item_version: string
   score: number
   dynamic_score?: ContestDynamicScoreConfig
-  battle_config?: ContestBattleRuntimeConfig
   battle_rule?: BattleRule
   seq: number
 }
 
 /** ContestDynamicScoreConfig 是按已解出队伍数衰减的固定计分参数。 */
-export interface ContestDynamicScoreConfig {
+interface ContestDynamicScoreConfig {
   min_score: number
   decay_per_solve: number
-}
-
-/**
- * ContestBattleRuntimeConfig 是对抗题的赛制参数。
- * 环境组合不在这里 —— 对抗环境由题目版本(M5)提供的已发布组合快照决定,
- * 竞赛侧只保存「怎么打」:执行边界、入场角色与复盘参数。
- */
-export interface ContestBattleRuntimeConfig {
-  /** execution_profile 固定为对抗赛访问边界,由后端校验闭集 */
-  execution_profile: SandboxAccessProfile
-  entry_roles: BattleRole[]
-  replay_profile: Record<string, unknown>
 }
 
 export interface ContestTeam {
@@ -142,7 +128,7 @@ export interface ContestTeam {
   members: TeamMember[]
 }
 
-export interface TeamMember {
+interface TeamMember {
   id: SnowflakeID
   team_id: SnowflakeID
   account_id: SnowflakeID
@@ -168,8 +154,9 @@ export interface ContestSubmission {
   content_ref: Record<string, unknown>
   source_ref: string
   judge_task_ref?: string
+  judge_status: JudgeTaskStatusCode
   passed: boolean
-  score: number
+  score: number | null
   sandbox_ref?: string
   submitted_at: string
 }
@@ -230,7 +217,7 @@ export interface BattleMatch {
   finished_at?: string
 }
 
-export interface BattleScoreDelta {
+interface BattleScoreDelta {
   team_a: SnowflakeID
   team_b: SnowflakeID
   rating_a_before: number
@@ -241,11 +228,6 @@ export interface BattleScoreDelta {
   delta_b: number
   k_factor: number
   result: BattleResult
-}
-
-export interface BattleReplayRef {
-  match_id: SnowflakeID
-  available: boolean
 }
 
 export interface BattleReplayWindow {
@@ -261,17 +243,17 @@ export interface BattleReplayWindowItem {
   match: BattleMatch
   sequence: number
   my_side: 'a' | 'b'
-  active_entry?: BattleReplayActiveEntry
+  entry: BattleReplayEntry
 }
 
-export interface BattleReplayActiveEntry {
+interface BattleReplayEntry {
   id: SnowflakeID
   role: BattleRole
   version_no: number
   submitted_at: string
 }
 
-export interface BattleReplayCheckpoint {
+interface BattleReplayCheckpoint {
   wins: number
   losses: number
   draws: number
@@ -286,11 +268,7 @@ export interface BattleReplayDownloadGrant {
   expires_at: string
 }
 
-/**
- * 对局回放归档的正文结构,镜像后端 `contest/service_battle_replay.go` 的 battleReplayArchive。
- * 它不是 REST 响应,而是经「签发授权 → 统一文件服务取件」拿到的 JSON 归档
- * (见 docs/08-竞赛/04-接口设计.md §对局回放);故类型在此登记,校验在消费方边界处做。
- */
+/** 经一次性授权下载的回放归档，与 M8 归档协议一致；消费方校验正文。 */
 export interface BattleReplayArchive {
   /** 归档协议版本;不认识的版本一律拒绝解析,不做兼容猜测 */
   version: number
@@ -304,7 +282,7 @@ export interface BattleReplayArchive {
   finished_at: string
 }
 
-export interface BattleReplayInitialState {
+interface BattleReplayInitialState {
   contest_id: SnowflakeID
   problem_id: SnowflakeID
   battle_rule: BattleRule
@@ -312,7 +290,7 @@ export interface BattleReplayInitialState {
   entry_b: BattleReplayEntryState
 }
 
-export interface BattleReplayEntryState {
+interface BattleReplayEntryState {
   role: BattleRole
   version_no: number
   artifact_hash: string
@@ -320,13 +298,14 @@ export interface BattleReplayEntryState {
 
 export interface BattleReplayAction {
   seq: number
-  /** 链操作类型:deploy 部署 / tx 交易 / reset 重置(与 M3 runChainStep 的封闭集一致) */
-  op: string
+  runtime_instance: string
+  /** 与预验证、判题共用的部署、交易、重置和查询动作。 */
+  op: VulnChainOperation
   payload?: Record<string, unknown>
   output?: Record<string, unknown>
 }
 
-export interface BattleReplayResult {
+interface BattleReplayResult {
   passed: boolean
   score: number
   max_score: number
@@ -340,6 +319,7 @@ export interface BattleReplayResultDetail {
   expected_label?: string
   actual?: string
   hint?: string
+  outcome?: JudgeOutcome
 }
 
 export interface LadderRank {
@@ -361,7 +341,7 @@ export interface ResultSnapshot {
   generated_at: string
 }
 
-export interface LadderSnapshotEntry {
+interface LadderSnapshotEntry {
   team_id: SnowflakeID
   /** 队名;读取时按 team_id 取,快照本身不存名字 */
   team_name: string
@@ -421,6 +401,7 @@ export interface VulnSourceRequest {
 
 export interface VulnSource {
   id: SnowflakeID
+  is_shared: boolean
   type: VulnSourceType
   name: string
   config: Record<string, unknown>
@@ -429,7 +410,7 @@ export interface VulnSource {
   last_sync_at?: string
 }
 
-export interface VulnProblemImportRequest {
+export interface VulnProblemRequest {
   source_id?: SnowflakeID
   external_ref?: string
   title: string
@@ -438,14 +419,9 @@ export interface VulnProblemImportRequest {
   draft_body: Record<string, unknown>
 }
 
-/**
- * VulnPrevalidateRequest 是漏洞题预验证请求:教师声明用什么组合跑正反向验证。
- * 只提交声明,编译与执行都在服务端;结果写回 prevalidate_status / prevalidate_detail。
- */
-export interface VulnPrevalidateRequest {
-  composition: SandboxCompositionSpec
-  init_code_ref?: string
-  init_script_ref?: string
+/** 按读取时的版本保存指定草稿，不能覆盖较新的编辑。 */
+export interface VulnProblemUpdateRequest extends VulnProblemRequest {
+  expected_updated_at: string
 }
 
 export interface VulnProblem {
@@ -462,4 +438,5 @@ export interface VulnProblem {
   content_item_code?: string
   content_item_version?: string
   status: VulnProblemStatus
+  updated_at: string
 }

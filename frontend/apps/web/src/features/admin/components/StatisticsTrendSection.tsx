@@ -1,18 +1,11 @@
-// 运营统计趋势区(平台看板与学校看板共用)。
-//
-// 两端的统计接口形状完全一致(逐日 { date, metrics } 快照),差别只有调用哪个接口,
-// 故这里只有一份实现 —— 此前两个看板各自复制了一遍同样的摊平表格与日期表单。
-//
-// 呈现形态按规范 §8.3:历史序列先出折线图,数据表是同一份数据的等价切换(ChartContainer 提供),
-// 而不是只给一张 40 行的「日期 × 指标 × 数值」长表 —— 那等于让读者自己在数字里找趋势。
-// metrics 是后端写入的开放对象:只呈现已登记的键,未登记键跳过,不猜语义、不把内部键名抛到界面上。
-// 时间范围切换在图表区右上角(设计 §7.5):近 7 / 30 / 90 天一键切换,「自定义」再展开日期;范围写进地址。
+// 平台与学校看板共用的日期筛选、趋势图和等价数据表。
 
 import { useMemo, useState } from 'react'
 import { CalendarRange } from 'lucide-react'
 import type { Statistics } from '@chaimir/api-client'
 import {
   ChartContainer,
+  DescriptionList,
   FilterBar,
   FilterField,
   Input,
@@ -27,6 +20,7 @@ import { statisticsMetricLabel } from '../../../utils/labels/admin'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
 import {
   STATISTICS_METRIC_GROUPS,
+  statisticsDateRange,
   type StatisticsMetricGroup,
 } from '../statisticsPresentation'
 
@@ -43,9 +37,6 @@ const RANGE_OPTIONS = [
   { value: '90', label: '近 90 天' },
   { value: 'custom', label: '自定义' },
 ]
-
-/** ISO_DATE 地址里的日期必须是 YYYY-MM-DD;不合法时回到预设区间 */
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 
 /** 一组指标在当前区间内的图表数据。 */
 interface TrendGroup {
@@ -72,12 +63,7 @@ export interface StatisticsTrendSectionProps {
  */
 export function StatisticsTrendSection({ load, idPrefix, description }: StatisticsTrendSectionProps) {
   const [query, setQuery] = useUrlState(TREND_QUERY)
-  const custom = query.range === 'custom' && ISO_DATE.test(query.from) && ISO_DATE.test(query.to)
-  const range = custom
-    ? { from: query.from, to: query.to }
-    : { from: isoDate(-Number(query.range === 'custom' ? '30' : query.range)), to: isoDate(0) }
-  const [from, setFrom] = useState(() => (custom ? query.from : range.from))
-  const [to, setTo] = useState(() => (custom ? query.to : range.to))
+  const range = statisticsDateRange(query)
 
   const statistics = useAsyncResource(
     () => load({ from: range.from, to: range.to }),
@@ -111,40 +97,22 @@ export function StatisticsTrendSection({ load, idPrefix, description }: Statisti
           options={RANGE_OPTIONS}
           value={query.range}
           onValueChange={(value) =>
-            value === 'custom' ? setQuery({ range: value, from, to }) : setQuery({ range: value, from: '', to: '' })
+            setQuery(value === 'custom' ? { range: value, ...range } : { range: value, from: '', to: '' })
           }
         />
       </div>
       <div className="flex flex-col gap-4">
         {query.range === 'custom' ? (
-        <FilterBar
-          label="自定义统计区间"
-          onSubmit={() => setQuery({ range: 'custom', from, to })}
-          submitLabel="查询"
-          submitIcon={CalendarRange}
-          submitting={loading}
-        >
-          <FilterField label="开始日期" htmlFor={`${idPrefix}-stats-from`}>
-            <Input
-              id={`${idPrefix}-stats-from`}
-              type="date"
-              value={from}
-              onChange={(event) => setFrom(event.target.value)}
-            />
-          </FilterField>
-          <FilterField label="结束日期" htmlFor={`${idPrefix}-stats-to`}>
-            <Input
-              id={`${idPrefix}-stats-to`}
-              type="date"
-              value={to}
-              onChange={(event) => setTo(event.target.value)}
-            />
-          </FilterField>
-        </FilterBar>
+          <StatisticsRangeForm
+            key={`${range.from}:${range.to}`}
+            range={range}
+            idPrefix={idPrefix}
+            loading={loading}
+            onSubmit={(value) => setQuery({ range: 'custom', ...value })}
+          />
         ) : null}
 
-        {/* 没有任何可呈现的分组时也要出一张容器:它自己有空/载/错三态与引导文案,
-            比页面另外拼一个空块更一致(§8.2) */}
+        {/* 没有已登记指标时也保留加载、失败和空态。 */}
         <div className={groups.length > 1 ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
           {(groups.length > 0 ? groups : [emptyGroup()]).map((item) => (
             <ChartContainer
@@ -159,7 +127,17 @@ export function StatisticsTrendSection({ load, idPrefix, description }: Statisti
               ariaSummary={trendSummary(item)}
               dataTable={groupDataTable(item)}
             >
-              <TrendLineChart data={item.data} xKey="date" series={item.series} />
+              {item.data.length < 4 ? (
+                <DescriptionList items={item.series.map((series) => {
+                  const value = item.data[item.data.length - 1]?.[series.key]
+                  return {
+                    term: series.name,
+                    description: typeof value === 'number' ? value.toLocaleString('zh-CN') : '没有数据',
+                  }
+                })} />
+              ) : (
+                <TrendLineChart data={item.data} xKey="date" series={item.series} />
+              )}
             </ChartContainer>
           ))}
         </div>
@@ -244,10 +222,43 @@ function trendSummary(item: TrendGroup): string {
   return `${item.group.title},${span}:${parts.join(';')}。`
 }
 
-/** isoDate 按天偏移生成 date 控件需要的 YYYY-MM-DD。 */
-function isoDate(offsetDays: number): string {
-  const date = new Date()
-  date.setDate(date.getDate() + offsetDays)
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+/** 未提交日期留在表单；地址范围变化时通过 key 重建，不另存已应用范围。 */
+function StatisticsRangeForm({ range, idPrefix, loading, onSubmit }: {
+  range: { from: string; to: string }
+  idPrefix: string
+  loading: boolean
+  onSubmit: (range: { from: string; to: string }) => void
+}) {
+  const [from, setFrom] = useState(range.from)
+  const [to, setTo] = useState(range.to)
+  return (
+    <FilterBar
+      label="自定义统计区间"
+      onSubmit={() => onSubmit({ from, to })}
+      submitLabel="查询"
+      submitIcon={CalendarRange}
+      submitting={loading}
+    >
+      <FilterField label="开始日期" htmlFor={`${idPrefix}-stats-from`}>
+        <Input
+          id={`${idPrefix}-stats-from`}
+          type="date"
+          required
+          max={to || undefined}
+          value={from}
+          onChange={(event) => setFrom(event.target.value)}
+        />
+      </FilterField>
+      <FilterField label="结束日期" htmlFor={`${idPrefix}-stats-to`}>
+        <Input
+          id={`${idPrefix}-stats-to`}
+          type="date"
+          required
+          min={from || undefined}
+          value={to}
+          onChange={(event) => setTo(event.target.value)}
+        />
+      </FilterField>
+    </FilterBar>
+  )
 }

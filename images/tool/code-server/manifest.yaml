@@ -29,6 +29,12 @@ upstream:
   node_digest: sha256:4228fca437e45714a3ebd1d4ecd1dcc583cf79f5a940aa025e286b472d93b67c
   reuse_policy: thin-wrapper
 data_driven: true
+env_keys:
+  config:
+    - CHAIMIR_GRAPH_ADMIN_URL
+    - CHAIMIR_GRAPH_STATUS_URL
+    - CHAIMIR_GRAPH_QUERY_URL
+    - CHAIMIR_IPFS_API_URL
 capabilities:
   provides:
     - web-ide
@@ -56,6 +62,43 @@ tool:
     - edu
   mount_workspace: true
   readiness_path: /healthz
+  bindings:
+    - name: indexer_deploy
+      title: 索引部署
+      optional: true
+      capability: subgraph-runner
+      source_component: web
+      endpoint: admin
+      protocol: HTTP
+      required_at_start: true
+      config_binding: env:CHAIMIR_GRAPH_ADMIN_URL
+    - name: indexer_status
+      title: 索引进度
+      optional: true
+      capability: subgraph-runner
+      source_component: web
+      endpoint: index-status
+      protocol: HTTP
+      required_at_start: true
+      config_binding: env:CHAIMIR_GRAPH_STATUS_URL
+    - name: indexer_query
+      title: 索引查询
+      optional: true
+      capability: chain-indexer
+      source_component: web
+      endpoint: graphql
+      protocol: HTTP
+      required_at_start: true
+      config_binding: env:CHAIMIR_GRAPH_QUERY_URL
+    - name: content_upload
+      title: 内容上传
+      optional: true
+      capability: ipfs-http-api
+      source_component: web
+      endpoint: api
+      protocol: HTTP
+      required_at_start: true
+      config_binding: env:CHAIMIR_IPFS_API_URL
   ephemeral_mounts:
     - name: code-server-config
       mount_path: /home/coder/.config

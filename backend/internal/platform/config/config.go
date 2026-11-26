@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 )
@@ -134,18 +135,19 @@ type NATSConfig struct {
 
 // ObjectStorageConfig 描述 S3 兼容对象存储连接和桶命名。
 type ObjectStorageConfig struct {
-	Endpoint                string
-	Secure                  bool
-	Region                  string
-	AccessKey               string
-	SecretKey               string
-	BucketCode              string
-	BucketAttach            string
-	BucketReport            string
-	BucketBackup            string
-	PingTimeoutSeconds      int
-	DownloadGrantTTLSeconds int
-	StreamGrantTTLSeconds   int
+	Endpoint                      string
+	Secure                        bool
+	Region                        string
+	AccessKey                     string
+	SecretKey                     string
+	BucketCode                    string
+	BucketAttach                  string
+	BucketReport                  string
+	BucketBackup                  string
+	PingTimeoutSeconds            int
+	DownloadGrantTTLSeconds       int
+	StreamGrantTTLSeconds         int
+	CourseCoverStageRetentionDays int
 }
 
 // parseObjectStorageEndpoint 解析唯一的 S3 endpoint 契约，scheme 同时决定客户端是否启用 TLS。
@@ -227,6 +229,7 @@ type SMSConfig struct {
 
 // UploadConfig 描述统一上传边界。
 type UploadConfig struct {
+	CleanupTimeoutSeconds     int
 	ImportMaxBytes            int64
 	ContentAttachmentMaxBytes int64
 	ExperimentReportMaxBytes  int64
@@ -284,6 +287,7 @@ type NotifyConfig struct {
 type TeachingConfig struct {
 	CourseGradesMaxRows             int
 	CourseStatusPollIntervalSeconds int
+	CourseLifecycleBatchSize        int
 	JudgeOutboxBatchSize            int
 	JudgeOutboxPollIntervalMs       int
 	JudgeOutboxStaleMs              int
@@ -296,8 +300,9 @@ type TeachingConfig struct {
 	GradeExportWorkerPollMs         int
 }
 
-// ExperimentConfig 描述实验实例生命周期与报告批改的后台边界。
+// ExperimentConfig 描述实验判分补偿与实例生命周期的运行参数。
 type ExperimentConfig struct {
+	CleanupTimeoutSeconds      int
 	RecyclePollIntervalSeconds int
 	RecycleBatchSize           int
 	InstanceIdleTimeoutSeconds int
@@ -310,18 +315,23 @@ type ExperimentConfig struct {
 
 // GradeConfig 描述成绩中心申诉和成绩单签名边界。
 type GradeConfig struct {
-	AppealWindowDays       int
-	SummaryCacheTTLSeconds int
-	TranscriptSigningKey   string
-	TranscriptMaxBytes     int64
-	LockOutboxBatchSize    int
-	LockOutboxPollMs       int
-	LockOutboxStaleMs      int
-	LockOutboxMaxAttempts  int
+	AppealWindowDays              int
+	GradeAggregateCacheTTLSeconds int
+	TranscriptSigningKey          string
+	TranscriptMaxBytes            int64
+	LockOutboxBatchSize           int
+	LockOutboxPollMs              int
+	LockOutboxStaleMs             int
+	LockOutboxMaxAttempts         int
 }
 
 // AdminConfig 描述管理后台统计快照与受控备份任务边界。
 type AdminConfig struct {
+	AlertPollSeconds                  int
+	AlertWindowSeconds                int
+	AlertNotifyBatchSize              int
+	AlertNotifyLeaseSeconds           int
+	AlertNotifyMaxAttempts            int
 	StatisticsSnapshotIntervalSeconds int
 	BackupCommandOutputMaxBytes       int64
 	AuditExportWorkerBatchSize        int
@@ -455,19 +465,19 @@ type PlatformImageAttestation struct {
 type JudgeConfig struct {
 	QueuePollIntervalMs          int
 	CatalogReconcileIntervalMs   int
-	WorkerBatchSize              int
+	WorkerBatchSize              int32
 	SubmitRateLimitSec           int
 	DefaultMaxRetries            int
 	SandboxReadyPollIntervalMs   int
-	SandboxReadyGraceSeconds     int
+	SandboxReadyGraceSeconds     int32
 	ResultDetailsMaxBytes        int
-	InputInjectTimeoutSeconds    int
+	InputTimeoutSeconds          int
 	InputArchiveMaxFiles         int
 	InputArchiveMaxUnpackedBytes int64
 	SimilarityDefaultThreshold   float64
 	TaskLeaseDurationMs          int
 	OutboxLeaseDurationMs        int
-	OutboxMaxAttempts            int
+	OutboxMaxAttempts            int32
 }
 
 // MonitoringConfig 描述外接监控面板入口。
@@ -645,18 +655,19 @@ func Load() (*Config, error) {
 		errs = append(errs, objectStorageEndpointErr.Error())
 	}
 	c.ObjectStorage = ObjectStorageConfig{
-		Endpoint:                objectStorageEndpoint,
-		Secure:                  objectStorageSecure,
-		Region:                  req("OBJECT_STORAGE_REGION"),
-		AccessKey:               req("OBJECT_STORAGE_ACCESS_KEY"),
-		SecretKey:               req("OBJECT_STORAGE_SECRET_KEY"),
-		BucketCode:              req("OBJECT_STORAGE_BUCKET_CODE"),
-		BucketAttach:            req("OBJECT_STORAGE_BUCKET_ATTACHMENT"),
-		BucketReport:            req("OBJECT_STORAGE_BUCKET_REPORT"),
-		BucketBackup:            req("OBJECT_STORAGE_BUCKET_BACKUP"),
-		PingTimeoutSeconds:      reqInt("OBJECT_STORAGE_PING_TIMEOUT_SECONDS"),
-		DownloadGrantTTLSeconds: reqInt("STORAGE_DOWNLOAD_GRANT_TTL_SECONDS"),
-		StreamGrantTTLSeconds:   reqInt("STORAGE_STREAM_GRANT_TTL_SECONDS"),
+		Endpoint:                      objectStorageEndpoint,
+		Secure:                        objectStorageSecure,
+		Region:                        req("OBJECT_STORAGE_REGION"),
+		AccessKey:                     req("OBJECT_STORAGE_ACCESS_KEY"),
+		SecretKey:                     req("OBJECT_STORAGE_SECRET_KEY"),
+		BucketCode:                    req("OBJECT_STORAGE_BUCKET_CODE"),
+		BucketAttach:                  req("OBJECT_STORAGE_BUCKET_ATTACHMENT"),
+		BucketReport:                  req("OBJECT_STORAGE_BUCKET_REPORT"),
+		BucketBackup:                  req("OBJECT_STORAGE_BUCKET_BACKUP"),
+		PingTimeoutSeconds:            reqInt("OBJECT_STORAGE_PING_TIMEOUT_SECONDS"),
+		DownloadGrantTTLSeconds:       reqInt("STORAGE_DOWNLOAD_GRANT_TTL_SECONDS"),
+		StreamGrantTTLSeconds:         reqInt("STORAGE_STREAM_GRANT_TTL_SECONDS"),
+		CourseCoverStageRetentionDays: reqInt("UPLOAD_COURSE_COVER_STAGE_RETENTION_DAYS"),
 	}
 	c.Auth = AuthConfig{
 		JWTSigningKey:             req("JWT_SIGNING_KEY"),
@@ -718,6 +729,7 @@ func Load() (*Config, error) {
 		TimeoutSeconds: reqInt("SMS_TIMEOUT_SECONDS"),
 	}
 	c.Upload = UploadConfig{
+		CleanupTimeoutSeconds:     reqInt("UPLOAD_CLEANUP_TIMEOUT_SECONDS"),
 		ImportMaxBytes:            reqInt64("UPLOAD_IMPORT_MAX_BYTES"),
 		ContentAttachmentMaxBytes: reqInt64("UPLOAD_CONTENT_ATTACHMENT_MAX_BYTES"),
 		ExperimentReportMaxBytes:  reqInt64("UPLOAD_EXPERIMENT_REPORT_MAX_BYTES"),
@@ -737,6 +749,7 @@ func Load() (*Config, error) {
 	c.SimBackend = SimBackendConfig{
 		NamespacePrefix:                req("SIM_BACKEND_NAMESPACE_PREFIX"),
 		PodReadyTimeoutSeconds:         reqInt("SIM_BACKEND_POD_READY_TIMEOUT_SECONDS"),
+		SessionLeaseDurationSeconds:    reqInt("SIM_BACKEND_SESSION_LEASE_DURATION_SECONDS"),
 		StdioAdapters:                  readSimBackendAdapters("SIM_BACKEND_STDIO_ADAPTERS_JSON", &errs),
 		PackageRunnerAdapterCode:       req("SIM_PACKAGE_RUNNER_ADAPTER_CODE"),
 		MaxConcurrentSessionsPerTenant: reqInt("SIM_BACKEND_MAX_CONCURRENT_SESSIONS_PER_TENANT"),
@@ -779,6 +792,7 @@ func Load() (*Config, error) {
 	c.Teaching = TeachingConfig{
 		CourseGradesMaxRows:             reqInt("TEACHING_COURSE_GRADES_MAX_ROWS"),
 		CourseStatusPollIntervalSeconds: reqInt("TEACHING_COURSE_STATUS_POLL_INTERVAL_SECONDS"),
+		CourseLifecycleBatchSize:        reqInt("TEACHING_COURSE_LIFECYCLE_BATCH_SIZE"),
 		JudgeOutboxBatchSize:            reqInt("TEACHING_JUDGE_OUTBOX_BATCH_SIZE"),
 		JudgeOutboxPollIntervalMs:       reqInt("TEACHING_JUDGE_OUTBOX_POLL_INTERVAL_MS"),
 		JudgeOutboxStaleMs:              reqInt("TEACHING_JUDGE_OUTBOX_STALE_INTERVAL_MS"),
@@ -791,6 +805,7 @@ func Load() (*Config, error) {
 		GradeExportWorkerPollMs:         reqInt("TEACHING_GRADE_EXPORT_WORKER_POLL_INTERVAL_MS"),
 	}
 	c.Experiment = ExperimentConfig{
+		CleanupTimeoutSeconds:      reqInt("EXPERIMENT_CLEANUP_TIMEOUT_SECONDS"),
 		RecyclePollIntervalSeconds: reqInt("EXPERIMENT_RECYCLE_POLL_INTERVAL_SECONDS"),
 		RecycleBatchSize:           reqInt("EXPERIMENT_RECYCLE_BATCH_SIZE"),
 		InstanceIdleTimeoutSeconds: reqInt("EXPERIMENT_INSTANCE_IDLE_TIMEOUT_SECONDS"),
@@ -801,16 +816,21 @@ func Load() (*Config, error) {
 		EventOutboxMaxAttempts:     reqInt("ASYNC_OUTBOX_MAX_ATTEMPTS"),
 	}
 	c.Grade = GradeConfig{
-		AppealWindowDays:       reqInt("GRADE_APPEAL_WINDOW_DAYS"),
-		SummaryCacheTTLSeconds: reqInt("GRADE_SUMMARY_CACHE_TTL_SECONDS"),
-		TranscriptSigningKey:   req("GRADE_TRANSCRIPT_SIGNING_KEY"),
-		TranscriptMaxBytes:     reqInt64("GRADE_TRANSCRIPT_MAX_BYTES"),
-		LockOutboxBatchSize:    reqInt("GRADE_LOCK_OUTBOX_BATCH_SIZE"),
-		LockOutboxPollMs:       reqInt("GRADE_LOCK_OUTBOX_POLL_INTERVAL_MS"),
-		LockOutboxStaleMs:      reqInt("GRADE_LOCK_OUTBOX_STALE_INTERVAL_MS"),
-		LockOutboxMaxAttempts:  reqInt("ASYNC_OUTBOX_MAX_ATTEMPTS"),
+		AppealWindowDays:              reqInt("GRADE_APPEAL_WINDOW_DAYS"),
+		GradeAggregateCacheTTLSeconds: reqInt("GRADE_AGGREGATE_CACHE_TTL_SECONDS"),
+		TranscriptSigningKey:          req("GRADE_TRANSCRIPT_SIGNING_KEY"),
+		TranscriptMaxBytes:            reqInt64("GRADE_TRANSCRIPT_MAX_BYTES"),
+		LockOutboxBatchSize:           reqInt("GRADE_LOCK_OUTBOX_BATCH_SIZE"),
+		LockOutboxPollMs:              reqInt("GRADE_LOCK_OUTBOX_POLL_INTERVAL_MS"),
+		LockOutboxStaleMs:             reqInt("GRADE_LOCK_OUTBOX_STALE_INTERVAL_MS"),
+		LockOutboxMaxAttempts:         reqInt("ASYNC_OUTBOX_MAX_ATTEMPTS"),
 	}
 	c.Admin = AdminConfig{
+		AlertPollSeconds:                  reqInt("ADMIN_ALERT_POLL_INTERVAL_SECONDS"),
+		AlertWindowSeconds:                reqInt("ADMIN_ALERT_WINDOW_SECONDS"),
+		AlertNotifyBatchSize:              reqInt("ADMIN_ALERT_NOTIFY_BATCH_SIZE"),
+		AlertNotifyLeaseSeconds:           reqInt("ADMIN_ALERT_NOTIFY_LEASE_SECONDS"),
+		AlertNotifyMaxAttempts:            reqInt("ASYNC_OUTBOX_MAX_ATTEMPTS"),
 		StatisticsSnapshotIntervalSeconds: reqInt("ADMIN_STATISTICS_SNAPSHOT_INTERVAL_SECONDS"),
 		BackupCommandOutputMaxBytes:       reqInt64("ADMIN_BACKUP_COMMAND_OUTPUT_MAX_BYTES"),
 		AuditExportWorkerBatchSize:        reqInt("ADMIN_AUDIT_EXPORT_WORKER_BATCH_SIZE"),
@@ -884,19 +904,19 @@ func Load() (*Config, error) {
 	c.Judge = JudgeConfig{
 		QueuePollIntervalMs:          reqInt("JUDGE_QUEUE_POLL_INTERVAL_MS"),
 		CatalogReconcileIntervalMs:   reqInt("JUDGE_CATALOG_RECONCILE_INTERVAL_MS"),
-		WorkerBatchSize:              reqInt("JUDGE_WORKER_BATCH_SIZE"),
+		WorkerBatchSize:              reqInt32("JUDGE_WORKER_BATCH_SIZE"),
 		SubmitRateLimitSec:           reqInt("JUDGE_SUBMIT_RATE_LIMIT_SECONDS"),
 		DefaultMaxRetries:            reqInt("JUDGE_DEFAULT_MAX_RETRIES"),
 		SandboxReadyPollIntervalMs:   reqInt("JUDGE_SANDBOX_READY_POLL_INTERVAL_MS"),
-		SandboxReadyGraceSeconds:     reqInt("JUDGE_SANDBOX_READY_GRACE_SECONDS"),
+		SandboxReadyGraceSeconds:     reqInt32("JUDGE_SANDBOX_READY_GRACE_SECONDS"),
 		ResultDetailsMaxBytes:        reqInt("JUDGE_RESULT_DETAILS_MAX_BYTES"),
-		InputInjectTimeoutSeconds:    reqInt("JUDGE_INPUT_INJECT_TIMEOUT_SECONDS"),
+		InputTimeoutSeconds:          reqInt("JUDGE_INPUT_TIMEOUT_SECONDS"),
 		InputArchiveMaxFiles:         reqInt("JUDGE_INPUT_ARCHIVE_MAX_FILES"),
 		InputArchiveMaxUnpackedBytes: reqInt64("JUDGE_INPUT_ARCHIVE_MAX_UNPACKED_BYTES"),
 		SimilarityDefaultThreshold:   reqFloat64("JUDGE_SIMILARITY_DEFAULT_THRESHOLD"),
 		TaskLeaseDurationMs:          reqInt("JUDGE_TASK_LEASE_DURATION_MS"),
 		OutboxLeaseDurationMs:        reqInt("JUDGE_OUTBOX_LEASE_DURATION_MS"),
-		OutboxMaxAttempts:            reqInt("ASYNC_OUTBOX_MAX_ATTEMPTS"),
+		OutboxMaxAttempts:            reqInt32("ASYNC_OUTBOX_MAX_ATTEMPTS"),
 	}
 	c.Monitoring = MonitoringConfig{
 		PanelsJSON:          req("MONITORING_PANELS_JSON"),
@@ -1064,6 +1084,12 @@ func Load() (*Config, error) {
 	if c.ObjectStorage.StreamGrantTTLSeconds <= 0 || c.ObjectStorage.StreamGrantTTLSeconds >= c.ObjectStorage.DownloadGrantTTLSeconds {
 		errs = append(errs, "STORAGE_STREAM_GRANT_TTL_SECONDS 必须大于 0 且小于 STORAGE_DOWNLOAD_GRANT_TTL_SECONDS")
 	}
+	if c.ObjectStorage.CourseCoverStageRetentionDays <= 0 {
+		errs = append(errs, "UPLOAD_COURSE_COVER_STAGE_RETENTION_DAYS 必须大于 0")
+	}
+	if c.Upload.CleanupTimeoutSeconds <= 0 || int64(c.Upload.CleanupTimeoutSeconds) > math.MaxInt64/int64(time.Second) {
+		errs = append(errs, "UPLOAD_CLEANUP_TIMEOUT_SECONDS 必须为有效的正数秒数")
+	}
 	if c.Upload.VirusScanTimeoutSeconds <= 0 {
 		errs = append(errs, "UPLOAD_VIRUS_SCAN_TIMEOUT_SECONDS 必须大于 0")
 	}
@@ -1100,6 +1126,9 @@ func Load() (*Config, error) {
 	if c.SimBackend.PodReadyTimeoutSeconds <= 0 {
 		errs = append(errs, "SIM_BACKEND_POD_READY_TIMEOUT_SECONDS 必须大于 0")
 	}
+	if c.SimBackend.SessionLeaseDurationSeconds <= 0 {
+		errs = append(errs, "SIM_BACKEND_SESSION_LEASE_DURATION_SECONDS 必须大于 0")
+	}
 	if !validKubernetesNamePrefix(c.SimBackend.NamespacePrefix) {
 		errs = append(errs, "SIM_BACKEND_NAMESPACE_PREFIX 必须以 sim- 开头、以连字符结尾且只含小写字母数字或连字符")
 	}
@@ -1121,8 +1150,8 @@ func Load() (*Config, error) {
 	if c.SimBackend.PreviewFrameCount <= 0 {
 		errs = append(errs, "SIM_PREVIEW_FRAME_COUNT 必须大于 0")
 	}
-	if c.SimBackend.PreviewLeaseDurationMs <= 0 {
-		errs = append(errs, "SIM_PREVIEW_LEASE_DURATION_MS 必须大于 0")
+	if c.SimBackend.PreviewLeaseDurationMs < 3000 {
+		errs = append(errs, "SIM_PREVIEW_LEASE_DURATION_MS 必须至少为 3000")
 	}
 	if c.SimBackend.PreviewMaxAttempts <= 0 {
 		errs = append(errs, "ASYNC_OUTBOX_MAX_ATTEMPTS 必须大于 0")
@@ -1136,8 +1165,8 @@ func Load() (*Config, error) {
 	if c.Transfer.TaskRetryDelayMs <= 0 {
 		errs = append(errs, "TRANSFER_TASK_RETRY_DELAY_MS 必须大于 0")
 	}
-	if c.Transfer.TaskLeaseDurationMs <= 0 {
-		errs = append(errs, "TRANSFER_TASK_LEASE_DURATION_MS 必须大于 0")
+	if c.Transfer.TaskLeaseDurationMs < 3000 {
+		errs = append(errs, "TRANSFER_TASK_LEASE_DURATION_MS 必须至少为 3000 毫秒")
 	}
 	if c.Contest.VulnSourceTimeoutSeconds < 1 || c.Contest.VulnSourceTimeoutSeconds > 60 {
 		errs = append(errs, "CONTEST_VULN_SOURCE_TIMEOUT_SECONDS 必须在 1 到 60 秒之间")
@@ -1163,8 +1192,8 @@ func Load() (*Config, error) {
 	if c.Contest.FailedCooldownSeconds <= 0 {
 		errs = append(errs, "CONTEST_FAILED_COOLDOWN_SECONDS 必须大于 0")
 	}
-	if c.Contest.MatchmakerLeaseDurationMs <= 0 {
-		errs = append(errs, "CONTEST_MATCHMAKER_LEASE_DURATION_MS 必须大于 0")
+	if c.Contest.MatchmakerLeaseDurationMs < 3000 {
+		errs = append(errs, "CONTEST_MATCHMAKER_LEASE_DURATION_MS 必须至少为 3000")
 	}
 	if c.Contest.AutoArchiveLeaseDurationMs <= 0 {
 		errs = append(errs, "CONTEST_AUTO_ARCHIVE_LEASE_DURATION_MS 必须大于 0")
@@ -1202,6 +1231,9 @@ func Load() (*Config, error) {
 	if c.Teaching.CourseGradesMaxRows <= 0 {
 		errs = append(errs, "TEACHING_COURSE_GRADES_MAX_ROWS 必须大于 0")
 	}
+	if c.Teaching.CourseLifecycleBatchSize <= 0 || int64(c.Teaching.CourseLifecycleBatchSize) > math.MaxInt32 {
+		return nil, fmt.Errorf("TEACHING_COURSE_LIFECYCLE_BATCH_SIZE 必须在 1 到 2147483647 之间")
+	}
 	if c.Teaching.CourseStatusPollIntervalSeconds <= 0 {
 		errs = append(errs, "TEACHING_COURSE_STATUS_POLL_INTERVAL_SECONDS 必须大于 0")
 	}
@@ -1235,6 +1267,9 @@ func Load() (*Config, error) {
 	if c.Teaching.GradeExportWorkerPollMs <= 0 {
 		errs = append(errs, "TEACHING_GRADE_EXPORT_WORKER_POLL_INTERVAL_MS 必须大于 0")
 	}
+	if c.Experiment.CleanupTimeoutSeconds <= 0 || int64(c.Experiment.CleanupTimeoutSeconds) > math.MaxInt64/int64(time.Second) {
+		errs = append(errs, "EXPERIMENT_CLEANUP_TIMEOUT_SECONDS 必须为有效的正数秒数")
+	}
 	if c.Experiment.RecyclePollIntervalSeconds <= 0 {
 		errs = append(errs, "EXPERIMENT_RECYCLE_POLL_INTERVAL_SECONDS 必须大于 0")
 	}
@@ -1262,8 +1297,8 @@ func Load() (*Config, error) {
 	if c.Grade.AppealWindowDays <= 0 {
 		errs = append(errs, "GRADE_APPEAL_WINDOW_DAYS 必须大于 0")
 	}
-	if c.Grade.SummaryCacheTTLSeconds <= 0 {
-		errs = append(errs, "GRADE_SUMMARY_CACHE_TTL_SECONDS 必须大于 0")
+	if c.Grade.GradeAggregateCacheTTLSeconds <= 0 {
+		errs = append(errs, "GRADE_AGGREGATE_CACHE_TTL_SECONDS 必须大于 0")
 	}
 	if c.Grade.TranscriptMaxBytes <= 0 {
 		errs = append(errs, "GRADE_TRANSCRIPT_MAX_BYTES 必须大于 0")
@@ -1304,8 +1339,8 @@ func Load() (*Config, error) {
 	if c.Judge.ResultDetailsMaxBytes <= 0 {
 		errs = append(errs, "JUDGE_RESULT_DETAILS_MAX_BYTES 必须大于 0")
 	}
-	if c.Judge.InputInjectTimeoutSeconds <= 0 {
-		errs = append(errs, "JUDGE_INPUT_INJECT_TIMEOUT_SECONDS 必须大于 0")
+	if c.Judge.InputTimeoutSeconds <= 0 {
+		errs = append(errs, "JUDGE_INPUT_TIMEOUT_SECONDS 必须大于 0")
 	}
 	if c.Judge.InputArchiveMaxFiles <= 0 {
 		errs = append(errs, "JUDGE_INPUT_ARCHIVE_MAX_FILES 必须大于 0")
@@ -1316,14 +1351,17 @@ func Load() (*Config, error) {
 	if c.Judge.SimilarityDefaultThreshold <= 0 || c.Judge.SimilarityDefaultThreshold >= 1 {
 		errs = append(errs, "JUDGE_SIMILARITY_DEFAULT_THRESHOLD 必须大于 0 且小于 1")
 	}
-	if c.Judge.TaskLeaseDurationMs <= 0 {
-		errs = append(errs, "JUDGE_TASK_LEASE_DURATION_MS 必须大于 0")
+	if c.Judge.TaskLeaseDurationMs < 3000 {
+		errs = append(errs, "JUDGE_TASK_LEASE_DURATION_MS 必须至少为 3000")
 	}
 	if c.Judge.OutboxLeaseDurationMs <= 0 {
 		errs = append(errs, "JUDGE_OUTBOX_LEASE_DURATION_MS 必须大于 0")
 	}
 	if c.Judge.OutboxMaxAttempts <= 0 {
 		errs = append(errs, "ASYNC_OUTBOX_MAX_ATTEMPTS 必须大于 0")
+	}
+	if c.Admin.AlertPollSeconds <= 0 || c.Admin.AlertWindowSeconds <= 0 || c.Admin.AlertNotifyBatchSize <= 0 || c.Admin.AlertNotifyLeaseSeconds <= 0 || c.Admin.AlertNotifyMaxAttempts <= 0 {
+		errs = append(errs, "ADMIN_ALERT_* 与 ASYNC_OUTBOX_MAX_ATTEMPTS 必须大于 0")
 	}
 	if c.Admin.StatisticsSnapshotIntervalSeconds <= 0 {
 		errs = append(errs, "ADMIN_STATISTICS_SNAPSHOT_INTERVAL_SECONDS 必须大于 0")
@@ -1448,6 +1486,9 @@ func Load() (*Config, error) {
 	}
 	if c.Identity.AuthRateWindowSeconds <= 0 || c.Identity.AuthRateMax <= 0 {
 		errs = append(errs, "IDENTITY_AUTH_RATE_WINDOW_SECONDS 和 IDENTITY_AUTH_RATE_MAX 必须大于 0")
+	}
+	if c.Identity.PasswordMaxFailedCount <= 0 || c.Identity.PasswordMaxFailedCount > math.MaxInt16 || c.Identity.PasswordLockMinutes <= 0 {
+		errs = append(errs, "IDENTITY_PASSWORD_MAX_FAILED_COUNT 必须在 1 到 32767 之间，IDENTITY_PASSWORD_LOCK_MINUTES 必须大于 0")
 	}
 	if c.Identity.ApplicationRateWindowSeconds <= 0 || c.Identity.ApplicationRateMax <= 0 {
 		errs = append(errs, "IDENTITY_APPLICATION_RATE_WINDOW_SECONDS 和 IDENTITY_APPLICATION_RATE_MAX 必须大于 0")

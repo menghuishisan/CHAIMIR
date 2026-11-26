@@ -10,6 +10,13 @@ SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bund
 FROM sim_package
 WHERE id = $1;
 
+-- name: GetSimPackageForUpdate :one
+SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, entry,
+       backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
+FROM sim_package
+WHERE id = $1
+FOR UPDATE;
+
 -- name: ListSimPackages :many
 SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, entry,
        backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
@@ -184,6 +191,12 @@ SET preview_lease_token = '', preview_lease_until = NULL, updated_at = now()
 WHERE id = sqlc.arg(review_id) AND package_id = sqlc.arg(package_id) AND result = 1
   AND preview_lease_token = sqlc.arg(lease_token) AND preview_lease_until > now();
 
+-- name: RenewSimPreviewLease :execrows
+UPDATE sim_package_review
+SET preview_lease_until = sqlc.arg(lease_until)::timestamptz, updated_at = now()
+WHERE id = sqlc.arg(review_id) AND package_id = sqlc.arg(package_id) AND result = 1
+  AND preview_lease_token = sqlc.arg(lease_token) AND preview_lease_until > now();
+
 -- name: ExhaustSimPreviewAttempts :many
 -- worker 在最后一次预览中崩溃时没有机会写报告;租约过期后由下一轮收敛为明确的终态门禁。
 UPDATE sim_package_review
@@ -198,8 +211,7 @@ RETURNING id, package_id, submitter_id, preview_report, reviewer_id, result, com
 
 -- name: ClaimSimPackagesForPreview :many
 -- 认领待隔离预览的包:审核中、且报告里两项动态校验都还没有结论。
--- 四项审核门禁中 determinism_check 与 worker_preview 只能由隔离预览产出,
--- 没有这个认领查询就没有生产者,教师提交的包会永久停在待审(见 docs/04-仿真可视化引擎/06-业务流程与状态机.md §4)。
+-- determinism_check 与 worker_preview 仅由隔离预览产出，空报告不能上架。
 -- FOR UPDATE SKIP LOCKED:多副本部署时各副本认领互不重复,也不互相阻塞。
 WITH candidates AS (
     SELECT r.id
@@ -240,7 +252,7 @@ RETURNING id, package_id, submitter_id, preview_report, reviewer_id, result, com
 
 -- name: CreateSimSession :one
 INSERT INTO sim_session (id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), now())
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1, now(), now())
 RETURNING id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at;
 
 -- name: GetSimSession :one
@@ -257,19 +269,17 @@ JOIN sim_package p ON p.id = s.package_id
 WHERE s.tenant_id = $1 AND s.id = $2;
 
 -- name: CountActiveIsolatedSimSessions :one
--- 统计本租户当前占用集群资源的隔离执行会话数,供并发闸门
--- SIM_BACKEND_MAX_CONCURRENT_SESSIONS_PER_TENANT 使用。
--- 一个隔离会话一个 Pod,没有这道闸门循环建会话可耗尽节点;浏览器执行的会话不占集群资源故不计入。
 SELECT COUNT(*)::bigint
 FROM sim_session
-WHERE tenant_id = $1 AND compute = 2 AND status IN (1, 2, 3);
+WHERE tenant_id = $1 AND compute = 2 AND status = 1;
 
--- name: UpdateSimSessionStatus :one
+-- name: LockIsolatedSimSessionCreation :exec
+SELECT pg_advisory_xact_lock(hashtextextended('sim.isolated-session:' || sqlc.arg(tenant_id)::bigint::text, 0));
+
+-- name: ArchiveSimSession :one
 UPDATE sim_session
-SET status = $3, updated_at = now()
+SET status = 2, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-  AND status IN (1, 2, 3, 4)
-  AND $3 IN (2, 3, 4, 5, 6)
 RETURNING id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at;
 
 -- name: UpdateSimSessionAuthorizedAccounts :one
@@ -280,8 +290,8 @@ RETURNING id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, sh
 
 -- name: ArchiveSimSessionsByScopeRef :many
 UPDATE sim_session
-SET status = 5, updated_at = now()
-WHERE tenant_id = $1 AND scope_ref = $2 AND source_ref = $3 AND status IN (1, 2, 3, 4)
+SET status = 2, updated_at = now()
+WHERE tenant_id = $1 AND scope_ref = $2 AND source_ref = $3
 RETURNING id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at;
 
 -- name: GetLastSimAction :one
@@ -290,6 +300,12 @@ FROM sim_action_log
 WHERE tenant_id = $1 AND session_id = $2
 ORDER BY seq DESC
 LIMIT 1;
+
+-- name: LockSimSessionActionSequence :one
+SELECT id
+FROM sim_session
+WHERE tenant_id = $1 AND id = $2
+FOR UPDATE;
 
 -- name: GetSimActionBySeq :one
 SELECT id, tenant_id, session_id, seq, at_tick, event_type, payload, created_at
@@ -307,18 +323,10 @@ FROM sim_action_log
 WHERE tenant_id = $1 AND session_id = $2
 ORDER BY seq ASC;
 
--- name: UpsertSimCheckpoint :one
-INSERT INTO sim_checkpoint (id, tenant_id, session_id, checkpoint_id, answer, achieved, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, now())
-ON CONFLICT (tenant_id, session_id, checkpoint_id) DO UPDATE
-SET answer = EXCLUDED.answer,
-    achieved = EXCLUDED.achieved,
-    created_at = now()
-RETURNING id, tenant_id, session_id, checkpoint_id, answer, achieved, created_at;
-
 -- name: CreateSimShare :one
 INSERT INTO sim_share (id, tenant_id, session_id, code, created_by, status, expire_at, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, 1, $6, now(), now())
+ON CONFLICT (code) DO NOTHING
 RETURNING id, tenant_id, session_id, code, created_by, status, expire_at, created_at, updated_at;
 
 -- name: GetSimShareByCode :one

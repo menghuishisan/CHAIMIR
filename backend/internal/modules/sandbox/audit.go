@@ -1,4 +1,3 @@
-// sandbox audit 文件封装 M2 审计动作,统一写入 identity 的 audit_log。
 package sandbox
 
 import (
@@ -8,7 +7,6 @@ import (
 	"chaimir/pkg/apperr"
 )
 
-// writeAudit 写入沙箱关键操作审计,不得自建审计表。
 func (s *Service) writeAudit(ctx context.Context, tenantID, actorID int64, actorRole int16, action, targetType string, targetID int64, detail map[string]any) error {
 	entry, err := audit.BuildEntry(ctx, tenantID, actorID, actorRole, action, targetType, targetID, detail)
 	if err != nil {
@@ -20,7 +18,6 @@ func (s *Service) writeAudit(ctx context.Context, tenantID, actorID int64, actor
 	return nil
 }
 
-// writeAuditFromContext 使用统一审计 actor 解析能力记录平台或租户用户操作。
 func (s *Service) writeAuditFromContext(ctx context.Context, tenantID int64, action, targetType string, targetID int64, detail map[string]any) error {
 	actorID, actorRole, err := audit.ResolveActor(ctx, s.identity)
 	if err != nil {

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -21,7 +20,7 @@ import (
 // platformStableID 根据逻辑编码生成跨迁移运行稳定的正数 ID,不依赖目录遍历顺序。
 func platformStableID(namespace, code string) int64 {
 	h := fnv.New64a()
-	_, _ = h.Write([]byte(namespace + "\x00" + strings.TrimSpace(code)))
+	h.Write([]byte(namespace + "\x00" + strings.TrimSpace(code)))
 	return 900000000000000000 + int64(h.Sum64()%99999999999999999)
 }
 
@@ -180,17 +179,8 @@ type toolManifestTool struct {
 	CommandPolicy         map[string]any                `json:"command_policy"`
 }
 
-// manifestBinding 是 images manifest 与 M2 WorkloadSpec 共用的能力端点绑定。
-type manifestBinding struct {
-	Name            string `json:"name"`
-	Capability      string `json:"capability"`
-	SourceComponent string `json:"source_component"`
-	SourceEndpoint  string `json:"source_endpoint,omitempty"`
-	Endpoint        string `json:"endpoint"`
-	Protocol        string `json:"protocol"`
-	RequiredAtStart bool   `json:"required_at_start"`
-	ConfigBinding   string `json:"config_binding"`
-}
+// manifestBinding 直接复用 M2 契约，避免目录转换丢失绑定字段。
+type manifestBinding = sandbox.ComponentBinding
 
 type toolManifestPort struct {
 	Name          string `json:"name"`
@@ -225,28 +215,9 @@ type toolManifestSelftestCommand struct {
 	Command []string `json:"command"`
 }
 
-// acceptanceImagesRoot 从当前工作目录向上定位仓库 images 目录。
-func acceptanceImagesRoot() (string, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("读取当前工作目录失败: %w", err)
-	}
-	for dir := wd; ; dir = filepath.Dir(dir) {
-		candidate := filepath.Join(dir, "images")
-		if info, statErr := os.Stat(filepath.Join(candidate, "tool")); statErr == nil && info.IsDir() {
-			return candidate, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-	}
-	return "", fmt.Errorf("未找到 images 目录")
-}
-
 // toolDefinitionFromManifest 把工具 manifest 转换为 M2 工具资源规格。
 func toolDefinitionFromManifest(manifest toolManifest) (acceptanceToolDefinition, error) {
-	imageURL, err := acceptanceImageURL(manifest.Image)
+	imageURL, err := verifiedImageURL(manifest.Image)
 	if err != nil {
 		return acceptanceToolDefinition{}, err
 	}
@@ -330,84 +301,40 @@ func toolStatusFromManifest(manifest toolManifest) int16 {
 
 // toolResourceSpecFromManifest 读取工具显式 WorkloadSpec;未声明时仅为单组件工具生成默认规格。
 func toolResourceSpecFromManifest(manifest toolManifest, imageURL string, kind int16) (map[string]any, error) {
+	var spec map[string]any
 	if len(manifest.Tool.ResourceSpec) > 0 {
-		spec, err := normalizeExplicitToolResourceSpec(manifest.Tool.ResourceSpec, imageURL, kind)
+		var err error
+		spec, err = normalizeExplicitToolResourceSpec(manifest.Tool.ResourceSpec, imageURL, manifest.Selftest, manifest.SecretsRequired)
 		if err != nil {
 			return nil, err
 		}
-		command, err := toolPrepullCommandFromManifest(manifest)
+	} else {
+		component, err := toolComponentFromManifest(manifest, imageURL, kind)
 		if err != nil {
-			return nil, fmt.Errorf("解析工具 selftest.commands 失败: %w", err)
-		}
-		if len(command) == 0 {
-			return nil, fmt.Errorf("显式工具 WorkloadSpec 必须声明 selftest.commands 作为预拉取自检命令: %s", manifest.Name)
-		}
-		if err := appendManifestSecretEnv(spec, manifest.SecretsRequired); err != nil {
 			return nil, err
 		}
-		componentData, err := json.Marshal(spec["components"])
-		if err != nil {
-			return nil, fmt.Errorf("编码显式工具组件失败: %w", err)
+		spec = map[string]any{"components": []workload.ComponentSpec{component}}
+		if kind == contracts.SandboxToolKindWebEmbed {
+			serviceName := "tool-" + manifest.Name + "-web"
+			port := component.Ports[0]
+			spec["services"] = []workload.ServiceSpec{{
+				Name: serviceName, Component: component.Name,
+				Ports: []workload.ServicePortSpec{{Name: "http", Port: port.ServicePort, TargetPort: "http", Protocol: port.Protocol}},
+			}}
+			spec["routes"] = []workload.RouteSpec{{PathPrefix: "/", Service: serviceName, Port: "http"}}
 		}
-		var components []workload.ComponentSpec
-		if err := json.Unmarshal(componentData, &components); err != nil || len(components) == 0 {
-			return nil, fmt.Errorf("显式工具 WorkloadSpec 缺少可预拉取组件: %s", manifest.Name)
+		if kind == contracts.SandboxToolKindCommand {
+			spec["command_policy"] = manifest.Tool.CommandPolicy
 		}
-		for index := range components {
-			if len(components[index].PrepullCommand) == 0 {
-				components[index].PrepullCommand = append([]string(nil), command...)
-			}
-		}
-		spec["components"] = components
-		spec["prepull_command"] = command
-		spec["bindings"] = append([]manifestBinding(nil), manifest.Tool.Bindings...)
-		if err := validateGeneratedToolResourceSpec(spec, kind); err != nil {
-			return nil, err
-		}
-		if err := applyToolStudentMounts(spec, manifest); err != nil {
-			return nil, err
-		}
-		if err := validateGeneratedToolResourceSpec(spec, kind); err != nil {
-			return nil, err
-		}
-		applyManifestCapabilities(spec, manifest)
-		return spec, nil
 	}
-	component, err := toolComponentFromManifest(manifest, imageURL, kind)
-	if err != nil {
-		return nil, err
-	}
-	spec := map[string]any{"components": []workload.ComponentSpec{component}}
-	if kind == contracts.SandboxToolKindWebEmbed {
-		serviceName := "tool-" + manifest.Name + "-web"
-		spec["services"] = []workload.ServiceSpec{{
-			Name:      serviceName,
-			Component: component.Name,
-			Ports:     []workload.ServicePortSpec{{Name: "http", Port: component.Ports[0].ServicePort, TargetPort: "http", Protocol: component.Ports[0].Protocol}},
-		}}
-		spec["routes"] = []workload.RouteSpec{{PathPrefix: "/", Service: serviceName, Port: "http"}}
-	}
-	if kind == contracts.SandboxToolKindCommand {
-		spec["command_policy"] = manifest.Tool.CommandPolicy
-	}
-	command, err := toolPrepullCommandFromManifest(manifest)
-	if err != nil {
-		return nil, fmt.Errorf("解析工具 selftest.commands 失败: %w", err)
-	}
-	if len(command) > 0 {
-		spec["prepull_command"] = command
-	}
-	spec["bindings"] = append([]manifestBinding(nil), manifest.Tool.Bindings...)
-	if err := validateGeneratedToolResourceSpec(spec, kind); err != nil {
-		return nil, err
-	}
+	spec["bindings"] = manifest.Tool.Bindings
 	if err := applyToolStudentMounts(spec, manifest); err != nil {
 		return nil, err
 	}
+	applyManifestCapabilities(spec, manifest)
 	if err := validateGeneratedToolResourceSpec(spec, kind); err != nil {
 		return nil, err
 	}
-	applyManifestCapabilities(spec, manifest)
 	return spec, nil
 }
 
@@ -456,6 +383,9 @@ func applyToolStudentMounts(spec map[string]any, manifest toolManifest) error {
 		component.WritableMountDomains = nil
 	}
 	spec["components"] = components
+	if len(allowed) > 0 && strings.TrimSpace(anyString(spec["volume_source"])) == "" {
+		spec["volume_source"] = "workspace"
+	}
 	return nil
 }
 
@@ -512,21 +442,21 @@ func appendManifestSecretEnv(spec map[string]any, requirements []manifestSecretR
 	for _, requirement := range requirements {
 		componentName := strings.TrimSpace(requirement.Component)
 		if componentName == "" {
-			return fmt.Errorf("Secret %s 缺少 component", strings.TrimSpace(requirement.Env))
+			return fmt.Errorf("secret %s 缺少 component", strings.TrimSpace(requirement.Env))
 		}
 		if _, exists := byName[componentName]; !exists {
-			return fmt.Errorf("Secret %s 声明的 component %s 不存在", strings.TrimSpace(requirement.Env), componentName)
+			return fmt.Errorf("secret %s 声明的 component %s 不存在", strings.TrimSpace(requirement.Env), componentName)
 		}
 		name := strings.TrimSpace(requirement.Env)
 		secretKey := strings.TrimSpace(requirement.SecretKey)
 		if name == "" || secretKey == "" {
-			return fmt.Errorf("Secret 引用必须同时声明 env 和 secret_key")
+			return fmt.Errorf("secret 引用必须同时声明 env 和 secret_key")
 		}
 		if seen[componentName] == nil {
 			seen[componentName] = map[string]struct{}{}
 		}
 		if _, exists := seen[componentName][name]; exists {
-			return fmt.Errorf("组件 %s 的 Secret 环境变量重复声明: %s", componentName, name)
+			return fmt.Errorf("组件 %s 的 secret 环境变量重复声明: %s", componentName, name)
 		}
 		seen[componentName][name] = struct{}{}
 		secretEnv[componentName] = append(secretEnv[componentName], map[string]any{"name": name, "secret_name": "chaimir-secret", "secret_key": secretKey})
@@ -561,128 +491,111 @@ func applyManifestCapabilities(spec map[string]any, manifest toolManifest) {
 	}
 }
 
-// normalizeExplicitToolResourceSpec 校验显式 WorkloadSpec 的基本形态,并把 @self 替换为本镜像 digest。
-func normalizeExplicitToolResourceSpec(input map[string]any, imageURL string, kind int16) (map[string]any, error) {
+// normalizeExplicitToolResourceSpec 解析组件镜像引用、自检声明和 Secret 绑定。
+func normalizeExplicitToolResourceSpec(input map[string]any, imageURL string, selftest map[string]any, secrets []manifestSecretRequirement) (map[string]any, error) {
 	spec := deepCopyMap(input).(map[string]any)
 	components, ok := spec["components"].([]any)
 	if !ok || len(components) == 0 {
-		return nil, fmt.Errorf("显式工具 WorkloadSpec 必须声明 components")
+		return nil, fmt.Errorf("显式工作负载必须声明组件")
 	}
 	for _, item := range components {
 		component, ok := item.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("显式工具 WorkloadSpec component 格式非法")
+			return nil, fmt.Errorf("工作负载组件格式无效")
 		}
-		if strings.TrimSpace(anyString(component["name"])) == "" {
-			return nil, fmt.Errorf("显式工具 WorkloadSpec component 缺少 name")
+		name := strings.TrimSpace(anyString(component["name"]))
+		if name == "" {
+			return nil, fmt.Errorf("工作负载组件缺少名称")
 		}
-		switch strings.TrimSpace(anyString(component["image_url"])) {
-		case "":
-			return nil, fmt.Errorf("显式工具 WorkloadSpec component 缺少 image_url")
-		case "@self":
-			component["image_url"] = imageURL
-		default:
-			if err := normalizeReferencedComponentImage(component); err != nil {
-				return nil, err
-			}
+		if err := resolveManifestComponentImage(component, imageURL, selftest); err != nil {
+			return nil, fmt.Errorf("解析组件 %s 的镜像和自检声明: %w", name, err)
 		}
 	}
-	if kind == contracts.SandboxToolKindWebEmbed {
-		if _, ok := spec["services"].([]any); !ok {
-			return nil, fmt.Errorf("web 工具显式 WorkloadSpec 必须声明 services")
-		}
-		if _, ok := spec["routes"].([]any); !ok {
-			return nil, fmt.Errorf("web 工具显式 WorkloadSpec 必须声明 routes")
-		}
+	if err := appendManifestSecretEnv(spec, secrets); err != nil {
+		return nil, err
 	}
-	if kind == contracts.SandboxToolKindCommand {
-		if _, ok := spec["command_policy"].(map[string]any); !ok {
-			return nil, fmt.Errorf("命令工具显式 WorkloadSpec 必须声明 command_policy")
-		}
-	}
-	// YAML manifest 的 resource_spec 使用 map 接收是为了先解析镜像占位符;
-	// 在返回前必须落到正式结构体做严格字段和类型校验,避免未知字段被静默丢弃。
-	raw, err := json.Marshal(spec)
+	data, err := json.Marshal(components)
 	if err != nil {
-		return nil, fmt.Errorf("编码显式 WorkloadSpec 失败: %w", err)
+		return nil, fmt.Errorf("编码工作负载组件失败: %w", err)
 	}
-	var typed sandbox.ToolResourceSpec
-	if err := jsonx.DecodeStrictKnownFields(raw, &typed); err != nil {
-		return nil, fmt.Errorf("显式 WorkloadSpec 包含未知字段或类型错误: %w", err)
+	var typed []workload.ComponentSpec
+	if err := jsonx.DecodeStrictKnownFields(data, &typed); err != nil {
+		return nil, fmt.Errorf("工作负载组件包含未知字段或类型错误: %w", err)
 	}
+	spec["components"] = typed
 	return spec, nil
 }
 
-// normalizeReferencedComponentImage 把显式工具组件里的受控镜像占位符替换为已证明的 Harbor digest。
-func normalizeReferencedComponentImage(component map[string]any) error {
+// resolveManifestComponentImage 从占位符指向的镜像清单解析自检；直接引用保留组件显式声明。
+func resolveManifestComponentImage(component map[string]any, imageURL string, selftest map[string]any) error {
 	raw := strings.TrimSpace(anyString(component["image_url"]))
-	if !strings.HasPrefix(raw, "@image:") {
+	switch {
+	case raw == "":
+		return fmt.Errorf("缺少镜像引用")
+	case raw == "@self":
+		component["image_url"] = imageURL
+	case strings.HasPrefix(raw, "@image:"):
+		image := strings.TrimSpace(strings.TrimPrefix(raw, "@image:"))
+		category, name, ok := strings.Cut(image, "/")
+		if !ok || category == "" || name == "" || strings.Contains(name, "/") {
+			return fmt.Errorf("镜像占位符无效: %s", raw)
+		}
+		ref, err := verifiedImageURL(image)
+		if err != nil {
+			return err
+		}
+		selftest, err = referencedImageSelftest(image, category, name)
+		if err != nil {
+			return err
+		}
+		component["image_url"] = ref
+	default:
 		return nil
 	}
-	image := strings.TrimSpace(strings.TrimPrefix(raw, "@image:"))
-	parts := strings.Split(image, "/")
-	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
-		return fmt.Errorf("显式工具 WorkloadSpec component 镜像占位符非法: %s", raw)
+	if _, declared := component["prepull_command"]; declared {
+		return fmt.Errorf("镜像占位符的自检命令必须来自镜像清单")
 	}
-	imageURL, err := acceptanceImageURL(image)
+	command, err := platformManifestSelftestCommand(selftest)
 	if err != nil {
 		return err
 	}
-	component["image_url"] = imageURL
-	if rawCommand, ok := component["prepull_command"]; ok && rawCommand != nil {
-		data, err := json.Marshal(rawCommand)
-		if err != nil {
-			return fmt.Errorf("编码组件预拉取命令失败: %w", err)
-		}
-		var existing []string
-		if err := json.Unmarshal(data, &existing); err == nil && len(existing) > 0 {
-			return nil
-		}
-	}
-	manifest, err := acceptanceImageUnitManifestFor(image, parts[0])
-	if err != nil {
-		return err
-	}
-	command, err := acceptanceManifestSelftestCommand(manifest)
-	if err != nil {
-		return err
+	if len(command) == 0 {
+		return fmt.Errorf("镜像缺少 selftest.commands")
 	}
 	component["prepull_command"] = command
 	return nil
 }
 
-// toolPrepullCommandFromManifest 选择镜像声明的首个自检命令作为预拉取启动命令,显式传播 manifest 解析错误。
-func toolPrepullCommandFromManifest(manifest toolManifest) ([]string, error) {
-	raw, ok := manifest.Selftest["commands"]
-	if !ok {
-		return nil, nil
+// referencedImageSelftest 只读取镜像标识和自检声明，完整清单由镜像发布门禁校验。
+func referencedImageSelftest(image, category, name string) (map[string]any, error) {
+	if image == "" || filepath.ToSlash(filepath.Clean(filepath.FromSlash(image))) != image || strings.Contains(image, "\\") || category == "." || category == ".." || name == "." || name == ".." {
+		return nil, fmt.Errorf("镜像路径无效: %s", image)
 	}
-	data, err := json.Marshal(raw)
+	root, err := platformImagesRoot()
 	if err != nil {
-		return nil, fmt.Errorf("编码 selftest.commands 失败: %w", err)
+		return nil, err
 	}
-	var commands []toolManifestSelftestCommand
-	if err := json.Unmarshal(data, &commands); err != nil {
-		return nil, fmt.Errorf("selftest.commands 结构非法: %w", err)
+	raw, err := readSeedFile(filepath.Join(root, category, name, "manifest.yaml"))
+	if err != nil {
+		return nil, fmt.Errorf("读取镜像清单 %s 失败: %w", image, err)
 	}
-	if len(commands) == 0 {
-		return nil, nil
+	data, err := yaml.YAMLToJSONStrict(raw)
+	if err != nil {
+		return nil, fmt.Errorf("解析镜像清单 %s 失败: %w", image, err)
 	}
-	command := commands[0].Command
-	if len(command) == 0 {
-		return nil, fmt.Errorf("selftest.commands 首条命令不能为空")
+	var manifest struct {
+		Category string         `json:"category"`
+		Name     string         `json:"name"`
+		Image    string         `json:"image"`
+		Selftest map[string]any `json:"selftest"`
 	}
-	out := make([]string, 0, len(command))
-	for _, part := range command {
-		trimmed := strings.TrimSpace(part)
-		if trimmed != "" {
-			out = append(out, trimmed)
-		}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, fmt.Errorf("解析镜像清单 %s 的标识和自检声明失败: %w", image, err)
 	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("selftest.commands 首条命令不能为空")
+	if manifest.Category != category || manifest.Name != name || manifest.Image != image {
+		return nil, fmt.Errorf("镜像清单标识与引用不一致: %s", image)
 	}
-	return out, nil
+	return manifest.Selftest, nil
 }
 
 // validateGeneratedToolResourceSpec 复用 M2 规则层校验 seed 产物,避免迁移入口绕过运行期约束。
@@ -737,23 +650,10 @@ func toolKindFromManifest(kind string) (int16, error) {
 	}
 }
 
-// toolManifestDeployable 只让供应链准入的工具进入验收种子。
-func toolManifestDeployable(manifest toolManifest) bool {
-	value, ok := manifest.SupplyChain["deployable"]
-	if !ok {
-		return true
-	}
-	deployable, ok := value.(bool)
-	if !ok {
-		return true
-	}
-	return deployable
-}
-
 // toolComponentFromManifest 构造工具容器声明。
 func toolComponentFromManifest(manifest toolManifest, imageURL string, kind int16) (workload.ComponentSpec, error) {
 	mountWorkspace := manifest.Tool.MountWorkspace
-	prepullCommand, err := toolPrepullCommandFromManifest(manifest)
+	prepullCommand, err := platformManifestSelftestCommand(manifest.Selftest)
 	if err != nil {
 		return workload.ComponentSpec{}, fmt.Errorf("解析工具 selftest.commands 失败: %w", err)
 	}

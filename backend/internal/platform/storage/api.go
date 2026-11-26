@@ -1,8 +1,8 @@
-// storage api 文件提供全平台唯一的短时授权文件下载入口。
 package storage
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"path"
@@ -59,7 +59,6 @@ func RegisterDownloadRoutes(r gin.IRouter, objects downloadStore, consumer grant
 	return nil
 }
 
-// download 校验、消费授权并把对象内容流式写入附件响应。
 func (a downloadAPI) download(c *gin.Context) {
 	token := strings.TrimSpace(c.Query("token"))
 	grant, err := VerifyDownloadGrantToken(token, a.signingKey)
@@ -77,7 +76,7 @@ func (a downloadAPI) download(c *gin.Context) {
 		return
 	}
 	if grant.Mode != DownloadModeStream {
-		if err := consumeDownloadGrant(c.Request.Context(), a.consumer, token, grant.ExpiresAt, timex.Now()); err != nil {
+		if err := consumeDownloadGrant(c.Request.Context(), a.consumer, grant, timex.Now()); err != nil {
 			response.Fail(c, err)
 			return
 		}
@@ -116,13 +115,17 @@ func authorizeDownloadGrant(grant DownloadGrant, id tenant.Identity) error {
 	return nil
 }
 
-// consumeDownloadGrant 使用令牌摘要原子标记授权已消费,不把敏感 token 写入 Redis 键。
-func consumeDownloadGrant(ctx context.Context, consumer grantConsumer, token string, expiresAt, now time.Time) error {
-	ttl := expiresAt.UTC().Sub(now.UTC())
+// 同一授权的等价外层编码必须共用消费记录；摘要只覆盖已验签的规范化内容。
+func consumeDownloadGrant(ctx context.Context, consumer grantConsumer, grant DownloadGrant, now time.Time) error {
+	ttl := grant.ExpiresAt.UTC().Sub(now.UTC())
 	if ttl <= 0 {
 		return apperr.ErrDownloadGrantInvalid
 	}
-	key := "storage:download-grant:" + pkgcrypto.SHA256Hex([]byte(token))
+	payload, err := json.Marshal(downloadGrantTokenPayloadFromGrant(grant))
+	if err != nil {
+		return apperr.ErrDownloadGrantInvalid.WithCause(fmt.Errorf("编码下载授权消费标识失败: %w", err))
+	}
+	key := "storage:download-grant:" + pkgcrypto.SHA256Hex(payload)
 	ok, err := consumer.SetNX(ctx, key, ttl)
 	if err != nil {
 		return apperr.ErrDownloadObjectUnavailable.WithCause(fmt.Errorf("记录下载授权消费状态失败: %w", err))
@@ -133,7 +136,6 @@ func consumeDownloadGrant(ctx context.Context, consumer grantConsumer, token str
 	return nil
 }
 
-// downloadFileName 从已校验对象 key 取最后一段作为附件名。
 func downloadFileName(key string) string {
 	return path.Base(key)
 }

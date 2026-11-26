@@ -167,6 +167,23 @@ func (q *Queries) CompleteTransferTask(ctx context.Context, arg CompleteTransfer
 	return i, err
 }
 
+const countFailedTransfers = `-- name: CountFailedTransfers :one
+SELECT count(*)::bigint FROM transfer_task WHERE tenant_id=$1 AND status='failed' AND updated_at BETWEEN $2 AND $3
+`
+
+type CountFailedTransfersParams struct {
+	TenantID    int64              `json:"tenant_id"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	UpdatedAt_2 pgtype.Timestamptz `json:"updated_at_2"`
+}
+
+func (q *Queries) CountFailedTransfers(ctx context.Context, arg CountFailedTransfersParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countFailedTransfers, arg.TenantID, arg.UpdatedAt, arg.UpdatedAt_2)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countTransferTasks = `-- name: CountTransferTasks :one
 SELECT count(*)::bigint
 FROM transfer_task
@@ -327,21 +344,6 @@ func (q *Queries) CreateTransferTask(ctx context.Context, arg CreateTransferTask
 		&i.LeaseUntil,
 	)
 	return i, err
-}
-
-const deletePendingTransferTask = `-- name: DeletePendingTransferTask :exec
-DELETE FROM transfer_task
-WHERE tenant_id = $1 AND id = $2 AND status = 'pending' AND attempt_count = 0
-`
-
-type DeletePendingTransferTaskParams struct {
-	TenantID int64 `json:"tenant_id"`
-	ID       int64 `json:"id"`
-}
-
-func (q *Queries) DeletePendingTransferTask(ctx context.Context, arg DeletePendingTransferTaskParams) error {
-	_, err := q.db.Exec(ctx, deletePendingTransferTask, arg.TenantID, arg.ID)
-	return err
 }
 
 const failTransferTask = `-- name: FailTransferTask :one
@@ -524,4 +526,34 @@ func (q *Queries) ListTransferTasks(ctx context.Context, arg ListTransferTasksPa
 		return nil, err
 	}
 	return items, nil
+}
+
+const renewTransferTaskLease = `-- name: RenewTransferTaskLease :execrows
+UPDATE transfer_task
+SET lease_until = $1::timestamptz
+WHERE tenant_id = $2
+  AND id = $3
+  AND status = 'running'
+  AND lease_token = $4
+  AND lease_until > now()
+`
+
+type RenewTransferTaskLeaseParams struct {
+	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
+	TenantID   int64              `json:"tenant_id"`
+	ID         int64              `json:"id"`
+	LeaseToken string             `json:"lease_token"`
+}
+
+func (q *Queries) RenewTransferTaskLease(ctx context.Context, arg RenewTransferTaskLeaseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renewTransferTaskLease,
+		arg.LeaseUntil,
+		arg.TenantID,
+		arg.ID,
+		arg.LeaseToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

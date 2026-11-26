@@ -1,9 +1,7 @@
-// useAsyncResource 管理页面级异步资源读取，统一加载、空态、错误和刷新状态。
-
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { DependencyList } from 'react'
 import { ApiError } from '@chaimir/api-client'
-import { RESOURCE_LOAD_FAILED_MESSAGE } from '../utils/userFacingError'
+import { errorDiagnostics, RESOURCE_LOAD_FAILED_MESSAGE } from '../utils/userFacingError'
 
 type ResourceStatus = 'loading' | 'success' | 'empty' | 'error'
 
@@ -16,9 +14,6 @@ export interface AsyncResourceState<T> {
   refreshVersion: number
 }
 
-/**
- * isDefaultEmpty 判断常见数组和分页列表响应是否为空。
- */
 function isDefaultEmpty<T>(value: T): boolean {
   if (Array.isArray(value)) {
     return value.length === 0
@@ -34,35 +29,24 @@ function isDefaultEmpty<T>(value: T): boolean {
   return false
 }
 
-/**
- * normalizeError 在边界处把未知异常收敛成用户向错误对象。
- * loader 内部除 API 错误外还可能抛出运行时异常(如渲染前的数据转换失败),
- * 这类异常的原文不可展示给用户(§8 错误暴露分层),故在此换成用户向文案;
- * 没有后端 trace_id 时不自造编号,页面据此不显示报障编号。
- */
-function normalizeError(error: unknown): ApiError {
-  return error instanceof ApiError ? error : new ApiError(RESOURCE_LOAD_FAILED_MESSAGE)
-}
-
-/**
- * useAsyncResource 在组件挂载或依赖变化时读取后端资源。
- */
+/** 同一范围刷新时保留数据；切换范围后只暴露新范围的结果。 */
 export function useAsyncResource<T>(
   loader: () => Promise<T>,
   deps: DependencyList,
   isEmpty: (value: T) => boolean = isDefaultEmpty
 ): AsyncResourceState<T> {
   const [version, setVersion] = useState(0)
-  // 请求归属在渲染时更新,避免依赖变化后到 effect 执行前仍暴露上一请求的成功状态。
-  // 调用方显式声明依赖,与下方 effect 的既有调用契约一致。
+  // 范围由调用方声明；显式刷新不改变数据归属。
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const requestKey = useMemo(() => ({}), [version, ...deps])
-  const [state, setState] = useState<Omit<AsyncResourceState<T>, 'reload' | 'refreshVersion'> & { requestKey: object }>({
-    requestKey,
-    status: 'loading',
-    data: null,
-    error: null,
-  })
+  const scopeKey = useMemo(() => ({}), deps)
+  const requestKey = useMemo(() => ({ scopeKey, version }), [scopeKey, version])
+  const [state, setState] = useState<{
+    scopeKey: object
+    requestKey: object
+    status: ResourceStatus
+    data: T | null
+    error: ApiError | null
+  }>({ scopeKey, requestKey, status: 'loading', data: null, error: null })
 
   const reload = useCallback(() => {
     setVersion((current) => current + 1)
@@ -70,49 +54,33 @@ export function useAsyncResource<T>(
 
   useEffect(() => {
     let active = true
-    setState((current) => ({
-      requestKey,
-      status: 'loading',
-      data: current.data,
-      error: null,
-    }))
-
-    loader()
-      .then((data) => {
-        if (!active) {
-          return
-        }
-        setState({
-          requestKey,
-          status: isEmpty(data) ? 'empty' : 'success',
-          data,
-          error: null,
-        })
-      })
-      .catch((error) => {
-        if (!active) {
-          return
-        }
-        setState({
-          requestKey,
-          status: 'error',
-          data: null,
-          error: normalizeError(error),
-        })
-      })
+    const load = async () => {
+      try {
+        const data = await loader()
+        if (!active) return
+        setState({ scopeKey, requestKey, status: isEmpty(data) ? 'empty' : 'success', data, error: null })
+      } catch (cause) {
+        if (!active) return
+        if (!(cause instanceof ApiError)) console.error('资源读取失败', errorDiagnostics(cause))
+        const error = cause instanceof ApiError ? cause : new ApiError(RESOURCE_LOAD_FAILED_MESSAGE)
+        setState({ scopeKey, requestKey, status: 'error', data: null, error })
+      }
+    }
+    void load()
 
     return () => {
       active = false
     }
     // 请求归属已包含调用方显式声明的依赖和刷新次数。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestKey])
+  }, [requestKey, scopeKey])
 
-  return useMemo(() => ({
-    status: state.requestKey === requestKey ? state.status : 'loading',
-    data: state.data,
-    error: state.requestKey === requestKey ? state.error : null,
+  const current = state.requestKey === requestKey
+  return {
+    status: current ? state.status : 'loading',
+    data: state.scopeKey === scopeKey ? state.data : null,
+    error: current ? state.error : null,
     reload,
     refreshVersion: version,
-  }), [reload, requestKey, state, version])
+  }
 }

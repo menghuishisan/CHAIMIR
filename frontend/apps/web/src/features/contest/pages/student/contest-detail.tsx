@@ -1,17 +1,8 @@
-// 竞赛详情页(深页,/student/contests/:contestId)。设计 §7.2:
-// 页头为赛事名 + 状态 + 一行属性(赛制 · 参赛形式 · 当前阶段的关键时间),右侧主按钮;下方赛程条。
-// 主体左栏「赛题 / 天梯榜」标签(当前标签写进地址;开赛前赛题显示「开赛后公布」,开赛后列题目与分值,
-// 点击进入答题);右栏「我的队伍」(未报名时是报名 / 用邀请码加入)与「我的成绩」(报名后显示)。
-// 主操作按状态:报名中且未报名 →「报名参赛」;进行中或封榜且已报名 →「进入答题」;已结束 →
-// 「查看我的战绩」;对抗赛增加「看对局回放」。不能操作时写原因(如「报名已截止」)。
-//
-// 这是竞赛答题与对局回放两条沉浸路由的退出回落页,故必须支持深链与刷新:
-// 赛事本体走学生专用单读 GET /contest/student/contests/{id}。报名与组队在本页完成,不单独建页。
-// 结果快照不对学生开放(teacher 组),最终名次经天梯榜与竞赛战绩呈现。
+// 本人战绩提供队伍编号；完整题面只在答题工作台按需读取。
 
 import { useCallback, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
-import { History, ListOrdered, Play, Swords, Trophy, UserPlus, Users } from 'lucide-react'
+import { History, ListOrdered, Play, Swords, Trophy, UserPlus } from 'lucide-react'
 import {
   ContestMode,
   ContestStatus,
@@ -47,29 +38,26 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceError, ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource, usePageLocation, locationLabel, useUrlState } from '../../../../hooks'
+import { useAsyncResource, usePagedResource, usePageLocation, locationLabel, useUrlState, useVisiblePolling } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatDateTime, formatScore } from '../../../../utils/formatters'
 import { contestModeLabel, contestStatusLabel, matchModeLabel, teamModeLabel } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { ContestTimeline } from '../../components/ContestTimeline'
+import { JoinTeamForm } from '../../components/JoinTeamForm'
+import { contestSignupState } from '../../contestTimeline'
 import { isContestAnswerable, isContestLeaderboardFrozen } from '../../rules'
 import { contestStatusTone } from '../../statusPresentation'
 import { ContestTeamCard } from './contest-team'
 import { useSession } from '../../../../components/RoleGuard/session'
 
-/** 地址参数:tab 是左栏标签 */
 const DETAIL_QUERY = {
   tab: { defaultValue: 'problems', allowed: ['problems', 'ladder'] },
 } as const
 
-/**
- * StudentContestDetailPage 读取赛事与本人参赛记录。
- */
 export default function StudentContestDetailPage() {
   const { contestId = '' } = useParams<{ contestId: string }>()
 
-  // 赛事本体与本人战绩一起读:战绩里的 team_id 是学生侧唯一的队伍来源
   const view = useAsyncResource(
     () =>
       Promise.all([api.contest.getStudentContest(contestId), api.contest.getMyContestRecords()]).then(
@@ -105,11 +93,12 @@ export default function StudentContestDetailPage() {
   )
 }
 
-/** keyTimeMeta 页头属性里「当前阶段的关键时间」 */
-function keyTimeMeta(contest: Contest): { label: string; value: string } {
+function keyTimeMeta(contest: Contest, upcomingSignup: boolean): { label: string; value: string } {
   switch (contest.status) {
     case ContestStatus.SIGNUP:
-      return { label: '报名截止', value: formatDateTime(contest.signup_end) }
+      return upcomingSignup
+        ? { label: '报名开始', value: formatDateTime(contest.signup_start) }
+        : { label: '报名截止', value: formatDateTime(contest.signup_end) }
     case ContestStatus.RUNNING:
     case ContestStatus.FROZEN:
       return { label: '结束', value: formatDateTime(contest.end_at) }
@@ -124,18 +113,23 @@ interface ContestDetailContentProps {
   onRefresh: () => void
 }
 
-/**
- * ContestDetailContent 渲染页头主操作、赛程条、赛题与天梯榜、队伍与成绩。
- */
 function ContestDetailContent({ contest, record, onRefresh }: ContestDetailContentProps) {
   const [query, setQuery] = useUrlState(DETAIL_QUERY)
   const [signupOpen, setSignupOpen] = useState(false)
+  const [now, setNow] = useState(Date.now)
+  const signup = contestSignupState(contest, now)
+  const signupHint = {
+    open: undefined,
+    upcoming: '报名尚未开始',
+    closed: contest.status === ContestStatus.SIGNUP ? '报名已截止' : '报名已关闭',
+  }[signup]
+  useVisiblePolling(contest.status === ContestStatus.SIGNUP && signup !== 'closed', () => setNow(Date.now()), 1000)
   const joined = record !== undefined
   const canAnswer = joined && isContestAnswerable(contest.status)
   const frozen = isContestLeaderboardFrozen(contest.status)
   const battle = contest.mode === ContestMode.BATTLE
   const ended = contest.status === ContestStatus.ENDED || contest.status === ContestStatus.ARCHIVED
-  const keyTime = keyTimeMeta(contest)
+  const keyTime = keyTimeMeta(contest, signup === 'upcoming')
 
   return (
     <>
@@ -154,12 +148,13 @@ function ContestDetailContent({ contest, record, onRefresh }: ContestDetailConte
             canAnswer={canAnswer}
             ended={ended}
             battle={battle}
+            signupHint={signupHint}
             onSignup={() => setSignupOpen(true)}
           />
         }
       />
 
-      <ContestTimeline contest={contest} className="mb-6" />
+      <ContestTimeline contest={contest} now={new Date(now)} className="mb-6" />
 
       {frozen ? (
         <Callout tone="warning" className="mb-6">
@@ -194,7 +189,7 @@ function ContestDetailContent({ contest, record, onRefresh }: ContestDetailConte
               <ContestTeamCard teamId={record.team_id} onChanged={onRefresh} />
             </>
           ) : (
-            <NotJoinedCard contest={contest} onSignup={() => setSignupOpen(true)} onJoined={onRefresh} />
+            <NotJoinedCard contest={contest} signupHint={signupHint} onSignup={() => setSignupOpen(true)} onJoined={onRefresh} />
           )}
         </aside>
       </div>
@@ -203,6 +198,7 @@ function ContestDetailContent({ contest, record, onRefresh }: ContestDetailConte
         open={signupOpen}
         onOpenChange={setSignupOpen}
         contest={contest}
+        signupHint={signupHint}
         onJoined={() => {
           setSignupOpen(false)
           onRefresh()
@@ -212,13 +208,13 @@ function ContestDetailContent({ contest, record, onRefresh }: ContestDetailConte
   )
 }
 
-/** PrimaryContestAction 页头主操作,按赛事状态与本人是否报名决定;不能操作时写原因 */
 function PrimaryContestAction({
   contest,
   joined,
   canAnswer,
   ended,
   battle,
+  signupHint,
   onSignup,
 }: {
   contest: Contest
@@ -226,6 +222,7 @@ function PrimaryContestAction({
   canAnswer: boolean
   ended: boolean
   battle: boolean
+  signupHint: string | undefined
   onSignup: () => void
 }) {
   const replay = battle && (canAnswer || ended) ? (
@@ -260,9 +257,8 @@ function PrimaryContestAction({
     )
   }
   if (contest.status === ContestStatus.SIGNUP && !joined) {
-    const closed = new Date(contest.signup_end).getTime() < Date.now()
-    return closed ? (
-      <span className="text-sm text-ink-sub">报名已截止</span>
+    return signupHint ? (
+      <span className="text-sm text-ink-sub">{signupHint}</span>
     ) : (
       <Button variant="primary" leftIcon={UserPlus} onClick={onSignup}>
         报名参赛
@@ -272,11 +268,9 @@ function PrimaryContestAction({
   if (contest.status === ContestStatus.SIGNUP && joined) {
     return <span className="text-sm text-ink-sub">已报名,开赛后可以进入答题</span>
   }
-  // 进行中但没报名
   return <span className="text-sm text-ink-sub">已开赛,报名已关闭</span>
 }
 
-/** MyScoreCard 我的成绩:得分与名次(封榜期注明暂停更新) */
 function MyScoreCard({ record, frozen }: { record: ContestRecord; frozen: boolean }) {
   return (
     <section aria-labelledby="contest-score-title" className="rounded-lg bg-surface p-5 shadow-xs">
@@ -302,16 +296,14 @@ function MyScoreCard({ record, frozen }: { record: ContestRecord; frozen: boolea
   )
 }
 
-/** NotJoinedCard 未报名时的右栏:报名中给报名与邀请码加入,否则说明报名已关闭 */
-function NotJoinedCard({ contest, onSignup, onJoined }: { contest: Contest; onSignup: () => void; onJoined: () => void }) {
-  const signupOpen = contest.status === ContestStatus.SIGNUP && new Date(contest.signup_end).getTime() >= Date.now()
+function NotJoinedCard({ contest, signupHint, onSignup, onJoined }: { contest: Contest; signupHint: string | undefined; onSignup: () => void; onJoined: () => void }) {
   const group = contest.team_mode === TeamMode.GROUP
   return (
     <section aria-labelledby="contest-join-title" className="rounded-lg bg-surface p-5 shadow-xs">
       <h2 id="contest-join-title" className="text-sm font-medium text-ink-sub">
         我的队伍
       </h2>
-      {signupOpen ? (
+      {!signupHint ? (
         <div className="mt-3 flex flex-col gap-4">
           <p className="text-sm text-ink">
             {group ? '还没有队伍。创建队伍后把邀请码发给队友,或用队长给的邀请码加入。' : '这场赛事个人参赛,报名即可。'}
@@ -319,74 +311,32 @@ function NotJoinedCard({ contest, onSignup, onJoined }: { contest: Contest; onSi
           <Button variant="secondary" leftIcon={UserPlus} onClick={onSignup}>
             {group ? '创建队伍并报名' : '报名参赛'}
           </Button>
-          {group ? <JoinTeamForm contestId={contest.id} onJoined={onJoined} /> : null}
+          {group ? (
+            <div className="border-t border-line pt-4">
+              <JoinTeamForm key={contest.id} contestId={contest.id} onJoined={onJoined} />
+            </div>
+          ) : null}
         </div>
       ) : (
         <p className="mt-3 text-sm text-ink-sub">
-          {contest.status === ContestStatus.SIGNUP ? '报名已截止,' : '报名已关闭,'}可以看看赛题与榜单。
+          {signupHint}，可以看看赛程与榜单。
         </p>
       )}
     </section>
   )
 }
 
-/** JoinTeamForm 用队长分享的邀请码加入队伍(后端按邀请码定位队伍并校验人数上限) */
-function JoinTeamForm({ contestId, onJoined }: { contestId: string; onJoined: () => void }) {
-  const [inviteCode, setInviteCode] = useState('')
-  const [joining, setJoining] = useState(false)
-  const [error, setError] = useState<string>()
-  const validation = useFormValidation(() => ({ inviteCode: !inviteCode.trim() ? '请输入队伍邀请码' : null }))
-
-  const submit = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      if (!validation.validate()) return
-      setJoining(true)
-      setError(undefined)
-      try {
-        await api.contest.joinTeam(contestId, { invite_code: inviteCode.trim() })
-        toast.success('已加入队伍')
-        onJoined()
-      } catch (cause) {
-        setError(userFacingErrorMessage(cause, '没能加入队伍,请确认邀请码后重试。'))
-      } finally {
-        setJoining(false)
-      }
-    },
-    [contestId, inviteCode, onJoined, validation],
-  )
-
-  return (
-    <form onSubmit={submit} noValidate className="flex flex-col gap-3 border-t border-line pt-4">
-      <FormField label="用邀请码加入" htmlFor="contest-team-invite" error={validation.errors.inviteCode}>
-        <Input
-          id="contest-team-invite"
-          value={inviteCode}
-          autoComplete="off"
-          placeholder="队长给你的邀请码"
-          invalid={Boolean(validation.errors.inviteCode)}
-          onChange={(event) => setInviteCode(event.target.value)}
-          onBlur={() => validation.validate(['inviteCode'])}
-        />
-      </FormField>
-      {error ? <Callout tone="danger">{error}</Callout> : null}
-      <Button type="submit" variant="outline" leftIcon={Users} loading={joining}>
-        加入队伍
-      </Button>
-    </form>
-  )
-}
-
-/** SignupModal 报名弹窗:组队赛填队名(同时创建队伍);个人赛填参赛名称(默认本人姓名,排行榜上显示) */
 function SignupModal({
   open,
   onOpenChange,
   contest,
+  signupHint,
   onJoined,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   contest: Contest
+  signupHint: string | undefined
   onJoined: () => void
 }) {
   const solo = contest.team_mode === TeamMode.SOLO
@@ -396,17 +346,22 @@ function SignupModal({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string>()
   const validation = useFormValidation(() => ({
-    teamName: teamName.trim() ? null : solo ? '请输入参赛名称' : '请输入队伍名称',
+    teamName: !teamName.trim()
+      ? solo
+        ? '请输入参赛名称'
+        : '请输入队伍名称'
+      : [...teamName.trim()].length > 128
+        ? '名称不能超过 128 个字'
+        : null,
   }))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (!validation.validate()) return
+      if (signupHint || !validation.validate()) return
       setSubmitting(true)
       setError(undefined)
       try {
-        // 个人赛提交的是参赛名称,组队赛提交的是队名;两者都显示在排行榜上
         await api.contest.signup(contest.id, { team_name: teamName.trim() })
         toast.success('报名成功')
         onJoined()
@@ -416,7 +371,7 @@ function SignupModal({
         setSubmitting(false)
       }
     },
-    [contest.id, onJoined, teamName, validation],
+    [contest.id, onJoined, signupHint, teamName, validation],
   )
 
   return (
@@ -447,11 +402,12 @@ function SignupModal({
               />
             </FormField>
             {error ? <Callout tone="danger">{error}</Callout> : null}
+            {signupHint ? <Callout tone="warning">{signupHint}</Callout> : null}
             <div className="flex justify-end gap-2">
               <Button variant="outline" disabled={submitting} onClick={() => onOpenChange(false)}>
                 取消
               </Button>
-              <Button type="submit" variant="primary" loading={submitting}>
+              <Button type="submit" variant="primary" loading={submitting} disabled={Boolean(signupHint)}>
                 确认报名
               </Button>
             </div>
@@ -462,10 +418,6 @@ function SignupModal({
   )
 }
 
-/**
- * ContestProblems 赛题列表:开赛前「开赛后公布」;开赛后每题一行(题号、题名、题型、分值),
- * 已报名且可作答时整行链到答题工作台里的这一题。题面正文只在工作台里按需取用(答案黑盒)。
- */
 function ContestProblems({ contest, canAnswer, joined }: { contest: Contest; canAnswer: boolean; joined: boolean }) {
   const started = contest.status !== ContestStatus.SIGNUP && contest.status !== ContestStatus.DRAFT
   const problems = useAsyncResource(() => (started ? api.contest.getProblems(contest.id) : Promise.resolve([])), [contest.id, started])
@@ -542,10 +494,6 @@ function ListRowLink(props: { href: string; title: string; meta: string; leading
   return <ListRow {...props} onNavigate={(href: string) => navigate(href)} />
 }
 
-/**
- * ContestLadder 天梯榜:名次、队名、得分(解题赛还有通过题数与最近通过时间);我的队伍高亮并标「我的队伍」。
- * 队名由接口按 team_id 读取后随榜单给出,个人赛是选手报名时填写的参赛名称。
- */
 function ContestLadder({ contestId, mode, myTeamId }: { contestId: string; mode: ContestMode; myTeamId: string | undefined }) {
   const ladder = usePagedResource<LadderRank>((params) => api.contest.getLadder(contestId, params), [contestId])
   const solve = mode === ContestMode.SOLVE

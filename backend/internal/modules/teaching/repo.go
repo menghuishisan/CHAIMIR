@@ -20,7 +20,7 @@ type Store interface {
 	TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
 	// TenantReadTx 只用于只读契约,可复用基础层已校验的同租户应用事务。
 	TenantReadTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
-	// PrivilegedTx 在受控模块事务中读取共享课程并写入目标租户克隆。
+	// PrivilegedTx 仅在 M6 自有表内读取外校共享来源或执行受控维护。
 	PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error
 }
 
@@ -28,6 +28,7 @@ type Store interface {
 type TxStore interface {
 	CreateCourse(context.Context, Course) (Course, error)
 	GetCourse(context.Context, int64, int64) (Course, error)
+	GetCourseForUpdate(context.Context, int64, int64) (Course, error)
 	BatchGetCourses(context.Context, int64, []int64) ([]Course, error)
 	GetCloneableCourse(context.Context, int64, int64) (Course, error)
 	GetCourseByInviteCode(context.Context, string) (Course, error)
@@ -44,8 +45,9 @@ type TxStore interface {
 	SetCourseVisibility(context.Context, int64, int64, int16) (Course, error)
 	RefreshCourseInviteCode(context.Context, int64, int64, string) (Course, error)
 	CountCourseLessons(context.Context, int64, int64) (int64, error)
-	ListCoursesDueToRun(context.Context, time.Time) ([]Course, error)
-	ListCoursesDueToEnd(context.Context, time.Time) ([]Course, error)
+	AdvanceCourseStatuses(context.Context, time.Time, int32) error
+	ClaimNextCourseEndedEvent(context.Context) (contracts.TeachingCourseEndedEvent, error)
+	MarkCourseEndedEventPublished(context.Context, int64, int64) error
 	CreateChapter(context.Context, Chapter) (Chapter, error)
 	GetChapter(context.Context, int64, int64) (Chapter, error)
 	ListChapters(context.Context, int64, int64) ([]Chapter, error)
@@ -53,6 +55,7 @@ type TxStore interface {
 	DeleteChapter(context.Context, int64, int64) (Chapter, error)
 	CreateLesson(context.Context, Lesson) (Lesson, error)
 	GetLesson(context.Context, int64, int64) (Lesson, error)
+	GetLessonForUpdate(context.Context, int64, int64) (Lesson, error)
 	ListLessonsByChapter(context.Context, int64, int64) ([]Lesson, error)
 	ListLessonsByCourse(context.Context, int64, int64) ([]Lesson, error)
 	UpdateLesson(context.Context, Lesson) (Lesson, error)
@@ -78,9 +81,8 @@ type TxStore interface {
 	ListJudgeOutboxBySubmission(context.Context, int64, int64) ([]JudgeOutbox, error)
 	ListSubmissionsByAssignment(context.Context, SubmissionListQuery) ([]Submission, int64, error)
 	CountSubmissionsByStatusAndLate(context.Context, int64, int64, int64) ([]submissionFacetRow, error)
-	UpdateSubmissionManualGrade(context.Context, int64, int64, int32, int32, string) (Submission, error)
-	UpdateSubmissionJudgeRef(context.Context, int64, int64, string) (Submission, error)
-	UpdateSubmissionAutoScore(context.Context, int64, int64, int32, int32) (Submission, error)
+	UpdateSubmissionManualGrade(context.Context, int64, int64, int32, *int32, string) (Submission, error)
+	UpdateSubmissionAutoScore(context.Context, int64, int64, int32, *int32) (Submission, error)
 	RevokeSubmissionAutoScore(context.Context, int64, int64) (Submission, error)
 	CreateJudgeOutbox(context.Context, JudgeOutbox) (JudgeOutbox, error)
 	ClaimJudgeOutbox(context.Context, int64, int32, int32, time.Time, string, time.Time) ([]JudgeOutbox, error)
@@ -182,7 +184,7 @@ func (s *store) TenantReadTx(ctx context.Context, tenantID int64, fn func(contex
 	})
 }
 
-// PrivilegedTx 在 teaching 模块自有表内执行受控跨租户克隆事务。
+// PrivilegedTx 不向其他模块提供特权事务；克隆结果另由目标租户事务保存。
 func (s *store) PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error {
 	if s == nil || s.database == nil {
 		return fmt.Errorf("teaching store 未初始化")

@@ -118,7 +118,7 @@ func replayToResponse(session SessionWithPackage, actions []Action) SimReplayRes
 	for _, action := range actions {
 		items = append(items, actionToResponse(action))
 	}
-	return SimReplayResponse{PackageCode: session.PackageCode, Version: session.PackageVersion, Seed: session.Seed, InitParams: session.InitParams, Actions: items}
+	return SimReplayResponse{ReadOnly: session.Status == SessionArchived, PackageCode: session.PackageCode, Version: session.PackageVersion, Seed: session.Seed, InitParams: session.InitParams, Actions: items}
 }
 
 // replayToPublicResponse 转换公开分享剧本,过滤检查点答案、令牌和内部绑定字段。
@@ -127,7 +127,7 @@ func replayToPublicResponse(session SessionWithPackage, actions []Action) SimRep
 	for _, action := range actions {
 		items = append(items, SimActionResponse{Seq: action.Seq, AtTick: action.AtTick, EventType: action.EventType, Payload: publicReplayMap(action.Payload)})
 	}
-	return SimReplayResponse{PackageCode: session.PackageCode, Version: session.PackageVersion, Seed: session.Seed, InitParams: publicReplayMap(session.InitParams), Actions: items}
+	return SimReplayResponse{ReadOnly: true, PackageCode: session.PackageCode, Version: session.PackageVersion, Seed: session.Seed, InitParams: publicReplayMap(session.InitParams), Actions: items}
 }
 
 // actionToResponse 转换操作为公开 HTTP DTO。

@@ -16,23 +16,13 @@ func ComputeGPA(grades []CourseGradeInput, mapping []LevelRule) (float64, float6
 		return 0, 0, apperr.ErrGradeConfigInvalid
 	}
 	ordered := orderedMapping(mapping)
-	var weighted float64
-	var credits float64
+	var totals gpaTotals
 	for _, grade := range grades {
-		if grade.Credits <= 0 {
-			continue
+		if err := totals.add(grade, ordered); err != nil {
+			return 0, 0, err
 		}
-		point, ok := gpaPointForScore(grade.FinalTotal, ordered)
-		if !ok {
-			return 0, 0, apperr.ErrGradeConfigInvalid
-		}
-		weighted += point * grade.Credits
-		credits += grade.Credits
 	}
-	if credits == 0 {
-		return 0, 0, nil
-	}
-	return round3(weighted / credits), credits, nil
+	return totals.gpa(), totals.credits, nil
 }
 
 // orderedMapping 返回按分数阈值降序排列的等级映射副本,供绩点与不及格判定共用同一套档位语义。
@@ -92,4 +82,29 @@ func gpaPointForScore(score float64, mapping []LevelRule) (float64, bool) {
 // round3 把 GPA 统一保留三位小数。
 func round3(value float64) float64 {
 	return math.Round(value*1000) / 1000
+}
+
+// gpaTotals 供完整明细和流式读取共用同一加权规则，避免学期平均值再次平均。
+type gpaTotals struct{ weighted, credits float64 }
+
+// add 使用已验证并排序的等级映射累加一门课程。
+func (t *gpaTotals) add(grade CourseGradeInput, mapping []LevelRule) error {
+	if grade.Credits <= 0 {
+		return nil
+	}
+	point, ok := gpaPointForScore(grade.FinalTotal, mapping)
+	if !ok {
+		return apperr.ErrGradeConfigInvalid
+	}
+	t.weighted += point * grade.Credits
+	t.credits += grade.Credits
+	return nil
+}
+
+// gpa 仅在完成加权后舍入，避免学期舍入误差进入累计值。
+func (t gpaTotals) gpa() float64 {
+	if t.credits == 0 {
+		return 0
+	}
+	return round3(t.weighted / t.credits)
 }

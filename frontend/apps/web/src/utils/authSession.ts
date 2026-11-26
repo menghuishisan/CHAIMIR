@@ -1,7 +1,8 @@
 // authSession 管理前端登录会话存储和经过角色边界校验的入口恢复。
 
-import type { LoginResponse, TokenRefreshResponse } from '@chaimir/api-client'
-import { isRoleHomePath, roleRouteForRoles, type RoleRouteConfig } from './roleRouting'
+import type { LoginResponse, TokenRefreshResponse, UserRole } from '@chaimir/api-client'
+import { ROLE_ROUTES, roleRouteForRoles } from './roleRouting'
+import { safeInternalNavigation } from './safeNavigation'
 import { errorDiagnostics } from './userFacingError'
 
 const MUST_CHANGE_PASSWORD_KEY = 'chaimir.must_change_password'
@@ -51,10 +52,8 @@ function notifyAuthSessionChanged(): void {
 /** clearPasswordChangeState 清理非敏感的改密拦截状态。 */
 function clearPasswordChangeState(): void {
   mustChangePassword = false
-  pendingEntryPath = null
   try {
     window.sessionStorage.removeItem(MUST_CHANGE_PASSWORD_KEY)
-    window.sessionStorage.removeItem(PENDING_ENTRY_PATH_KEY)
   } catch (error) {
     console.warn('auth_session_storage_clear_failed', {
       operation: 'clear_password_change_state',
@@ -63,13 +62,57 @@ function clearPasswordChangeState(): void {
   }
 }
 
-/** persistPasswordChangeState 同时保留当前页内存状态和可用的会话级恢复信息。 */
-function persistPasswordChangeState(entryPath: string): void {
-  mustChangePassword = true
+/** readPendingEntryPath 恢复本标签页的目标；它仍须通过当前服务端角色校验。 */
+function readPendingEntryPath(): string | null {
+  if (pendingEntryPath !== null) return pendingEntryPath
+  try {
+    return window.sessionStorage.getItem(PENDING_ENTRY_PATH_KEY)
+  } catch (error) {
+    console.warn('auth_session_storage_read_failed', {
+      operation: 'read_pending_entry_path', error: errorDiagnostics(error),
+    })
+    return null
+  }
+}
+
+function persistEntryPath(entryPath: string): void {
   pendingEntryPath = entryPath
   try {
-    window.sessionStorage.setItem(MUST_CHANGE_PASSWORD_KEY, 'true')
     window.sessionStorage.setItem(PENDING_ENTRY_PATH_KEY, entryPath)
+  } catch (error) {
+    console.warn('auth_session_storage_write_failed', {
+      operation: 'persist_entry_path', error: errorDiagnostics(error),
+    })
+  }
+}
+
+function clearEntryPath(): void {
+  pendingEntryPath = null
+  try {
+    window.sessionStorage.removeItem(PENDING_ENTRY_PATH_KEY)
+  } catch (error) {
+    console.warn('auth_session_storage_clear_failed', {
+      operation: 'clear_entry_path', error: errorDiagnostics(error),
+    })
+  }
+}
+
+/** rememberCurrentEntryPath 仅暂存受保护的站内地址，不捕获认证页凭据或票据。 */
+export function rememberCurrentEntryPath(): void {
+  const { pathname, search, hash } = window.location
+  const currentPath = `${pathname}${search}${hash}`
+  const target = Object.values(ROLE_ROUTES)
+    .map((route) => safeInternalPath(currentPath, route.pathPrefix))
+    .find(Boolean)
+  if (target) persistEntryPath(target)
+}
+
+/** persistPasswordChangeState 保留已校验的目标，改密完成前不开放角色页面。 */
+function persistPasswordChangeState(entryPath: string): void {
+  mustChangePassword = true
+  persistEntryPath(entryPath)
+  try {
+    window.sessionStorage.setItem(MUST_CHANGE_PASSWORD_KEY, 'true')
   } catch (error) {
     console.warn('auth_session_storage_write_failed', {
       operation: 'persist_password_change_state',
@@ -79,15 +122,26 @@ function persistPasswordChangeState(entryPath: string): void {
 }
 
 /**
- * persistLoginTokens 仅在内存保留短期 access token；refresh token 由后端写入 HttpOnly cookie。
+ * completeLogin 建立内存会话并消费经角色校验的回跳；必须改密时保留目标。
+ * refresh token 仍只由后端写入 HttpOnly cookie。
  */
-export function persistLoginTokens(response: LoginResponse): void {
+export function completeLogin(response: LoginResponse): string {
+  const target = entryPathForRoles(response.account?.roles ?? [], readPendingEntryPath())
   accessToken = response.access_token || null
   if (response.must_change_pwd) {
-    persistPasswordChangeState(roleEntryPath(response))
+    persistPasswordChangeState(target)
   } else {
     clearPasswordChangeState()
+    clearEntryPath()
   }
+  notifyAuthSessionChanged()
+  return response.must_change_pwd ? '/auth/change-pwd' : target
+}
+
+/** expireLoginSession 清除失效凭据，保留尚未完成的认证回跳供用户重试。 */
+export function expireLoginSession(): void {
+  accessToken = null
+  clearPasswordChangeState()
   notifyAuthSessionChanged()
 }
 
@@ -103,6 +157,7 @@ export function clearLoginTokens(): void {
 export function clearLoginTokensLocally(): void {
   accessToken = null
   clearPasswordChangeState()
+  clearEntryPath()
 }
 
 /** subscribeToAuthSessionChanges 监听其他浏览器标签的会话变更通知。 */
@@ -127,29 +182,20 @@ export function persistRefreshedTokens(response: TokenRefreshResponse): void {
   accessToken = response.access_token
 }
 
-/**
- * loginEntryPath 把必须改密账号引导到安全拦截页，其余账号进入角色首个功能页。
- */
-export function loginEntryPath(response: LoginResponse, requestedPath?: unknown): string {
-  if (response.must_change_pwd) return '/auth/change-pwd'
-  const roleRoute = accountRoleRoute(response)
-  if (!roleRoute) return '/auth/login'
-  return safeInternalPath(requestedPath, roleRoute.pathPrefix) || roleRoute.homePath
-}
-
-/**
- * accountRoleRoute 取登录响应对应的角色入口。
- * 契约上 account 只在需要选择学校等未完成登录的响应里缺省，此时没有可进入的角色区。
- */
-function accountRoleRoute(response: LoginResponse): RoleRouteConfig | undefined {
-  if (!response.account) return undefined
-  return roleRouteForRoles(response.account.roles)
+function entryPathForRoles(roles: UserRole[], requestedPath: unknown): string {
+  for (const role of roles) {
+    const route = roleRouteForRoles([role])
+    const target = route && safeInternalPath(requestedPath, route.pathPrefix)
+    if (target) return target
+  }
+  return roleRouteForRoles(roles)?.homePath ?? '/auth/login'
 }
 
 /** safeInternalPath 只接受站内绝对路径，阻止登录回跳被构造成外部地址。 */
 function safeInternalPath(value: unknown, rolePrefix: string): string | null {
-  if (typeof value !== 'string' || !value.startsWith(`${rolePrefix}/`) || value.startsWith('//') || value.includes('\\')) return null
-  return value
+  if (typeof value !== 'string' || /\p{Cc}/u.test(value)) return null
+  const target = safeInternalNavigation(value)
+  return target?.startsWith(`${rolePrefix}/`) ? target : null
 }
 
 /**
@@ -170,27 +216,11 @@ export function isPasswordChangeRequired(): boolean {
 }
 
 /**
- * completeRequiredPasswordChange 清除改密拦截并返回经过白名单校验的角色入口。
+ * completeRequiredPasswordChange 按本次服务端身份校验并消费目标，清除改密拦截。
  */
-export function completeRequiredPasswordChange(): string {
-  let storedPath: string | null = null
-  try {
-    storedPath = window.sessionStorage.getItem(PENDING_ENTRY_PATH_KEY)
-  } catch (error) {
-    console.warn('auth_session_storage_read_failed', {
-      operation: 'read_pending_entry_path',
-      error: errorDiagnostics(error),
-    })
-  }
-  const targetPath = pendingEntryPath ?? storedPath
+export function completeRequiredPasswordChange(roles: UserRole[]): string {
+  const target = entryPathForRoles(roles, readPendingEntryPath())
   clearPasswordChangeState()
-  return targetPath && isRoleHomePath(targetPath) ? targetPath : '/auth/login'
-}
-
-/**
- * roleEntryPath 根据服务端账号角色决定登录后的第一个功能页。
- */
-function roleEntryPath(response: LoginResponse): string {
-  const roleRoute = accountRoleRoute(response)
-  return roleRoute ? roleRoute.homePath : '/auth/login'
+  clearEntryPath()
+  return target
 }

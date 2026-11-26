@@ -1,6 +1,6 @@
 # Chaimir 镜像层
 
-本目录是 Chaimir 全量镜像治理目录。这里不按后端模块划分,而按镜像职责划分:`service`、`runtime`、`infra`、`tool`、`judger`、`sim`、`sidecar`、`init`、`base`、`middleware`、`observability`、`ingress`、`network`。
+本目录是 Chaimir 全量镜像治理目录。镜像目录、镜像名前缀、Harbor Project 和 manifest 分类统一使用九类:`service`、`runtime`、`infra`、`tool`、`judger`、`sim`、`sidecar`、`init`、`base`。
 
 ## 维护原则
 
@@ -64,7 +64,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/build-images.ps1 `
 
 脚本固定使用 `docker buildx build --push` 将镜像直接推入 `registry.chaimir.io`,并把 Registry 解析出的 digest 写入 `-DigestLockOut`。构建或推送失败只按既定次数重试同一 builder 的完整命令;即使日志已出现导出 manifest,也不得推送本机同名 tag 来替代本次产物。只有该命令退出0才可读取 Registry digest并写入本镜像候选条目,重试耗尽必须阻断。`-DigestLock` 同时作为构建依赖输入:例如 `base/judge-min` 依赖 `base/go-builder` 时,必须先让 `base/go-builder` 写入同一候选锁,后续镜像才能按 `registry.chaimir.io/base/go-builder@sha256:...` 构建。
 
-构建脚本会根据 Dockerfile 中的受控镜像参数做内部依赖拓扑排序。网络代理或 registry mirror 只能配置在 Docker Desktop、BuildKit 或 CI runner 传输层,脚本和仓库配置不维护专用镜像源。
+本地与 CI 共用 Dockerfile 镜像参数解析和依赖排序。CI 只晋升完整批次，单镜像片段用于给后续依赖组传递当前 digest。网络代理或 registry mirror 只能配置在 Docker Desktop、BuildKit 或 CI runner 传输层,脚本和仓库配置不维护专用镜像源。
 
 候选锁只能用于回拉和安全校验,不能直接作为正式发布锁。完成构建后必须用同一拉取脚本按 digest 拉回:
 
@@ -82,10 +82,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
 测试阶段仍运行在项目的 Kubernetes + HTTPS 入口,不启动宿主机 Go/pnpm 服务,不使用源码 hostPath、`kubectl cp`、临时 tag 或第二套生产路径。只对变更影响集合执行同一套候选锁、digest 回拉、Trivy/SBOM/Cosign 门禁:
 
 - `frontend/**`、`images/service/frontend/**` 或 `base/node-builder` digest 变化: `-Images service/frontend`。
-- `backend/**`: `-Images service/backend,service/migrate,service/cron`,因为三个服务镜像都复制后端源码。
+- `backend/**`: `-Images @('service/backend', 'service/migrate', 'service/cron')`,因为三个服务镜像都复制后端源码。
 - 仅修改某个 `images/service/<name>` Dockerfile 或 manifest: 只选择对应的 `service/<name>`。
 - `images/tool`、`images/infra`、`images/runtime` 或 `images/judger` 中的 `manifest.yaml` 变化: 同时选择 `service/migrate`,因为它把这四类目录声明复制到 `/app/images`。声明所属镜像仍按自身实际变更参与构建,不得只更新声明却继续发布携带旧目录的迁移镜像。
-- `base/go-builder`、`base/runtime-min`、`middleware/postgres` 变化: 根据 Dockerfile 的真实 `FROM` 依赖扩展到实际消费者,不受影响镜像不重复处理。
+- `base/go-builder`、`base/runtime-min`、`infra/postgres` 变化: 根据 Dockerfile 的真实 `FROM` 依赖扩展到实际消费者,不受影响镜像不重复处理。
 
 前端镜像的日常构建还复用正式 BuildKit builder 上的两级缓存:依赖层使用 pnpm store cache,任务层使用挂载到 `/src/frontend/.turbo` 的 Turbo cache。`frontend/turbo.json` 只缓存各工作区真实产物 `dist/**`,并把构建期 `VITE_*` 配置纳入任务摘要;因此源码改动不会重新安装未变化的依赖,环境配置变化也不会恢复错误的旧静态资源。正式流水线必须复用持久化的项目 BuildKit builder,不得把缓存导出为运行镜像、临时 tag 或宿主机替代镜像;首次冷构建仍需完整执行 Vite 打包。
 
@@ -95,7 +95,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
 
 `images/build-images.ps1` 成功后会自动调用 `images/cleanup-local-images.ps1 -Apply`:只清理 `e2e-*`、`candidate-*`、`refresh-*`、`local-*`、`refactor-*`、`prepull-*` 临时标签和没有正式/候选 digest、没有容器引用的悬空层。正式锁、当前候选锁、运行中或已保留容器、Harbor/Trivy/Cosign 状态不会删除;清理器不会自动下载恢复引用。
 
-无需密钥的静态门禁统一运行 `images/validate-image-metadata.ps1`:它校验目录/category/name、Dockerfile/构建路径、不可变基础镜像和正式锁现有条目,但不会把尚待流水线首次晋升的新镜像误判为失败。
+构建、证明和部署探测复用 `images/lib/ImageMetadata.psm1` 的有界原生命令执行，统一参数传递、退出码和超时处理。
+
+正式校验运行 `images/validate-image-metadata.ps1`,要求每个可部署镜像都有正式 digest 和当前路径的供应链证明。CI 镜像发现阶段额外使用 `-AllowUnpromoted` 校验源码结构；该模式只允许尚无 digest 的构建镜像等待本批次晋升,不能用于部署准入。
 
 项目清理只按 `docs/总-镜像与容器设计.md` 的“项目级 Docker 清理边界”执行。常规清理不得删除正式锁在本机的最后 digest 引用、Harbor PVC、Trivy 缓存、认证、Cosign 密钥或尚未晋升的证据,也不得对整台宿主机执行全局 prune。
 

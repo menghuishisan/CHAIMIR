@@ -1,6 +1,3 @@
-// Notify API：通知与实时推送
-// 对应后端 M10 模块
-
 import { ApiClient, encodePathSegment } from '../client'
 import type { PaginatedResponse } from '../types/common'
 import type {
@@ -10,20 +7,9 @@ import type {
   AnnouncementRequest,
 } from '../types/notify'
 
-/**
- * NotifyApi 封装后端 M10 通知、偏好、公告和实时推送入口。
- */
 export class NotifyApi {
-  /**
-   * constructor 注入统一 API 客户端，复用根路径 WebSocket 和 HTTP 错误处理。
-   */
   constructor(private client: ApiClient) {}
 
-  // ===== 通知列表 =====
-
-  /**
-   * 获取我的通知列表
-   */
   async getNotifications(params?: {
     type?: string
     is_read?: boolean
@@ -33,73 +19,40 @@ export class NotifyApi {
     return this.client.get('/notify/inbox', params)
   }
 
-  /**
-   * 获取未读数量
-   */
   async getUnreadCount(): Promise<{ unread: number }> {
     return this.client.get('/notify/inbox/unread-count')
   }
 
-  /**
-   * 标记为已读
-   */
   async markAsRead(notificationId: string): Promise<Notification> {
     return this.client.post(`/notify/inbox/${encodePathSegment(notificationId)}/read`)
   }
 
-  /**
-   * 全部标记为已读
-   */
   async markAllAsRead(): Promise<void> {
     return this.client.post('/notify/inbox/read-all')
   }
 
-  /**
-   * 删除通知
-   */
-  async deleteNotification(notificationId: string): Promise<void> {
+  async deleteNotification(notificationId: string): Promise<Notification> {
     return this.client.delete(`/notify/inbox/${encodePathSegment(notificationId)}`)
   }
 
-  // ===== 通知偏好 =====
-
-  /**
-   * 获取通知偏好设置。
-   * 返回后端通知模板的全部可配置类型 + 本人当前设置 + 是否为不可关闭的强制类型，
-   * 未设置过的类型回默认启用；前端不硬编码类型清单。
-   */
+  /** 返回后端配置的全部通知类型；未设置时默认启用。 */
   async getPreferences(): Promise<NotificationPreference[]> {
     return this.client.get('/notify/preferences')
   }
 
-  /**
-   * 更新通知偏好
-   */
   async updatePreference(type: string, data: { enabled: boolean }): Promise<NotificationPreference> {
     return this.client.put('/notify/preferences', { type, enabled: data.enabled })
   }
 
-  // ===== 公告 =====
-
-  /**
-   * 获取公告列表
-   */
   async getAnnouncements(params?: { page?: number; size?: number }): Promise<PaginatedResponse<Announcement>> {
     return this.client.get('/notify/announcements', params)
   }
 
-  /**
-   * 发布公告（管理员）
-   */
   async createAnnouncement(data: AnnouncementRequest): Promise<Announcement> {
     return this.client.post('/notify/announcements', data)
   }
 
-  /**
-   * 标记公告已读
-   */
   async markAnnouncementRead(announcementId: string): Promise<void> {
     return this.client.post(`/notify/announcements/${encodePathSegment(announcementId)}/read`)
   }
-
 }

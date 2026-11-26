@@ -1,4 +1,4 @@
-# 本文件定义 RPC 网关 Envoy 基线配置,运行期由 M2 按环境注入上游集群。
+# 入口将已校验的组合地址写入原生 Envoy 字段。
 static_resources:
   listeners:
     - name: rpc_listener
@@ -22,6 +22,7 @@ static_resources:
                             prefix: "/"
                           route:
                             cluster: runtime_rpc
+                            auto_host_rewrite: true
                 http_filters:
                   - name: envoy.filters.http.router
                     typed_config:
@@ -35,8 +36,41 @@ static_resources:
         cluster_name: runtime_rpc
         endpoints:
           - lb_endpoints:
+{{range $index, $target := .}}
               - endpoint:
                   address:
                     socket_address:
-                      address: __UPSTREAM_HOST__
-                      port_value: __UPSTREAM_PORT__
+                      address: {{quote .Host}}
+                      port_value: {{.Port}}
+                metadata:
+                  filter_metadata:
+                    envoy.transport_socket_match:
+                      upstream: "node-{{$index}}"
+{{end}}
+      transport_socket_matches:
+{{range $index, $target := .}}
+        - name: "node-{{$index}}"
+          match:
+            upstream: "node-{{$index}}"
+          transport_socket:
+{{if .TLS}}
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+{{if .SNI}}
+              sni: {{quote .SNI}}
+{{end}}
+              common_tls_context:
+                validation_context:
+                  trusted_ca:
+                    filename: /etc/ssl/certs/ca-certificates.crt
+                  match_typed_subject_alt_names:
+                    - san_type: {{.SANType}}
+                      matcher:
+                        exact: {{quote .Host}}
+{{else}}
+            name: envoy.transport_sockets.raw_buffer
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.raw_buffer.v3.RawBuffer
+{{end}}
+{{end}}

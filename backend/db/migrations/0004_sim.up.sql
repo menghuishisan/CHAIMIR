@@ -73,11 +73,10 @@ CREATE TABLE IF NOT EXISTS sim_session (
     seed BIGINT NOT NULL,
     init_params JSONB NOT NULL DEFAULT '{}'::jsonb,
     compute SMALLINT NOT NULL CHECK (compute IN (1, 2)),
-    status SMALLINT NOT NULL CHECK (status IN (1, 2, 3, 4, 5, 6)),
+    status SMALLINT NOT NULL CHECK (status IN (1, 2)),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, id),
-    UNIQUE (tenant_id, scope_ref),
     CHECK (source_ref ~ '^[a-z]+:[0-9]{4}:[a-z][a-z0-9_-]*:[0-9A-Za-z_-]+$'),
     CONSTRAINT chk_sim_session_shared_accounts_positive CHECK (0 < ALL(shared_account_ids)),
     CONSTRAINT chk_sim_session_shared_accounts_no_null CHECK (array_position(shared_account_ids, NULL) IS NULL),
@@ -95,18 +94,6 @@ CREATE TABLE IF NOT EXISTS sim_action_log (
     payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, session_id, seq),
-    FOREIGN KEY (tenant_id, session_id) REFERENCES sim_session(tenant_id, id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS sim_checkpoint (
-    id BIGINT PRIMARY KEY,
-    tenant_id BIGINT NOT NULL REFERENCES tenant(id),
-    session_id BIGINT NOT NULL,
-    checkpoint_id VARCHAR(96) NOT NULL,
-    answer JSONB NOT NULL DEFAULT '{}'::jsonb,
-    achieved BOOLEAN NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (tenant_id, session_id, checkpoint_id),
     FOREIGN KEY (tenant_id, session_id) REFERENCES sim_session(tenant_id, id) ON DELETE CASCADE
 );
 
@@ -129,20 +116,17 @@ CREATE INDEX IF NOT EXISTS idx_sim_package_code ON sim_package(code, version);
 CREATE INDEX IF NOT EXISTS idx_sim_package_review_result ON sim_package_review(result, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_sim_session_owner ON sim_session(tenant_id, owner_account_id);
 CREATE INDEX IF NOT EXISTS idx_sim_session_source_ref ON sim_session(tenant_id, source_ref);
+CREATE INDEX IF NOT EXISTS idx_sim_session_scope_ref ON sim_session(tenant_id, scope_ref);
 -- 隔离执行会话按租户计数(并发闸门 SIM_BACKEND_MAX_CONCURRENT_SESSIONS_PER_TENANT):
 -- 只索引 compute=2 的活跃态,因为浏览器执行的会话不占集群资源、不参与该闸门。
 CREATE INDEX IF NOT EXISTS idx_sim_session_isolated_active ON sim_session(tenant_id)
-    WHERE compute = 2 AND status IN (1, 2, 3);
-CREATE INDEX IF NOT EXISTS idx_sim_action_session_seq ON sim_action_log(tenant_id, session_id, seq);
-CREATE INDEX IF NOT EXISTS idx_sim_checkpoint_session ON sim_checkpoint(tenant_id, session_id);
+    WHERE compute = 2 AND status = 1;
 CREATE INDEX IF NOT EXISTS idx_sim_share_session ON sim_share(tenant_id, session_id);
 
 ALTER TABLE sim_session ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sim_action_log ENABLE ROW LEVEL SECURITY;
-ALTER TABLE sim_checkpoint ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sim_share ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY sim_session_tenant_rls ON sim_session USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY sim_action_log_tenant_rls ON sim_action_log USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY sim_checkpoint_tenant_rls ON sim_checkpoint USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY sim_share_tenant_rls ON sim_share USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);

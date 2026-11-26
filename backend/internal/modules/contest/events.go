@@ -21,7 +21,11 @@ func SubscribeEvents(bus eventbus.Bus, svc *Service) ([]eventbus.Subscription, e
 	if svc == nil {
 		return nil, apperr.ErrEventServiceMissing
 	}
-	subs := make([]eventbus.Subscription, 0, 2)
+	fanout, ok := bus.(eventbus.FanoutBus)
+	if !ok {
+		return nil, apperr.ErrEventBusMissing
+	}
+	subs := make([]eventbus.Subscription, 0, 3)
 	sub, err := bus.Subscribe(contracts.SubjectJudgeCompleted, contestEventQueue, handleJudgeCompletedEvent(svc))
 	if err != nil {
 		return nil, apperr.ErrContestEventSubscribeFailed.WithCause(err)
@@ -32,7 +36,29 @@ func SubscribeEvents(bus eventbus.Bus, svc *Service) ([]eventbus.Subscription, e
 		return nil, apperr.ErrContestEventSubscribeFailed.WithCause(err)
 	}
 	subs = append(subs, sub)
+	sub, err = fanout.SubscribeFanout(contracts.SubjectContestSandboxSessionsRevoked, handleContestSandboxSessionsRevoked(svc))
+	if err != nil {
+		return nil, apperr.ErrContestEventSubscribeFailed.WithCause(err)
+	}
+	subs = append(subs, sub)
 	return subs, nil
+}
+
+// handleContestSandboxSessionsRevoked 关闭当前副本上绑定到撤销授权的连接。
+func handleContestSandboxSessionsRevoked(svc *Service) eventbus.Handler {
+	return func(ctx context.Context, data []byte) error {
+		if svc == nil || svc.wsHub == nil {
+			return apperr.ErrSandboxToolProxyUnavailable
+		}
+		var event contracts.ContestSandboxSessionsRevokedEvent
+		if err := eventbus.Decode(data, &event, apperr.ErrContestEventPayloadInvalid); err != nil {
+			return err
+		}
+		if event.TenantID <= 0 || len(event.Sessions) == 0 {
+			return apperr.ErrContestEventPayloadInvalid
+		}
+		return closeContestSandboxSessions(svc.wsHub, event.Sessions)
+	}
 }
 
 // handleJudgeCompletedEvent 解码 M3 判题完成事件。

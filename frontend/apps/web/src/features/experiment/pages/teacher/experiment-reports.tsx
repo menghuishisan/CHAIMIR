@@ -245,7 +245,7 @@ function ReportsQueue({
   /** <lg 走两级页面(§6.4.1 规则 4) */
   const [mobileView, setMobileView] = useState<'queue' | 'detail'>('queue')
 
-  const list = useMemo(() => reports.data?.list ?? [], [reports.data])
+  const list = reports.data?.list ?? []
   const selected = list.find((item) => item.id === selectedId) ?? list[0]
   const selectedIndex = selected ? list.findIndex((item) => item.id === selected.id) : -1
 
@@ -378,7 +378,7 @@ function ReportsQueue({
       detail={
         selected ? (
           <ReportGradePane
-            key={selected.id}
+            key={`${selected.id}:${selected.submitted_at}`}
             report={selected}
             submitShortcut={queue.submitShortcut}
             onDownload={() => onDownload(selected)}
@@ -405,21 +405,15 @@ interface ReportGradePaneProps {
   submitShortcut: (submit: () => void) => (event: React.KeyboardEvent<HTMLElement>) => void
 }
 
-/**
- * ReportGradePane 是审阅队列族的右侧详情与批改表单(§6.5.3 第 ⑤ 族)。
- * 报告正文是对象存储引用,故这里给的是取件按钮而不是内嵌预览:
- * 报告格式不固定(文档/压缩包/笔记本),统一走一次性下载授权最可靠。
- *
- * key 由调用方按报告编号给出:切换条目时表单重建,上一份的草稿不会串到下一份。
- */
+// 提交时间参与 key；同一学生重交后重建表单，避免沿用上一份的评分。
 function ReportGradePane({ report, onDownload, onSaved, submitShortcut }: ReportGradePaneProps) {
   const [score, setScore] = useState(String(report.manual_score ?? ''))
   const [comment, setComment] = useState(report.comment ?? '')
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
   const { errors, validate } = useFormValidation(useCallback(() => ({
-    score: score.trim() === '' || !Number.isFinite(Number(score)) || Number(score) < 0
-      ? '分数需要是 0 或更大的数字' : null,
+    score: score.trim() === '' || !Number.isFinite(Number(score)) || Number(score) < 0 || Number(score) > 100
+      ? '分数需要在 0 到 100 之间' : null,
     comment: comment.trim() === '' ? '请写下批改意见,让学生知道得分依据' : null,
   }), [comment, score]))
 
@@ -429,7 +423,11 @@ function ReportGradePane({ report, onDownload, onSaved, submitShortcut }: Report
     setFormError(undefined)
     setWorking(true)
     try {
-      await api.experiment.gradeReport(report.id, { manual_score: value, comment: comment.trim() })
+      await api.experiment.gradeReport(report.id, {
+        manual_score: value,
+        comment: comment.trim(),
+        submitted_at: report.submitted_at,
+      })
       toast.success('已提交批改结果')
       onSaved()
     } catch (error) {
@@ -437,7 +435,7 @@ function ReportGradePane({ report, onDownload, onSaved, submitShortcut }: Report
     } finally {
       setWorking(false)
     }
-  }, [comment, onSaved, report.id, score, validate])
+  }, [comment, onSaved, report.id, report.submitted_at, score, validate])
 
   return (
     <div
@@ -469,6 +467,7 @@ function ReportGradePane({ report, onDownload, onSaved, submitShortcut }: Report
           id="report-score"
           type="number"
           min="0"
+          max="100"
           step="0.5"
           value={score}
           invalid={Boolean(errors.score)}

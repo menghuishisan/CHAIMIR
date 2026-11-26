@@ -1,11 +1,9 @@
-// contest service_battle_replay 文件负责把 M3 产出的链轨迹固化为 M8 回放归档。
 package contest
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -122,20 +120,19 @@ func (s *Service) prepareBattleReplay(ctx context.Context, tenantID, taskID int6
 	if err != nil {
 		return "", false, apperr.ErrContestReplayUnavailable.WithCause(err)
 	}
-	if err := s.replayStore.Put(ctx, s.replayBucket, key, bytes.NewReader(raw), int64(len(raw)), "application/json"); err != nil {
-		return "", false, apperr.ErrContestReplayUnavailable.WithCause(err)
-	}
 	objectRef, err := storage.ObjectRefString(s.replayBucket, key)
 	if err != nil {
-		if cleanupErr := s.replayStore.Delete(ctx, s.replayBucket, key); cleanupErr != nil {
-			return "", false, apperr.ErrContestReplayUnavailable.WithCause(fmt.Errorf("生成回放引用失败: %w; 清理对象失败: %w", err, cleanupErr))
-		}
 		return "", false, apperr.ErrContestReplayUnavailable.WithCause(err)
+	}
+	if err := s.replayStore.Put(ctx, s.replayBucket, key, bytes.NewReader(raw), int64(len(raw)), "application/json"); err != nil {
+		return "", false, apperr.ErrContestReplayUnavailable.WithCause(storage.CompensateUpload(ctx, s.cleanupTimeout, err, false, func(ctx context.Context) error {
+			return s.deleteBattleReplay(ctx, objectRef)
+		}))
 	}
 	return objectRef, false, nil
 }
 
-// deleteBattleReplay 清理事务失败后未被 battle_match 引用的对象。
+// deleteBattleReplay 只接收本次生成且已确认可清理的对象引用。
 func (s *Service) deleteBattleReplay(ctx context.Context, objectRef string) error {
 	ref, err := storage.ParseObjectRef(objectRef)
 	if err != nil {

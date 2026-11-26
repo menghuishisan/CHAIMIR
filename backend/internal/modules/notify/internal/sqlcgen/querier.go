@@ -27,7 +27,6 @@ type Querier interface {
 	GetNotificationTemplate(ctx context.Context, type_ string) (NotificationTemplate, error)
 	GetVisibleAnnouncement(ctx context.Context, arg GetVisibleAnnouncementParams) (GetVisibleAnnouncementRow, error)
 	ListAnnouncements(ctx context.Context, arg ListAnnouncementsParams) ([]ListAnnouncementsRow, error)
-	ListNotificationTemplates(ctx context.Context) ([]NotificationTemplate, error)
 	ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]Notification, error)
 	// 以通知模板全表为基准左连本人偏好:未设置过的类型回默认启用,与 PreferenceEnabled 的
 	// COALESCE(..., true) 口径一致。force 类通知 Send 时直接跳过偏好判定,故此处也恒回启用,

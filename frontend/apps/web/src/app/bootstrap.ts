@@ -1,5 +1,3 @@
-// bootstrap 在应用模块装配前加载部署配置,让网络与配置错误进入已挂载的共享错误边界。
-
 /** loadRuntimeConfiguration 从同源唯一入口读取配置,超时与失败均显式拒绝应用启动。 */
 export function loadRuntimeConfiguration(): Promise<void> {
   const timeoutMs = Number(import.meta.env.VITE_API_TIMEOUT_MS)
@@ -11,7 +9,6 @@ export function loadRuntimeConfiguration(): Promise<void> {
     const script = document.createElement('script')
     script.src = '/runtime-config.js'
 
-    /** finish 清理脚本与计时器,避免失败加载继续占用启动资源。 */
     const finish = (error?: Error) => {
       window.clearTimeout(timer)
       script.onload = null

@@ -20,6 +20,7 @@
   get:
     tags: [admin]
     summary: 外接监控面板入口
+    description: 仅返回允许来源的 HTTPS 地址，不含凭据、查询串或片段；前端用 noopener,noreferrer 在独立窗口打开，外部监控自行认证。
     operationId: adminMonitoringPanels
     x-chaimir-audience: platform-admin
     security: [{ bearerAuth: [] }]
@@ -28,11 +29,17 @@
   get:
     tags: [admin]
     summary: 备份记录分页列表
-    description: facets.status：备份状态分段计数。
+    description: 仅返回成功/失败结果及真实 started_at、finished_at；facets.status 提供结果分段计数。
     operationId: adminListBackups
     x-chaimir-audience: platform-admin
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
+    parameters:
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
+      - name: status
+        in: query
+        description: 0 不筛选，1 成功，2 失败。
+        schema: { type: integer, enum: [0, 1, 2], default: 0 }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/admin/school/dashboard:
   get:
@@ -85,53 +92,6 @@
       - { $ref: "#/components/parameters/FromQuery" }
       - { $ref: "#/components/parameters/ToQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/admin/configs:
-  get:
-    tags: [admin]
-    summary: 配置列表
-    operationId: adminListConfigs
-    x-chaimir-audience: platform-admin-or-school-admin
-    security: [{ bearerAuth: [] }]
-    parameters: [{ name: scope, in: query, description: 平台身份只读全平台配置（省略或 1），学校身份固定为本校并忽略该参数, schema: { type: integer, minimum: 0, maximum: 2 } }]
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/admin/configs/{key}:
-  get:
-    tags: [admin]
-    summary: 单条配置
-    operationId: adminGetConfig
-    x-chaimir-audience: platform-admin-or-school-admin
-    security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/KeyPath" }]
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-  put:
-    tags: [admin]
-    summary: 更新配置
-    operationId: adminUpdateConfig
-    x-chaimir-audience: platform-admin-or-school-admin
-    security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/KeyPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/admin/configs/{key}/history:
-  get:
-    tags: [admin]
-    summary: 配置变更历史
-    description: 每条带操作人姓名 operator_name（平台配置解析平台管理员，学校配置解析本校账号；账号已移除时省略）。
-    operationId: adminConfigHistory
-    x-chaimir-audience: platform-admin-or-school-admin
-    security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/KeyPath" }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/admin/configs/{key}/rollback:
-  post:
-    tags: [admin]
-    summary: 回滚配置
-    operationId: adminRollbackConfig
-    x-chaimir-audience: platform-admin-or-school-admin
-    security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/KeyPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/admin/alert-rules:
   get:
     tags: [admin]
@@ -162,7 +122,7 @@
   get:
     tags: [admin]
     summary: 告警事件分页列表
-    description: facets.status：告警状态分段计数，套用级别与学校范围、不套用状态筛选。
+    description: 返回 rule_name，供学校及平台直接显示事件所属规则。facets.status：告警状态分段计数，套用级别与学校范围、不套用状态筛选。
     operationId: adminListAlertEvents
     x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]

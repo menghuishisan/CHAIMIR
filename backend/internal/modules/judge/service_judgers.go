@@ -3,6 +3,8 @@ package judge
 
 import (
 	"context"
+	"encoding/json"
+	"maps"
 	"reflect"
 	"sort"
 	"strings"
@@ -39,7 +41,10 @@ func (s *Service) executeJudgerStrategy(ctx context.Context, task JudgeTask, san
 
 // judgeOnchainAssertions 按 M5 提供的 chain_steps/assertions 通过 M2 链能力比对现场状态。
 func (s *Service) judgeOnchainAssertions(ctx context.Context, task JudgeTask, sandboxID int64) (JudgeExecutionResult, error) {
-	steps := jsonx.SliceFromAny(task.InputSnapshot.Expectation["chain_steps"])
+	steps, err := onchainSteps(task.SandboxMode, task.accessProfile, task.InputSnapshot.Expectation)
+	if err != nil {
+		return JudgeExecutionResult{}, err
+	}
 	assertions := jsonx.SliceFromAny(task.InputSnapshot.Expectation["assertions"])
 	if len(assertions) == 0 {
 		return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid
@@ -49,21 +54,15 @@ func (s *Service) judgeOnchainAssertions(ctx context.Context, task JudgeTask, sa
 		return JudgeExecutionResult{}, err
 	}
 	details := make([]JudgeResultDetail, 0, len(assertions))
-	actions := make([]contracts.JudgeReplayAction, 0, len(steps))
+	actions := make([]contracts.JudgeReplayAction, 0, len(steps)+len(assertions))
 	passed := true
-	for seq, raw := range steps {
+	hasOutcome := false
+	for _, raw := range steps {
 		action, err := s.runChainStep(ctx, task, sandboxID, runtimeInstance, jsonx.ObjectFromAny(raw))
 		if err != nil {
 			return JudgeExecutionResult{}, err
 		}
-		if action != nil {
-			sequence, ok := intx.Int32(seq + 1)
-			if !ok {
-				return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid
-			}
-			action.Seq = sequence
-			actions = append(actions, *action)
-		}
+		actions = append(actions, *action)
 	}
 	for _, raw := range assertions {
 		assertion := jsonx.ObjectFromAny(raw)
@@ -71,7 +70,11 @@ func (s *Service) judgeOnchainAssertions(ctx context.Context, task JudgeTask, sa
 		if err != nil {
 			return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
 		}
-		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task), RuntimeInstance: runtimeInstance, Target: parsedAssertion.Target})
+		instance, err := contracts.ChainRuntimeInstance(assertion, runtimeInstance)
+		if err != nil {
+			return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
+		}
+		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task), RuntimeInstance: instance, Target: parsedAssertion.Target})
 		if err != nil {
 			return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed.WithCause(err)
 		}
@@ -79,6 +82,16 @@ func (s *Service) judgeOnchainAssertions(ctx context.Context, task JudgeTask, sa
 		if err != nil {
 			return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed.WithCause(err)
 		}
+		var outcome contracts.JudgeOutcome
+		if assertion["outcome"] == true {
+			value, ok := actual[parsedAssertion.Field].(string)
+			outcome = contracts.JudgeOutcome(value)
+			if !ok || !outcome.Valid() {
+				return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed
+			}
+			hasOutcome = true
+		}
+		actions = append(actions, contracts.JudgeReplayAction{Op: "query", RuntimeInstance: instance, Payload: map[string]any{"target": parsedAssertion.Target}, Output: sanitizeReplayMap(actual)})
 		if !result.Passed {
 			passed = false
 		}
@@ -88,7 +101,18 @@ func (s *Service) judgeOnchainAssertions(ctx context.Context, task JudgeTask, sa
 			ExpectedLabel: result.ExpectedLabel,
 			Actual:        result.Actual,
 			Hint:          result.Hint,
+			Outcome:       outcome,
 		})
+	}
+	if hasOutcome && !passed {
+		return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed
+	}
+	for i := range actions {
+		sequence, ok := intx.Int32(i + 1)
+		if !ok {
+			return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid
+		}
+		actions[i].Seq = sequence
 	}
 	score := int32(0)
 	if passed {
@@ -97,10 +121,88 @@ func (s *Service) judgeOnchainAssertions(ctx context.Context, task JudgeTask, sa
 	return JudgeExecutionResult{Passed: passed, Score: score, MaxScore: task.InputSnapshot.MaxScore, Details: details, Replay: contracts.JudgeReplayTrace{Actions: actions}}, nil
 }
 
-// judgeRuntimeInstance 返回冻结组合明确指定的工作区 runtime 实例。
-// 判题调用链能力必须使用这份不可变快照,不能按 runtime 列表顺序推断或回退到别名。
+// onchainSteps 只允许独立判题或已核验的私有对局执行程序，学生现场只读。
+func onchainSteps(mode int16, profile contracts.SandboxAccessProfile, expectation map[string]any) ([]any, error) {
+	hasOutcome, err := validateOutcomeAssertions(expectation)
+	if err != nil {
+		return nil, err
+	}
+	if hasOutcome && (mode != JudgeSandboxModeReuse || profile != contracts.SandboxAccessContestBattle) {
+		return nil, apperr.ErrJudgerConfigInvalid
+	}
+	raw, exists := expectation["chain_steps"]
+	var steps []any
+	if exists {
+		var ok bool
+		steps, ok = raw.([]any)
+		if !ok {
+			return nil, apperr.ErrJudgerConfigInvalid
+		}
+	}
+	if mode != JudgeSandboxModeReuse {
+		return steps, nil
+	}
+	if profile != contracts.SandboxAccessContestBattle {
+		if len(steps) > 0 {
+			return nil, apperr.ErrJudgerConfigInvalid
+		}
+		return steps, nil
+	}
+	hasExecution := false
+	for _, raw := range steps {
+		switch jsonx.StringField(jsonx.ObjectFromAny(raw), "op") {
+		case "deploy", "tx":
+			hasExecution = true
+		case "query", "reset":
+		default:
+			return nil, apperr.ErrJudgerConfigInvalid
+		}
+	}
+	if hasExecution {
+		return steps, nil
+	}
+	return nil, apperr.ErrJudgerConfigInvalid
+}
+
+// validateOutcomeAssertions 在执行前确定唯一结果来源，避免先改变链状态才发现配置冲突。
+func validateOutcomeAssertions(expectation map[string]any) (bool, error) {
+	hasOutcome := false
+	for _, raw := range jsonx.SliceFromAny(expectation["assertions"]) {
+		assertion := jsonx.ObjectFromAny(raw)
+		marker, exists := assertion["outcome"]
+		if !exists {
+			continue
+		}
+		enabled, ok := marker.(bool)
+		if !ok || !enabled {
+			return false, apperr.ErrJudgerConfigInvalid
+		}
+		parsed, err := chainassert.FromMap(assertion)
+		if err != nil || hasOutcome || parsed.Op != chainassert.OperationExists || parsed.Field == "" {
+			return false, apperr.ErrJudgerConfigInvalid.WithCause(err)
+		}
+		hasOutcome = true
+	}
+	return hasOutcome, nil
+}
+
+// validateOutcomeRequirement 将 M8 规则绑定到锁定题目的唯一结果来源。
+func validateOutcomeRequirement(typ, mode int16, profile contracts.SandboxAccessProfile, hasOutcome, required bool) error {
+	if required && (typ != JudgerTypeOnchainAssert || mode != JudgeSandboxModeReuse || profile != contracts.SandboxAccessContestBattle) {
+		return apperr.ErrJudgerConfigInvalid
+	}
+	if hasOutcome && profile != contracts.SandboxAccessContestBattle || profile == contracts.SandboxAccessContestBattle && hasOutcome != required {
+		return apperr.ErrJudgerConfigInvalid
+	}
+	return nil
+}
+
+// judgeRuntimeInstance 使用本次环境冻结的工作区实例，现场模式不借用平台判题器的实例名。
 func judgeRuntimeInstance(task JudgeTask) (string, error) {
 	instance := strings.TrimSpace(task.InputSnapshot.CompositionSnapshot.Spec.WorkspaceRuntimeInstance)
+	if task.SandboxMode == JudgeSandboxModeReuse {
+		instance = task.runtimeInstance
+	}
 	if instance == "" {
 		return "", apperr.ErrJudgerConfigInvalid
 	}
@@ -109,6 +211,10 @@ func judgeRuntimeInstance(task JudgeTask) (string, error) {
 
 // runChainStep 执行 deploy/tx/reset/query 预处理步骤。
 func (s *Service) runChainStep(ctx context.Context, task JudgeTask, sandboxID int64, runtimeInstance string, step map[string]any) (*contracts.JudgeReplayAction, error) {
+	runtimeInstance, err := contracts.ChainRuntimeInstance(step, runtimeInstance)
+	if err != nil {
+		return nil, apperr.ErrJudgerConfigInvalid.WithCause(err)
+	}
 	op := strings.TrimSpace(jsonx.StringFromAny(step["op"]))
 	payload := sanitizeReplayMap(jsonx.ObjectFromAny(step["payload"]))
 	switch op {
@@ -117,20 +223,28 @@ func (s *Service) runChainStep(ctx context.Context, task JudgeTask, sandboxID in
 		if err != nil {
 			return nil, err
 		}
-		return &contracts.JudgeReplayAction{Op: op, Payload: payload, Output: sanitizeReplayMap(output)}, nil
+		return &contracts.JudgeReplayAction{Op: op, RuntimeInstance: runtimeInstance, Payload: payload, Output: sanitizeReplayMap(output)}, nil
 	case "tx":
 		output, err := s.sandbox.ChainSendTx(ctx, contracts.SandboxChainTxRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task), RuntimeInstance: runtimeInstance, Payload: jsonx.ObjectFromAny(step["payload"])})
 		if err != nil {
 			return nil, err
 		}
-		return &contracts.JudgeReplayAction{Op: op, Payload: payload, Output: sanitizeReplayMap(output)}, nil
+		return &contracts.JudgeReplayAction{Op: op, RuntimeInstance: runtimeInstance, Payload: payload, Output: sanitizeReplayMap(output)}, nil
 	case "reset":
 		if err := s.sandbox.ChainReset(ctx, contracts.SandboxChainResetRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task), RuntimeInstance: runtimeInstance}); err != nil {
 			return nil, err
 		}
-		return &contracts.JudgeReplayAction{Op: op}, nil
-	case "query", "":
-		return nil, nil
+		return &contracts.JudgeReplayAction{Op: op, RuntimeInstance: runtimeInstance}, nil
+	case "query":
+		target := strings.TrimSpace(jsonx.StringField(step, "target"))
+		if target == "" {
+			return nil, apperr.ErrJudgerConfigInvalid
+		}
+		output, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task), RuntimeInstance: runtimeInstance, Target: target})
+		if err != nil {
+			return nil, err
+		}
+		return &contracts.JudgeReplayAction{Op: op, RuntimeInstance: runtimeInstance, Payload: map[string]any{"target": target}, Output: sanitizeReplayMap(output)}, nil
 	default:
 		return nil, apperr.ErrJudgerConfigInvalid
 	}
@@ -145,7 +259,11 @@ func (s *Service) judgeFlag(ctx context.Context, task JudgeTask, sandboxID int64
 	}
 	submittedHash := strings.TrimSpace(jsonx.StringFromAny(task.InputSnapshot.ExtraInput["submitted_flag_hash"]))
 	if target := strings.TrimSpace(jsonx.StringFromAny(task.InputSnapshot.Expectation["flag_chain_target"])); target != "" {
-		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task), Target: target})
+		runtimeInstance, err := judgeRuntimeInstance(task)
+		if err != nil {
+			return JudgeExecutionResult{}, err
+		}
+		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task), RuntimeInstance: runtimeInstance, Target: target})
 		if err != nil {
 			return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed.WithCause(err)
 		}
@@ -207,12 +325,10 @@ func judgeSimCheckpoint(task JudgeTask) (JudgeExecutionResult, error) {
 	}, nil
 }
 
-// snapshotExpectationForJudger 生成可复现但不泄露答案的快照期望。
-func (s *Service) snapshotExpectationForJudger(typ int16, expectation map[string]any, _ map[string]any) (map[string]any, error) {
+// snapshotExpectationForJudger 按题型冻结私有判定依据；该快照不得用于用户响应。
+func snapshotExpectationForJudger(typ int16, expectation map[string]any) (map[string]any, error) {
 	out := map[string]any{}
-	for k, v := range expectation {
-		out[k] = v
-	}
+	maps.Copy(out, expectation)
 	switch typ {
 	case JudgerTypeTheoryQuestion:
 		definition, err := question.Decode(out, true)
@@ -238,6 +354,9 @@ func (s *Service) snapshotExpectationForJudger(typ int16, expectation map[string
 		}
 		return safe, nil
 	case JudgerTypeOnchainAssert:
+		if _, err := validateOutcomeAssertions(out); err != nil {
+			return nil, err
+		}
 		if len(jsonx.SliceFromAny(out["assertions"])) == 0 {
 			return nil, apperr.ErrJudgerConfigInvalid
 		}
@@ -269,10 +388,10 @@ func (s *Service) snapshotExpectationForJudger(typ int16, expectation map[string
 }
 
 // executionExpectationForJudger 只在 worker 执行期恢复 J2/J5 所需的 M5 全量配置,不写回数据库快照。
-func (s *Service) executionExpectationForJudger(typ int16, spec contracts.ContentJudgeSpec, snapshot map[string]any) (map[string]any, error) {
+func executionExpectationForJudger(typ int16, expectation, snapshot map[string]any) (map[string]any, error) {
 	switch typ {
 	case JudgerTypeOnchainAssert:
-		out := cloneExpectationMap(spec.Expectation)
+		out := maps.Clone(expectation)
 		if len(jsonx.SliceFromAny(out["assertions"])) == 0 {
 			return nil, apperr.ErrJudgerConfigInvalid
 		}
@@ -281,7 +400,7 @@ func (s *Service) executionExpectationForJudger(typ int16, spec contracts.Conten
 		}
 		return out, nil
 	case JudgerTypeSimCheckpoint:
-		out := cloneExpectationMap(spec.Expectation)
+		out := maps.Clone(expectation)
 		if _, ok := out["checkpoint"]; !ok {
 			return nil, apperr.ErrJudgerConfigInvalid
 		}
@@ -350,15 +469,6 @@ func summarizeSimCheckpointExpectation(expectation map[string]any) map[string]an
 	return out
 }
 
-// cloneExpectationMap 复制 M5 配置顶层 map,避免运行期修改污染契约返回值。
-func cloneExpectationMap(expectation map[string]any) map[string]any {
-	out := make(map[string]any, len(expectation))
-	for k, v := range expectation {
-		out[k] = v
-	}
-	return out
-}
-
 // firstNonEmptyString 选择第一个非空摘要文本。
 func firstNonEmptyString(values ...any) string {
 	for _, value := range values {
@@ -388,11 +498,11 @@ func uniqueSortedStrings(values []string) []string {
 
 // containsSensitiveExpectationMaterial 保守拒绝命令型判题期望中携带敏感明文。
 func containsSensitiveExpectationMaterial(v any) (bool, error) {
-	raw, err := chainassert.ShortJSON(v)
+	raw, err := json.Marshal(v)
 	if err != nil {
 		return false, err
 	}
-	return privacy.ContainsResultSensitiveText(strings.ToLower(raw)), nil
+	return privacy.ContainsResultSensitiveText(string(raw)), nil
 }
 
 // flagActualText 返回用户向 flag 判题实际状态。

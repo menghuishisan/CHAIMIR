@@ -149,13 +149,10 @@ const (
 	SandboxProgressStageFailed = "准备失败"
 	// SandboxProgressStageRecycling 表示用户向进度处于释放阶段。
 	SandboxProgressStageRecycling = "环境释放中"
-)
-
-const (
-	// InitAssetApplyPhaseInit 表示初始化资产在沙箱个性化初始化阶段开始时执行。
-	InitAssetApplyPhaseInit = "init"
-	// InitAssetApplyPhasePersonalization 表示初始化资产在文档定义的个性化阶段执行。
-	InitAssetApplyPhasePersonalization = "personalization"
+	// SandboxProgressStagePaused 提示已暂停环境需恢复后继续。
+	SandboxProgressStagePaused = "环境已暂停"
+	// SandboxProgressStageDestroyed 表示资源已完成释放。
+	SandboxProgressStageDestroyed = "环境已释放"
 )
 
 const (

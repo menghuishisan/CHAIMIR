@@ -2,6 +2,7 @@
 package main
 
 import (
+	"chaimir/internal/contracts"
 	"context"
 	"errors"
 	"fmt"
@@ -31,7 +32,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// main 启动生产 HTTP 服务;所有失败都在启动边界显式终止。
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--selftest" {
 		fmt.Fprintln(os.Stdout, "后端服务自检通过")
@@ -43,8 +43,7 @@ func main() {
 	}
 }
 
-// run 负责串联配置、基础设施、模块装配和优雅退出。
-func run() error {
+func run() (err error) {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -59,7 +58,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer infra.close()
+	defer func() {
+		stop()
+		err = errors.Join(err, infra.close())
+	}()
 
 	router := newRouter(cfg, infra)
 	if err := router.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
@@ -112,7 +114,6 @@ func run() error {
 	}
 }
 
-// infrastructure 汇总组合根持有的共享基础设施实例。
 type infrastructure struct {
 	database *db.DB
 	redis    *redis.Client
@@ -133,94 +134,67 @@ func (i *infrastructure) beginDraining() {
 	}
 }
 
-// newInfrastructure 初始化所有模块共享的基础设施,任何依赖不可用都 fail-fast。
-func newInfrastructure(ctx context.Context, cfg *config.Config) (*infrastructure, error) {
-	database, err := db.New(ctx, cfg.Postgres)
-	if err != nil {
+func newInfrastructure(ctx context.Context, cfg *config.Config) (_ *infrastructure, err error) {
+	infra := &infrastructure{}
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, infra.close())
+		}
+	}()
+
+	if infra.database, err = db.New(ctx, cfg.Postgres); err != nil {
 		return nil, err
 	}
-	redisClient, err := redis.New(ctx, cfg.Redis)
-	if err != nil {
-		return nil, errors.Join(err, closeStartupInfrastructure(database, nil, nil))
+	if infra.redis, err = redis.New(ctx, cfg.Redis); err != nil {
+		return nil, err
 	}
-	bus, err := eventbus.New(cfg.NATS)
-	if err != nil {
-		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, nil))
+	if infra.bus, err = eventbus.New(cfg.NATS); err != nil {
+		return nil, err
 	}
-	objectStore, err := storage.New(ctx, cfg.ObjectStorage)
-	if err != nil {
-		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, bus))
+	if infra.storage, err = storage.New(ctx, cfg.ObjectStorage); err != nil {
+		return nil, err
 	}
-	if err := objectStore.EnsureBuckets(ctx); err != nil {
-		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, bus))
+	if err := infra.storage.EnsureBuckets(ctx); err != nil {
+		return nil, err
 	}
-	fileService, err := storage.NewServiceFromConfig(cfg.Auth, cfg.ObjectStorage, cfg.Upload)
-	if err != nil {
-		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, bus))
+	if infra.files, err = storage.NewServiceFromConfig(cfg.Auth, cfg.ObjectStorage, cfg.Upload); err != nil {
+		return nil, err
 	}
-	k8sClient, err := platformk8s.New(cfg.Sandbox)
-	if err != nil {
-		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, bus))
+	if infra.k8s, err = platformk8s.New(cfg.Sandbox); err != nil {
+		return nil, err
 	}
-	ids, err := snowflake.NewNode(cfg.Snowflake.NodeID)
-	if err != nil {
-		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, bus))
+	if infra.ids, err = snowflake.NewNode(cfg.Snowflake.NodeID); err != nil {
+		return nil, err
 	}
-	hub, err := ws.NewHub(ws.NewOriginPolicy(cfg.Server.WSAllowedOrigins, cfg.Server.TrustedProxies), ws.HubOptions{
+	if infra.wsHub, err = ws.NewHub(ws.NewOriginPolicy(cfg.Server.WSAllowedOrigins, cfg.Server.TrustedProxies), ws.HubOptions{
 		ReadTimeout:  time.Duration(cfg.Server.WSReadTimeoutSeconds) * time.Second,
 		WriteTimeout: time.Duration(cfg.Server.WSWriteTimeoutSeconds) * time.Second,
 		PingInterval: time.Duration(cfg.Server.WSPingIntervalSeconds) * time.Second,
 		ReadLimit:    cfg.Server.WSReadLimitBytes,
-	})
-	if err != nil {
-		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, bus))
+	}); err != nil {
+		return nil, err
 	}
-	return &infrastructure{
-		database: database,
-		redis:    redisClient,
-		bus:      bus,
-		storage:  objectStore,
-		files:    fileService,
-		k8s:      k8sClient,
-		auth:     auth.NewManager(cfg.Auth),
-		wsHub:    hub,
-		ids:      ids,
-	}, nil
+	infra.auth = auth.NewManager(cfg.Auth)
+	return infra, nil
 }
 
-// closeStartupInfrastructure 释放启动阶段已创建的依赖，并返回需要向上报告的关闭错误。
-func closeStartupInfrastructure(database *db.DB, redisClient *redis.Client, bus eventbus.Bus) error {
-	if bus != nil {
-		bus.Close()
-	}
-	var closeErr error
-	if redisClient != nil {
-		if err := redisClient.Close(); err != nil {
-			closeErr = fmt.Errorf("关闭 Redis 客户端失败: %w", err)
+// close 也用于启动失败时释放已经初始化的依赖。
+func (i *infrastructure) close() error {
+	var err error
+	if i.bus != nil {
+		if closeErr := i.bus.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("关闭事件总线失败: %w", closeErr))
 		}
 	}
-	if database != nil {
-		database.Close()
-	}
-	return closeErr
-}
-
-// close 释放长连接资源;HTTP server 自身由 run 的 Shutdown 管理。
-func (i *infrastructure) close() {
-	if i == nil {
-		return
-	}
-	if i.bus != nil {
-		i.bus.Close()
-	}
 	if i.redis != nil {
-		if err := i.redis.Close(); err != nil {
-			slog.Error("close redis failed", slog.String("error", logging.SanitizeError(err.Error())))
+		if closeErr := i.redis.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("关闭 Redis 客户端失败: %w", closeErr))
 		}
 	}
 	if i.database != nil {
 		i.database.Close()
 	}
+	return err
 }
 
 // newRouter 创建 HTTP 路由器、统一 trace 中间件和健康探针。
@@ -261,9 +235,7 @@ func maxMultipartBodyBytes(cfg *config.Config) int64 {
 	return maxBytes + 1<<20
 }
 
-// livenessProbe 回存活明文。探针消费者是 kubelet 与网关,不是终端用户,
-// 因此不套业务 JSON 信封:HTTP 状态码本身就是探针唯一可判定的信号
-// (与 storage 下载流一样,是 docs/总-API接口总览.md 声明的显式非信封出口)。
+// 探针用 HTTP 状态码向 kubelet 和网关报告结果。
 func livenessProbe(c *gin.Context) {
 	c.String(http.StatusOK, "ok")
 }
@@ -371,34 +343,34 @@ func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config
 	if err != nil {
 		return err
 	}
-	stdioJSONAdapters, err := sim.NewStdioJSONBackendRegistry(infra.k8s, cfg.SimBackend, cfg.Sandbox)
+	stdioJSONAdapters, err := sim.NewStdioJSONBackendRegistry(infra.k8s, cfg.SimBackend, cfg.Sandbox, infra.redis)
 	if err != nil {
 		return fmt.Errorf("装配 M4 stdio-json 后端计算能力失败: %w", err)
 	}
-	simSvc, err := RegisterSimModule(ctx, SimModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Upload: cfg.Upload, FileService: infra.files, SimBackend: cfg.SimBackend, Storage: infra.storage, Audit: auditWriter, WSHub: infra.wsHub, Auth: infra.auth, Roles: identitySvc, BackendAdapters: stdioJSONAdapters})
+	simSvc, err := RegisterSimModule(ctx, SimModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Upload: cfg.Upload, FileService: infra.files, SimBackend: cfg.SimBackend, Storage: infra.storage, Audit: auditWriter, WSHub: infra.wsHub, Auth: infra.auth, Roles: identitySvc, EventBus: infra.bus, BackendAdapters: stdioJSONAdapters})
 	if err != nil {
 		return err
 	}
-	// notify 模块通过事件总线订阅业务推送/通知,注册后无需被其他模块直接依赖。
-	if _, err := RegisterNotifyModule(ctx, NotifyModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Redis: infra.redis, Hub: infra.wsHub, Config: cfg.Notify, EventBus: infra.bus, Auth: infra.auth, Roles: identitySvc, Audit: auditWriter}); err != nil {
-		return err
-	}
-	teachingSvc, err := RegisterTeachingModule(ctx, TeachingModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Teaching, Upload: cfg.Upload, FileService: infra.files, Content: contentSvc, Judge: judgeSvc, Transfer: transferSvc, Storage: infra.storage, Audit: auditWriter, EventBus: infra.bus, Auth: infra.auth, Roles: identitySvc})
+	experimentSvc, err := RegisterExperimentModule(ctx, ExperimentModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Experiment, Content: contentSvc, ContentClone: contentSvc, Sandbox: sandboxSvc, SandboxClone: sandboxSvc, Judge: judgeSvc, Sim: simSvc, Audit: auditWriter, EventBus: infra.bus, Storage: infra.storage, Upload: cfg.Upload, FileService: infra.files, Auth: infra.auth, Roles: identitySvc})
 	if err != nil {
 		return err
 	}
-	experimentSvc, err := RegisterExperimentModule(ctx, ExperimentModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Experiment, Content: contentSvc, Sandbox: sandboxSvc, Judge: judgeSvc, Sim: simSvc, Audit: auditWriter, EventBus: infra.bus, Storage: infra.storage, Upload: cfg.Upload, FileService: infra.files, Auth: infra.auth, Roles: identitySvc})
+	teachingSvc, err := RegisterTeachingModule(ctx, TeachingModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Teaching, Upload: cfg.Upload, FileService: infra.files, Content: contentSvc, ContentClone: contentSvc, ExperimentClone: experimentSvc, Sim: simSvc, Judge: judgeSvc, Transfer: transferSvc, Storage: infra.storage, Audit: auditWriter, EventBus: infra.bus, Auth: infra.auth, Roles: identitySvc})
 	if err != nil {
 		return err
 	}
-	contestSvc, err := RegisterContestModule(ctx, ContestModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Contest, AuthConfig: cfg.Auth, FileService: infra.files, Storage: infra.storage, Content: contentSvc, ContentImport: contentSvc, Sandbox: sandboxSvc, Judge: judgeSvc, Fingerprint: judgeSvc, Audit: auditWriter, EventBus: infra.bus, WSHub: infra.wsHub, Auth: infra.auth, Roles: identitySvc})
+	contestSvc, err := RegisterContestModule(ctx, ContestModuleDeps{CleanupTimeout: time.Duration(cfg.Upload.CleanupTimeoutSeconds) * time.Second, Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Contest, AuthConfig: cfg.Auth, FileService: infra.files, Storage: infra.storage, Content: contentSvc, ContentImport: contentSvc, Sandbox: sandboxSvc, Judge: judgeSvc, Fingerprint: judgeSvc, Audit: auditWriter, EventBus: infra.bus, WSHub: infra.wsHub, Auth: infra.auth, Roles: identitySvc})
 	if err != nil {
 		return err
 	}
-	if _, err := RegisterAdminModule(ctx, AdminModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Identity: identitySvc, Stats: identitySvc, AuditRead: identitySvc, Teaching: teachingSvc, Sandbox: sandboxSvc, Experiment: experimentSvc, Contest: contestSvc, EventBus: infra.bus, Monitoring: cfg.Monitoring, Config: cfg.Admin, AuthConfig: cfg.Auth, FileService: infra.files, Transfer: transferSvc, Storage: infra.storage, Auth: infra.auth, Roles: identitySvc}); err != nil {
+	if _, err := RegisterNotifyModule(ctx, NotifyModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Redis: infra.redis, Hub: infra.wsHub, Config: cfg.Notify, EventBus: infra.bus, Auth: infra.auth, Roles: identitySvc, Contests: contestSvc, Audit: auditWriter}); err != nil {
 		return err
 	}
-	if _, err := RegisterGradeModule(ctx, GradeModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Teaching: teachingSvc, EventBus: infra.bus, Redis: infra.redis, Storage: infra.storage, FileService: infra.files, Config: cfg.Grade, Auth: infra.auth, Roles: identitySvc}); err != nil {
+	gradeSvc, err := RegisterGradeModule(ctx, GradeModuleDeps{CleanupTimeout: time.Duration(cfg.Upload.CleanupTimeoutSeconds) * time.Second, Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Teaching: teachingSvc, EventBus: infra.bus, Redis: infra.redis, Storage: infra.storage, FileService: infra.files, Config: cfg.Grade, Auth: infra.auth, Roles: identitySvc})
+	if err != nil {
+		return err
+	}
+	if _, err := RegisterAdminModule(ctx, AdminModuleDeps{CleanupTimeout: time.Duration(cfg.Upload.CleanupTimeoutSeconds) * time.Second, Metrics: []contracts.AlertMetricReader{identitySvc, sandboxSvc, judgeSvc, transferSvc, gradeSvc}, Recipients: identitySvc, Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Identity: identitySvc, Stats: identitySvc, AuditRead: identitySvc, Teaching: teachingSvc, Sandbox: sandboxSvc, Experiment: experimentSvc, Contest: contestSvc, EventBus: infra.bus, Monitoring: cfg.Monitoring, Config: cfg.Admin, FileService: infra.files, Transfer: transferSvc, Storage: infra.storage, Auth: infra.auth, Roles: identitySvc}); err != nil {
 		return err
 	}
 	return nil

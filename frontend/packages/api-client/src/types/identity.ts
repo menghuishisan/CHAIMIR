@@ -330,7 +330,7 @@ export interface ImportPreviewResponse extends ImportPreviewSummary {
   rows: ImportRowResult[]
 }
 
-export interface ImportRowResult {
+interface ImportRowResult {
   line: number
   error?: string
 }

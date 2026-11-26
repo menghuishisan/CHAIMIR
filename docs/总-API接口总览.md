@@ -16,12 +16,13 @@
 - 基础路径:`/api/v1`,各模块在其下有子前缀(见第二节)。
 - 风格:RESTful;资源名词,非 CRUD 用动词子路径;路径嵌套 ≤2 层。
 - 协议:HTTPS;实时用 WebSocket。
+- JSON 请求统一由 `httpx.BindJSON`/`BindJSONWithError` 绑定：只接收一个完整值，拒绝结构体未声明字段和尾随内容，并执行 Gin 的字段校验。显式声明的 map 字段仍按各自业务契约接收动态键；业务校验和租户、资源归属校验由所属模块负责。
 
 ### 2. 统一响应体
 ```json
-{ "code": 0, "message": "ok", "data": {} }
+{ "code": "0", "message": "ok", "data": {} }
 ```
-- `code`:0 成功,非 0 业务错误码。
+- `code` 为字符串。`"0"` 表示成功，其余值为业务错误码。
 - `message`:用户向友好文案;技术原因只进入日志,不进入响应体。
 - 分页:请求 `?page=1&size=20`;响应 `data: { list, total, page, size }`(默认 size=20,上限 100)。
 - 分段计数:列表页上方有状态分段(或类别分段)的接口,在同一事务、同一权限范围里另返回 `data.facets`:`{ <键>: { <取值>: 条数 } }`;键名与该分段的筛选参数同名(如 `status`、`is_read`、`channel`、`state`),取值与筛选参数的取值一致,数字按十进制字符串、布尔为 `"true"`/`"false"`。每组分段的计数套用本次请求里的其他全部筛选(含其他分段组),只不套用本组自己的筛选 —— 选中某个分段后,同组其他分段的数字仍然可见;一组分段可以由多列构成(如批改台「待批改 / 已出分 / 迟交」由状态与是否迟交两列构成),这时两列的计数都不套用这一组的筛选;没有记录的取值不返回,前端按 0 显示。前端不得为每个分段各发一次只取总数的请求,也不得对没有该契约的接口猜测 `facets`。
@@ -64,11 +65,13 @@
 | 6xxxx | M6 教学(61 课程/62 作业/63 进度/64 成绩) |
 | 7xxxx | M7 实验(71 定义/72 实例/73 协作/74 结果) |
 | 8xxxx | M8 竞赛(81 赛事/82 报名/83 解题/84 对抗/85 漏洞源) |
-| 9xxxx | M9 管理(91 看板/92 审计/93 配置/94 告警) |
+| 9xxxx | M9 管理(91 看板/92 审计/93 监控与备份/94 告警) |
 | A0xxx | M10 通知 |
 | B0xxx | M11 成绩 |
 
 补充:生产代码不得用同一错误码动态替换多种用户文案;新增场景应在对应段落补稳定错误码。`11503–11508` 只用于服务端装配依赖缺失,详细技术原因只进入日志。
+
+M5 错误补充:`51014` 表示分类仍有活动子分类或未删除题目引用,删除被拒绝;仅空分类可删除。
 
 身份会话错误补充:`12015` 表示 Refresh 或服务端会话无效,`12017` 表示已鉴权请求缺少服务端会话上下文；二者都要求客户端清除本地 access token 并重新登录。仅通用 `11001` 在存在 Refresh Cookie 时触发一次令牌轮转。
 
@@ -119,6 +122,8 @@
 
 `stream` 之所以不能沿用一次性消费:播放器为拖动进度会对同一资源发多个分段请求,首个请求就会烧掉一次性令牌。它以更短有效期(`STORAGE_STREAM_GRANT_TTL_SECONDS`)与同样的租户+账号+资源前缀绑定换取可重复性,不放宽任何一项边界校验。两种 mode 共用同一端点、同一 grant 构造器与签名器,不新增第二条投放路由。
 
+一次性消费以已验签授权的规范化内容摘要为标识；同一授权的等价外层编码共享同一个原子消费记录。
+
 **鉴权载体**:`<video src>`、`<img src>` 这类由浏览器自身发起的请求发不出 `Authorization` 头,故本入口接受 **Bearer 头**(XHR 取件)**或路径受限 Cookie**(浏览器直连),沿用 M2 浏览器工具代理已有的 `chaimir_access` 机制。两个入口共用 Cookie 与会话校验底座,但首次建链方式不同:M2 工具代理只接受 `/auth/browser-ticket` 签发的短时路径票据,统一文件服务由签发 `mode=stream` 授权的业务接口直接写 Cookie。文件服务**不接受任何 query 形式的 access token** —— `token` 参数位只表示投放授权,同名两义会让验签路径产生歧义。Cookie 作用域限定 `storage.DownloadCookiePath`(`/api/v1/storage`)、`HttpOnly`,有效期与 access token 一致;授权仍绑定租户、账号与资源前缀,`authorizeDownloadGrant` 的会话比对不因载体变化而放宽。
 
 > 所有模块签发的授权都只能由本入口消费。业务模块和前端页面不得拼接 S3 对象存储 地址、复制 token 验签逻辑或新增模块私有下载路由。
@@ -148,12 +153,11 @@
 - `/packages/*`:仿真包查询/扩展接入。`GET /packages` 同一路由按 `mine` 分叉:缺省只回已上架包;`mine=true` 按服务端会话账号回本人提交的包(状态可选,缺省全部状态),作者边界不接受客户端传参。提交请求不含 `compute`/`backend_adapter` —— 执行位置按作者类型派生(内置=浏览器 Worker、教师/第三方=后端隔离容器),提交者没有可选项,故也没有运行能力查询接口。**无 bundle 下载授权接口**:内置包按 `code` 在 Worker 内装配,扩展包 bundle 只经受控 k8s exec 投入隔离容器,从不下发浏览器。
 - `/reviews/*`:仿真包审核 `[平台管理员]`,列表携带隔离预览渲出的样例教学帧供人工判定。确定性双跑结论、渲帧结论与样例帧由 M4 进程内的隔离预览任务直接写入审核记录,**没有回写接口** —— 一个能把门禁置为通过的服务签名入口就是审核闸门的旁路。
 - `/sessions`:创建/操作上报/回放/分享;`/sessions/recycle` 回收 `[内部]`;`WS /sessions/{id}/stream`(隔离容器执行:客户端只发 step/event/back/restart 四种受控命令,服务端首帧下发包自描述信息、其后逐帧推完整教学快照,前端只渲染)。
-- `/sessions/{id}/checkpoints`:检查点上报 `[内部]`。
 
 ### M5 题库与模板中心 `/api/v1/content`
 - `/items/*`:内容 CRUD/检索/题面(过滤答案)/full(内部)/发布/弃用。
 - `/items/system-import`:系统/外部源建题 `[内部]`(M8 漏洞题固化入库)。
-- `/items/{code}/versions`、`/clone`、`/share`、`/unshare`、`/shared`:版本/复用/共享。
+- `/items/{code}/versions`:仅本校版本历史；`/items/{id}/clone`、`/share`、`/unshare` 管理复用；`/shared` 浏览共享库，`/shared/{id}` 精确预览共享题面。
 - `/categories`、`/papers`:分类/组卷。
 - `/items/{code}/{version}/full`、`/items/batch`:内部取用 `[内部]`。
 
@@ -179,7 +183,7 @@
 - `/student/contests`、`/student/contests/{id}`:学生可发现的非草稿赛事列表与单条读取(门槛与列表一致),支持状态和名称检索。
 - `/signup`、`/contests/{id}/join-team`、`/teams/*`:报名组队。加入队伍只按邀请码(队伍编号对学生是内部标识,不进请求)。
 - `/problems` 摘要、`/problems/{pid}` 安全题面、`/problems/{pid}/env`、`/submit`、`/submission`:解题赛;摘要不返回完整题面,安全题面和环境/提交均要求当前参赛队伍成员。`GET /problems/{pid}/env` 按服务端稳定 `request_ref` 恢复当前队伍仍未销毁的环境,不存在时返回通用资源不存在;`POST` 只负责创建或幂等取得环境。`GET /problems/{pid}/submission` 只返回当前队伍最近一次提交,用于刷新和关闭重开后的状态恢复。代码题提交只带当前 `sandbox_ref`，M8 核验成员 grant 和题目/队伍/竞赛归属后经 M2 保存工作区；`code_storage_key`、`code_hash` 由服务端生成，客户端不提供。答案题只传 `content_ref`。环境从 M5 锁定题目版本的 `composition` 派生并以 `contest-solve` 调 M2、判题调 M3;学生请求不得携带运行时、镜像、工具、初始化或网络配置。
-- `/battle/entry`、`/battle/matches`、`/battle/replay-window`、`/matches/{id}/replay`、`/ladder`:对抗赛/回放/天梯。`POST /battle/entry` 请求为 `{problem_id,sandbox_id,role}`;M8 校验当前成员授权的竞赛、队伍及题目沙箱后,调用 M2 保存工作区并以返回的引用与哈希创建参战版本,客户端不得指定 `artifact_ref` 或 `code_hash`。`GET /contests/{id}/battle/entries?page=&size=` 与 `GET /contests/{id}/battle/matches` 都返回分页信封;matches 师生同路由按身份分视角:赛事组织者与学校管理员见本赛事全部对局(实时监控),其余账号见本队对局;学生回放使用 `GET /contests/{id}/battle/replay-window?page=&size=`，由服务端提供已完成总量、处理中数量、窗口前检查点和窗口内有序事件，不能用通用列表页切片重算全场状态;回放取件仍限参赛队伍成员。
+- `/battle/entry`、`/battle/matches`、`/battle/replay-window`、`/replay/download-grant`、`/ladder`:对抗赛/回放/天梯。`POST /battle/entry` 请求为 `{problem_id,sandbox_id,role}`;M8 校验当前成员授权的竞赛、队伍及题目沙箱后,调用 M2 保存工作区并以返回的引用与哈希创建参战版本,客户端不得指定 `artifact_ref` 或 `code_hash`。`GET /contests/{id}/battle/entries?page=&size=` 与 `GET /contests/{id}/battle/matches` 都返回分页信封;matches 师生同路由按身份分视角:赛事组织者与学校管理员见本赛事全部对局(实时监控),其余账号见本队对局;学生回放使用 `GET /contests/{id}/battle/replay-window?page=&size=`，由服务端提供已完成总量、处理中数量、窗口前检查点和窗口内有序事件，不能用通用列表页切片重算全场状态;回放归档状态直接使用窗口条目的 `replay_available`，取件仍限参赛队伍成员并统一走下载授权。
 - `/my/contest-records`、`/result-snapshot`:个人战绩;榜单统计按赛制解释,对抗赛只展示 ELO,不展示解题数/末次解题时间。
 - `/cheat-*`:防作弊。
 - `/vuln-sources/*`、`/vuln-problems/*`:租户漏洞源与漏洞题转化 `[出题教师/学校管理员]`(finalize 调 M5 system-import)。
@@ -190,14 +194,14 @@
 - `/platform/dashboard`、`/platform/statistics`:平台看板与统计聚合 `[平台管理员]`。租户列表与入驻申请审核不在 M9,统一走 M1 `/platform/tenants`、`/platform/applications`。
 - `/school/dashboard`、`/school/statistics`:学校看板。
 - `/audit`、`/audit/export`:统一审计查询中心(查 M1 audit_log)。
-- `/configs/*`、`/alert-rules`、`/alert-events/*`:配置/告警;告警规则 `condition` 固定为
+- `/alert-rules`、`/alert-events/*`:业务告警，事件返回 `rule_name`；运行参数由环境变量管理;告警规则 `condition` 固定为
   `operator`、`threshold`、`duration_seconds` 三字段,指标必须来自 M9 登记清单。
-- `/platform/monitoring/panels`:外接监控嵌入入口。
-- `/platform/backups`:备份记录。
+- `/platform/monitoring/panels`：受控 HTTPS 外部监控入口，独立窗口打开，不传递平台凭据。
+- `/platform/backups`：仅成功/失败的备份结果，返回真实起止时间。
 
 ### M10 通知与实时推送 `/api/v1/notify`
-- `/send` `[内部]`:统一通知发送。
-- `/push` `[内部]`:实时推送到带租户前缀的 topic。
+- `/internal/send` `[内部]`:统一站内信发送，传递原业务请求编号保证幂等。
+- `/internal/push` `[内部]`:实时推送到带租户前缀的 topic。
 - `WS /api/ws`:统一实时通道(订阅 topic)`[租户用户]`;topic 以 `tenant:{tenant_id}` 为根,平台管理员不订阅。
 - `/inbox/*`、`/preferences`:站内信/偏好 `[租户用户]`;`notification`、`notification_preference` 表 `tenant_id NOT NULL`,平台管理员无收件箱。`GET /preferences` 返回 `notification_template` 全量类型与本人设置的合并结果(`type/enabled/force`),不返回模板正文。
 - `POST /announcements`:发布公告 `[平台管理员/学校管理员]`;`GET /announcements`:公告列表 `[租户用户/平台管理员]`,`facets` 带 `scope`(发布范围)与 `is_read`(本人是否已读),口径为当前身份可见的全部公告;`POST /announcements/{id}/read`:标记已读 `[租户用户]`。
@@ -205,9 +209,9 @@
 ### M11 成绩中心 `/api/v1/grade-center`
 - `/level-configs`、`/semesters`:等级映射/学期。`GET /students/{id}/grades?semester=&page=&size=` 返回包含当前范围 GPA 摘要和 `{list,total,page,size}` 的分页课程成绩明细。
 - `/reviews/*`:成绩审核(approve 锁定/unlock 解锁);审核流程在 M11,单课程写保护投影由 M6 自管。
-- `/students/{id}/grades`、`/gpa`、`/recompute`:GPA 聚合(只读 M6)。
+- `/students/{id}/grades`、`/gpa`:仅学生本人和本校校管读取已审核且锁定课程；学期汇总按所选范围，累计 GPA 按当前全部已发布课程加权。`/recompute` 仅校管，聚合写入与响应摘要同事务完成。
 - `/appeals/*`:申诉(accept 走解锁→改 M6→重算→重锁)。`GET /appeals` 师生同路由按身份分视角:学生只见本人申诉,教师见本人任教课程,校管见全校。
-- `/warnings/*`:学业预警。
+- `/warnings/*`:学业预警；扫描默认当前学期，同学生/学期/类型复用记录并保留已知悉，不重复通知。
 - `/transcripts/*`:成绩单 PDF。
 
 ---

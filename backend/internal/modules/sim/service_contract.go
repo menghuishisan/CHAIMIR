@@ -3,16 +3,26 @@ package sim
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/ids"
-	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
 )
+
+// ValidatePackage 供业务发布前检查锁定包版本，不产生执行资源。
+func (s *Service) ValidatePackage(ctx context.Context, tenantID int64, packageCode, version string) error {
+	if tenantID <= 0 {
+		return apperr.ErrSimSessionInvalid
+	}
+	if err := s.identity.RequireTenantModules(ctx, tenantID, contracts.TenantModuleSim); err != nil {
+		return err
+	}
+	_, err := s.loadRunnablePackage(ctx, packageCode, version)
+	return err
+}
 
 // CreateSession 创建仿真会话并锁定仿真包版本。
 func (s *Service) CreateSession(ctx context.Context, req contracts.SimCreateSessionRequest) (contracts.SimSessionInfo, error) {
@@ -39,20 +49,18 @@ func (s *Service) CreateSession(ctx context.Context, req contracts.SimCreateSess
 	if err := s.validateSessionSharedAccounts(ctx, req.TenantID, sharedAccountIDs); err != nil {
 		return contracts.SimSessionInfo{}, err
 	}
-	pkg, err := s.loadPackage(ctx, req.PackageCode, req.Version)
+	pkg, err := s.loadRunnablePackage(ctx, req.PackageCode, req.Version)
 	if err != nil {
 		return contracts.SimSessionInfo{}, err
 	}
-	if pkg.Status != PackageStatusPublished {
-		return contracts.SimSessionInfo{}, apperr.ErrSimPackageUnavailable
-	}
-	if err := validateBackendAdapterConfig(pkg.Compute, pkg.BackendAdapter, pkg.BackendConfig, s.backends); err != nil {
-		return contracts.SimSessionInfo{}, err
-	}
-	session := Session{ID: s.ids.Generate(), TenantID: req.TenantID, PackageID: pkg.ID, SourceRef: req.SourceRef, ScopeRef: req.ScopeRef, OwnerAccountID: req.OwnerAccountID, SharedAccountIDs: sharedAccountIDs, Seed: req.Seed, InitParams: initParams, Compute: pkg.Compute, Status: SessionCreating}
+	session := Session{ID: s.ids.Generate(), TenantID: req.TenantID, PackageID: pkg.ID, SourceRef: req.SourceRef, ScopeRef: req.ScopeRef, OwnerAccountID: req.OwnerAccountID, SharedAccountIDs: sharedAccountIDs, Seed: req.Seed, InitParams: initParams, Compute: pkg.Compute}
+	var out contracts.SimSessionInfo
 	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
 		// 隔离会话的并发闸门与建行必须处于同一事务,避免并发请求同时绕过配额。
 		if pkg.Compute == ComputeIsolated {
+			if err := tx.LockIsolatedSessionCreation(ctx, req.TenantID); err != nil {
+				return apperr.ErrSimSessionQueryFailed.WithCause(err)
+			}
 			active, err := tx.CountActiveIsolatedSessions(ctx, req.TenantID)
 			if err != nil {
 				return apperr.ErrSimSessionQueryFailed.WithCause(err)
@@ -66,18 +74,15 @@ func (s *Service) CreateSession(ctx context.Context, req contracts.SimCreateSess
 		if err != nil {
 			return apperr.ErrSimSessionInvalid.WithCause(err)
 		}
-		session, err = tx.UpdateSessionStatus(ctx, req.TenantID, session.ID, SessionRunning)
+		out, err = sessionToContract(session, pkg)
 		if err != nil {
-			return apperr.ErrSimSessionStateInvalid.WithCause(err)
+			return err
 		}
-		return nil
+		return s.writeSystemAudit(ctx, req.TenantID, "sim.session.create", "sim_session", session.ID, map[string]any{"source_ref": session.SourceRef, "owner_account_id": req.OwnerAccountID, "package": pkg.Code + ":" + pkg.Version})
 	}); err != nil {
 		return contracts.SimSessionInfo{}, err
 	}
-	if err := s.writeSystemAudit(ctx, req.TenantID, "sim.session.create", "sim_session", session.ID, map[string]any{"source_ref": session.SourceRef, "owner_account_id": req.OwnerAccountID, "package": pkg.Code + ":" + pkg.Version}); err != nil {
-		return contracts.SimSessionInfo{}, err
-	}
-	return sessionToContract(session, pkg)
+	return out, nil
 }
 
 // validateSessionSharedAccounts 确认共享账号真实存在且全部属于目标租户,弥补数组字段无法声明逐元素外键的限制。
@@ -132,21 +137,21 @@ func (s *Service) DestroySession(ctx context.Context, req contracts.SimDestroySe
 		if session.SourceRef != req.SourceRef {
 			return apperr.ErrServiceUnauthorized
 		}
-		if !canArchiveSession(session.Status) {
+		if session.Status == SessionArchived {
+			archived = session
+		} else if session.Status != SessionAvailable {
 			return apperr.ErrSimSessionStateInvalid
+		} else {
+			archived, err = tx.ArchiveSession(ctx, req.TenantID, req.SessionID)
+			if err != nil {
+				return apperr.ErrSimSessionStateInvalid.WithCause(err)
+			}
 		}
-		archived, err = tx.UpdateSessionStatus(ctx, req.TenantID, req.SessionID, SessionArchived)
-		if err != nil {
-			return apperr.ErrSimSessionStateInvalid.WithCause(err)
-		}
-		return nil
+		return s.writeSystemAudit(ctx, req.TenantID, "sim.session.archive", "sim_session", archived.ID, map[string]any{"source_ref": archived.SourceRef})
 	}); err != nil {
 		return err
 	}
-	if err := s.releaseBackendSessions(ctx, req.TenantID, []Session{archived}); err != nil {
-		return err
-	}
-	return s.writeSystemAudit(ctx, req.TenantID, "sim.session.archive", "sim_session", archived.ID, map[string]any{"source_ref": archived.SourceRef})
+	return s.releaseBackendSessions(ctx, req.TenantID, []Session{archived})
 }
 
 // UpdateSessionAuthorizedAccounts 原子替换仿真会话共享账号,并精确关闭已撤销账号的在线流。
@@ -158,8 +163,10 @@ func (s *Service) UpdateSessionAuthorizedAccounts(ctx context.Context, req contr
 	if !auth.ServiceSourceRefAuthorized(ctx, req.SourceRef) {
 		return apperr.ErrServiceUnauthorized
 	}
-	var revoked []int64
 	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
+		if err := tx.LockSessionActions(ctx, req.TenantID, req.SessionID); err != nil {
+			return apperr.ErrSimSessionStateInvalid.WithCause(err)
+		}
 		session, err := tx.GetSession(ctx, req.TenantID, req.SessionID)
 		if err != nil {
 			return lookupError(err, apperr.ErrSimSessionNotFound, apperr.ErrSimSessionQueryFailed)
@@ -167,7 +174,7 @@ func (s *Service) UpdateSessionAuthorizedAccounts(ctx context.Context, req contr
 		if session.SourceRef != req.SourceRef {
 			return apperr.ErrServiceUnauthorized
 		}
-		if !canMutateSession(session.Status) {
+		if session.Status != SessionAvailable {
 			return apperr.ErrSimSessionStateInvalid
 		}
 		if err := s.validateSessionSharedAccounts(ctx, req.TenantID, req.AuthorizedAccountIDs); err != nil {
@@ -177,21 +184,6 @@ func (s *Service) UpdateSessionAuthorizedAccounts(ctx context.Context, req contr
 		if err != nil {
 			return err
 		}
-		previous := make(map[int64]struct{})
-		previous[session.OwnerAccountID] = struct{}{}
-		for _, accountID := range session.SharedAccountIDs {
-			previous[accountID] = struct{}{}
-		}
-		next := make(map[int64]struct{})
-		next[session.OwnerAccountID] = struct{}{}
-		for _, accountID := range accountIDs {
-			next[accountID] = struct{}{}
-		}
-		for accountID := range previous {
-			if _, ok := next[accountID]; !ok {
-				revoked = append(revoked, accountID)
-			}
-		}
 		_, err = tx.UpdateSessionAuthorizedAccounts(ctx, req.TenantID, req.SessionID, req.SourceRef, accountIDs)
 		if err != nil {
 			return apperr.ErrSimSessionStateInvalid.WithCause(err)
@@ -200,18 +192,7 @@ func (s *Service) UpdateSessionAuthorizedAccounts(ctx context.Context, req contr
 	}); err != nil {
 		return err
 	}
-	var closeErrs []error
-	if s.wsHub != nil {
-		for _, accountID := range revoked {
-			if err := s.wsHub.CloseSession(ws.SessionKey{TenantID: req.TenantID, AccountID: accountID, Scope: simSessionSessionScope(req.SessionID)}); err != nil {
-				closeErrs = append(closeErrs, fmt.Errorf("关闭已撤销仿真成员连接失败: tenant_id=%d session_id=%d account_id=%d: %w", req.TenantID, req.SessionID, accountID, err))
-			}
-		}
-	}
-	if err := errors.Join(closeErrs...); err != nil {
-		return apperr.ErrSimBackendComputeUnavailable.WithCause(err)
-	}
-	return nil
+	return s.publishSessionChanged(ctx, req.TenantID, req.SessionID)
 }
 
 // RecycleByScopeRef 按生命周期作用域归档仿真会话并释放后端计算资源。
@@ -231,29 +212,14 @@ func (s *Service) RecycleByScopeRef(ctx context.Context, req contracts.SimRecycl
 		if err != nil {
 			return apperr.ErrSimSessionStateInvalid.WithCause(err)
 		}
+		for _, session := range archived {
+			if err := s.writeSystemAudit(ctx, req.TenantID, "sim.session.archive", "sim_session", session.ID, map[string]any{"source_ref": session.SourceRef, "reason": strings.TrimSpace(req.Reason)}); err != nil {
+				return err
+			}
+		}
 		return nil
 	}); err != nil {
 		return err
 	}
-	if err := s.releaseBackendSessions(ctx, req.TenantID, archived); err != nil {
-		return err
-	}
-	for _, session := range archived {
-		if err := s.writeSystemAudit(ctx, req.TenantID, "sim.session.archive", "sim_session", session.ID, map[string]any{"source_ref": session.SourceRef, "reason": strings.TrimSpace(req.Reason)}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ReportCheckpoint 保存仿真检查点结果快照,供 M3 后续判分读取。
-func (s *Service) ReportCheckpoint(ctx context.Context, req contracts.SimCheckpointRequest) error {
-	sourceRef := strings.TrimSpace(req.SourceRef)
-	if !auth.ValidSourceRef(sourceRef) {
-		return apperr.ErrSimCheckpointInvalid
-	}
-	if !auth.ServiceSourceRefAuthorized(ctx, sourceRef) {
-		return apperr.ErrServiceUnauthorized
-	}
-	return s.reportCheckpointRaw(ctx, req.TenantID, req.SessionID, sourceRef, req.CheckpointID, req.Answer, req.Achieved)
+	return s.releaseBackendSessions(ctx, req.TenantID, archived)
 }

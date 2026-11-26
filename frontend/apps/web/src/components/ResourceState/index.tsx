@@ -1,7 +1,3 @@
-// ResourceState 统一渲染页面级资源的加载、空态与错误态(规范 §6.5 三态 / §6.7 展示位 A)。
-// 各页面自己写这三段会导致同一种失败在不同页面长得不一样,也容易漏掉报障编号,
-// 故收敛到一处:骨架预留空间防布局跳动、空态给引导与行动、错误态可重试并只显示后端 trace_id。
-
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { Button, Empty, Skeleton } from '@chaimir/ui'
@@ -26,9 +22,8 @@ export interface ResourceStateProps<T> {
 }
 
 /**
- * ResourceState 按资源状态选择渲染分支。
- * 错误文案取后端 message(后端已是用户向),非 ApiError 已在 useAsyncResource 边界处
- * 换成用户向文案;编号只在后端签发 trace_id 时展示,前端不自造。
+ * ResourceState 展示加载、空数据、失败和成功结果。
+ * 资源边界已转换用户向错误文案；报障编号只展示后端签发的 trace_id。
  */
 export function ResourceState<T>({
   resource,
@@ -82,25 +77,23 @@ export interface ResourceErrorProps {
   /** 后端签发的报障编号;不存在时不显示编号 */
   traceId?: string
   onRetry: () => void
+  /** 沉浸态侧栏使用深色文字和紧凑间距。 */
+  onDark?: boolean
 }
 
-/**
- * ResourceError 渲染可恢复的读取失败态。
- * 由 ResourceState 在读取失败分支统一使用,避免各页面自行拼错误块。
- */
-export function ResourceError({ message, traceId, onRetry }: ResourceErrorProps) {
+/** ResourceError 展示读取失败原因、服务端报障编号和重试入口。 */
+export function ResourceError({ message, traceId, onRetry, onDark = false }: ResourceErrorProps) {
   return (
-    // 抬起片(规范 §6.5.1 第 1 级):失败块与它替代的那张表同层,故同样不画边框
     <div
       role="alert"
       aria-live="assertive"
-      className="flex flex-col items-center gap-3 px-6 py-12 text-center"
+      className={onDark ? 'flex flex-col items-center gap-2 py-3 text-center' : 'flex flex-col items-center gap-3 px-6 py-12 text-center'}
     >
-      <p className="text-base text-ink">{message}</p>
+      <p className={onDark ? 'text-sm text-on-dark' : 'text-base text-ink'}>{message}</p>
       {traceId ? (
-        <p className="font-mono text-xs text-ink-sub">{traceHintText(traceId)}</p>
+        <p className={'break-all font-mono text-xs ' + (onDark ? 'text-on-dark-sub' : 'text-ink-sub')}>{traceHintText(traceId)}</p>
       ) : null}
-      <Button variant="outline" onClick={onRetry}>
+      <Button variant={onDark ? 'on-dark' : 'outline'} onClick={onRetry}>
         重新加载
       </Button>
     </div>

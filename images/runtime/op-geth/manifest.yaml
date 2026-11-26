@@ -53,30 +53,20 @@ capabilities:
   config_schema:
     type: object
     additionalProperties: false
-    required: [data_dir, genesis, rpc_port, engine_port]
+    required: [data_dir, genesis]
     properties:
       data_dir:
         title: 链数据目录
         type: string
         minLength: 1
+        pattern: '^/runtime-state(?:/[A-Za-z0-9_-][A-Za-z0-9_.-]*)+$'
         x-chaimir-env: runtime/OP_GETH_DATA_DIR
       genesis:
         title: 创世配置文件路径
         type: string
         minLength: 1
+        pattern: '^(?:/opt/chaimir/genesis/op-geth\.json|/runtime-state(?:/[A-Za-z0-9_-][A-Za-z0-9_.-]*)+)$'
         x-chaimir-env: runtime/OP_GETH_GENESIS_PATH
-      rpc_port:
-        title: 链服务端口
-        type: integer
-        minimum: 1
-        maximum: 65535
-        x-chaimir-env: runtime/OP_GETH_RPC_PORT
-      engine_port:
-        title: 引擎服务端口
-        type: integer
-        minimum: 1
-        maximum: 65535
-        x-chaimir-env: runtime/OP_GETH_ENGINE_PORT
   student_access: private
 runtime:
   eco: evm

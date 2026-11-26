@@ -22,6 +22,7 @@ import (
 
 // Store 定义 service 所需的 experiment 持久化事务入口。
 type Store interface {
+	CloneTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
 	// TenantTx 在注入 RLS 租户变量后访问 M7 租户表。
 	TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
 	// PrivilegedTx 在受控后台任务中跨租户扫描 M7 自有表。
@@ -30,12 +31,14 @@ type Store interface {
 
 // TxStore 定义单个事务内可调用的数据访问能力,不暴露 sqlc 行类型。
 type TxStore interface {
+	ListCourseExperimentsForClone(context.Context, int64, int64, int64, []int64) ([]Experiment, error)
 	CreateExperiment(context.Context, Experiment) (Experiment, error)
 	GetExperiment(context.Context, int64, int64) (Experiment, error)
 	ListExperiments(context.Context, int64, int64, int16, string, int, int) ([]Experiment, int64, error)
 	CountPublishedExperimentsByShape(context.Context, int64, int64) (map[string]map[string]int64, error)
 	UpdateExperiment(context.Context, Experiment) (Experiment, error)
-	SetExperimentStatus(context.Context, int64, int64, int16) (Experiment, error)
+	UnpublishExperiment(context.Context, int64, int64) (Experiment, error)
+	PublishExperimentIfUnchanged(context.Context, int64, int64, time.Time) (Experiment, error)
 	CreateGroup(context.Context, ExperimentGroup) (ExperimentGroup, error)
 	GetGroup(context.Context, int64, int64) (ExperimentGroup, error)
 	GetGroupForUpdate(context.Context, int64, int64) (ExperimentGroup, error)
@@ -62,7 +65,6 @@ type TxStore interface {
 	ListLiveInstancesByCourse(context.Context, int64, int64) ([]ExperimentInstance, error)
 	ListTeacherInstances(context.Context, int64, int64, int16, int, int) ([]ExperimentInstance, int64, error)
 	UpsertCheckpoint(context.Context, CheckpointResult) (CheckpointResult, error)
-	GetCheckpointByJudgeTask(context.Context, int64, string) (CheckpointResult, error)
 	ListCheckpoints(context.Context, int64, int64) ([]CheckpointResult, error)
 	UpsertReport(context.Context, ExperimentReport) (ExperimentReport, error)
 	GradeReport(context.Context, int64, int64, float64, string) (ExperimentReport, error)
@@ -88,6 +90,17 @@ type txStore struct{ q *sqlcgen.Queries }
 // NewStore 创建 experiment 模块持久化入口,仅装配层应调用。
 func NewStore(database *db.DB) Store { return &store{database: database} }
 
+// CloneTx 只借用目标普通事务，防止课程与实验分开提交。
+func (s *store) CloneTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error {
+	joined, err := s.database.WithTenantTxIfPresent(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
+	})
+	if err == nil && !joined {
+		return fmt.Errorf("实验复制缺少目标租户事务")
+	}
+	return err
+}
+
 // TenantTx 在当前租户事务中执行 M7 自有表读写。
 func (s *store) TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error {
 	if s == nil || s.database == nil {
@@ -111,6 +124,30 @@ func (s *store) PrivilegedTx(ctx context.Context, fn func(context.Context, TxSto
 // isNoRows 统一识别未命中错误,让 service 不直接依赖 pgx。
 func isNoRows(err error) bool { return db.IsNoRows(err) }
 
+func mapLookupError(err error, notFound *apperr.Error) error {
+	if isNoRows(err) {
+		return notFound.WithCause(err)
+	}
+	return apperr.AsAppError(err)
+}
+
+// ListCourseExperimentsForClone 一次锁定课程实验与课时引用的作者未绑定实验。
+func (tx *txStore) ListCourseExperimentsForClone(ctx context.Context, tenantID, courseID, teacherID int64, lessonIDs []int64) ([]Experiment, error) {
+	rows, err := tx.q.ListCourseExperimentsForClone(ctx, sqlcgen.ListCourseExperimentsForCloneParams{TenantID: tenantID, CourseID: courseID, SourceTeacherID: teacherID, LessonExperimentIds: lessonIDs})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]Experiment, 0, len(rows))
+	for _, row := range rows {
+		item, err := experimentFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
 // CreateExperiment 创建向导草稿。
 func (tx *txStore) CreateExperiment(ctx context.Context, item Experiment) (Experiment, error) {
 	components, err := jsonx.AnyBytes(item.Components, apperr.ErrExperimentInvalid)
@@ -132,7 +169,7 @@ func (tx *txStore) CreateExperiment(ctx context.Context, item Experiment) (Exper
 func (tx *txStore) GetExperiment(ctx context.Context, tenantID, id int64) (Experiment, error) {
 	row, err := tx.q.GetExperiment(ctx, sqlcgen.GetExperimentParams{TenantID: tenantID, ID: id})
 	if err != nil {
-		return Experiment{}, apperr.ErrExperimentNotFound.WithCause(err)
+		return Experiment{}, mapLookupError(err, apperr.ErrExperimentNotFound)
 	}
 	return experimentFromRow(row)
 }
@@ -190,9 +227,20 @@ func (tx *txStore) UpdateExperiment(ctx context.Context, item Experiment) (Exper
 	return experimentFromRow(row)
 }
 
-// SetExperimentStatus 更新实验发布状态。
-func (tx *txStore) SetExperimentStatus(ctx context.Context, tenantID, id int64, status int16) (Experiment, error) {
-	row, err := tx.q.SetExperimentStatus(ctx, sqlcgen.SetExperimentStatusParams{TenantID: tenantID, ID: id, Status: status})
+// UnpublishExperiment 仅允许将已发布实验下架。
+func (tx *txStore) UnpublishExperiment(ctx context.Context, tenantID, id int64) (Experiment, error) {
+	row, err := tx.q.UnpublishExperiment(ctx, sqlcgen.UnpublishExperimentParams{TenantID: tenantID, ID: id})
+	if err != nil {
+		return Experiment{}, apperr.ErrExperimentStateInvalid.WithCause(err)
+	}
+	return experimentFromRow(row)
+}
+
+// PublishExperimentIfUnchanged 仅发布预拉取期间未被编辑的草稿版本。
+func (tx *txStore) PublishExperimentIfUnchanged(ctx context.Context, tenantID, id int64, expectedUpdatedAt time.Time) (Experiment, error) {
+	row, err := tx.q.PublishExperimentIfUnchanged(ctx, sqlcgen.PublishExperimentIfUnchangedParams{
+		TenantID: tenantID, ID: id, ExpectedUpdatedAt: timex.RequiredTimestamptz(expectedUpdatedAt),
+	})
 	if err != nil {
 		return Experiment{}, apperr.ErrExperimentStateInvalid.WithCause(err)
 	}
@@ -212,7 +260,7 @@ func (tx *txStore) CreateGroup(ctx context.Context, item ExperimentGroup) (Exper
 func (tx *txStore) GetGroup(ctx context.Context, tenantID, id int64) (ExperimentGroup, error) {
 	row, err := tx.q.GetExperimentGroup(ctx, sqlcgen.GetExperimentGroupParams{TenantID: tenantID, ID: id})
 	if err != nil {
-		return ExperimentGroup{}, apperr.ErrExperimentGroupNotFound.WithCause(err)
+		return ExperimentGroup{}, mapLookupError(err, apperr.ErrExperimentGroupNotFound)
 	}
 	members, err := tx.q.ListGroupMembers(ctx, sqlcgen.ListGroupMembersParams{TenantID: tenantID, GroupID: id})
 	if err != nil {
@@ -225,7 +273,7 @@ func (tx *txStore) GetGroup(ctx context.Context, tenantID, id int64) (Experiment
 func (tx *txStore) GetGroupForUpdate(ctx context.Context, tenantID, id int64) (ExperimentGroup, error) {
 	row, err := tx.q.GetExperimentGroupForUpdate(ctx, sqlcgen.GetExperimentGroupForUpdateParams{TenantID: tenantID, ID: id})
 	if err != nil {
-		return ExperimentGroup{}, apperr.ErrExperimentGroupNotFound.WithCause(err)
+		return ExperimentGroup{}, mapLookupError(err, apperr.ErrExperimentGroupNotFound)
 	}
 	return groupFromRows(row, nil), nil
 }
@@ -360,7 +408,7 @@ func (tx *txStore) CreateInstance(ctx context.Context, item ExperimentInstance) 
 func (tx *txStore) GetInstance(ctx context.Context, tenantID, id int64) (ExperimentInstance, error) {
 	row, err := tx.q.GetExperimentInstance(ctx, sqlcgen.GetExperimentInstanceParams{TenantID: tenantID, ID: id})
 	if err != nil {
-		return ExperimentInstance{}, apperr.ErrExperimentInstanceNotFound.WithCause(err)
+		return ExperimentInstance{}, mapLookupError(err, apperr.ErrExperimentInstanceNotFound)
 	}
 	return instanceFromGetRow(row)
 }
@@ -369,7 +417,7 @@ func (tx *txStore) GetInstance(ctx context.Context, tenantID, id int64) (Experim
 func (tx *txStore) GetInstanceForUpdate(ctx context.Context, tenantID, id int64) (ExperimentInstance, error) {
 	row, err := tx.q.GetExperimentInstanceForUpdate(ctx, sqlcgen.GetExperimentInstanceForUpdateParams{TenantID: tenantID, ID: id})
 	if err != nil {
-		return ExperimentInstance{}, apperr.ErrExperimentInstanceNotFound.WithCause(err)
+		return ExperimentInstance{}, mapLookupError(err, apperr.ErrExperimentInstanceNotFound)
 	}
 	return instanceFromForUpdateRow(row)
 }
@@ -378,7 +426,7 @@ func (tx *txStore) GetInstanceForUpdate(ctx context.Context, tenantID, id int64)
 func (tx *txStore) GetInstanceBySourceRef(ctx context.Context, tenantID int64, sourceRef string) (ExperimentInstance, error) {
 	row, err := tx.q.GetExperimentInstanceBySourceRef(ctx, sqlcgen.GetExperimentInstanceBySourceRefParams{TenantID: tenantID, SourceRef: sourceRef})
 	if err != nil {
-		return ExperimentInstance{}, apperr.ErrExperimentInstanceNotFound.WithCause(err)
+		return ExperimentInstance{}, mapLookupError(err, apperr.ErrExperimentInstanceNotFound)
 	}
 	return instanceFromSourceRefRow(row)
 }
@@ -441,7 +489,7 @@ func (tx *txStore) UpdateInstanceScoreIfChanged(ctx context.Context, tenantID, i
 func (tx *txStore) TouchInstance(ctx context.Context, tenantID, id int64) (ExperimentInstance, error) {
 	row, err := tx.q.TouchExperimentInstance(ctx, sqlcgen.TouchExperimentInstanceParams{TenantID: tenantID, ID: id})
 	if err != nil {
-		return ExperimentInstance{}, apperr.ErrExperimentInstanceNotFound.WithCause(err)
+		return ExperimentInstance{}, mapLookupError(err, apperr.ErrExperimentInstanceNotFound)
 	}
 	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.ScopeRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
 }
@@ -512,19 +560,13 @@ func (tx *txStore) UpsertCheckpoint(ctx context.Context, item CheckpointResult) 
 		return CheckpointResult{}, err
 	}
 	row, err := tx.q.UpsertCheckpointResult(ctx, sqlcgen.UpsertCheckpointResultParams{ID: item.ID, TenantID: item.TenantID, InstanceID: item.InstanceID, CheckpointID: item.CheckpointID, JudgeTaskRef: pgtypex.Text(item.JudgeTaskRef), Passed: item.Passed, Column7: fmt.Sprintf("%.2f", item.Score), DetailRef: pgtypex.Text(item.DetailRef), BindingOutput: bindingOutput})
+	if db.IsNoRows(err) {
+		return CheckpointResult{}, apperr.ErrExperimentInstanceStateInvalid.WithCause(err)
+	}
 	if err != nil {
 		return CheckpointResult{}, apperr.ErrExperimentCheckpointInvalid.WithCause(err)
 	}
 	return checkpointFromUpsertRow(row)
-}
-
-// GetCheckpointByJudgeTask 按 M3 判题任务引用查找检查点结果。
-func (tx *txStore) GetCheckpointByJudgeTask(ctx context.Context, tenantID int64, judgeTaskRef string) (CheckpointResult, error) {
-	row, err := tx.q.GetCheckpointResultByJudgeTask(ctx, sqlcgen.GetCheckpointResultByJudgeTaskParams{TenantID: tenantID, JudgeTaskRef: pgtypex.Text(judgeTaskRef)})
-	if err != nil {
-		return CheckpointResult{}, apperr.ErrExperimentCheckpointInvalid.WithCause(err)
-	}
-	return checkpointFromJudgeTaskRow(row)
 }
 
 // ListCheckpoints 查询实例检查点结果。
@@ -557,7 +599,7 @@ func (tx *txStore) UpsertReport(ctx context.Context, item ExperimentReport) (Exp
 func (tx *txStore) GradeReport(ctx context.Context, tenantID, id int64, score float64, comment string) (ExperimentReport, error) {
 	row, err := tx.q.GradeExperimentReport(ctx, sqlcgen.GradeExperimentReportParams{TenantID: tenantID, ID: id, Column3: fmt.Sprintf("%.2f", score), Comment: pgtypex.Text(comment)})
 	if err != nil {
-		return ExperimentReport{}, apperr.ErrExperimentReportNotFound.WithCause(err)
+		return ExperimentReport{}, mapLookupError(err, apperr.ErrExperimentReportNotFound)
 	}
 	return reportFromGradeRow(row), nil
 }
@@ -566,7 +608,7 @@ func (tx *txStore) GradeReport(ctx context.Context, tenantID, id int64, score fl
 func (tx *txStore) GetReport(ctx context.Context, tenantID, id int64) (ExperimentReport, error) {
 	row, err := tx.q.GetExperimentReport(ctx, sqlcgen.GetExperimentReportParams{TenantID: tenantID, ID: id})
 	if err != nil {
-		return ExperimentReport{}, apperr.ErrExperimentReportNotFound.WithCause(err)
+		return ExperimentReport{}, mapLookupError(err, apperr.ErrExperimentReportNotFound)
 	}
 	return ExperimentReport{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, StudentID: row.StudentID, ContentRef: row.ContentRef, ManualScore: row.ManualScore, Comment: pgtypex.TextValue(row.Comment), Status: row.Status, SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}, nil
 }
@@ -575,7 +617,7 @@ func (tx *txStore) GetReport(ctx context.Context, tenantID, id int64) (Experimen
 func (tx *txStore) GetReportByInstanceStudent(ctx context.Context, tenantID, instanceID, studentID int64) (ExperimentReport, error) {
 	row, err := tx.q.GetExperimentReportByInstanceStudent(ctx, sqlcgen.GetExperimentReportByInstanceStudentParams{TenantID: tenantID, InstanceID: instanceID, StudentID: studentID})
 	if err != nil {
-		return ExperimentReport{}, apperr.ErrExperimentReportNotFound.WithCause(err)
+		return ExperimentReport{}, mapLookupError(err, apperr.ErrExperimentReportNotFound)
 	}
 	return ExperimentReport{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, StudentID: row.StudentID, ContentRef: row.ContentRef, ManualScore: row.ManualScore, Comment: pgtypex.TextValue(row.Comment), Status: row.Status, SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}, nil
 }

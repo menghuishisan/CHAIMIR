@@ -38,6 +38,9 @@ const StudentContestsPage = lazy(() => import('../../features/contest/pages/stud
 const StudentContestDetailPage = lazy(
   () => import('../../features/contest/pages/student/contest-detail')
 )
+const StudentContestJoinPage = lazy(
+  () => import('../../features/contest/pages/student/contest-join')
+)
 const StudentRecordsPage = lazy(() => import('../../features/contest/pages/student/records'))
 const StudentGradesPage = lazy(() => import('../../features/grade/pages/student/grades'))
 const StudentAlertsPage = lazy(() => import('../../features/grade/pages/student/alerts'))
@@ -91,6 +94,7 @@ export default function StudentSection() {
 
           <Route path="contests" element={<StudentContestsPage />} />
           <Route path="contests/:contestId" element={<StudentContestDetailPage />} />
+          <Route path="contests/:contestId/join" element={<StudentContestJoinPage />} />
           <Route path="records" element={<StudentRecordsPage />} />
 
           <Route path="grades" element={<StudentGradesPage />} />

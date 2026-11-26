@@ -23,25 +23,26 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ContestModuleDeps 汇总组合根装配 M8 需要的基础设施和跨模块契约。
+// ContestModuleDeps 是 M8 装配所需的依赖。
 type ContestModuleDeps struct {
-	Router        gin.IRouter
-	Database      *db.DB
-	IDs           snowflake.Generator
-	Config        config.ContestConfig
-	AuthConfig    config.AuthConfig
-	FileService   storage.Service
-	Storage       *storage.Storage
-	Content       contracts.ContentReadService
-	ContentImport contracts.ContentImportService
-	Sandbox       contracts.SandboxService
-	Judge         contracts.JudgeService
-	Fingerprint   contracts.FingerprintService
-	Audit         audit.Writer
-	EventBus      eventbus.Bus
-	WSHub         *ws.Hub
-	Auth          *auth.Manager
-	Roles         contracts.IdentityService
+	CleanupTimeout time.Duration
+	Router         gin.IRouter
+	Database       *db.DB
+	IDs            snowflake.Generator
+	Config         config.ContestConfig
+	AuthConfig     config.AuthConfig
+	FileService    storage.Service
+	Storage        *storage.Storage
+	Content        contracts.ContentReadService
+	ContentImport  contracts.ContentImportService
+	Sandbox        contracts.SandboxService
+	Judge          contracts.JudgeService
+	Fingerprint    contracts.FingerprintService
+	Audit          audit.Writer
+	EventBus       eventbus.Bus
+	WSHub          *ws.Hub
+	Auth           *auth.Manager
+	Roles          contracts.IdentityService
 }
 
 // RegisterContestModule 构造竞赛 store/service,注册路由、事件和撮合后台任务。
@@ -68,22 +69,23 @@ func RegisterContestModule(ctx context.Context, deps ContestModuleDeps) (*contes
 		return nil, err
 	}
 	svc, err := contest.NewService(contest.ServiceDeps{
-		Store:         store,
-		IDs:           deps.IDs,
-		Config:        deps.Config,
-		Audit:         deps.Audit,
-		Roles:         deps.Roles,
-		Content:       deps.Content,
-		ContentImport: deps.ContentImport,
-		Sandbox:       deps.Sandbox,
-		Judge:         deps.Judge,
-		Fingerprint:   deps.Fingerprint,
-		FileService:   deps.FileService,
-		ReplayStore:   deps.Storage,
-		ReplayBucket:  deps.Storage.BucketReport(),
-		Bus:           deps.EventBus,
-		WSHub:         deps.WSHub,
-		Cipher:        cipher,
+		CleanupTimeout: deps.CleanupTimeout,
+		Store:          store,
+		IDs:            deps.IDs,
+		Config:         deps.Config,
+		Audit:          deps.Audit,
+		Roles:          deps.Roles,
+		Content:        deps.Content,
+		ContentImport:  deps.ContentImport,
+		Sandbox:        deps.Sandbox,
+		Judge:          deps.Judge,
+		Fingerprint:    deps.Fingerprint,
+		FileService:    deps.FileService,
+		ReplayStore:    deps.Storage,
+		ReplayBucket:   deps.Storage.BucketReport(),
+		Bus:            deps.EventBus,
+		WSHub:          deps.WSHub,
+		Cipher:         cipher,
 	})
 	if err != nil {
 		return nil, err
@@ -94,60 +96,32 @@ func RegisterContestModule(ctx context.Context, deps ContestModuleDeps) (*contes
 	if _, err := contest.SubscribeEvents(deps.EventBus, svc); err != nil {
 		return nil, err
 	}
-	task, err := contestMatchmakerTask(deps.Config, svc)
-	if err != nil {
-		return nil, err
-	}
-	go background.Run(ctx, task)
-	archiveTask, err := contestAutoArchiveTask(deps.Config, svc)
-	if err != nil {
-		return nil, err
-	}
-	go background.Run(ctx, archiveTask)
-	lifecycleTask, err := contestLifecycleTask(deps.Config, svc)
-	if err != nil {
-		return nil, err
-	}
-	go background.Run(ctx, lifecycleTask)
-	return svc, nil
-}
-
-// contestMatchmakerTask 把 M8 对抗赛撮合接入统一后台任务运行器。
-func contestMatchmakerTask(cfg config.ContestConfig, svc *contest.Service) (background.Task, error) {
-	if svc == nil {
-		return background.Task{}, fmt.Errorf("contest matchmaker task 缺少 service")
-	}
-	if cfg.MatchmakerPollIntervalSeconds <= 0 {
-		return background.Task{}, fmt.Errorf("CONTEST_MATCHMAKER_POLL_INTERVAL_SECONDS 必须大于 0")
-	}
-	return background.Task{Name: "contest.matchmaker", Interval: time.Duration(cfg.MatchmakerPollIntervalSeconds) * time.Second, Run: svc.RunMatchmakerOnce}, nil
-}
-
-// contestAutoArchiveTask 把 M8 到期竞赛自动收尾接入统一后台任务运行器。
-func contestAutoArchiveTask(cfg config.ContestConfig, svc *contest.Service) (background.Task, error) {
-	if svc == nil {
-		return background.Task{}, fmt.Errorf("contest auto archive task 缺少 service")
-	}
-	if cfg.AutoArchivePollIntervalSeconds <= 0 {
-		return background.Task{}, fmt.Errorf("CONTEST_AUTO_ARCHIVE_POLL_INTERVAL_SECONDS 必须大于 0")
-	}
-	return background.Task{Name: "contest.auto_archive", Interval: time.Duration(cfg.AutoArchivePollIntervalSeconds) * time.Second, Run: svc.RunAutoArchiveOnce}, nil
-}
-
-// contestLifecycleTask 把报名、开赛、封榜和结束状态推进接入统一后台任务运行器。
-// 复用自动归档轮询间隔,避免再引入一套仅服务于同一赛事时钟的配置。
-func contestLifecycleTask(cfg config.ContestConfig, svc *contest.Service) (background.Task, error) {
-	if svc == nil {
-		return background.Task{}, fmt.Errorf("contest lifecycle task 缺少 service")
-	}
-	if cfg.AutoArchivePollIntervalSeconds <= 0 {
-		return background.Task{}, fmt.Errorf("CONTEST_AUTO_ARCHIVE_POLL_INTERVAL_SECONDS 必须大于 0")
-	}
-	return background.Task{
-		Name:     "contest.lifecycle",
-		Interval: time.Duration(cfg.AutoArchivePollIntervalSeconds) * time.Second,
-		Run: func(ctx context.Context) error {
-			return svc.AdvanceContestStatusesOnce(ctx, time.Now())
+	// 赛事状态推进与自动归档共用轮询间隔。
+	if err := background.Start(ctx,
+		background.Task{
+			Name:     "contest.leaderboard",
+			Interval: time.Duration(deps.Config.MatchmakerPollIntervalSeconds) * time.Second,
+			Run:      svc.RunLeaderboardPushOnce,
 		},
-	}, nil
+		background.Task{
+			Name:     "contest.matchmaker",
+			Interval: time.Duration(deps.Config.MatchmakerPollIntervalSeconds) * time.Second,
+			Run:      svc.RunMatchmakerOnce,
+		},
+		background.Task{
+			Name:     "contest.auto_archive",
+			Interval: time.Duration(deps.Config.AutoArchivePollIntervalSeconds) * time.Second,
+			Run:      svc.RunAutoArchiveOnce,
+		},
+		background.Task{
+			Name:     "contest.lifecycle",
+			Interval: time.Duration(deps.Config.AutoArchivePollIntervalSeconds) * time.Second,
+			Run: func(ctx context.Context) error {
+				return svc.AdvanceContestStatusesOnce(ctx, time.Now())
+			},
+		},
+	); err != nil {
+		return nil, err
+	}
+	return svc, nil
 }

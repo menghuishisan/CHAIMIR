@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -63,10 +64,6 @@ func main() {
 	if err := decoder.Decode(&root); err != nil {
 		fail("parse Hyperlane base config: " + err.Error())
 	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		fail("Hyperlane base config must contain exactly one JSON document")
-	}
 	defaultSignerKey := requiredSignerKey()
 	chains, ok := root["chains"].(map[string]any)
 	if !ok {
@@ -95,20 +92,41 @@ func main() {
 		"key":  defaultSignerKey,
 	}
 
-	outputPath := "/tmp/chaimir-hyperlane/merged-config.json"
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0700); err != nil {
-		fail("create Hyperlane runtime config directory: " + err.Error())
-	}
-	updated, err := json.MarshalIndent(root, "", "  ")
-	if err != nil {
-		fail("encode Hyperlane runtime config: " + err.Error())
-	}
-	if err := os.WriteFile(outputPath, append(updated, '\n'), 0600); err != nil {
+	if err := writeConfig(root); err != nil {
 		fail("write Hyperlane runtime config: " + err.Error())
 	}
-	if err := os.Chmod(outputPath, 0600); err != nil {
-		fail("secure Hyperlane runtime config: " + err.Error())
+}
+
+// writeConfig 仅在完整写入成功后替换配置，防止启动失败破坏上一份文件。
+func writeConfig(root map[string]any) (writeErr error) {
+	outputPath := "/tmp/chaimir-hyperlane/merged-config.json"
+	directory := filepath.Dir(outputPath)
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		return fmt.Errorf("create private config directory: %w", err)
 	}
+	if err := os.Chmod(directory, 0700); err != nil {
+		return fmt.Errorf("secure private config directory: %w", err)
+	}
+	file, err := os.CreateTemp(directory, ".config-*.json")
+	if err != nil {
+		return err
+	}
+	temporary := file.Name()
+	defer func() {
+		if temporary != "" {
+			writeErr = errors.Join(writeErr, os.Remove(temporary))
+		}
+	}()
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+	if err := errors.Join(encoder.Encode(root), file.Close()); err != nil {
+		return err
+	}
+	if err := os.Rename(temporary, outputPath); err != nil {
+		return err
+	}
+	temporary = ""
+	return nil
 }
 
 // chainConfig 保存一个已绑定到 RPC endpoint 的受控 Hyperlane 链配置。
@@ -125,7 +143,7 @@ type chainConfig struct {
 // 桥接镜像消费固定 agent 的 EVM 元数据格式,协议材料必须来自受控 base config,
 // 不能在此处生成。
 func validateEVMChain(name string, chain map[string]any) (uint64, uint32, map[string]string) {
-	if requireExactStringField(name, chain, "name") != name {
+	if chain["name"] != name {
 		fail("Hyperlane chain name must match its source/destination binding")
 	}
 	protocol, ok := chain["protocol"].(string)
@@ -142,14 +160,6 @@ func validateEVMChain(name string, chain map[string]any) (uint64, uint32, map[st
 		addresses[addressName] = requireEVMAddress(name, addressName, chain[addressName])
 	}
 	return chainID, uint32(domain), addresses
-}
-
-func requireExactStringField(chainName string, chain map[string]any, fieldName string) string {
-	value, ok := chain[fieldName].(string)
-	if !ok || value == "" || value != strings.TrimSpace(value) {
-		fail("Hyperlane chain " + chainName + " must contain a string field " + fieldName)
-	}
-	return value
 }
 
 func requirePositiveInteger(chainName, fieldName string, value any) uint64 {
@@ -223,7 +233,7 @@ func requiredSignerKey() string {
 func requiredRPC(name string) string {
 	value := requiredEnv(name)
 	parsed, err := url.Parse(value)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.Port() == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.Port() == "" || parsed.User != nil || parsed.Path != "" || strings.ContainsAny(value, "?#") {
 		fail(name + " must be an HTTP(S) URL with an explicit port")
 	}
 	port, err := strconv.Atoi(parsed.Port())
@@ -300,39 +310,33 @@ func rpcString(endpoint, method string, params any) string {
 	if err != nil {
 		fail("Hyperlane RPC request failed for " + method)
 	}
-	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, rpcResponseMaxBytes+1))
+	if err := errors.Join(err, response.Body.Close()); err != nil {
+		fail("read Hyperlane RPC response for " + method + ": " + err.Error())
+	}
+	if len(body) > rpcResponseMaxBytes {
+		fail("Hyperlane RPC response is too large for " + method)
+	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		fail("Hyperlane RPC returned a non-success HTTP status for " + method)
-	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, rpcResponseMaxBytes+1))
-	if err != nil || len(body) > rpcResponseMaxBytes {
-		fail("Hyperlane RPC response is unreadable or too large for " + method)
 	}
 	if err := rejectDuplicateJSONKeys(body); err != nil {
 		fail("Hyperlane RPC response contains invalid JSON: " + err.Error())
 	}
-	var envelope struct {
-		JSONRPC string          `json:"jsonrpc"`
-		ID      json.RawMessage `json:"id"`
-		Result  json.RawMessage `json:"result"`
-		Error   *struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	if err := decoder.Decode(&envelope); err != nil {
+	// map 保留协议成员的大小写，避免结构体解码将 RESULT 等非标准字段当作 result。
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
 		fail("parse Hyperlane RPC response for " + method)
 	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		fail("Hyperlane RPC response must contain one JSON object for " + method)
+	var version string
+	if err := json.Unmarshal(envelope["jsonrpc"], &version); err != nil || version != "2.0" {
+		fail("Hyperlane RPC returned an invalid response version for " + method)
 	}
-	if envelope.JSONRPC != "2.0" || string(envelope.ID) != "1" || envelope.Error != nil || len(envelope.Result) == 0 || string(envelope.Result) == "null" {
+	if _, hasError := envelope["error"]; hasError || string(envelope["id"]) != "1" {
 		fail("Hyperlane RPC returned an invalid response for " + method)
 	}
 	var value string
-	if err := json.Unmarshal(envelope.Result, &value); err != nil || value == "" {
+	if err := json.Unmarshal(envelope["result"], &value); err != nil || value == "" {
 		fail("Hyperlane RPC returned an invalid result for " + method)
 	}
 	return value

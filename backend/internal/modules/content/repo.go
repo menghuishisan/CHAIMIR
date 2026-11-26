@@ -10,13 +10,16 @@ import (
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/pgtypex"
+	"chaimir/pkg/apperr"
 
 	"github.com/jackc/pgx/v5"
 )
 
 // Store 定义 service 所需的 content 持久化能力,不暴露 sqlc 行类型。
 type Store interface {
+	CloneTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
 	TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
+	UsageTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
 }
 
 // TxStore 定义单个事务内可调用的数据访问能力。
@@ -25,6 +28,7 @@ type TxStore interface {
 	UpdateDraftItem(ctx context.Context, item ItemWithBody) (ItemWithBody, error)
 	GetItemByID(ctx context.Context, tenantID, id int64) (Item, error)
 	GetItemWithBodyByID(ctx context.Context, tenantID, id int64) (ItemWithBody, error)
+	GetVisibleItemWithBodyByID(ctx context.Context, tenantID, id int64) (ItemWithBody, error)
 	GetItemWithBodyByRef(ctx context.Context, tenantID int64, code, version string) (ItemWithBody, error)
 	ListItems(ctx context.Context, tenantID int64, filter ItemListFilter) ([]Item, int64, error)
 	CountSharedItemsByType(ctx context.Context, keyword string) (pagex.FacetGroup, error)
@@ -52,6 +56,17 @@ type store struct {
 	database *db.DB
 }
 
+// CloneTx 只允许课程依赖随目标租户事务保存，不另开事务。
+func (s *store) CloneTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error {
+	joined, err := s.database.WithTenantTxIfPresent(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
+	})
+	if err == nil && !joined {
+		return fmt.Errorf("内容复制缺少目标租户事务")
+	}
+	return err
+}
+
 type txStore struct {
 	q *sqlcgen.Queries
 }
@@ -71,6 +86,20 @@ func (s *store) TenantTx(ctx context.Context, tenantID int64, fn func(context.Co
 	})
 }
 
+// UsageTx 仅为引用集合写入复用调用方的同租户普通事务。
+func (s *store) UsageTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error {
+	if s == nil || s.database == nil {
+		return fmt.Errorf("content store 未初始化")
+	}
+	joined, err := s.database.WithTenantTxIfPresent(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
+	})
+	if err != nil || joined {
+		return err
+	}
+	return s.TenantTx(ctx, tenantID, fn)
+}
+
 // isNoRows 统一识别未命中错误,让 service 不直接依赖 pgx。
 func isNoRows(err error) bool {
 	return db.IsNoRows(err)
@@ -78,12 +107,18 @@ func isNoRows(err error) bool {
 
 // CreateItem 创建内容外壳与正文。
 func (s *txStore) CreateItem(ctx context.Context, item ItemWithBody) (ItemWithBody, error) {
+	if err := s.checkItemCategory(ctx, item.TenantID, item.CategoryID); err != nil {
+		return ItemWithBody{}, err
+	}
 	body, err := encodeMap(item.Body)
 	if err != nil {
 		return ItemWithBody{}, err
 	}
 	row, err := s.q.CreateContentItem(ctx, sqlcgen.CreateContentItemParams{ID: item.ID, TenantID: item.TenantID, Code: item.Code, Version: item.Version, Type: item.Type, Title: item.Title, CategoryID: pgtypex.Int8(item.CategoryID), Difficulty: item.Difficulty, Tags: item.Tags, KnowledgePoints: item.KnowledgePoints, AuthorID: item.AuthorID, AuthorType: item.AuthorType, Visibility: item.Visibility, Status: item.Status, VersionHash: item.VersionHash})
 	if err != nil {
+		if isNoRows(err) {
+			return ItemWithBody{}, apperr.ErrContentVersionConflict.WithCause(err)
+		}
 		return ItemWithBody{}, err
 	}
 	if _, err := s.q.CreateContentBody(ctx, sqlcgen.CreateContentBodyParams{ItemID: row.ID, TenantID: row.TenantID, Body: body, SensitiveFields: item.SensitiveFields}); err != nil {
@@ -96,6 +131,9 @@ func (s *txStore) CreateItem(ctx context.Context, item ItemWithBody) (ItemWithBo
 
 // UpdateDraftItem 更新草稿外壳与正文。
 func (s *txStore) UpdateDraftItem(ctx context.Context, item ItemWithBody) (ItemWithBody, error) {
+	if err := s.checkItemCategory(ctx, item.TenantID, item.CategoryID); err != nil {
+		return ItemWithBody{}, err
+	}
 	body, err := encodeMap(item.Body)
 	if err != nil {
 		return ItemWithBody{}, err
@@ -128,7 +166,16 @@ func (s *txStore) GetItemWithBodyByID(ctx context.Context, tenantID, id int64) (
 	return itemWithBodyFromIDRow(row)
 }
 
-// GetItemWithBodyByRef 按 code/version 查询完整内容。
+// GetVisibleItemWithBodyByID 读取本校内容或已发布共享内容，作者权限由服务校验。
+func (s *txStore) GetVisibleItemWithBodyByID(ctx context.Context, tenantID, id int64) (ItemWithBody, error) {
+	row, err := s.q.GetVisibleContentItemWithBodyByID(ctx, sqlcgen.GetVisibleContentItemWithBodyByIDParams{TenantID: tenantID, ID: id})
+	if err != nil {
+		return ItemWithBody{}, err
+	}
+	return itemWithBodyFromIDRow(sqlcgen.GetContentItemWithBodyByIDRow(row))
+}
+
+// GetItemWithBodyByRef 按本校 code/version 查询完整内容。
 func (s *txStore) GetItemWithBodyByRef(ctx context.Context, tenantID int64, code, version string) (ItemWithBody, error) {
 	row, err := s.q.GetContentItemWithBodyByRef(ctx, sqlcgen.GetContentItemWithBodyByRefParams{Code: code, Version: version, TenantID: tenantID})
 	if err != nil {
@@ -164,14 +211,7 @@ func (s *txStore) ListItems(ctx context.Context, tenantID int64, filter ItemList
 	}
 	out := make([]Item, 0, len(rows))
 	for _, row := range rows {
-		item := itemFromRow(row)
-		if filter.PublishedShared && (item.Visibility != VisibilityShared || item.Status != StatusPublished) {
-			continue
-		}
-		if item.Visibility == VisibilityPrivate && item.AuthorID != filter.ViewerID {
-			continue
-		}
-		out = append(out, item)
+		out = append(out, itemFromRow(row))
 	}
 	return out, total, nil
 }
@@ -263,8 +303,14 @@ func (s *txStore) ReplaceUsageRefs(ctx context.Context, tenantID int64, sourceSc
 
 // CreateCategory 创建分类。
 func (s *txStore) CreateCategory(ctx context.Context, category Category) (Category, error) {
+	if err := s.q.LockContentCategoryScope(ctx, category.TenantID); err != nil {
+		return Category{}, err
+	}
 	row, err := s.q.CreateContentCategory(ctx, sqlcgen.CreateContentCategoryParams{ID: category.ID, TenantID: category.TenantID, ParentID: pgtypex.Int8(category.ParentID), Name: category.Name, Sort: category.Sort})
 	if err != nil {
+		if isNoRows(err) {
+			return Category{}, apperr.ErrContentCategoryInvalid.WithCause(err)
+		}
 		return Category{}, err
 	}
 	return categoryFromRow(row), nil
@@ -272,8 +318,14 @@ func (s *txStore) CreateCategory(ctx context.Context, category Category) (Catego
 
 // UpdateCategory 更新分类。
 func (s *txStore) UpdateCategory(ctx context.Context, category Category) (Category, error) {
+	if err := s.q.LockContentCategoryScope(ctx, category.TenantID); err != nil {
+		return Category{}, err
+	}
 	row, err := s.q.UpdateContentCategory(ctx, sqlcgen.UpdateContentCategoryParams{TenantID: category.TenantID, ID: category.ID, ParentID: pgtypex.Int8(category.ParentID), Name: category.Name, Sort: category.Sort})
 	if err != nil {
+		if isNoRows(err) {
+			return Category{}, apperr.ErrContentCategoryInvalid.WithCause(err)
+		}
 		return Category{}, err
 	}
 	return categoryFromRow(row), nil
@@ -281,9 +333,22 @@ func (s *txStore) UpdateCategory(ctx context.Context, category Category) (Catego
 
 // DeleteCategory 软删分类。
 func (s *txStore) DeleteCategory(ctx context.Context, tenantID, id int64) (Category, error) {
+	if err := s.q.LockContentCategoryScope(ctx, tenantID); err != nil {
+		return Category{}, err
+	}
 	row, err := s.q.DeleteContentCategory(ctx, sqlcgen.DeleteContentCategoryParams{TenantID: tenantID, ID: id})
 	if err != nil {
-		return Category{}, err
+		if !isNoRows(err) {
+			return Category{}, err
+		}
+		_, lookupErr := s.q.GetActiveContentCategory(ctx, sqlcgen.GetActiveContentCategoryParams{TenantID: tenantID, ID: id})
+		if isNoRows(lookupErr) {
+			return Category{}, apperr.ErrContentCategoryInvalid.WithCause(err)
+		}
+		if lookupErr != nil {
+			return Category{}, lookupErr
+		}
+		return Category{}, apperr.ErrContentCategoryDeleteBlocked.WithCause(err)
 	}
 	return categoryFromRow(row), nil
 }
@@ -299,6 +364,21 @@ func (s *txStore) ListCategories(ctx context.Context, tenantID int64) ([]Categor
 		out = append(out, categoryFromRow(row))
 	}
 	return out, nil
+}
+
+// checkItemCategory 与分类删除串行化,避免题目引用已隐藏的分类。
+func (s *txStore) checkItemCategory(ctx context.Context, tenantID, categoryID int64) error {
+	if categoryID == 0 {
+		return nil
+	}
+	if err := s.q.LockContentCategoryScope(ctx, tenantID); err != nil {
+		return err
+	}
+	_, err := s.q.GetActiveContentCategory(ctx, sqlcgen.GetActiveContentCategoryParams{TenantID: tenantID, ID: categoryID})
+	if isNoRows(err) {
+		return apperr.ErrContentCategoryInvalid.WithCause(err)
+	}
+	return err
 }
 
 // CreatePaper 创建试卷外壳。

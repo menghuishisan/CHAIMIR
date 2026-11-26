@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -17,27 +18,33 @@ func main() {
 	if !safeToken(user) || !safeToken(database) {
 		fail("database user/name contains unsupported characters")
 	}
-	databaseURL := url.URL{Scheme: "postgresql", Host: address, Path: "/" + database, User: url.UserPassword(user, password)}
-	if databaseURL.Hostname() == "" {
+	databaseURL, err := url.Parse("postgresql://" + address)
+	if err != nil || databaseURL.Hostname() == "" || databaseURL.User != nil || databaseURL.Path != "" || databaseURL.RawQuery != "" || databaseURL.ForceQuery || strings.Contains(address, "#") {
 		fail("CHAIMIR_DATABASE_ADDRESS is invalid")
 	}
+	port, err := strconv.Atoi(databaseURL.Port())
+	if err != nil || port < 1 || port > 65535 {
+		fail("CHAIMIR_DATABASE_ADDRESS is invalid")
+	}
+	databaseURL.User = url.UserPassword(user, password)
+	databaseURL.Path = "/" + database
+	databaseURL.RawQuery = "sslmode=require"
 	args := []string{
 		"pgweb",
 		"--bind=0.0.0.0",
 		"--listen=8081",
-		"--ssl=disable",
+		"--ssl=require",
 		"--url=" + databaseURL.String(),
 		"--open-retry=60",
 		"--open-retry-delay=2",
 	}
 	if err := syscall.Exec("/usr/local/bin/pgweb", args, os.Environ()); err != nil {
-		fmt.Fprintf(os.Stderr, "exec pgweb: %v\n", err)
-		os.Exit(1)
+		fail("exec pgweb: " + err.Error())
 	}
 }
 
 func requiredEnv(name string) string {
-	value := strings.TrimSpace(os.Getenv(name))
+	value := os.Getenv(name)
 	if value == "" {
 		fail(name + " is required")
 	}
@@ -54,6 +61,8 @@ func safeToken(value string) bool {
 }
 
 func fail(message string) {
-	fmt.Fprintln(os.Stderr, message)
+	if _, err := fmt.Fprintln(os.Stderr, message); err != nil {
+		os.Exit(2)
+	}
 	os.Exit(2)
 }

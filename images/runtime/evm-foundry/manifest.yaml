@@ -47,6 +47,7 @@ env_keys:
     - CHAIMIR_CHAIN_RPC_URL
     - CHAIMIR_RUNTIME_RPC_PORT
     - CHAIMIR_CHAIN_STATE_DIR
+    - FOUNDRY_TRANSACTION_TIMEOUT
   secret:
     - CHAIMIR_EVM_DEPLOYER_MNEMONIC
 secrets_required:
@@ -78,6 +79,8 @@ runtime:
         value: /runtime-state
       - name: CHAIMIR_RUNTIME_RPC_PORT
         value: "8545"
+      - name: FOUNDRY_TRANSACTION_TIMEOUT
+        value: "60"
   native:
     helper: /usr/local/bin/chaimir-foundry-adapter
     profile: evm-contract
@@ -123,7 +126,7 @@ selftest:
       command:
         - sh
         - -lc
-        - "forge --version && anvil --version && cast --version"
+        - "forge --version && anvil --version && cast --version && cast publish --help >/dev/null && timeout --version >/dev/null"
     - name: solidity-compilers
       command:
         - sh

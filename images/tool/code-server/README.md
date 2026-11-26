@@ -24,9 +24,10 @@ VS Code Web 编辑器镜像。
 
 ## bindings 与 links
 
-- 必需 bindings：无。
-- 必需 links：无；本镜像不声明跨组件 link。
-- binding 的 endpoint、协议、配置键和启动前置以 manifest 为准；缺失、重复、错误能力或错误 provider 均拒绝编排。
+- 必需 bindings：无；四项可选连接分别用于索引部署、索引进度、索引查询和 IPFS 内容上传。
+- 教师在编排中明确选择目标；未选择时不增加依赖、地址或网络权限，只有一个候选也不自动连接。
+- 选中后分别注入 `CHAIMIR_GRAPH_ADMIN_URL`、`CHAIMIR_GRAPH_STATUS_URL`、`CHAIMIR_GRAPH_QUERY_URL` 和 `CHAIMIR_IPFS_API_URL`，学生可在 IDE 终端通过已有 Node HTTP 能力调用服务的原生接口。subgraph 的已编译材料由工作区提供；本镜像不内置 Graph CLI，也不在运行时下载依赖。
+- 选中的连接沿用端点、协议、能力和启动前置校验；重复或错误目标拒绝编排。只放行对应服务端口，不注入数据库密码、POI token 或链私有状态。
 
 ## 端口与服务
 
@@ -76,3 +77,4 @@ VS Code Web 编辑器镜像。
 - 先按 digest lock 启动合法 CompositionSpec，核对 command/args、bindings、links、材料和 Secret 投影，再执行 manifest selftest。
 - selftest 只证明镜像布局和声明入口正确；协议、链、存储、索引、签名或跨镜像能力必须追加真实 provider 联动、正向业务、错误输入拒绝、重启/持久化（若声明）和清理证据。
 - 未执行或只完成探活的项目不得标记为业务通过。
+- 选择四项连接后，在 IDE 终端上传 subgraph 材料、调用原生部署接口、读取索引进度并查询链上事件；撤销连接后，新快照不得保留旧地址和网络规则。另验证普通编辑环境不拉入索引器或 IPFS。

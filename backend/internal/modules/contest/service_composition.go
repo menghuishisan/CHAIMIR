@@ -1,4 +1,4 @@
-// contest composition 文件负责从 M5 已发布题目版本读取唯一环境组合声明。
+// 竞赛组合声明的编译与冻结快照校验。
 package contest
 
 import (
@@ -25,16 +25,8 @@ func sandboxProfileForContestMode(mode int16) (contracts.SandboxAccessProfile, e
 	}
 }
 
-// compileCompositionFromContent 在教师编排题目时读取 M5 正文并编译唯一不可变快照。
-func (s *Service) compileCompositionFromContent(ctx context.Context, tenantID int64, itemCode, itemVersion string, profile contracts.SandboxAccessProfile) (contracts.SandboxCompositionSnapshot, error) {
-	face, err := s.content.GetContentFull(ctx, tenantID, contracts.ContentItemRef{ItemCode: itemCode, ItemVersion: itemVersion})
-	if err != nil {
-		return contracts.SandboxCompositionSnapshot{}, apperr.ErrContestProblemInvalid.WithCause(fmt.Errorf("重读组合内容失败: %w", err))
-	}
-	rawValue, ok := face.Body["composition"]
-	if !ok {
-		return contracts.SandboxCompositionSnapshot{}, apperr.ErrContestProblemInvalid.WithCause(fmt.Errorf("重读组合内容缺少组合声明"))
-	}
+// compileComposition 编译已读取的锁定正文，类型校验与组合声明使用同一快照。
+func (s *Service) compileComposition(ctx context.Context, tenantID int64, rawValue any, profile contracts.SandboxAccessProfile) (contracts.SandboxCompositionSnapshot, error) {
 	raw, err := json.Marshal(rawValue)
 	if err != nil {
 		return contracts.SandboxCompositionSnapshot{}, apperr.ErrContestProblemInvalid.WithCause(fmt.Errorf("编码组合声明失败: %w", err))
@@ -55,7 +47,7 @@ func (s *Service) compileCompositionFromContent(ctx context.Context, tenantID in
 }
 
 // compositionFromProblem 只返回竞赛题已锁定的快照,运行阶段禁止再次读取 M5 或编译组合。
-func (s *Service) compositionFromProblem(_ context.Context, _ int64, problem ContestProblem, profile contracts.SandboxAccessProfile) (contracts.SandboxCompositionSnapshot, error) {
+func compositionFromProblem(problem ContestProblem, profile contracts.SandboxAccessProfile) (contracts.SandboxCompositionSnapshot, error) {
 	if problem.CompositionSnapshot == nil || strings.TrimSpace(problem.CompositionDigest) == "" {
 		return contracts.SandboxCompositionSnapshot{}, apperr.ErrContestProblemInvalid
 	}

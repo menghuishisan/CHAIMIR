@@ -2,7 +2,6 @@
 package teaching
 
 import (
-	"chaimir/internal/platform/ids"
 	"time"
 )
 
@@ -104,7 +103,6 @@ type Submission struct {
 	StudentID    int64
 	AttemptNo    int32
 	ContentRef   map[string]any
-	JudgeTaskRef string
 	AutoScore    *int32
 	ManualScore  *int32
 	FinalScore   *int32
@@ -258,12 +256,4 @@ type CourseListFilter struct {
 	IsShared int16
 	Page     int
 	Size     int
-}
-
-type ProgressStats struct {
-	CourseID            ids.ID `json:"course_id"`
-	LessonCount         int64  `json:"lesson_count"`
-	CompletedCount      int64  `json:"completed_count"`
-	ProgressRecordCount int64  `json:"progress_record_count"`
-	DurationSec         int64  `json:"duration_sec"`
 }

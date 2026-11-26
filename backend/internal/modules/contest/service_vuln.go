@@ -4,11 +4,11 @@ package contest
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -38,21 +38,14 @@ func (s *Service) UpsertPlatformVulnSource(ctx context.Context, req VulnSourceRe
 	if err != nil {
 		return VulnSourceDTO{}, err
 	}
-	if err := validateVulnSourceConfig(item.Config, s.cfg.VulnSourceTimeoutSeconds); err != nil {
-		return VulnSourceDTO{}, err
-	}
-	item.Config, err = secretmap.Protect(s.cipher, item.Config, "漏洞源配置")
-	if err != nil {
-		return VulnSourceDTO{}, apperr.ErrContestVulnSourceInvalid.WithCause(err)
-	}
-	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
-		item, err = tx.UpsertVulnSource(ctx, item)
-		return err
+		item, err = s.saveVulnSource(ctx, tx, item, req.ID > 0)
+		if err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, 0, id.AccountID, contracts.RoleNumPlatformAdmin, "contest.vuln_source.upsert", auditTargetVulnSource, item.ID, nil)
 	}); err != nil {
-		return VulnSourceDTO{}, err
-	}
-	if err := s.writeAudit(ctx, 0, id.AccountID, contracts.RoleNumPlatformAdmin, "contest.vuln_source.upsert", auditTargetVulnSource, item.ID, nil); err != nil {
 		return VulnSourceDTO{}, err
 	}
 	return vulnSourceDTOFromModel(item), nil
@@ -65,7 +58,7 @@ func (s *Service) ListPlatformVulnSources(ctx context.Context) ([]VulnSourceDTO,
 		return nil, apperr.ErrUnauthorized
 	}
 	var items []VulnSource
-	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
 		items, err = tx.ListVulnSources(ctx, 0)
 		return err
@@ -91,25 +84,37 @@ func (s *Service) UpsertVulnSource(ctx context.Context, req VulnSourceRequest) (
 	if err != nil {
 		return VulnSourceDTO{}, err
 	}
-	if err := validateVulnSourceConfig(item.Config, s.cfg.VulnSourceTimeoutSeconds); err != nil {
-		return VulnSourceDTO{}, err
-	}
-	protected, err := secretmap.Protect(s.cipher, item.Config, "漏洞源配置")
-	if err != nil {
-		return VulnSourceDTO{}, apperr.ErrContestVulnSourceInvalid.WithCause(err)
-	}
-	item.Config = protected
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		item, err = tx.UpsertVulnSource(ctx, item)
-		return err
+		item, err = s.saveVulnSource(ctx, tx, item, req.ID > 0)
+		if err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.vuln_source.upsert", auditTargetVulnSource, item.ID, nil)
 	}); err != nil {
 		return VulnSourceDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.vuln_source.upsert", auditTargetVulnSource, item.ID, nil); err != nil {
-		return VulnSourceDTO{}, err
-	}
 	return vulnSourceDTOFromModel(item), nil
+}
+
+func (s *Service) saveVulnSource(ctx context.Context, tx TxStore, item VulnSource, editing bool) (VulnSource, error) {
+	if _, err := parseVulnSourceConfig(item.Config, s.cfg.VulnSourceTimeoutSeconds); err != nil {
+		return VulnSource{}, err
+	}
+	var stored map[string]any
+	if editing {
+		current, err := tx.LockVulnSource(ctx, item.TenantID, item.ID)
+		if err != nil {
+			return VulnSource{}, err
+		}
+		stored = current.Config
+	}
+	protected, err := secretmap.Protect(s.cipher, item.Config, stored, "漏洞源配置")
+	if err != nil {
+		return VulnSource{}, apperr.ErrContestVulnSourceInvalid.WithCause(err)
+	}
+	item.Config = protected
+	return tx.UpsertVulnSource(ctx, item)
 }
 
 // ListVulnSources 查询平台预置源和本租户源。
@@ -162,23 +167,24 @@ func (s *Service) SyncVulnSource(ctx context.Context, sourceID int64) ([]VulnPro
 	var problems []VulnProblem
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		for _, item := range cases {
-			if !validateVulnDraftBody(item.DraftBody) {
-				return apperr.ErrContestVulnProblemInvalid
-			}
-			if item.Level == 0 {
-				item.Level = source.DefaultLevel
-			}
 			item.ID = s.ids.Generate()
 			item.TenantID = id.TenantID
 			item.SourceID = source.ID
 			item, err = tx.UpsertVulnProblem(ctx, item)
+			if isNoRows(err) {
+				continue // 非草稿冲突由 SQL 拒绝，不能因来源同步重新打开。
+			}
 			if err != nil {
 				return err
 			}
 			problems = append(problems, item)
 		}
-		_, err := tx.MarkVulnSourceSynced(ctx, id.TenantID, source.ID)
-		return err
+		if source.TenantID == id.TenantID {
+			if _, err := tx.MarkVulnSourceSynced(ctx, id.TenantID, source.ID); err != nil {
+				return err
+			}
+		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.vuln_source.sync", auditTargetVulnSource, source.ID, map[string]any{"count": len(problems)})
 	}); err != nil {
 		return nil, err
 	}
@@ -186,11 +192,11 @@ func (s *Service) SyncVulnSource(ctx context.Context, sourceID int64) ([]VulnPro
 	for _, item := range problems {
 		out = append(out, vulnProblemDTOFromModel(item))
 	}
-	return out, s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.vuln_source.sync", auditTargetVulnSource, source.ID, map[string]any{"count": len(out)})
+	return out, nil
 }
 
-// ImportVulnProblem 手动导入一个漏洞案例草稿。
-func (s *Service) ImportVulnProblem(ctx context.Context, req ImportVulnProblemRequest) (VulnProblemDTO, error) {
+// CreateVulnProblem 新建漏洞题草稿，不覆盖已有案例。
+func (s *Service) CreateVulnProblem(ctx context.Context, req VulnProblemRequest) (VulnProblemDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return VulnProblemDTO{}, err
@@ -207,12 +213,61 @@ func (s *Service) ImportVulnProblem(ctx context.Context, req ImportVulnProblemRe
 			}
 		}
 		var err error
-		item, err = tx.UpsertVulnProblem(ctx, item)
+		item, err = tx.CreateVulnProblem(ctx, item)
+		if err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.vuln_problem.create", auditTargetVulnProblem, item.ID, nil)
+	}); err != nil {
+		return VulnProblemDTO{}, err
+	}
+	return vulnProblemDTOFromModel(item), nil
+}
+
+// GetVulnProblem 读取当前学校的完整草稿，供恢复编辑和展示验证结果。
+func (s *Service) GetVulnProblem(ctx context.Context, problemID int64) (VulnProblemDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return VulnProblemDTO{}, err
+	}
+	var item VulnProblem
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		item, err = tx.GetVulnProblem(ctx, id.TenantID, problemID)
 		return err
 	}); err != nil {
 		return VulnProblemDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.vuln_problem.import", auditTargetVulnProblem, item.ID, nil); err != nil {
+	return vulnProblemDTOFromModel(item), nil
+}
+
+// UpdateVulnProblem 只编辑调用方读过的草稿版本，写入与审计同事务提交。
+func (s *Service) UpdateVulnProblem(ctx context.Context, problemID int64, req UpdateVulnProblemRequest) (VulnProblemDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return VulnProblemDTO{}, err
+	}
+	if req.ExpectedUpdatedAt.IsZero() {
+		return VulnProblemDTO{}, apperr.ErrContestVulnProblemInvalid
+	}
+	input, err := validateVulnProblemInput(req.VulnProblemRequest)
+	if err != nil {
+		return VulnProblemDTO{}, err
+	}
+	item := VulnProblem{ID: problemID, TenantID: id.TenantID, SourceID: input.SourceID.Int64(), ExternalRef: input.ExternalRef, Title: input.Title, Level: input.Level, RuntimeMode: input.RuntimeMode, DraftBody: input.DraftBody, UpdatedAt: req.ExpectedUpdatedAt}
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		if item.SourceID > 0 {
+			if _, err := tx.GetVulnSource(ctx, id.TenantID, item.SourceID); err != nil {
+				return err
+			}
+		}
+		var err error
+		item, err = tx.UpdateVulnProblem(ctx, item)
+		if err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.vuln_problem.update", auditTargetVulnProblem, item.ID, nil)
+	}); err != nil {
 		return VulnProblemDTO{}, err
 	}
 	return vulnProblemDTOFromModel(item), nil
@@ -247,12 +302,8 @@ func (s *Service) ListVulnProblems(ctx context.Context, sourceID int64, status, 
 }
 
 // SetVulnPrevalidate 运行漏洞题正反向预验证并保存结果。
-func (s *Service) SetVulnPrevalidate(ctx context.Context, problemID int64, req PrevalidateRequest) (VulnProblemDTO, error) {
+func (s *Service) SetVulnPrevalidate(ctx context.Context, problemID int64) (VulnProblemDTO, error) {
 	id, err := currentIdentity(ctx)
-	if err != nil {
-		return VulnProblemDTO{}, err
-	}
-	req, err = validatePrevalidateRequest(req)
 	if err != nil {
 		return VulnProblemDTO{}, err
 	}
@@ -267,30 +318,31 @@ func (s *Service) SetVulnPrevalidate(ctx context.Context, problemID int64, req P
 	if current.Status != VulnProblemStatusDraft {
 		return VulnProblemDTO{}, apperr.ErrContestVulnPrevalidateFailed
 	}
-	lockedSpec := req.Composition
-	lockedSpec.ID = fmt.Sprintf("contest:%04d:vuln:%s", timex.Now().Year(), ids.Format(problemID))
-	snapshot, err := s.sandbox.CompileSandboxComposition(ctx, id.TenantID, lockedSpec)
+	spec, err := vulnPrevalidateSpec(current.DraftBody)
+	if err != nil {
+		return VulnProblemDTO{}, err
+	}
+	spec.ID = fmt.Sprintf("contest:%04d:vuln:%s", timex.Now().Year(), ids.Format(problemID))
+	snapshot, err := s.sandbox.CompileSandboxComposition(ctx, id.TenantID, spec)
 	if err != nil {
 		return VulnProblemDTO{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
-	status, detail := s.runVulnPrevalidation(ctx, id.TenantID, id.AccountID, current, req, snapshot)
-	digest := ""
-	var storedSnapshot *contracts.SandboxCompositionSnapshot
-	initCodeRef, initScriptRef := "", ""
-	if status == VulnPrevalidatePassed {
-		digest = snapshot.Digest
-		storedSnapshot = &snapshot
-		initCodeRef, initScriptRef = req.InitCodeRef, req.InitScriptRef
+	current.PrevalidateStatus, current.PrevalidateDetail = s.runVulnPrevalidation(ctx, id.TenantID, id.AccountID, current, snapshot)
+	current.CompositionDigest, current.CompositionSnapshot = "", nil
+	if current.PrevalidateStatus == VulnPrevalidatePassed {
+		current.CompositionDigest, current.CompositionSnapshot = snapshot.Digest, &snapshot
 	}
-	var item VulnProblem
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		item, err = tx.SetVulnProblemPrevalidate(ctx, id.TenantID, problemID, status, detail, digest, storedSnapshot, initCodeRef, initScriptRef)
-		return err
+		current, err = tx.SetVulnProblemPrevalidate(ctx, current)
+		if err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.vuln_problem.prevalidate", auditTargetVulnProblem, current.ID, map[string]any{"status": current.PrevalidateStatus})
 	}); err != nil {
 		return VulnProblemDTO{}, err
 	}
-	return vulnProblemDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.vuln_problem.prevalidate", auditTargetVulnProblem, item.ID, map[string]any{"status": status})
+	return vulnProblemDTOFromModel(current), nil
 }
 
 // FinalizeVulnProblem 把预验证通过的漏洞题固化到 M5 内容中心。
@@ -323,9 +375,17 @@ func (s *Service) FinalizeVulnProblem(ctx context.Context, problemID int64) (Vul
 	if err != nil {
 		return VulnProblemDTO{}, apperr.ErrContestVulnFinalizeFailed.WithCause(err)
 	}
-	body["composition"] = item.CompositionSnapshot.Spec
-	body["init_code_ref"] = item.InitCodeRef
-	body["init_script_ref"] = item.InitScriptRef
+	// 内容声明不锁定使用场景；竞赛或实验发布时再按本场景编译访问边界。
+	rawComposition, err := json.Marshal(item.CompositionSnapshot.Spec)
+	if err != nil {
+		return VulnProblemDTO{}, apperr.ErrContestVulnFinalizeFailed.WithCause(err)
+	}
+	composition, err := jsonx.ObjectMapStrict(rawComposition)
+	if err != nil {
+		return VulnProblemDTO{}, apperr.ErrContestVulnFinalizeFailed.WithCause(err)
+	}
+	delete(composition, "access_profile")
+	body["composition"] = composition
 	judgeConfig, ok := body["judge_config"].(map[string]any)
 	if !ok {
 		return VulnProblemDTO{}, apperr.ErrContestVulnPrevalidateFailed
@@ -334,12 +394,13 @@ func (s *Service) FinalizeVulnProblem(ctx context.Context, problemID int64) (Vul
 	if !ok {
 		expectation = map[string]any{}
 	}
-	chainSteps := append([]any{}, jsonx.SliceFromAny(body["init_steps"])...)
-	chainSteps = append(chainSteps, jsonx.SliceFromAny(body["positive_steps"])...)
-	expectation["chain_steps"] = chainSteps
+	delete(expectation, "chain_steps")
 	expectation["assertions"] = jsonx.SliceFromAny(body["assertions"])
 	judgeConfig["expectation"] = expectation
 	body["judge_config"] = judgeConfig
+	for _, key := range []string{"positive_steps", "assertions"} {
+		delete(body, key)
+	}
 	importCtx, err := auth.WithServiceIdentity(ctx, id.TenantID, fmt.Sprintf("contest:%04d:vuln-finalize:%s", timex.Now().Year(), ids.Format(item.ID)))
 	if err != nil {
 		return VulnProblemDTO{}, apperr.ErrContestVulnFinalizeFailed.WithCause(err)
@@ -350,12 +411,12 @@ func (s *Service) FinalizeVulnProblem(ctx context.Context, problemID int64) (Vul
 	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		item, err = tx.FinalizeVulnProblem(ctx, id.TenantID, problemID, contentSnapshot.ItemCode, contentSnapshot.ItemVersion)
-		return err
+		item, err = tx.FinalizeVulnProblem(ctx, id.TenantID, problemID, contentSnapshot.ItemCode, contentSnapshot.ItemVersion, item.UpdatedAt)
+		if err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.vuln_problem.finalize", auditTargetVulnProblem, item.ID, map[string]any{"item_code": item.ContentItemCode, "item_version": item.ContentItemVersion})
 	}); err != nil {
-		return VulnProblemDTO{}, err
-	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.vuln_problem.finalize", auditTargetVulnProblem, item.ID, map[string]any{"item_code": item.ContentItemCode, "item_version": item.ContentItemVersion}); err != nil {
 		return VulnProblemDTO{}, err
 	}
 	return vulnProblemDTOFromModel(item), nil
@@ -363,36 +424,36 @@ func (s *Service) FinalizeVulnProblem(ctx context.Context, problemID int64) (Vul
 
 // fetchVulnCases 根据源配置拉取并解析漏洞案例。
 func (s *Service) fetchVulnCases(ctx context.Context, source VulnSource) ([]VulnProblem, error) {
-	cfg := source.Config
-	endpoint, _ := cfg["endpoint"].(string)
-	method, _ := cfg["method"].(string)
-	if method == "" {
-		method = http.MethodGet
+	cfg, err := parseVulnSourceConfig(source.Config, s.cfg.VulnSourceTimeoutSeconds)
+	if err != nil {
+		return nil, err
 	}
-	method = strings.ToUpper(strings.TrimSpace(method))
-	timeout := sourceTimeoutSeconds(cfg, s.cfg.VulnSourceTimeoutSeconds)
 	var body io.Reader
-	if method == http.MethodPost {
-		raw, err := jsonx.AnyBytes(cfg["body"], apperr.ErrContestVulnSourceInvalid)
+	if cfg.method == http.MethodPost {
+		payload, exists := source.Config["body"]
+		if !exists {
+			payload = map[string]any{}
+		}
+		raw, err := json.Marshal(payload)
 		if err != nil {
-			return nil, err
+			return nil, apperr.ErrContestVulnSourceInvalid.WithCause(err)
 		}
 		body = bytes.NewReader(raw)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
+	req, err := http.NewRequestWithContext(ctx, cfg.method, cfg.endpoint, body)
 	if err != nil {
 		return nil, apperr.ErrContestVulnSourceInvalid.WithCause(err)
 	}
 	req.Header.Set("Accept", "application/json")
-	if method == http.MethodPost {
+	if cfg.method == http.MethodPost {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	for key, value := range jsonx.StringMapFromAny(cfg["headers"]) {
-		if key != "" && value != "" {
+	for key, value := range cfg.headers {
+		if strings.TrimSpace(value) != "" {
 			req.Header.Set(key, value)
 		}
 	}
-	client, err := netx.NewPublicHTTPClient(time.Duration(timeout) * time.Second)
+	client, err := netx.NewPublicHTTPClient(time.Duration(cfg.timeoutSeconds) * time.Second)
 	if err != nil {
 		return nil, apperr.ErrContestVulnSourceInvalid.WithCause(err)
 	}
@@ -418,11 +479,13 @@ func (s *Service) fetchVulnCases(ctx context.Context, source VulnSource) ([]Vuln
 	if err := jsonx.DecodeStrict(raw, &payload); err != nil {
 		return nil, apperr.ErrContestVulnSourceJSONInvalid.WithCause(err)
 	}
-	nodes := selectCases(payload, strings.TrimSpace(jsonx.StringField(cfg, "cases_path")))
-	mapping := jsonx.StringMapFromAny(cfg["mapping"])
+	nodes, err := selectCases(payload, cfg.casesPath)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]VulnProblem, 0, len(nodes))
 	for _, node := range nodes {
-		item, err := vulnProblemFromExternal(node, mapping, source.DefaultLevel)
+		item, err := vulnProblemFromExternal(node, cfg.mapping, source.DefaultLevel)
 		if err != nil {
 			return nil, err
 		}
@@ -432,9 +495,15 @@ func (s *Service) fetchVulnCases(ctx context.Context, source VulnSource) ([]Vuln
 }
 
 // runVulnPrevalidation 在隔离沙箱中执行正向 PoC 与反向不误判验证。
-func (s *Service) runVulnPrevalidation(ctx context.Context, tenantID, accountID int64, problem VulnProblem, req PrevalidateRequest, snapshot contracts.SandboxCompositionSnapshot) (int16, map[string]any) {
+func (s *Service) runVulnPrevalidation(ctx context.Context, tenantID, accountID int64, problem VulnProblem, snapshot contracts.SandboxCompositionSnapshot) (int16, map[string]any) {
 	detail := map[string]any{"positive": map[string]any{}, "negative": map[string]any{}}
-	positive, err := s.runVulnValidationCase(ctx, tenantID, accountID, problem, req, snapshot, "positive", true)
+	if err := s.sandbox.PrepareCompositions(ctx, []string{snapshot.Digest}); err != nil {
+		logging.ErrorContext(ctx, "vulnerability prevalidation composition preparation failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", tenantID), slog.Int64("problem_id", problem.ID))
+		detail["error"] = safeDetailError(err)
+		detail["trace_id"] = response.TraceFromContext(ctx)
+		return VulnPrevalidateFailed, detail
+	}
+	positive, err := s.runVulnValidationCase(ctx, tenantID, accountID, problem, snapshot, "positive", true)
 	detail["positive"] = positive
 	if err != nil {
 		logging.ErrorContext(ctx, "vulnerability prevalidation failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", tenantID), slog.Int64("problem_id", problem.ID), slog.String("phase", "positive"))
@@ -442,7 +511,7 @@ func (s *Service) runVulnPrevalidation(ctx context.Context, tenantID, accountID 
 		detail["trace_id"] = response.TraceFromContext(ctx)
 		return VulnPrevalidateFailed, detail
 	}
-	negative, err := s.runVulnValidationCase(ctx, tenantID, accountID, problem, req, snapshot, "negative", false)
+	negative, err := s.runVulnValidationCase(ctx, tenantID, accountID, problem, snapshot, "negative", false)
 	detail["negative"] = negative
 	if err != nil {
 		logging.ErrorContext(ctx, "vulnerability prevalidation failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", tenantID), slog.Int64("problem_id", problem.ID), slog.String("phase", "negative"))
@@ -457,7 +526,15 @@ func (s *Service) runVulnPrevalidation(ctx context.Context, tenantID, accountID 
 }
 
 // runVulnValidationCase 执行一条正向或反向预验证用例。
-func (s *Service) runVulnValidationCase(ctx context.Context, tenantID, accountID int64, problem VulnProblem, req PrevalidateRequest, snapshot contracts.SandboxCompositionSnapshot, phase string, positive bool) (result map[string]any, retErr error) {
+func (s *Service) runVulnValidationCase(ctx context.Context, tenantID, accountID int64, problem VulnProblem, snapshot contracts.SandboxCompositionSnapshot, phase string, positive bool) (result map[string]any, retErr error) {
+	steps, err := validationSteps(problem.DraftBody, "positive_steps")
+	if err != nil {
+		return nil, err
+	}
+	assertions, err := validationSteps(problem.DraftBody, "assertions")
+	if err != nil || len(assertions) == 0 {
+		return nil, apperr.ErrContestVulnProblemInvalid
+	}
 	sourceRef := fmt.Sprintf("contest:%04d:vuln-prevalidate-%s:%s", timex.Now().Year(), phase, ids.Format(problem.ID))
 	scopeRef := sourceRef + ":scope:" + ids.Format(s.ids.Generate())
 	// 创建响应丢失时也按本次唯一作用域回收,不依赖调用方拿到沙箱编号。
@@ -472,7 +549,7 @@ func (s *Service) runVulnValidationCase(ctx context.Context, tenantID, accountID
 			retErr = apperr.ErrContestSandboxUnavailable.WithCause(recycleErr)
 		}
 	}()
-	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: tenantID, CompositionSnapshot: snapshot, InitCodeRef: req.InitCodeRef, InitScriptRef: req.InitScriptRef, OwnerAccountID: accountID, SourceRef: sourceRef, ScopeRef: scopeRef, KeepAlive: false, SnapshotEnabled: false})
+	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: tenantID, CompositionSnapshot: snapshot, InitCodeRef: snapshot.Spec.InitCodeRef, InitScriptRef: snapshot.Spec.InitScriptRef, OwnerAccountID: accountID, SourceRef: sourceRef, ScopeRef: scopeRef, KeepAlive: false, SnapshotEnabled: false})
 	if err != nil {
 		return nil, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
@@ -483,19 +560,14 @@ func (s *Service) runVulnValidationCase(ctx context.Context, tenantID, accountID
 	if runtimeInstance == "" {
 		return nil, apperr.ErrContestVulnProblemInvalid
 	}
-	for _, step := range validationSteps(problem.DraftBody, "init_steps") {
-		if err := s.runVulnChainStep(ctx, tenantID, info.SandboxID, sourceRef, runtimeInstance, step); err != nil {
-			return nil, err
-		}
-	}
 	if positive {
-		for _, step := range validationSteps(problem.DraftBody, "positive_steps") {
+		for _, step := range steps {
 			if err := s.runVulnChainStep(ctx, tenantID, info.SandboxID, sourceRef, runtimeInstance, step); err != nil {
 				return nil, err
 			}
 		}
 	}
-	results, err := s.checkVulnAssertions(ctx, tenantID, info.SandboxID, sourceRef, runtimeInstance, validationSteps(problem.DraftBody, "assertions"), positive)
+	results, err := s.checkVulnAssertions(ctx, tenantID, info.SandboxID, sourceRef, runtimeInstance, assertions, positive)
 	if err != nil {
 		return nil, err
 	}
@@ -504,7 +576,11 @@ func (s *Service) runVulnValidationCase(ctx context.Context, tenantID, accountID
 
 // runVulnChainStep 调用 M2 链能力执行预验证步骤。
 func (s *Service) runVulnChainStep(ctx context.Context, tenantID, sandboxID int64, sourceRef, runtimeInstance string, step map[string]any) error {
-	switch strings.ToLower(strings.TrimSpace(jsonx.StringFromAny(step["op"]))) {
+	runtimeInstance, err := contracts.ChainRuntimeInstance(step, runtimeInstance)
+	if err != nil {
+		return apperr.ErrContestVulnProblemInvalid.WithCause(err)
+	}
+	switch strings.TrimSpace(jsonx.StringFromAny(step["op"])) {
 	case VulnChainOperationDeploy:
 		_, err := s.sandbox.ChainDeploy(ctx, contracts.SandboxChainDeployRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, RuntimeInstance: runtimeInstance, Payload: jsonx.ObjectFromAny(step["payload"])})
 		return err
@@ -513,8 +589,13 @@ func (s *Service) runVulnChainStep(ctx context.Context, tenantID, sandboxID int6
 		return err
 	case VulnChainOperationReset:
 		return s.sandbox.ChainReset(ctx, contracts.SandboxChainResetRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, RuntimeInstance: runtimeInstance})
-	case VulnChainOperationQuery, "":
-		return nil
+	case VulnChainOperationQuery:
+		target := strings.TrimSpace(jsonx.StringField(step, "target"))
+		if target == "" {
+			return apperr.ErrContestVulnProblemInvalid
+		}
+		_, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, RuntimeInstance: runtimeInstance, Target: target})
+		return err
 	default:
 		return apperr.ErrContestVulnProblemInvalid
 	}
@@ -531,7 +612,11 @@ func (s *Service) checkVulnAssertions(ctx context.Context, tenantID, sandboxID i
 		if err != nil {
 			return nil, apperr.ErrContestVulnProblemInvalid.WithCause(err)
 		}
-		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, RuntimeInstance: runtimeInstance, Target: assertion.Target})
+		instance, err := contracts.ChainRuntimeInstance(raw, runtimeInstance)
+		if err != nil {
+			return nil, apperr.ErrContestVulnProblemInvalid.WithCause(err)
+		}
+		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, RuntimeInstance: instance, Target: assertion.Target})
 		if err != nil {
 			return nil, apperr.ErrContestSandboxUnavailable.WithCause(err)
 		}
@@ -546,21 +631,6 @@ func (s *Service) checkVulnAssertions(ctx context.Context, tenantID, sandboxID i
 		out = append(out, map[string]any{"case": result.Case, "passed": passed, "expected_label": result.ExpectedLabel, "actual": result.Actual, "hint": result.Hint})
 	}
 	return out, nil
-}
-
-// validationSteps 从漏洞草稿读取链步骤或断言数组。
-func validationSteps(body map[string]any, key string) []map[string]any {
-	raw, ok := body[key].([]any)
-	if !ok {
-		return nil
-	}
-	out := make([]map[string]any, 0, len(raw))
-	for _, item := range raw {
-		if m := jsonx.ObjectFromAny(item); len(m) > 0 {
-			out = append(out, m)
-		}
-	}
-	return out
 }
 
 // allAssertionResults 判断断言结果是否全部通过。
@@ -588,143 +658,4 @@ func safeDetailError(err error) string {
 		return ""
 	}
 	return apperr.AsAppError(err).UserMessage()
-}
-
-// vulnSourceFromRequest 归一化漏洞源请求。
-func vulnSourceFromRequest(req VulnSourceRequest, tenantID, generatedID int64) (VulnSource, error) {
-	req.Name = strings.TrimSpace(req.Name)
-	if req.ID <= 0 {
-		req.ID = ids.ID(generatedID)
-	}
-	if (req.Type != VulnSourceTypeSWC && req.Type != VulnSourceTypeIntelligence && req.Type != VulnSourceTypeCVEOnchain) || req.Name == "" || len(req.Name) > 128 || req.Config == nil || (req.DefaultLevel != VulnLevelA && req.DefaultLevel != VulnLevelB && req.DefaultLevel != VulnLevelC) {
-		return VulnSource{}, apperr.ErrContestVulnSourceInvalid
-	}
-	return VulnSource{ID: req.ID.Int64(), TenantID: tenantID, Type: req.Type, Name: req.Name, Config: req.Config, DefaultLevel: req.DefaultLevel, Enabled: req.Enabled}, nil
-}
-
-// validateVulnSourceConfig 校验 HTTP 源配置边界。
-func validateVulnSourceConfig(cfg map[string]any, defaultTimeout int) error {
-	endpoint := strings.TrimSpace(jsonx.StringField(cfg, "endpoint"))
-	if _, err := netx.ValidatePublicHTTPURL(endpoint); err != nil {
-		return apperr.ErrContestVulnSourceInvalid
-	}
-	method := strings.ToUpper(strings.TrimSpace(jsonx.StringField(cfg, "method")))
-	if method == "" {
-		method = http.MethodGet
-	}
-	if method != http.MethodGet && method != http.MethodPost {
-		return apperr.ErrContestVulnSourceInvalid
-	}
-	timeout := sourceTimeoutSeconds(cfg, defaultTimeout)
-	if timeout < 1 || timeout > 60 {
-		return apperr.ErrContestVulnSourceInvalid
-	}
-	mapping := jsonx.StringMapFromAny(cfg["mapping"])
-	for _, key := range []string{"external_ref", "title", "draft_body"} {
-		if strings.TrimSpace(mapping[key]) == "" {
-			return apperr.ErrContestVulnSourceInvalid
-		}
-	}
-	return nil
-}
-
-// sourceTimeoutSeconds 读取源级超时,缺失时使用启动配置。
-func sourceTimeoutSeconds(cfg map[string]any, defaultTimeout int) int {
-	switch v := cfg["timeout_seconds"].(type) {
-	case float64:
-		return int(v)
-	case int:
-		return v
-	default:
-		return defaultTimeout
-	}
-}
-
-// selectCases 从 JSON 载荷中选择案例数组。
-func selectCases(payload any, path string) []map[string]any {
-	current := payload
-	if root, ok := payload.(map[string]any); ok && strings.TrimSpace(path) != "" {
-		current = jsonx.ValueFromPath(root, path)
-	}
-	switch v := current.(type) {
-	case []any:
-		out := make([]map[string]any, 0, len(v))
-		for _, item := range v {
-			if obj, ok := item.(map[string]any); ok {
-				out = append(out, obj)
-			}
-		}
-		return out
-	case map[string]any:
-		return []map[string]any{v}
-	default:
-		return nil
-	}
-}
-
-// vulnProblemFromExternal 将外部漏洞案例映射为平台草稿。
-func vulnProblemFromExternal(item map[string]any, mapping map[string]string, defaultLevel int16) (VulnProblem, error) {
-	body := jsonx.ObjectFromAny(jsonx.ValueFromPath(item, mapping["draft_body"]))
-	req := ImportVulnProblemRequest{
-		ExternalRef: strings.TrimSpace(jsonx.StringFromPath(item, mapping["external_ref"])),
-		Title:       strings.TrimSpace(jsonx.StringFromPath(item, mapping["title"])),
-		Level:       vulnLevelFromAny(jsonx.ValueFromPath(item, mapping["level"]), defaultLevel),
-		RuntimeMode: vulnRuntimeFromAny(jsonx.ValueFromPath(item, mapping["runtime_mode"]), VulnRuntimeIsolated),
-		DraftBody:   body,
-	}
-	req, err := validateVulnProblemInput(req)
-	if err != nil {
-		return VulnProblem{}, err
-	}
-	return VulnProblem{ExternalRef: req.ExternalRef, Title: req.Title, Level: req.Level, RuntimeMode: req.RuntimeMode, DraftBody: req.DraftBody}, nil
-}
-
-// vulnLevelFromAny 解析 A/B/C 或 1/2/3 分级。
-func vulnLevelFromAny(v any, defaultValue int16) int16 {
-	switch x := v.(type) {
-	case string:
-		text := strings.ToUpper(strings.TrimSpace(x))
-		if n, err := strconv.ParseInt(text, 10, 16); err == nil {
-			return int16(n)
-		}
-		switch text {
-		case "A":
-			return VulnLevelA
-		case "B":
-			return VulnLevelB
-		case "C":
-			return VulnLevelC
-		}
-	case float64:
-		return jsonx.Int16FromAny(x, defaultValue)
-	case int:
-		return jsonx.Int16FromAny(x, defaultValue)
-	case int16:
-		return x
-	}
-	return defaultValue
-}
-
-// vulnRuntimeFromAny 解析 isolated/forked 或 1/2 运行时。
-func vulnRuntimeFromAny(v any, defaultValue int16) int16 {
-	switch x := v.(type) {
-	case string:
-		text := strings.ToLower(strings.TrimSpace(x))
-		if n, err := strconv.ParseInt(text, 10, 16); err == nil {
-			return int16(n)
-		}
-		switch text {
-		case "isolated":
-			return VulnRuntimeIsolated
-		case "forked":
-			return VulnRuntimeForked
-		}
-	case float64:
-		return jsonx.Int16FromAny(x, defaultValue)
-	case int:
-		return jsonx.Int16FromAny(x, defaultValue)
-	case int16:
-		return x
-	}
-	return defaultValue
 }

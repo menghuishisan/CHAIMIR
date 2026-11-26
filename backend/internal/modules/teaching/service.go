@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"time"
 
 	"chaimir/internal/contracts"
@@ -30,11 +31,15 @@ const (
 
 // Service 承载 teaching 模块业务编排,依赖 repo 接口和跨模块 contracts。
 type Service struct {
+	cleanupTimeout     time.Duration
 	store              Store
 	ids                snowflake.Generator
 	audit              audit.Writer
 	identity           contracts.IdentityService
 	content            contracts.ContentReadService
+	contentClone       contracts.ContentCloneService
+	experimentClone    contracts.ExperimentCloneService
+	sim                contracts.SimService
 	judge              contracts.JudgeService
 	bus                eventbus.Bus
 	transfers          transferService
@@ -50,6 +55,7 @@ type Service struct {
 type objectStorage interface {
 	Delete(ctx context.Context, bucket, key string) error
 	Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error
+	PutTemporary(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error
 	CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string) (int64, error)
 	BucketAttach() string
 	BucketReport() string
@@ -65,19 +71,23 @@ type fileService interface {
 type transferService interface {
 	CreateTask(context.Context, transfer.NewTaskRequest) (transfer.Task, error)
 	GetTask(context.Context, int64, int64) (transfer.Task, error)
-	DeletePendingTask(context.Context, int64, int64) error
 	ClaimTask(context.Context, int64, int64) (transfer.Task, error)
+	RunWithLease(context.Context, transfer.Task, func(context.Context) error) error
 	CompleteTask(context.Context, transfer.Task, transfer.CompleteTaskRequest) (transfer.Task, error)
 	FailTask(context.Context, transfer.Task, error, time.Time) (transfer.Task, error)
 }
 
 // ServiceDeps 是 teaching service 的装配依赖集合。
 type ServiceDeps struct {
+	CleanupTimeout         time.Duration
 	Store                  Store
 	IDs                    snowflake.Generator
 	Audit                  audit.Writer
 	Identity               contracts.IdentityService
 	Content                contracts.ContentReadService
+	ContentClone           contracts.ContentCloneService
+	ExperimentClone        contracts.ExperimentCloneService
+	Sim                    contracts.SimService
 	Judge                  contracts.JudgeService
 	Bus                    eventbus.Bus
 	Transfers              transferService
@@ -91,6 +101,9 @@ type ServiceDeps struct {
 
 // NewService 构造 teaching 服务,不接收数据库连接,由装配层传入 Store。
 func NewService(deps ServiceDeps) (*Service, error) {
+	if deps.CleanupTimeout <= 0 {
+		return nil, fmt.Errorf("上传清理超时必须大于 0")
+	}
 	if deps.Store == nil {
 		return nil, fmt.Errorf("teaching service 缺少 store")
 	}
@@ -116,10 +129,13 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Transfers == nil || objects == nil || deps.FileService == nil {
 		return nil, fmt.Errorf("teaching service 缺少统一导入导出或文件服务依赖")
 	}
-	if deps.Config.CourseGradesMaxRows <= 0 || deps.Config.JudgeOutboxBatchSize <= 0 || deps.Config.GradeEventOutboxBatchSize <= 0 || deps.Config.GradeEventOutboxStaleMs <= 0 || deps.Config.GradeExportBatchSize <= 0 || deps.Config.GradeExportWorkerBatchSize <= 0 || deps.Config.GradeExportWorkerPollMs <= 0 || deps.CourseMaterialMaxBytes <= 0 || deps.CourseCoverMaxBytes <= 0 {
+	if deps.Config.CourseLifecycleBatchSize <= 0 || int64(deps.Config.CourseLifecycleBatchSize) > math.MaxInt32 || deps.Config.CourseGradesMaxRows <= 0 || deps.Config.JudgeOutboxBatchSize <= 0 || deps.Config.GradeEventOutboxBatchSize <= 0 || deps.Config.GradeEventOutboxStaleMs <= 0 || deps.Config.GradeExportBatchSize <= 0 || deps.Config.GradeExportWorkerBatchSize <= 0 || deps.Config.GradeExportWorkerPollMs <= 0 || deps.CourseMaterialMaxBytes <= 0 || deps.CourseCoverMaxBytes <= 0 {
 		return nil, fmt.Errorf("teaching service 配置不完整")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, identity: deps.Identity, content: deps.Content, judge: deps.Judge, bus: deps.Bus, transfers: deps.Transfers, storage: objects, files: deps.FileService, cfg: deps.Config, materialMaxBytes: deps.CourseMaterialMaxBytes, coverMaxBytes: deps.CourseCoverMaxBytes, materialScanPolicy: deps.MaterialScanPolicy}, nil
+	if deps.ContentClone == nil || deps.ExperimentClone == nil || deps.Sim == nil {
+		return nil, fmt.Errorf("teaching service 缺少课程依赖复制契约")
+	}
+	return &Service{cleanupTimeout: deps.CleanupTimeout, store: deps.Store, ids: deps.IDs, audit: deps.Audit, identity: deps.Identity, content: deps.Content, contentClone: deps.ContentClone, experimentClone: deps.ExperimentClone, sim: deps.Sim, judge: deps.Judge, bus: deps.Bus, transfers: deps.Transfers, storage: objects, files: deps.FileService, cfg: deps.Config, materialMaxBytes: deps.CourseMaterialMaxBytes, coverMaxBytes: deps.CourseCoverMaxBytes, materialScanPolicy: deps.MaterialScanPolicy}, nil
 }
 
 // currentIdentity 读取租户账号身份。
@@ -135,6 +151,9 @@ func currentIdentity(ctx context.Context) (tenant.Identity, error) {
 func mapCourseError(err error) error {
 	if err == nil {
 		return nil
+	}
+	if _, ok := apperr.As(err); ok {
+		return err
 	}
 	if isNoRows(err) {
 		return apperr.ErrTeachingCourseNotFound

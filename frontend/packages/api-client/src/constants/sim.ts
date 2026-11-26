@@ -1,9 +1,4 @@
-// 仿真契约常量：维护 M4 用户向字符串枚举，来源为后端 sim 转换层。
-
-/**
- * 仿真执行位置。后端按包的作者类型派生，不是提交时的可选项：
- * 平台内置包在浏览器 Worker 内运行，教师与第三方扩展包在后端隔离容器内运行。
- */
+/** 执行位置由后端按包的作者类型确定。内置包在浏览器执行，扩展包在隔离环境执行。 */
 export const SIM_COMPUTE = {
   BROWSER: 'browser',
   ISOLATED: 'isolated',
@@ -33,15 +28,13 @@ export type SimReviewResult = (typeof SIM_REVIEW_RESULT)[keyof typeof SIM_REVIEW
 export const SIM_VALIDATION_STATUS = {
   PASSED: 'passed',
   FAILED: 'failed',
+  /** 仅静态扫描可产生，保留给平台人工判断。 */
+  WARNING: 'warning',
 } as const
 
 export type SimValidationStatusValue =
   (typeof SIM_VALIDATION_STATUS)[keyof typeof SIM_VALIDATION_STATUS]
 
-/**
- * 隔离执行 WebSocket 的客户端命令类型（后端 `modules/sim/enum.go` 的 BackendCommandKind 同源）。
- * 四种之外服务端一律拒绝：推进一个推演时刻、注入一次包内声明的交互、回退一步、回到初始状态。
- */
 export const SIM_STREAM_COMMAND = {
   STEP: 'step',
   EVENT: 'event',
@@ -51,9 +44,7 @@ export const SIM_STREAM_COMMAND = {
 
 export type SimStreamCommand = (typeof SIM_STREAM_COMMAND)[keyof typeof SIM_STREAM_COMMAND]
 
-/**
- * 隔离执行 WebSocket 的服务端帧类型：首帧带包自描述信息，其后只带教学快照。
- */
+/** 首帧带包自描述信息，之后只发送教学快照。 */
 export const SIM_STREAM_FRAME = {
   READY: 'ready',
   SNAPSHOT: 'snapshot',

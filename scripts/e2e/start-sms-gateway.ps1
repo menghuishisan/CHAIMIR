@@ -272,13 +272,17 @@ while ($true) {
 }
 
 $deadline = (Get-Date).AddSeconds($BackendReadyTimeoutSeconds)
+$lastReadyError = $null
 while ($true) {
     try {
         $ready = Invoke-WebRequest -Uri "http://127.0.0.1:$BackendLocalPort/-/readyz" -UseBasicParsing -TimeoutSec 5
         if ($ready.StatusCode -eq 200) { break }
-    } catch { }
+        $lastReadyError = "后端就绪探针返回 HTTP $($ready.StatusCode)"
+    } catch {
+        $lastReadyError = $_.Exception.Message
+    }
     if ((Get-Date) -gt $deadline) {
-        throw "后端 $BackendReadyTimeoutSeconds 秒内未就绪，无法完成短信链路探活"
+        throw "后端 $BackendReadyTimeoutSeconds 秒内未就绪，无法完成短信链路探活；最后一次探针错误: $lastReadyError"
     }
     Start-Sleep -Seconds 2
 }

@@ -1,14 +1,4 @@
-// 竞赛出题(赛事详情页内区块)。
-//
-// 赛题 = M5 题目引用 + 赛内分值 + 动态分规则 + (对抗赛)对抗配置。
-// 题目从题库已发布内容里选并锁版本,不让教师手填题目编号与版本号。
-//
-// 动态分与对抗配置使用前后端共用的固定结构,不给裸 JSON 文本域。
-//
-// 答案黑盒:题面正文与判题配置不在本页展开,只呈现标题、分值与类型 ——
-// 教师编排需要的是"选哪道题、值多少分",不需要在这里读答案。
-
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Plus, Swords } from 'lucide-react'
 import {
   ContestMode,
@@ -42,43 +32,27 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
+import type { AsyncResourceState } from '../../../../hooks/useAsyncResource'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { ContentItemSelect } from '../../../content/components/ContentItemSelect'
 import { battleRoleLabel, battleRuleLabel } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { BATTLE_RULES } from '../../options'
-import { battleEntryRoles, battleRuntimeConfig } from '../../rules'
+import { battleEntryRoles } from '../../rules'
 
 export interface ContestProblemsProps {
   contest: Contest
+  problems: AsyncResourceState<ContestProblem[]>
   readOnly?: boolean
-  /** 赛题数量读到或变化时通知父页(详情页据此判断能否发布);读取失败时不通知 */
-  onCountChange?: (count: number) => void
 }
 
-/**
- * ContestProblems 管理赛题清单。
- * 后端按 (赛事, 题目, 版本) 唯一约束做 upsert,故"编辑"与"新增"是同一个提交动作。
- */
-export function ContestProblems({ contest, readOnly = false, onCountChange }: ContestProblemsProps) {
+export function ContestProblems({ contest, problems, readOnly = false }: ContestProblemsProps) {
   const [modal, setModal] = useState<{ problem?: ContestProblem } | undefined>()
-
-  const problems = useAsyncResource(
-    () => api.contest.getProblems(contest.id),
-    [contest.id],
-    (value) => value.length === 0
-  )
-  const problemCount = problems.status === 'success' || problems.status === 'empty' ? (problems.data ?? []).length : undefined
-  useEffect(() => {
-    if (problemCount !== undefined) onCountChange?.(problemCount)
-  }, [onCountChange, problemCount])
 
   const isBattle = contest.mode === ContestMode.BATTLE
   const totalScore = (problems.data ?? []).reduce((sum, item) => sum + item.score, 0)
 
   const columns: TableColumn<ContestProblem>[] = [
-    // 序号是窄的数字列:定宽,不把它摊成一大片空白
     { key: 'seq', header: '序号', align: 'right', mono: true, width: '88px' },
     {
       key: 'title',
@@ -152,8 +126,6 @@ export function ContestProblems({ contest, readOnly = false, onCountChange }: Co
         </div>
       }
     >
-      {/* 列表型页内子视图走 DataPanel 片段(§6.5.5 B):与同父页的防作弊标签同构;
-          赛题一次回齐,不分页也不筛选,故只用片本身 */}
       <DataPanel label="赛题">
         <ResourceState
           resource={problems}
@@ -178,7 +150,6 @@ export function ContestProblems({ contest, readOnly = false, onCountChange }: Co
               rowKey={(item) => item.id}
               elevated={false}
               onRowClick={readOnly ? undefined : (item) => setModal({ problem: item })}
-              // <md 换行卡(§6.4.1 规则 3):题名一行、题源与分值一行,题目类型在右
               mobileCard={(item) => ({
                 title: item.title || `第 ${item.seq} 题`,
                 meta: `第 ${item.seq} 题 · ${item.score} 分 · ${item.item_code}`,
@@ -222,11 +193,6 @@ interface ProblemFormModalProps {
   onSaved: () => void
 }
 
-/**
- * ProblemFormModal 配置单道赛题。
- * 对抗题的执行环境来自题库锁定版本的组合声明,竞赛侧只决定赛制:
- * 规则、入场角色与回放方式 —— 环境参数不在这里重复一遍,也就不会与题目版本对不上。
- */
 function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: ProblemFormModalProps) {
   const editing = problem !== undefined
   const isBattle = contest.mode === ContestMode.BATTLE
@@ -236,24 +202,23 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
   )
   const [score, setScore] = useState(String(problem?.score ?? 100))
   const [seq, setSeq] = useState(String(problem?.seq ?? nextSeq))
-  const [dynamicEnabled, setDynamicEnabled] = useState(
-    (problem?.dynamic_score?.decay_per_solve ?? 0) > 0
-  )
+  const [dynamicEnabled, setDynamicEnabled] = useState((problem?.dynamic_score?.decay_per_solve ?? 0) > 0)
   const [minScore, setMinScore] = useState(String(problem?.dynamic_score?.min_score ?? 60))
   const [decay, setDecay] = useState(String(problem?.dynamic_score?.decay_per_solve ?? 5))
   const [battleRule, setBattleRule] = useState(String(problem?.battle_rule ?? BATTLE_RULES[0]))
   const [formError, setFormError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
+  const useDynamicScore = !isBattle && dynamicEnabled
   const { errors, validate } = useFormValidation(() => ({
     item: itemRef === '' ? '请选择这道赛题引用的题目' : null,
     score: Number.isInteger(Number(score)) && Number(score) > 0
       ? null : '分值需要是大于 0 的整数',
     seq: Number.isInteger(Number(seq)) && Number(seq) > 0
       ? null : '序号需要是大于 0 的整数',
-    minScore: dynamicEnabled && (
+    minScore: useDynamicScore && (
       !Number.isInteger(Number(minScore)) || Number(minScore) <= 0 || Number(minScore) > Number(score)
     ) ? '最低分需要是正整数且不超过题目分值' : null,
-    decay: dynamicEnabled && (!Number.isInteger(Number(decay)) || Number(decay) <= 0)
+    decay: useDynamicScore && (!Number.isInteger(Number(decay)) || Number(decay) <= 0)
       ? '每队衰减需要是大于 0 的整数' : null,
   }))
 
@@ -262,7 +227,7 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
     ? [ContentType.CONTEST_PROBLEM]
     : [ContentType.CONTEST_PROBLEM, ContentType.THEORY_QUESTION]
 
-  const entryRoles = useMemo(() => battleEntryRoles(Number(battleRule) as BattleRule), [battleRule])
+  const entryRoles = battleEntryRoles(Number(battleRule) as BattleRule)
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -278,12 +243,10 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
         item_version: itemVersion,
         score: scoreValue,
         seq: seqValue,
-        // 动态分与对抗配置按结构化字段组装,不接受用户手写 JSON
-        dynamic_score: dynamicEnabled
+        dynamic_score: useDynamicScore
           ? { min_score: Number(minScore), decay_per_solve: Number(decay) }
           : undefined,
         battle_rule: isBattle ? rule : undefined,
-        battle_config: isBattle ? battleRuntimeConfig(rule) : undefined,
       }
 
       setFormError(undefined)
@@ -302,7 +265,7 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
       battleRule,
       contest.id,
       decay,
-      dynamicEnabled,
+      useDynamicScore,
       editing,
       isBattle,
       itemRef,
@@ -378,55 +341,57 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
               </FormField>
             </div>
 
-            <div className="flex flex-col gap-3 rounded-md bg-surface-hover p-4">
-              <Checkbox
-                checked={dynamicEnabled}
-                label="按通过队数递减分值(动态分)"
-                onCheckedChange={(checked) => setDynamicEnabled(checked === true)}
-              />
-              {dynamicEnabled ? (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <FormField
-                    label="每队衰减"
-                    htmlFor="problem-decay"
-                    required
-                    error={errors.decay}
-                    helper="每有一支队伍通过,后续通过者的得分下降这么多"
-                  >
-                    <Input
-                      id="problem-decay"
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={decay}
-                      invalid={Boolean(errors.decay)}
-                      onBlur={() => validate(['decay'])}
-                      onChange={(event) => setDecay(event.target.value)}
-                    />
-                  </FormField>
-                  <FormField
-                    label="最低分"
-                    htmlFor="problem-min-score"
-                    required
-                    error={errors.minScore}
-                    helper="衰减到这个分数后不再下降"
-                  >
-                    <Input
-                      id="problem-min-score"
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={minScore}
-                      invalid={Boolean(errors.minScore)}
-                      onBlur={() => validate(['minScore'])}
-                      onChange={(event) => setMinScore(event.target.value)}
-                    />
-                  </FormField>
-                </div>
-              ) : (
-                <p className="text-sm text-ink-sub">不开启则所有通过的队伍都得满分。</p>
-              )}
-            </div>
+            {!isBattle ? (
+              <div className="flex flex-col gap-3 rounded-md bg-surface-hover p-4">
+                <Checkbox
+                  checked={dynamicEnabled}
+                  label="按通过队数递减分值(动态分)"
+                  onCheckedChange={(checked) => setDynamicEnabled(checked === true)}
+                />
+                {dynamicEnabled ? (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <FormField
+                      label="每队衰减"
+                      htmlFor="problem-decay"
+                      required
+                      error={errors.decay}
+                      helper="每有一支队伍通过,后续通过者的得分下降这么多"
+                    >
+                      <Input
+                        id="problem-decay"
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={decay}
+                        invalid={Boolean(errors.decay)}
+                        onBlur={() => validate(['decay'])}
+                        onChange={(event) => setDecay(event.target.value)}
+                      />
+                    </FormField>
+                    <FormField
+                      label="最低分"
+                      htmlFor="problem-min-score"
+                      required
+                      error={errors.minScore}
+                      helper="衰减到这个分数后不再下降"
+                    >
+                      <Input
+                        id="problem-min-score"
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={minScore}
+                        invalid={Boolean(errors.minScore)}
+                        onBlur={() => validate(['minScore'])}
+                        onChange={(event) => setMinScore(event.target.value)}
+                      />
+                    </FormField>
+                  </div>
+                ) : (
+                  <p className="text-sm text-ink-sub">不开启则所有通过的队伍都得满分。</p>
+                )}
+              </div>
+            ) : null}
 
             {isBattle ? (
               <div className="flex flex-col gap-4 rounded-md bg-surface-hover p-4">
@@ -442,7 +407,6 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
                   />
                 </FormField>
 
-                {/* 入场角色与回放方式由规则决定,故只呈现结果不给重复输入(改规则即改这两项) */}
                 <DescriptionList
                   dense
                   items={[

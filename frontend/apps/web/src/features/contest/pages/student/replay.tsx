@@ -1,23 +1,7 @@
-// 对局回放 · 时空回溯器(学生沉浸态,/student/contests/:contestId/replay)。
-//
-// 这是阶段 5 的创新②:把本队的对抗历程做成一条可以拖回去的时间轴,并在选定的一局里
-// 继续按链上动作逐帧回放。为什么这样做 —— 对抗赛的结果是一串对局,每局都改变积分与名次;
-// 学生看到的却只有一个当前分数,不知道是哪一版参战物、在哪一局、被哪一步链上操作打穿的。
-// 于是把时间本身做成可操作对象:
-//   外层游标拖到任一时刻 → 按**那一刻之前已结束的对局**重算当时战绩、积分与生效参战物;
-//   内层游标拖到某一步   → 按**归档里已执行到的动作**画出攻防拓扑并让链上日志流增长。
-//
-// 状态一律由记录重算,不插值、不补帧(对齐清单 §6.13)。积分变化取对局自带的评分明细
-// (delta/before/after 都是后端写下的事实),不在前端另算一套。
-//
-// 逐帧轨迹走「读取引用 → 签发授权 → 统一文件服务取件」,不把对象存储地址交给浏览器。
-// 服务端回放窗口会提供本队方向与当局生效参战物摘要;逐帧轨迹仍以归档的 initial_state
-// 为准。未取件前如实说明细粒度拓扑暂不可用,不拿猜出来的角色先画一个。
-//
-// 三区分工遵守规范 §7.1:左=当时的战绩与榜单(有界状态)、中=拓扑与两级回溯条(主体,不滚动)、
-// 右=链上日志流(无界序列)。
+// 学生对局回放：按服务端时间窗回溯战绩，授权取件后展示链上轨迹。
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { useParams } from 'react-router'
 import { Clock, Download, History, LoaderCircle, Swords, TriangleAlert, Trophy } from 'lucide-react'
 import {
@@ -28,6 +12,7 @@ import {
   type BattleReplayWindow,
   type BattleReplayWindowItem,
   type LadderRank,
+  type PaginatedResponse,
 } from '@chaimir/api-client'
 import {
   Badge,
@@ -41,7 +26,9 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { AppStatusScreen } from '../../../../components/AppStatusScreen'
+import { ResourceError } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import type { AsyncResourceState } from '../../../../hooks/useAsyncResource'
 import { useImmersive } from '../../../../layouts/immersive/context'
 import { downloadAttachment } from '../../../../utils/downloadAttachment'
 import { formatDateTime } from '../../../../utils/formatters'
@@ -56,9 +43,7 @@ import {
 } from '../../components/BattleTracePanels'
 import { CONTEST_LADDER_PREVIEW_SIZE } from '../../queryLimits'
 
-/**
- * StudentContestReplayPage 取回本队对局与参战记录。
- */
+/** StudentContestReplayPage 加载本队回放时间窗与当前榜单。 */
 export default function StudentContestReplayPage() {
   const { contestId = '' } = useParams<{ contestId: string }>()
   const { exit } = useImmersive()
@@ -125,8 +110,9 @@ export default function StudentContestReplayPage() {
 
   return (
     <Rewinder
+      key={replay.page}
       window={replay.data}
-      ranks={ladder.data?.list ?? []}
+      ladder={<LadderSection resource={ladder} pending={replay.data.pending} />}
       page={replay.page}
       pageSize={replay.pageSize}
       onPageChange={replay.setPage}
@@ -135,107 +121,69 @@ export default function StudentContestReplayPage() {
 }
 
 interface RewinderProps {
-  window: {
-    list: BattleReplayWindowItem[]
-    total: number
-    page: number
-    size: number
-    pending: number
-    checkpoint: {
-      wins: number
-      losses: number
-      draws: number
-      rating_delta: number
-      rating: number
-    }
-  }
-  ranks: LadderRank[]
+  window: BattleReplayWindow
+  ladder: ReactNode
   page: number
   pageSize: number
   onPageChange: (page: number) => void
 }
 
-/**
- * Rewinder 渲染时间轴并按游标重算当时状态。
- */
-function Rewinder({ window, ranks, page, pageSize, onPageChange }: RewinderProps) {
+/** Rewinder 按游标展示历史战绩和选定对局的轨迹。 */
+function Rewinder({ window, ladder, page, pageSize, onPageChange }: RewinderProps) {
   const { title, exit } = useImmersive()
 
-  // 回放窗口由服务端按完成时间和本队视角生成,不从通用分页切片重新猜测身份或历史。
   const timeline = window.list
   const timelineStart = (page - 1) * pageSize
 
-  // 游标:指向时间轴上的第几局(0 表示开局之前,也就是还没打过)
+  // 游标为零时显示当前窗口之前的检查点。
   const [cursor, setCursor] = useState(timeline.length)
-
-  // 切换服务端时间窗后默认停在该窗口的最新一局。
-  useEffect(() => {
-    setCursor(timeline.length)
-  }, [page, timeline.length])
 
   const played = timeline.slice(0, cursor)
   const currentItem = cursor > 0 ? timeline[cursor - 1] : undefined
   const currentMatch = currentItem?.match
+  const currentMatchId = currentMatch?.id
 
-  const standing = useMemo(
-    () => recomputeStanding(played, window.checkpoint),
-    [played, window.checkpoint]
-  )
-  const activeEntry = currentItem?.active_entry
+  const standing = recomputeStanding(played, window.checkpoint)
+  const entry = currentItem?.entry
 
-  const failedIndexes = useMemo(
-    () =>
-      timeline.reduce<number[]>((indexes, item, index) => {
-        if (index < cursor && outcomeOf(item) === 'lose') indexes.push(timelineStart + index)
-        return indexes
-      }, []),
-    [cursor, timeline, timelineStart]
-  )
+  const failedIndexes = timeline.flatMap((item, index) =>
+    index < cursor && outcomeOf(item) === 'lose' ? [timelineStart + index] : [])
+  const attackAnchors = new Set(timeline.flatMap((item, index) => attackLandedAt(item) ? [index] : []))
 
-  // 攻击锚点:本队为攻方且获胜,或本队为守方且失利 —— 两种情况都意味着这一局攻方得手。
-  // 角色取「那一刻生效的参战物」,分不出角色时不标锚点(与其猜一个红刻度,不如不给)。
-  const attackAnchors = useMemo(
-    () =>
-      new Set(
-        timeline.reduce<number[]>((indexes, item, index) => {
-          if (attackLandedAt(item)) indexes.push(index)
-          return indexes
-        }, [])
-      ),
-    [timeline]
-  )
+  const [trace, setTrace] = useState<TraceState>({ loading: false, step: 0 })
+  const activeTrace = trace.matchId === currentMatchId ? trace : { loading: false, step: 0 }
+  const step = activeTrace.step
+  function setStep(next: number | ((current: number) => number)) {
+    setTrace((previous) => {
+      if (previous.matchId !== currentMatchId || !previous.archive) return previous
+      return { ...previous, step: typeof next === 'function' ? next(previous.step) : next }
+    })
+  }
 
-  // 逐帧轨迹:每换一局都重新取件(授权是一次性短时凭据,不跨局缓存)
-  const [trace, setTrace] = useState<TraceState>({ loading: false })
-  const [step, setStep] = useState(0)
-
-  useEffect(() => {
-    setTrace({ loading: false })
-    setStep(0)
-  }, [currentMatch?.id])
-
-  const loadTrace = useCallback(async () => {
-    if (!currentMatch) return
-    setTrace({ loading: true })
+  async function loadTrace() {
+    if (!currentMatchId) return
+    const pending: TraceState = { loading: true, matchId: currentMatchId, step: 0 }
+    setTrace(pending)
     try {
-      const archive = await readBattleReplayArchive(currentMatch.id)
-      setTrace({ loading: false, archive })
-      // 取件后直接停在最后一步:先给完整结果,再让用户往回拖
-      setStep(archive.actions.length)
+      const archive = await readBattleReplayArchive(currentMatchId)
+      // 只完成本次请求；较晚发起的请求和游标不受迟到响应影响。
+      setTrace((previous) => previous === pending
+        ? { ...pending, loading: false, archive, step: archive.actions.length }
+        : previous)
     } catch (error) {
-      setTrace({
-        loading: false,
-        error: userFacingErrorMessage(error, '这一局的轨迹没有读到,请稍后重试。'),
-      })
+      setTrace((previous) => previous === pending
+        ? { ...pending, loading: false, error: userFacingErrorMessage(error, '这一局的轨迹没有读到,请稍后重试。') }
+        : previous)
     }
-  }, [currentMatch])
+  }
 
-  const [topbarError, setTopbarError] = useState<string>()
-  const topbarDownload = useReplayDownload(setTopbarError)
+  const [topbarError, setTopbarError] = useState<{ matchId: string; message: string }>()
+  const topbarDownload = useReplayDownload((message) => {
+    if (currentMatchId) setTopbarError({ matchId: currentMatchId, message })
+  })
+  const downloadError = topbarError?.matchId === currentMatchId ? topbarError?.message : undefined
 
-  // 时间轴的方向键(设计 §7.2 C):←/→ 按局回溯,Shift + ←/→ 在已读取的轨迹里逐帧回溯。
-  // 两条游标都只是本地重算,按住不放连续移动;可用条件与底栏按钮、滑条的边界一致。
-  const actionCount = trace.archive?.actions.length
+  const actionCount = activeTrace.archive?.actions.length
   const timelineShortcuts: WorkbenchShortcut[] = [
     {
       key: 'ArrowLeft',
@@ -295,8 +243,8 @@ function Rewinder({ window, ranks, page, pageSize, onPageChange }: RewinderProps
             />
           }
           cta={
-            <div className="flex items-center gap-2">
-              {topbarError ? <span className="hidden text-xs text-on-dark-danger md:inline">{topbarError}</span> : null}
+            <div className="flex flex-wrap items-center gap-2">
+              {downloadError ? <span role="alert" className="text-xs text-on-dark-danger">{downloadError}</span> : null}
               <Button
                 variant="primary"
                 size="sm"
@@ -305,7 +253,7 @@ function Rewinder({ window, ranks, page, pageSize, onPageChange }: RewinderProps
                 disabled={!currentMatch?.replay_available}
                 title={currentMatch?.replay_available ? undefined : '这一局没有留下轨迹记录'}
                 onClick={() => {
-                  if (!currentMatch) return
+                  if (!currentMatchId) return
                   setTopbarError(undefined)
                   void topbarDownload.download(currentMatch.id)
                 }}
@@ -319,11 +267,10 @@ function Rewinder({ window, ranks, page, pageSize, onPageChange }: RewinderProps
       left={
         <SituationPanel
           standing={standing}
-          activeEntry={activeEntry}
+          entry={entry}
           globalCursor={timelineStart + cursor}
           total={window.total}
-          ranks={ranks}
-          pending={window.pending}
+          ladder={ladder}
         />
       }
       leftLabel="当时的战绩与榜单"
@@ -334,17 +281,17 @@ function Rewinder({ window, ranks, page, pageSize, onPageChange }: RewinderProps
           attackAnchors={attackAnchors}
           onCursorChange={setCursor}
           currentMatch={currentMatch}
-          archive={trace.archive}
+          archive={activeTrace.archive}
           step={step}
           onStepChange={setStep}
         />
       }
       right={
         <ChainLogStream
-          archive={trace.archive}
+          archive={activeTrace.archive}
           step={step}
-          loading={trace.loading}
-          error={trace.error}
+          loading={activeTrace.loading}
+          error={activeTrace.error}
           available={currentMatch?.replay_available === true}
           onLoad={() => void loadTrace()}
         />
@@ -358,7 +305,7 @@ function Rewinder({ window, ranks, page, pageSize, onPageChange }: RewinderProps
               <span>
                 {currentMatch
                   ? `回溯到 ${formatDateTime(currentMatch.finished_at ?? '')}`
-                  : '回溯到开赛之前'}
+                  : timelineStart > 0 ? '回溯到当前窗口开始之前' : '回溯到开赛之前'}
               </span>
               <span>
                 第 {timelineStart + cursor}/{window.total} 局
@@ -419,31 +366,25 @@ function Rewinder({ window, ranks, page, pageSize, onPageChange }: RewinderProps
   )
 }
 
-/** Outcome 是本队在一局里的结果。 */
 type Outcome = 'win' | 'lose' | 'draw' | 'unknown'
 
-/** TraceState 是当前这一局逐帧轨迹的取件状态。 */
 interface TraceState {
+  matchId?: string
   loading: boolean
+  step: number
   archive?: BattleReplayArchive
-  /** 用户向失败文案;技术原因只进控制台之外的错误链,不上界面 */
   error?: string
 }
 
-/**
- * attackLandedAt 判断这一局「攻方是否得手」,用于时间轴上的攻击锚点。
- * 判据只用事实:本队为攻方且获胜、或本队为守方且失利 —— 两者都说明攻击成功。
- * 那一刻的本队角色取生效的参战物;角色或胜负分不出来时回 false,不给猜出来的红刻度。
- */
+/** attackLandedAt 标记攻方获胜或守方失利；角色未知时不标记。 */
 function attackLandedAt(item: BattleReplayWindowItem): boolean {
-  const role = item.active_entry?.role
+  const role = item.entry.role
   if (role !== BattleRole.ATTACK && role !== BattleRole.DEFENSE) return false
   const outcome = outcomeOf(item)
   if (outcome === 'unknown' || outcome === 'draw') return false
   return role === BattleRole.ATTACK ? outcome === 'win' : outcome === 'lose'
 }
 
-/** Standing 是某一时刻重算出来的战绩。 */
 interface Standing {
   win: number
   lose: number
@@ -454,21 +395,17 @@ interface Standing {
   ratingDelta: number
 }
 
-/**
- * recomputeStanding 按已打完的对局重算战绩与积分。
- * 积分取对局记录里后端写下的赛后评分,净变化按每局的本队增量累加 ——
- * 不在前端重算 ELO,那会与服务端产生第二套算法。
- */
+/** recomputeStanding 累加胜负和净变化，积分直接读取服务端赛后记录。 */
 function recomputeStanding(
   played: BattleReplayWindowItem[],
-  checkpoint: { wins: number; losses: number; draws: number; rating_delta: number; rating: number }
+  checkpoint: BattleReplayWindow['checkpoint']
 ): Standing {
   const standing: Standing = {
     win: checkpoint.wins,
     lose: checkpoint.losses,
     draw: checkpoint.draws,
     ratingDelta: checkpoint.rating_delta,
-    rating: checkpoint.rating || undefined,
+    rating: checkpoint.wins + checkpoint.losses + checkpoint.draws > 0 ? checkpoint.rating : undefined,
   }
   for (const item of played) {
     const outcome = outcomeOf(item)
@@ -483,15 +420,15 @@ function recomputeStanding(
     standing.ratingDelta += delta
     const after =
       item.my_side === 'a'
-        ? (item.match.score_delta?.rating_a_after ?? 0)
-        : (item.match.score_delta?.rating_b_after ?? 0)
-    if (after !== 0) standing.rating = after
+        ? item.match.score_delta?.rating_a_after
+        : item.match.score_delta?.rating_b_after
+    if (after !== undefined) standing.rating = after
   }
   return standing
 }
 
 /** outcomeOf 使用服务端确定的本队方向,不从当前页参战物猜测。 */
-function outcomeOf(item: BattleReplayWindowItem): Outcome {
+function outcomeOf(item: Pick<BattleReplayWindowItem, 'match' | 'my_side'>): Outcome {
   const match = item.match
   if (match.result === undefined) return 'unknown'
   if (match.result === BattleResult.DRAW) return 'draw'
@@ -499,53 +436,44 @@ function outcomeOf(item: BattleReplayWindowItem): Outcome {
   return won ? 'win' : 'lose'
 }
 
-/** matchTime 取一局的时间刻度:优先结束时间,缺失时退到匹配时间。 */
 interface SituationPanelProps {
   standing: Standing
-  activeEntry?: BattleReplayWindowItem['active_entry']
+  entry?: BattleReplayWindowItem['entry']
   globalCursor: number
   total: number
-  ranks: LadderRank[]
-  pending: number
+  ladder: ReactNode
 }
 
-/**
- * SituationPanel 是左辅助区:当时的战绩、当时生效的参战物、当前天梯与待打对局。
- * 这些都是**有界状态**,按规范 §7.1 的状态与事件分流留在辅助区;
- * 无界的链上动作序列在右侧事件流,不在这里重复一份。
- */
+/** SituationPanel 组合历史战绩、参战物与当前榜单。 */
 function SituationPanel({
   standing,
-  activeEntry,
+  entry,
   globalCursor,
   total,
-  ranks,
-  pending,
+  ladder,
 }: SituationPanelProps) {
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
       <StandingSection
         standing={standing}
-        activeEntry={activeEntry}
+        entry={entry}
         cursor={globalCursor}
         total={total}
       />
-      <LadderSection ranks={ranks} pending={pending} />
+      {ladder}
     </div>
   )
 }
 
 interface StandingSectionProps {
   standing: Standing
-  activeEntry?: BattleReplayWindowItem['active_entry']
+  entry?: BattleReplayWindowItem['entry']
   cursor: number
   total: number
 }
 
-/**
- * StandingSection 渲染当时的战绩与当时生效的参战物。
- */
-function StandingSection({ standing, activeEntry, cursor, total }: StandingSectionProps) {
+/** StandingSection 展示游标处的战绩与参战物。 */
+function StandingSection({ standing, entry, cursor, total }: StandingSectionProps) {
   return (
     <>
       <section className="flex flex-col gap-2">
@@ -593,23 +521,23 @@ function StandingSection({ standing, activeEntry, cursor, total }: StandingSecti
       </section>
 
       <section className="flex flex-col gap-2">
-        <h3 className="text-xs font-medium text-on-dark-sub">当时生效的参战物</h3>
-        {activeEntry ? (
+        <h3 className="text-xs font-medium text-on-dark-sub">本局使用的参战物</h3>
+        {entry ? (
           <div className="flex flex-col gap-1 rounded-md border border-dark-line bg-dark-surface p-2">
             <span className="text-sm text-on-dark">
-              第 {activeEntry.version_no} 版 · {battleRoleLabel(activeEntry.role)}
+              第 {entry.version_no} 版 · {battleRoleLabel(entry.role)}
             </span>
             <span className="font-mono text-xs text-on-dark-sub">
-              {formatDateTime(activeEntry.submitted_at)} 提交
+              {formatDateTime(entry.submitted_at)} 提交
             </span>
           </div>
         ) : (
           <p className="text-xs text-on-dark-sub">
-            {cursor === 0 ? '开赛之前还没有参战物。' : '这一刻之前没有找到对应的参战记录。'}
+            选择一局后可查看本队实际使用的版本。
           </p>
         )}
         <p className="text-xs text-on-dark-faint">
-          换版本会改变后续对局的打法,把时间轴拖过版本更替的位置就能看出差别。
+          每局保留实际使用的版本，重新提交不会改变历史对局。
         </p>
       </section>
     </>
@@ -629,11 +557,7 @@ interface TimelineStageProps {
   onStepChange: (step: number) => void
 }
 
-/**
- * TimelineStage 是主舞台:攻防拓扑 + 两级回溯条(对局级 / 逐帧级)+ 这一局的事实。
- * 舞台永不滚动(规范 §7.1):两条回溯条与拓扑钉在上方,详情在下方自己滚 ——
- * 回溯条是这一台的主体,不能被局数或步数一多顶出视口。
- */
+/** TimelineStage 固定拓扑与回溯条，仅让对局详情独立滚动。 */
 function TimelineStage({
   timeline,
   cursor,
@@ -687,13 +611,13 @@ function TimelineStage({
                 <button
                   type="button"
                   onClick={() => onCursorChange(index + 1)}
-                  aria-label={`回溯到第 ${index + 1} 局${anchored ? ',这一局攻方得手' : ''}`}
+                  aria-label={`回溯到第 ${item.sequence} 局${anchored ? ',这一局攻方得手' : ''}`}
                   className={
                     'hit-target relative rounded-md border px-2 py-1 font-mono text-xs tabular-nums focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2 ' +
                     outcomeClass(outcome, reached)
                   }
                 >
-                  {index + 1}
+                  {item.sequence}
                   {/* 攻击锚点:颜色之外用一个上标记号,色弱用户同样能定位 */}
                   {anchored ? (
                     <span
@@ -747,12 +671,13 @@ function TimelineStage({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {currentMatch ? (
           <div className="flex flex-col gap-3">
-            <MatchDetail match={currentMatch} mySide={mySide} />
+            <MatchDetail key={currentMatch.id} match={currentMatch} mySide={mySide} />
             {archive ? <TraceAssertions archive={archive} /> : null}
           </div>
         ) : (
           <p className="text-sm text-on-dark-sub">
-            时间轴在开赛之前。往右拖或点一个局次,就能看到那一局发生了什么。
+            {timeline[0]?.sequence > 1 ? '时间轴在当前窗口开始之前。' : '时间轴在开赛之前。'}
+            往右拖或点一个局次,就能看到那一局发生了什么。
           </p>
         )}
       </div>
@@ -760,28 +685,22 @@ function TimelineStage({
   )
 }
 
-/**
- * useReplayDownload 下载一局的回放归档:每次重新签发一次性授权,再交给统一文件服务。
- * 顶栏主操作与「这一局」里的按钮共用,失败原因交给调用方就近显示。
- */
+/** useReplayDownload 每次签发取件授权，下载失败交给调用方显示。 */
 function useReplayDownload(onError: (message: string) => void) {
   const [downloading, setDownloading] = useState(false)
-  const download = useCallback(
-    async (matchId: string) => {
-      setDownloading(true)
-      try {
-        const grant = await api.contest.issueBattleReplayDownloadGrant(matchId)
-        const file = await api.storage.consumeGrant(grant.token)
-        downloadAttachment(file)
-        toast.success('回放归档已开始下载')
-      } catch (error) {
-        onError(userFacingErrorMessage(error, '回放下载没有完成,请稍后重试。'))
-      } finally {
-        setDownloading(false)
-      }
-    },
-    [onError],
-  )
+  async function download(matchId: string) {
+    setDownloading(true)
+    try {
+      const grant = await api.contest.issueBattleReplayDownloadGrant(matchId)
+      const file = await api.storage.consumeGrant(grant.token)
+      downloadAttachment(file)
+      toast.success('回放归档已开始下载')
+    } catch (error) {
+      onError(userFacingErrorMessage(error, '回放下载没有完成,请稍后重试。'))
+    } finally {
+      setDownloading(false)
+    }
+  }
   return { downloading, download }
 }
 
@@ -798,43 +717,22 @@ interface MatchDetailProps {
   mySide?: BattleReplayWindowItem['my_side']
 }
 
-/**
- * MatchDetail 渲染游标处这一局的事实,并提供归档回放的受控取件入口。
- */
+/** MatchDetail 展示对局事实和归档下载结果。 */
 function MatchDetail({ match, mySide }: MatchDetailProps) {
-  const [archived, setArchived] = useState<boolean>()
   const [checkError, setCheckError] = useState<string>()
   const { downloading, download } = useReplayDownload(setCheckError)
 
   const side = mySide
-  const outcome = side ? outcomeOf({ match, my_side: side, sequence: 0 }) : 'unknown'
-
-  /** verifyTrace 确认这一局的轨迹已归档且本队有权访问(后端按队伍归属校验)。 */
-  const verifyTrace = useCallback(async () => {
-    setCheckError(undefined)
-    try {
-      const ref = await api.contest.getBattleReplay(match.id)
-      setArchived(ref.available)
-    } catch (error) {
-      setArchived(false)
-      setCheckError(userFacingErrorMessage(error, '这一局的轨迹暂时确认不了。'))
-    }
-  }, [match.id])
-
-  useEffect(() => {
-    setArchived(undefined)
-    setCheckError(undefined)
-    if (match.replay_available) void verifyTrace()
-  }, [match.replay_available, verifyTrace])
+  const outcome = side ? outcomeOf({ match, my_side: side }) : 'unknown'
 
   const before =
     side === 'b'
-      ? (match.score_delta?.rating_b_before ?? 0)
-      : (match.score_delta?.rating_a_before ?? 0)
+      ? match.score_delta?.rating_b_before
+      : match.score_delta?.rating_a_before
   const after =
     side === 'b'
-      ? (match.score_delta?.rating_b_after ?? 0)
-      : (match.score_delta?.rating_a_after ?? 0)
+      ? match.score_delta?.rating_b_after
+      : match.score_delta?.rating_a_after
   const delta = side === 'b' ? (match.score_delta?.delta_b ?? 0) : (match.score_delta?.delta_a ?? 0)
 
   return (
@@ -873,43 +771,31 @@ function MatchDetail({ match, mySide }: MatchDetailProps) {
           term="结束时间"
           value={match.finished_at ? formatDateTime(match.finished_at) : '未记录'}
         />
-        <TimelineFact term="赛前积分" value={before !== 0 ? String(before) : '未记录'} />
+        <TimelineFact term="赛前积分" value={before !== undefined ? String(before) : '未记录'} />
         <TimelineFact
           term="赛后积分"
-          value={after !== 0 ? `${after}(${delta > 0 ? `+${delta}` : delta})` : '未记录'}
+          value={after !== undefined ? `${after}(${delta > 0 ? `+${delta}` : delta})` : '未记录'}
         />
       </dl>
 
       <div className="flex flex-wrap items-center gap-2">
         {match.replay_available ? (
-          archived === undefined ? (
-            <span className="text-xs text-on-dark-sub">正在确认这一局的轨迹…</span>
-          ) : archived ? (
-            <>
-              <Badge onDark tone="jade">
-                轨迹已归档
-              </Badge>
-              <Button
-                variant="on-dark"
-                size="sm"
-                leftIcon={Download}
-                loading={downloading}
-                onClick={() => {
-                  setCheckError(undefined)
-                  void download(match.id)
-                }}
-              >
-                下载回放归档
-              </Button>
-            </>
-          ) : (
-            <>
-              <span className="text-xs text-on-dark-danger">{checkError}</span>
-              <Button variant="on-dark" size="sm" onClick={() => void verifyTrace()}>
-                重新确认
-              </Button>
-            </>
-          )
+          <>
+            <Badge onDark tone="jade">轨迹已归档</Badge>
+            <Button
+              variant="on-dark"
+              size="sm"
+              leftIcon={Download}
+              loading={downloading}
+              onClick={() => {
+                setCheckError(undefined)
+                void download(match.id)
+              }}
+            >
+              下载回放归档
+            </Button>
+            {checkError ? <span role="alert" className="text-xs text-on-dark-danger">{checkError}</span> : null}
+          </>
         ) : (
           <span className="text-xs text-on-dark-sub">这一局没有留下轨迹记录。</span>
         )}
@@ -929,15 +815,13 @@ function TimelineFact({ term, value }: { term: string; value: string }) {
 }
 
 interface LadderSectionProps {
-  ranks: LadderRank[]
+  resource: AsyncResourceState<PaginatedResponse<LadderRank>>
   pending: number
 }
 
-/**
- * LadderSection 展示当前天梯与还没打完的对局数。
- * 榜单是「现在」的,不随时间轴回溯 —— 后端只存当前投影,回溯它会变成前端编造。
- */
-function LadderSection({ ranks, pending }: LadderSectionProps) {
+/** LadderSection 展示当前榜单与待处理对局，不推算未留存的历史排名。 */
+function LadderSection({ resource, pending }: LadderSectionProps) {
+  const ranks = resource.data?.list ?? []
   return (
     <>
       <section className="flex flex-col gap-2">
@@ -945,7 +829,16 @@ function LadderSection({ ranks, pending }: LadderSectionProps) {
           <Trophy aria-hidden="true" className="size-4 text-accent" />
           <h2 className="text-sm font-medium text-on-dark">当前天梯</h2>
         </div>
-        {ranks.length === 0 ? (
+        {resource.status === 'loading' ? (
+          <p role="status" className="text-xs text-on-dark-sub">正在读取榜单…</p>
+        ) : resource.status === 'error' ? (
+          <ResourceError
+            onDark
+            message={resource.error?.message ?? '榜单暂时读不到，请重新加载。'}
+            traceId={resource.error?.traceId}
+            onRetry={resource.reload}
+          />
+        ) : ranks.length === 0 ? (
           <p className="text-xs text-on-dark-sub">还没有队伍上榜。</p>
         ) : (
           <ol className="flex flex-col gap-1">

@@ -1,15 +1,7 @@
 # 本文件定义前端单 SPA 静态资源服务镜像,在构建阶段产出四角色共用的 React 应用。
-# 构建与运行基座都由 images/build-images.ps1 注入不可变引用,禁止裸 tag 构建。
+# 构建与运行基座由构建入口按 digest 解析。
 ARG NODE_BUILDER_IMAGE=invalid.invalid/base/node-builder:required
 ARG NGINX_RUNTIME_IMAGE=invalid.invalid/runtime/nginx:required
-ARG VITE_API_BASE_URL
-ARG VITE_WS_BASE_URL
-ARG VITE_API_TIMEOUT_MS
-ARG VITE_RUNTIME_SELFTEST_POLL_INTERVAL_MS
-ARG VITE_RUNTIME_SELFTEST_POLL_TIMEOUT_MS
-ARG VITE_SIM_WORKER_COMMAND_TIMEOUT_MS
-ARG VITE_SIM_STEP_INTERVAL_MS
-ARG CHAIMIR_FRONTEND_SOURCE_DIGEST=unknown
 FROM ${NODE_BUILDER_IMAGE} AS builder
 
 ARG HTTP_PROXY

@@ -7,7 +7,6 @@ import type { TenantOption } from '@chaimir/api-client'
 export interface PendingTenantLogin {
   tenants: TenantOption[]
   remember: boolean
-  returnPath?: string
   method:
     | { type: 'phone'; phone: string; password: string }
     | { type: 'sms'; phone: string; code: string }

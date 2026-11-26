@@ -1,23 +1,19 @@
-// sandbox service_chain_exec 文件实现声明式命令驱动的 L2 链能力。
 package sandbox
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
 )
 
-// execChainCapability 通过运行时镜像内受控 helper 执行 deploy/tx/query/reset,避免动态加载任意插件代码。
 type execChainCapability struct {
-	orchestrator   Orchestrator
-	timeoutSeconds int
+	orchestrator Orchestrator
 }
 
 // Deploy 调用运行时声明的部署命令,stdin/stdout 均为 JSON 对象。
@@ -43,41 +39,25 @@ func (c execChainCapability) Reset(ctx context.Context, sb Sandbox, runtime Runt
 
 // runJSON 统一执行 capability 命令,限制超时并把 stderr 仅作为内部错误链保存。
 func (c execChainCapability) runJSON(ctx context.Context, sb Sandbox, runtime Runtime, spec CapabilityCommandSpec, payload map[string]any) (map[string]any, error) {
-	if c.orchestrator == nil || !workload.ValidNonShellCommand(spec.Command) {
+	if c.orchestrator == nil || !workload.ValidNonShellCommand(spec.Command) || spec.TimeoutSeconds <= 0 {
 		return nil, apperr.ErrSandboxCapabilityUnavailable
 	}
 	stdin, err := jsonx.AnyBytes(payload, apperr.ErrSandboxContractRequestInvalid)
 	if err != nil {
 		return nil, err
 	}
-	runCtx, cancel := context.WithTimeout(ctx, c.commandTimeout(spec))
+	runCtx, cancel := context.WithTimeout(ctx, time.Duration(spec.TimeoutSeconds)*time.Second)
 	defer cancel()
 	stdout, stderr, err := c.orchestrator.Exec(runCtx, sb.Namespace, strings.TrimSpace(spec.ExecTarget), spec.Command, stdin, false)
 	if err != nil {
 		return nil, sandboxExecFailure(apperr.ErrSandboxChainFailed, err, stderr)
 	}
-	if len(bytes.TrimSpace(stdout)) == 0 {
-		return map[string]any{}, nil
-	}
 	var out map[string]any
 	if err := jsonx.DecodeStrict(stdout, &out); err != nil {
 		return nil, fmt.Errorf("链能力输出不是 JSON 对象: %w", err)
 	}
+	if out == nil {
+		return nil, errors.New("链能力未返回 JSON 对象")
+	}
 	return out, nil
-}
-
-// commandTimeout 计算单个链能力命令超时,优先使用动作声明,否则使用平台环境配置。
-func (c execChainCapability) commandTimeout(spec CapabilityCommandSpec) time.Duration {
-	seconds := spec.TimeoutSeconds
-	if seconds <= 0 {
-		var ok bool
-		seconds, ok = intx.Int32(c.timeoutSeconds)
-		if !ok {
-			return 0
-		}
-	}
-	if seconds <= 0 {
-		seconds = 1
-	}
-	return time.Duration(seconds) * time.Second
 }

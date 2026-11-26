@@ -1,10 +1,4 @@
-// 备份记录(平台侧栏,/platform-admin/backups)。设计 §7.6:
-// 顶部一行「最近一次成功备份:N 小时前 · 大小」(超过 48 小时没有成功用警示色);状态分段(带数字,写进地址);
-// 表格列为开始时间、类型、状态、耗时、快照大小(耗时由开始和结束时间算出)。
-// 「已成功 / 已失败 / 进行中」指标条与健康判断卡去掉(与分段计数重复)。
-//
-// 备份由受控运维任务执行(定时或运维手动触发),平台端只读结果:从浏览器发起备份意味着把带凭据的集群链路
-// 暴露给前端,所以这里没有触发按钮。
+// 只读备份记录与最近成功时间；备份执行归受控运维任务。
 
 import { Save } from 'lucide-react'
 import { BackupStatus, type BackupRecord } from '@chaimir/api-client'
@@ -19,7 +13,7 @@ import {
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { ResourceState } from '../../../../components/ResourceState'
+import { ResourceError, ResourceState } from '../../../../components/ResourceState'
 import {
   useAsyncResource,
   usePagedResource,
@@ -28,17 +22,17 @@ import {
 import { segmentCounts } from '../../../../utils/facets'
 import { formatDateTimeSeconds, formatDuration, formatFileSize } from '../../../../utils/formatters'
 import { backupStatusLabel, backupTypeLabel } from '../../../../utils/labels/admin'
+import { RESOURCE_LOAD_FAILED_MESSAGE } from '../../../../utils/userFacingError'
 import { backupFreshness } from '../../backupFreshness'
 import { backupStatusTone } from '../../statusPresentation'
 
 /** 地址参数:status 分段(默认全部);页码在 page */
 const BACKUPS_QUERY = {
-  status: { defaultValue: 'all', allowed: ['all', 'running', 'succeeded', 'failed'] },
+  status: { defaultValue: 'all', allowed: ['all', 'succeeded', 'failed'] },
 } as const
 
 const STATUS_SEGMENTS = [
   { value: 'all', label: '全部' },
-  { value: 'running', label: '进行中', status: BackupStatus.RUNNING },
   { value: 'succeeded', label: '已成功', status: BackupStatus.SUCCEEDED },
   { value: 'failed', label: '已失败', status: BackupStatus.FAILED },
 ] as const
@@ -179,7 +173,13 @@ function LatestBackupLine({
   if (resource.status === 'loading')
     return <Skeleton variant="line" width="half" className="mb-4" />
   if (resource.status === 'error') {
-    return <p className="mb-4 text-sm text-ink-sub">最近一次成功备份暂时读不到。</p>
+    return (
+      <ResourceError
+        message={resource.error?.message ?? RESOURCE_LOAD_FAILED_MESSAGE}
+        traceId={resource.error?.traceId}
+        onRetry={resource.reload}
+      />
+    )
   }
   const latest = resource.data?.list[0]
   if (!latest) {
@@ -202,11 +202,10 @@ function LatestBackupLine({
 }
 
 /**
- * durationText 备份耗时,由开始和结束时间算出;还没结束的写进行中。
+ * durationText 根据真实起止时间计算备份耗时。
  * 秒级完成的备份写「不足 1 分钟」:通用时长文案把 0 秒当成没有记录,这里 0 秒是真的很快。
  */
 function durationText(record: BackupRecord): string {
-  if (!record.finished_at) return '进行中'
   const seconds = Math.round(
     (new Date(record.finished_at).getTime() - new Date(record.started_at).getTime()) / 1000
   )

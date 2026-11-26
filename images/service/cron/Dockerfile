@@ -1,6 +1,6 @@
 # 本文件构建 Chaimir 受控定时任务镜像,包含 cron 二进制和 PostgreSQL 官方备份客户端。
 ARG GO_BUILDER_IMAGE=invalid.invalid/base/go-builder:required
-ARG PG_CLIENT_IMAGE=invalid.invalid/middleware/postgres:required
+ARG PG_CLIENT_IMAGE=invalid.invalid/infra/postgres:required
 
 FROM ${GO_BUILDER_IMAGE} AS builder
 

@@ -37,12 +37,13 @@ type SimBackendAdapterConfig struct {
 type SimBackendConfig struct {
 	NamespacePrefix        string
 	PodReadyTimeoutSeconds int
-	StdioAdapters          []SimBackendAdapterConfig
+	// SessionLeaseDurationSeconds 是跨后端副本互斥同一会话资源的租约有效期。
+	SessionLeaseDurationSeconds int
+	StdioAdapters               []SimBackendAdapterConfig
 	// PackageRunnerAdapterCode 是扩展包通用运行器能力编号,服务端按作者类型自动绑定给
 	// 教师/第三方包,教师无从选择;它必须存在于 StdioAdapters 中,否则扩展接入整条链路不可用。
 	PackageRunnerAdapterCode string
-	// MaxConcurrentSessionsPerTenant 限定单租户同时活跃的隔离执行会话数。
-	// 一个会话一个 Pod,没有这道闸门循环建会话可耗尽节点。
+	// MaxConcurrentSessionsPerTenant 分别限制可用隔离会话和实际环境，回放及预览也占环境容量。
 	MaxConcurrentSessionsPerTenant int
 	// PreviewPollIntervalSeconds 是隔离预览任务的轮询间隔。
 	PreviewPollIntervalSeconds int

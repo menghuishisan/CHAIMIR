@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/crypto"
 	"chaimir/pkg/privacy"
 )
@@ -12,38 +13,44 @@ import (
 // MaskedValue 是响应中展示已配置敏感值的统一用户向文案。
 const MaskedValue = "已配置"
 
-// Protect 递归加密 map 中带凭据语义的字符串字段。
-func Protect(cipher *crypto.Cipher, value map[string]any, label string) (map[string]any, error) {
+// Protect 加密新凭据；占位值只能沿用 stored 同一路径的服务端原值，新建传 nil。
+func Protect(cipher *crypto.Cipher, value, stored map[string]any, label string) (map[string]any, error) {
 	if value == nil {
 		return map[string]any{}, nil
+	}
+	if encrypted, _ := value["encrypted"].(bool); encrypted {
+		return nil, fmt.Errorf("%s 不接受客户端密文封装", label)
 	}
 	out := make(map[string]any, len(value))
 	for key, raw := range value {
 		if privacy.IsCredentialKey(key) {
 			text, ok := raw.(string)
-			if !ok {
-				protected, err := protectValue(cipher, raw, label)
+			if ok && text == MaskedValue {
+				previous, exists := stored[key]
+				oldText, isText := previous.(string)
+				if !exists || previous == nil || (isText && strings.TrimSpace(oldText) == "") {
+					return nil, fmt.Errorf("%s %s 没有可保留的凭据", label, key)
+				}
+				copy, err := jsonx.CloneObjectStrict(map[string]any{key: previous})
 				if err != nil {
 					return nil, err
 				}
-				out[key] = protected
+				out[key] = copy[key]
 				continue
 			}
-			if strings.TrimSpace(text) == "" {
-				out[key] = raw
+			if ok && strings.TrimSpace(text) != "" {
+				if cipher == nil {
+					return nil, fmt.Errorf("%s %s 缺少加密器", label, key)
+				}
+				encrypted, err := cipher.EncryptString(text)
+				if err != nil {
+					return nil, err
+				}
+				out[key] = map[string]any{"encrypted": true, "value": encrypted}
 				continue
 			}
-			if cipher == nil {
-				return nil, fmt.Errorf("%s %s 缺少加密器", label, key)
-			}
-			encrypted, err := cipher.EncryptString(text)
-			if err != nil {
-				return nil, err
-			}
-			out[key] = map[string]any{"encrypted": true, "value": encrypted}
-			continue
 		}
-		protected, err := protectValue(cipher, raw, label)
+		protected, err := protectValue(cipher, raw, stored[key], label)
 		if err != nil {
 			return nil, err
 		}
@@ -60,6 +67,10 @@ func Mask(value map[string]any) map[string]any {
 	out := make(map[string]any, len(value))
 	for key, raw := range value {
 		if privacy.IsCredentialKey(key) {
+			if text, ok := raw.(string); raw == nil || (ok && strings.TrimSpace(text) == "") {
+				out[key] = raw
+				continue
+			}
 			out[key] = MaskedValue
 			continue
 		}
@@ -85,14 +96,20 @@ func Reveal(cipher *crypto.Cipher, value map[string]any, label string) (map[stri
 }
 
 // protectValue 递归处理任意 JSON 值,让数组中的配置对象也复用同一敏感字段加密口径。
-func protectValue(cipher *crypto.Cipher, raw any, label string) (any, error) {
+func protectValue(cipher *crypto.Cipher, raw, stored any, label string) (any, error) {
 	switch v := raw.(type) {
 	case map[string]any:
-		return Protect(cipher, v, label)
+		previous, _ := stored.(map[string]any)
+		return Protect(cipher, v, previous, label)
 	case []any:
+		previous, _ := stored.([]any)
 		out := make([]any, 0, len(v))
-		for _, item := range v {
-			protected, err := protectValue(cipher, item, label)
+		for index, item := range v {
+			var old any
+			if index < len(previous) {
+				old = previous[index]
+			}
+			protected, err := protectValue(cipher, item, old, label)
 			if err != nil {
 				return nil, err
 			}

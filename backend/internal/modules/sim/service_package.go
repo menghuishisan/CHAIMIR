@@ -3,12 +3,12 @@ package sim
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"strings"
+	"time"
 
-	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/storage"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
 )
@@ -97,14 +97,11 @@ func (s *Service) ListPackageVersions(ctx context.Context, code string) ([]SimPa
 	return out, nil
 }
 
-// SubmitPackage 上传仿真包、执行静态校验并创建审核记录。
-//
-// 执行位置与运行能力在此派生而非由请求提供:教师提交的包是外部代码,恒在隔离容器内执行
-// (见 docs/04-仿真可视化引擎/02-架构设计.md §8),绑定平台的扩展包运行器能力。
-// 请求结构里没有这两个字段,因此不存在"客户端声明了一个平台无法运行的执行位置"这种状态。
+// SubmitPackage 校验教师包并创建审核记录。扩展包固定使用平台的隔离运行器。
 func (s *Service) SubmitPackage(ctx context.Context, tenantID, accountID int64, req SubmitPackageRequest, input BundleInput) (SimPackageSubmissionResponse, error) {
 	req = normalizePackageRequest(req)
-	if err := validatePackageRequest(req, accountID); err != nil {
+	scale, err := validatePackageRequest(req, accountID)
+	if err != nil {
 		return SimPackageSubmissionResponse{}, err
 	}
 	if err := s.ensurePackageRunnerAvailable(); err != nil {
@@ -114,13 +111,14 @@ func (s *Service) SubmitPackage(ctx context.Context, tenantID, accountID int64, 
 		return SimPackageSubmissionResponse{}, err
 	}
 	packageID := s.ids.Generate()
-	stored, err := s.storeBundle(ctx, tenantID, accountID, packageID, input, req)
+	stored, err := s.prepareBundle(ctx, tenantID, accountID, packageID, input, req, scale)
 	if err != nil {
 		return SimPackageSubmissionResponse{}, err
 	}
-	scale, err := decodeObject(req.ScaleLimit)
-	if err != nil {
-		return SimPackageSubmissionResponse{}, err
+	if err := s.uploadPlannedBundle(ctx, stored.ObjectRef, input); err != nil {
+		return SimPackageSubmissionResponse{}, apperr.AsAppError(storage.CompensateUpload(ctx, time.Duration(s.upload.CleanupTimeoutSeconds)*time.Second, err, false, func(ctx context.Context) error {
+			return s.discardPackageBundle(ctx, tenantID, packageID, stored.ObjectRef)
+		}))
 	}
 	pkg := Package{
 		ID: packageID, Code: req.Code, Version: req.Version, Name: req.Name, Category: req.Category,
@@ -130,53 +128,50 @@ func (s *Service) SubmitPackage(ctx context.Context, tenantID, accountID int64, 
 		InteractionSchema: stored.InteractionSchema, CodeTrace: stored.CodeTrace,
 		AuthorType: AuthorTeacher, AuthorID: accountID, Status: PackageStatusReviewing,
 	}
-	var created Package
-	var review Review
-	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+	var out SimPackageSubmissionResponse
+	var commitAttempted bool
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		if _, err := tx.GetPackageByCodeVersion(ctx, pkg.Code, pkg.Version); err == nil {
 			return apperr.ErrSimPackageVersionConflict
 		} else if !isNoRows(err) {
 			return apperr.ErrSimPackageInvalid.WithCause(err)
 		}
-		var err error
-		created, err = tx.CreatePackage(ctx, pkg)
+		created, err := tx.CreatePackage(ctx, pkg)
 		if err != nil {
 			return apperr.ErrSimPackageInvalid.WithCause(err)
 		}
-		review, err = tx.CreateReview(ctx, s.ids.Generate(), created.ID, accountID, stored.Report)
+		review, err := tx.CreateReview(ctx, s.ids.Generate(), created.ID, accountID, stored.Report)
 		if err != nil {
 			return apperr.ErrSimReviewStateInvalid.WithCause(err)
 		}
+		out.SimPackageResponse, err = packageToResponse(created)
+		if err != nil {
+			return err
+		}
+		out.Review, err = reviewToResponse(review)
+		if err != nil {
+			return err
+		}
+		if err := s.writeAuditFromContext(ctx, tenantID, "sim.package.submit", "sim_package", created.ID, map[string]any{"code": created.Code, "version": created.Version}); err != nil {
+			return err
+		}
+		commitAttempted = true
 		return nil
 	}); err != nil {
-		return SimPackageSubmissionResponse{}, err
+		err = storage.CompensateUpload(ctx, time.Duration(s.upload.CleanupTimeoutSeconds)*time.Second, err, commitAttempted, func(ctx context.Context) error {
+			return s.discardPackageBundle(ctx, tenantID, packageID, stored.ObjectRef)
+		})
+		return SimPackageSubmissionResponse{}, apperr.AsAppError(err)
 	}
-	if err := s.uploadPlannedBundle(ctx, stored.ObjectRef, input); err != nil {
-		if rollbackErr := s.markUploadFailed(ctx, created.ID, review.ID); rollbackErr != nil {
-			logging.ErrorContext(ctx, "sim package upload rollback failed", rollbackErr.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("package_id", created.ID), slog.Int64("review_id", review.ID))
-			return SimPackageSubmissionResponse{}, apperr.ErrSimBundleUnreadable.WithCause(errors.Join(err, rollbackErr))
-		}
-		return SimPackageSubmissionResponse{}, err
-	}
-	if err := s.writeAuditFromContext(ctx, tenantID, "sim.package.submit", "sim_package", created.ID, map[string]any{"code": created.Code, "version": created.Version}); err != nil {
-		return SimPackageSubmissionResponse{}, err
-	}
-	out, err := packageToResponse(created)
-	if err != nil {
-		return SimPackageSubmissionResponse{}, err
-	}
-	reviewOut, err := reviewToResponse(review)
-	if err != nil {
-		return SimPackageSubmissionResponse{}, err
-	}
-	return SimPackageSubmissionResponse{SimPackageResponse: out, Review: reviewOut}, nil
+	return out, nil
 }
 
 // UpdatePackage 更新草稿或退回包的新 bundle,并重新进入审核中。
 // 不改 compute/backend_adapter/author_type:更新一个包不改变它的作者,也就不该改变执行位置。
 func (s *Service) UpdatePackage(ctx context.Context, tenantID, accountID, packageID int64, req SubmitPackageRequest, input BundleInput) (SimPackageSubmissionResponse, error) {
 	req = normalizePackageRequest(req)
-	if err := validatePackageRequest(req, accountID); err != nil {
+	scale, err := validatePackageRequest(req, accountID)
+	if err != nil {
 		return SimPackageSubmissionResponse{}, err
 	}
 	if err := s.ensurePackageRunnerAvailable(); err != nil {
@@ -185,13 +180,14 @@ func (s *Service) UpdatePackage(ctx context.Context, tenantID, accountID, packag
 	if err := s.ensurePackageEditable(ctx, accountID, packageID, req.Code, req.Version); err != nil {
 		return SimPackageSubmissionResponse{}, err
 	}
-	stored, err := s.storeBundle(ctx, tenantID, accountID, packageID, input, req)
+	stored, err := s.prepareBundle(ctx, tenantID, accountID, packageID, input, req, scale)
 	if err != nil {
 		return SimPackageSubmissionResponse{}, err
 	}
-	scale, err := decodeObject(req.ScaleLimit)
-	if err != nil {
-		return SimPackageSubmissionResponse{}, err
+	if err := s.uploadPlannedBundle(ctx, stored.ObjectRef, input); err != nil {
+		return SimPackageSubmissionResponse{}, apperr.AsAppError(storage.CompensateUpload(ctx, time.Duration(s.upload.CleanupTimeoutSeconds)*time.Second, err, false, func(ctx context.Context) error {
+			return s.discardPackageBundle(ctx, tenantID, packageID, stored.ObjectRef)
+		}))
 	}
 	pkg := Package{
 		ID: packageID, Name: req.Name, Category: req.Category, ScaleLimit: scale,
@@ -199,41 +195,51 @@ func (s *Service) UpdatePackage(ctx context.Context, tenantID, accountID, packag
 		InteractionSchema: stored.InteractionSchema, CodeTrace: stored.CodeTrace,
 		Status: PackageStatusReviewing,
 	}
-	var updated Package
-	var review Review
-	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		var err error
-		updated, err = tx.UpdatePackageDraft(ctx, pkg)
+	var out SimPackageSubmissionResponse
+	var oldBundle string
+	var commitAttempted bool
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		existing, err := tx.GetPackageForUpdate(ctx, packageID)
+		if err != nil {
+			return lookupError(err, apperr.ErrSimPackageNotFound, apperr.ErrSimPackageQueryFailed)
+		}
+		if existing.AuthorID != accountID || existing.Code != req.Code || existing.Version != req.Version {
+			return apperr.ErrForbidden
+		}
+		oldBundle = existing.BundleKey
+		updated, err := tx.UpdatePackageDraft(ctx, pkg)
 		if err != nil {
 			return lookupError(err, apperr.ErrSimPackageUnavailable, apperr.ErrSimPackageQueryFailed)
 		}
-		review, err = tx.CreateReview(ctx, s.ids.Generate(), updated.ID, accountID, stored.Report)
+		review, err := tx.CreateReview(ctx, s.ids.Generate(), updated.ID, accountID, stored.Report)
 		if err != nil {
 			return apperr.ErrSimReviewStateInvalid.WithCause(err)
 		}
+		out.SimPackageResponse, err = packageToResponse(updated)
+		if err != nil {
+			return err
+		}
+		out.Review, err = reviewToResponse(review)
+		if err != nil {
+			return err
+		}
+		if err := s.writeAuditFromContext(ctx, tenantID, "sim.package.update", "sim_package", updated.ID, map[string]any{"code": updated.Code, "version": updated.Version}); err != nil {
+			return err
+		}
+		commitAttempted = true
 		return nil
 	}); err != nil {
-		return SimPackageSubmissionResponse{}, err
+		err = storage.CompensateUpload(ctx, time.Duration(s.upload.CleanupTimeoutSeconds)*time.Second, err, commitAttempted, func(ctx context.Context) error {
+			return s.discardPackageBundle(ctx, tenantID, packageID, stored.ObjectRef)
+		})
+		return SimPackageSubmissionResponse{}, apperr.AsAppError(err)
 	}
-	if err := s.uploadPlannedBundle(ctx, stored.ObjectRef, input); err != nil {
-		if rollbackErr := s.markUploadFailed(ctx, updated.ID, review.ID); rollbackErr != nil {
-			logging.ErrorContext(ctx, "sim package upload rollback failed", rollbackErr.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("package_id", updated.ID), slog.Int64("review_id", review.ID))
-			return SimPackageSubmissionResponse{}, apperr.ErrSimBundleUnreadable.WithCause(errors.Join(err, rollbackErr))
+	if oldBundle != "" && oldBundle != stored.ObjectRef {
+		if err := s.discardPackageBundle(ctx, tenantID, packageID, oldBundle); err != nil {
+			logging.ErrorContext(ctx, "清理已替换仿真包对象失败", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("package_id", packageID))
 		}
-		return SimPackageSubmissionResponse{}, err
 	}
-	if err := s.writeAuditFromContext(ctx, tenantID, "sim.package.update", "sim_package", updated.ID, map[string]any{"code": updated.Code, "version": updated.Version}); err != nil {
-		return SimPackageSubmissionResponse{}, err
-	}
-	out, err := packageToResponse(updated)
-	if err != nil {
-		return SimPackageSubmissionResponse{}, err
-	}
-	reviewOut, err := reviewToResponse(review)
-	if err != nil {
-		return SimPackageSubmissionResponse{}, err
-	}
-	return SimPackageSubmissionResponse{SimPackageResponse: out, Review: reviewOut}, nil
+	return out, nil
 }
 
 // ensurePackageVersionAvailable 在执行昂贵 bundle 扫描前拒绝明显的版本冲突。
@@ -266,9 +272,9 @@ func (s *Service) ensurePackageEditable(ctx context.Context, accountID, packageI
 }
 
 // PackagePreview 返回作者自己的最新审核报告和包摘要,避免待审报告被任意教师窥探。
-func (s *Service) PackagePreview(ctx context.Context, accountID, packageID int64) (SimPackagePreviewResponse, error) {
+func (s *Service) PackagePreview(ctx context.Context, accountID, packageID int64) (SimPackageReviewDetailResponse, error) {
 	if accountID <= 0 {
-		return SimPackagePreviewResponse{}, apperr.ErrForbidden
+		return SimPackageReviewDetailResponse{}, apperr.ErrForbidden
 	}
 	var pkg Package
 	var review Review
@@ -290,17 +296,17 @@ func (s *Service) PackagePreview(ctx context.Context, accountID, packageID int64
 		}
 		return nil
 	}); err != nil {
-		return SimPackagePreviewResponse{}, err
+		return SimPackageReviewDetailResponse{}, err
 	}
 	pkgOut, err := packageToResponse(pkg)
 	if err != nil {
-		return SimPackagePreviewResponse{}, err
+		return SimPackageReviewDetailResponse{}, err
 	}
 	reviewOut, err := reviewToResponse(review)
 	if err != nil {
-		return SimPackagePreviewResponse{}, err
+		return SimPackageReviewDetailResponse{}, err
 	}
-	return SimPackagePreviewResponse{Package: pkgOut, Review: reviewOut}, nil
+	return SimPackageReviewDetailResponse{Package: pkgOut, Review: reviewOut}, nil
 }
 
 // ListReviews 返回审核分页列表。
@@ -371,10 +377,11 @@ func (s *Service) accountNames(ctx context.Context, accountIDs []int64) (map[int
 	return names, nil
 }
 
-// ApproveReview 通过审核并上架包,要求四项校验全部通过。
-func (s *Service) ApproveReview(ctx context.Context, reviewerID, reviewID int64) (SimReviewDecisionResponse, error) {
+// ApproveReview 在运行门禁通过后由平台人工审核上架，保留扫描风险提示。
+func (s *Service) ApproveReview(ctx context.Context, reviewerID, reviewID int64) (SimPackageReviewDetailResponse, error) {
 	var pkg Package
 	var review Review
+	var out SimPackageReviewDetailResponse
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
 		review, err = tx.GetReview(ctx, reviewID)
@@ -402,31 +409,29 @@ func (s *Service) ApproveReview(ctx context.Context, reviewerID, reviewID int64)
 		if err != nil {
 			return apperr.ErrSimPackageInvalid.WithCause(err)
 		}
-		return nil
+		out.Package, err = packageToResponse(pkg)
+		if err != nil {
+			return err
+		}
+		out.Review, err = reviewToResponse(review)
+		if err != nil {
+			return err
+		}
+		return s.writeAuditFromContext(ctx, 0, "sim.package.approve", "sim_package", pkg.ID, map[string]any{"code": pkg.Code, "version": pkg.Version})
 	}); err != nil {
-		return SimReviewDecisionResponse{}, err
+		return SimPackageReviewDetailResponse{}, err
 	}
-	if err := s.writeAuditFromContext(ctx, 0, "sim.package.approve", "sim_package", pkg.ID, map[string]any{"code": pkg.Code, "version": pkg.Version}); err != nil {
-		return SimReviewDecisionResponse{}, err
-	}
-	pkgOut, err := packageToResponse(pkg)
-	if err != nil {
-		return SimReviewDecisionResponse{}, err
-	}
-	reviewOut, err := reviewToResponse(review)
-	if err != nil {
-		return SimReviewDecisionResponse{}, err
-	}
-	return SimReviewDecisionResponse{Package: pkgOut, Review: reviewOut}, nil
+	return out, nil
 }
 
 // RejectReview 退回审核并写入意见。
-func (s *Service) RejectReview(ctx context.Context, reviewerID, reviewID int64, comment string) (SimReviewDecisionResponse, error) {
+func (s *Service) RejectReview(ctx context.Context, reviewerID, reviewID int64, comment string) (SimPackageReviewDetailResponse, error) {
 	if strings.TrimSpace(comment) == "" || len(comment) > 500 {
-		return SimReviewDecisionResponse{}, apperr.ErrSimReviewStateInvalid
+		return SimPackageReviewDetailResponse{}, apperr.ErrSimReviewStateInvalid
 	}
 	var pkg Package
 	var review Review
+	var out SimPackageReviewDetailResponse
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
 		review, err = tx.GetReview(ctx, reviewID)
@@ -448,54 +453,52 @@ func (s *Service) RejectReview(ctx context.Context, reviewerID, reviewID int64, 
 		if err != nil {
 			return apperr.ErrSimPackageInvalid.WithCause(err)
 		}
-		return nil
+		out.Package, err = packageToResponse(pkg)
+		if err != nil {
+			return err
+		}
+		out.Review, err = reviewToResponse(review)
+		if err != nil {
+			return err
+		}
+		return s.writeAuditFromContext(ctx, 0, "sim.package.reject", "sim_package", pkg.ID, map[string]any{"code": pkg.Code, "version": pkg.Version})
 	}); err != nil {
-		return SimReviewDecisionResponse{}, err
+		return SimPackageReviewDetailResponse{}, err
 	}
-	if err := s.writeAuditFromContext(ctx, 0, "sim.package.reject", "sim_package", pkg.ID, map[string]any{"code": pkg.Code, "version": pkg.Version}); err != nil {
-		return SimReviewDecisionResponse{}, err
-	}
-	pkgOut, err := packageToResponse(pkg)
-	if err != nil {
-		return SimReviewDecisionResponse{}, err
-	}
-	reviewOut, err := reviewToResponse(review)
-	if err != nil {
-		return SimReviewDecisionResponse{}, err
-	}
-	return SimReviewDecisionResponse{Package: pkgOut, Review: reviewOut}, nil
+	return out, nil
 }
 
 // ArchivePackage 下架已发布包,不影响历史回放。
 func (s *Service) ArchivePackage(ctx context.Context, packageID int64) (SimPackageResponse, error) {
-	var pkg Package
+	var out SimPackageResponse
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		existing, err := tx.GetPackageByID(ctx, packageID)
+		existing, err := tx.GetPackageForUpdate(ctx, packageID)
 		if err != nil {
 			return lookupError(err, apperr.ErrSimPackageNotFound, apperr.ErrSimPackageQueryFailed)
 		}
 		if existing.Status != PackageStatusPublished {
 			return apperr.ErrSimPackageUnavailable
 		}
-		pkg, err = tx.UpdatePackageStatus(ctx, packageID, PackageStatusArchived)
+		pkg, err := tx.UpdatePackageStatus(ctx, packageID, PackageStatusArchived)
 		if err != nil {
 			return apperr.ErrSimPackageInvalid.WithCause(err)
 		}
-		return nil
+		out, err = packageToResponse(pkg)
+		if err != nil {
+			return err
+		}
+		return s.writeAuditFromContext(ctx, 0, "sim.package.archive", "sim_package", pkg.ID, map[string]any{"code": pkg.Code, "version": pkg.Version})
 	}); err != nil {
 		return SimPackageResponse{}, err
 	}
-	if err := s.writeAuditFromContext(ctx, 0, "sim.package.archive", "sim_package", pkg.ID, map[string]any{"code": pkg.Code, "version": pkg.Version}); err != nil {
-		return SimPackageResponse{}, err
-	}
-	return packageToResponse(pkg)
+	return out, nil
 }
 
 // RepublishPackage 仅允许已下架包重新上架,不得绕过审核发布草稿或退回包。
 func (s *Service) RepublishPackage(ctx context.Context, packageID int64) (SimPackageResponse, error) {
-	var pkg Package
+	var out SimPackageResponse
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		existing, err := tx.GetPackageByID(ctx, packageID)
+		existing, err := tx.GetPackageForUpdate(ctx, packageID)
 		if err != nil {
 			return lookupError(err, apperr.ErrSimPackageNotFound, apperr.ErrSimPackageQueryFailed)
 		}
@@ -505,33 +508,22 @@ func (s *Service) RepublishPackage(ctx context.Context, packageID int64) (SimPac
 		if err := validateBackendAdapterConfig(existing.Compute, existing.BackendAdapter, existing.BackendConfig, s.backends); err != nil {
 			return err
 		}
-		pkg, err = tx.UpdatePackageStatus(ctx, packageID, PackageStatusPublished)
+		pkg, err := tx.UpdatePackageStatus(ctx, packageID, PackageStatusPublished)
 		if err != nil {
 			return apperr.ErrSimPackageInvalid.WithCause(err)
 		}
-		return nil
+		out, err = packageToResponse(pkg)
+		if err != nil {
+			return err
+		}
+		return s.writeAuditFromContext(ctx, 0, "sim.package.republish", "sim_package", pkg.ID, map[string]any{"code": pkg.Code, "version": pkg.Version})
 	}); err != nil {
 		return SimPackageResponse{}, err
 	}
-	if err := s.writeAuditFromContext(ctx, 0, "sim.package.republish", "sim_package", pkg.ID, map[string]any{"code": pkg.Code, "version": pkg.Version}); err != nil {
-		return SimPackageResponse{}, err
-	}
-	return packageToResponse(pkg)
+	return out, nil
 }
 
-// markUploadFailed 回滚业务可见状态,避免对象上传失败后留下可审核的包记录。
-func (s *Service) markUploadFailed(ctx context.Context, packageID, reviewID int64) error {
-	return s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		if _, err := tx.CompleteReview(ctx, reviewID, ReviewRejected, 0, "资源上传失败,请重新提交"); err != nil && !isNoRows(err) {
-			return err
-		}
-		_, err := tx.UpdatePackageStatus(ctx, packageID, PackageStatusRejected)
-		return err
-	})
-}
-
-// loadPackage 按 code/version 查询平台级包并归一错误码。
-func (s *Service) loadPackage(ctx context.Context, code, version string) (Package, error) {
+func (s *Service) loadRunnablePackage(ctx context.Context, code, version string) (Package, error) {
 	if !simCodePattern.MatchString(strings.TrimSpace(code)) || !semverPattern.MatchString(strings.TrimSpace(version)) {
 		return Package{}, apperr.ErrSimPackageInvalid
 	}
@@ -546,14 +538,14 @@ func (s *Service) loadPackage(ctx context.Context, code, version string) (Packag
 	}); err != nil {
 		return Package{}, err
 	}
-	return pkg, nil
-}
-
-// decodeObject 在进入数据库前把已通过 rules 校验的 JSON 对象转换为 map。
-func decodeObject(raw []byte) (map[string]any, error) {
-	out := map[string]any{}
-	if err := jsonx.DecodeStrict(raw, &out); err != nil {
-		return nil, apperr.ErrSimPackageInvalid.WithCause(err)
+	if pkg.Status != PackageStatusPublished {
+		return Package{}, apperr.ErrSimPackageUnavailable
 	}
-	return out, nil
+	if _, err := computeText(pkg.Compute); err != nil {
+		return Package{}, err
+	}
+	if err := validateBackendAdapterConfig(pkg.Compute, pkg.BackendAdapter, pkg.BackendConfig, s.backends); err != nil {
+		return Package{}, err
+	}
+	return pkg, nil
 }

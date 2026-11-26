@@ -28,15 +28,11 @@ func isNoRows(err error) bool {
 	return db.IsNoRows(err)
 }
 
-// isUniqueViolation 识别 PostgreSQL 唯一约束冲突,用于分享码随机碰撞的窄重试。
-func isUniqueViolation(err error) bool {
-	return db.IsUniqueViolation(err)
-}
-
 // TxStore 定义单个事务内可调用的 sim 数据访问能力。
 type TxStore interface {
 	GetPackageByCodeVersion(ctx context.Context, code, version string) (Package, error)
 	GetPackageByID(ctx context.Context, id int64) (Package, error)
+	GetPackageForUpdate(ctx context.Context, id int64) (Package, error)
 	ListPackages(ctx context.Context, status int16, category, keyword string, authorID int64, limit, offset int32) ([]Package, int64, error)
 	CountPackagesByCategory(ctx context.Context, status int16, keyword string, authorID int64) (map[string]int64, error)
 	CountPackagesByStatus(ctx context.Context, category, keyword string, authorID int64) (map[int16]int64, error)
@@ -54,6 +50,7 @@ type TxStore interface {
 	CountReviewsByResult(ctx context.Context) (map[int16]int64, error)
 	MergeValidationReport(ctx context.Context, reviewID, packageID int64, leaseToken string, report ValidationReport) (Review, error)
 	ReleasePreviewLease(ctx context.Context, reviewID, packageID int64, leaseToken string) (int64, error)
+	RenewPreviewLease(ctx context.Context, reviewID, packageID int64, leaseToken string, leaseUntil time.Time) (bool, error)
 	ExhaustPreviewAttempts(ctx context.Context, maxAttempts int32, staleBefore time.Time, report ValidationReport) ([]Review, error)
 	ClaimPackagesForPreview(ctx context.Context, limit, maxAttempts int32, staleBefore, leaseUntil time.Time, leaseToken string) ([]Package, error)
 	CompleteReview(ctx context.Context, id int64, result int16, reviewerID int64, comment string) (Review, error)
@@ -61,14 +58,15 @@ type TxStore interface {
 	GetSession(ctx context.Context, tenantID, sessionID int64) (Session, error)
 	GetSessionWithPackage(ctx context.Context, tenantID, sessionID int64) (SessionWithPackage, error)
 	CountActiveIsolatedSessions(ctx context.Context, tenantID int64) (int64, error)
-	UpdateSessionStatus(ctx context.Context, tenantID, sessionID int64, status int16) (Session, error)
+	LockIsolatedSessionCreation(ctx context.Context, tenantID int64) error
+	ArchiveSession(ctx context.Context, tenantID, sessionID int64) (Session, error)
 	UpdateSessionAuthorizedAccounts(ctx context.Context, tenantID, sessionID int64, sourceRef string, accountIDs []int64) (Session, error)
 	ArchiveSessionsByScopeRef(ctx context.Context, tenantID int64, scopeRef, sourceRef string) ([]Session, error)
 	GetLastAction(ctx context.Context, tenantID, sessionID int64) (Action, error)
+	LockSessionActions(ctx context.Context, tenantID, sessionID int64) error
 	GetActionBySeq(ctx context.Context, tenantID, sessionID int64, seq int32) (Action, error)
 	CreateAction(ctx context.Context, action Action) (Action, error)
 	ListActions(ctx context.Context, tenantID, sessionID int64) ([]Action, error)
-	UpsertCheckpoint(ctx context.Context, cp Checkpoint) (Checkpoint, error)
 	CreateShare(ctx context.Context, share Share) (Share, error)
 	GetShareByCode(ctx context.Context, code string) (Share, error)
 }
@@ -128,6 +126,15 @@ func (s *txStore) GetPackageByCodeVersion(ctx context.Context, code, version str
 // GetPackageByID 按 ID 查询包。
 func (s *txStore) GetPackageByID(ctx context.Context, id int64) (Package, error) {
 	row, err := s.q.GetSimPackageByID(ctx, id)
+	if err != nil {
+		return Package{}, err
+	}
+	return packageFromRow(row)
+}
+
+// GetPackageForUpdate 读取并锁定当前包，生命周期校验与对象替换使用同一版本。
+func (s *txStore) GetPackageForUpdate(ctx context.Context, id int64) (Package, error) {
+	row, err := s.q.GetSimPackageForUpdate(ctx, id)
 	if err != nil {
 		return Package{}, err
 	}
@@ -379,6 +386,14 @@ func (s *txStore) ReleasePreviewLease(ctx context.Context, reviewID, packageID i
 	return s.q.ReleaseSimPreviewLease(ctx, sqlcgen.ReleaseSimPreviewLeaseParams{ReviewID: reviewID, PackageID: packageID, LeaseToken: leaseToken})
 }
 
+// RenewPreviewLease 延长仍由当前 worker 持有的预览租约。
+func (s *txStore) RenewPreviewLease(ctx context.Context, reviewID, packageID int64, leaseToken string, leaseUntil time.Time) (bool, error) {
+	updated, err := s.q.RenewSimPreviewLease(ctx, sqlcgen.RenewSimPreviewLeaseParams{
+		ReviewID: reviewID, PackageID: packageID, LeaseToken: leaseToken, LeaseUntil: timex.RequiredTimestamptz(leaseUntil),
+	})
+	return updated == 1, err
+}
+
 // ExhaustPreviewAttempts 将最后一次预览在 worker 崩溃后遗留的过期租约收敛为受控终态报告。
 func (s *txStore) ExhaustPreviewAttempts(ctx context.Context, maxAttempts int32, staleBefore time.Time, report ValidationReport) ([]Review, error) {
 	raw, err := dynamicValidationReportJSON(report)
@@ -432,7 +447,7 @@ func (s *txStore) CreateSession(ctx context.Context, session Session) (Session, 
 	if err != nil {
 		return Session{}, err
 	}
-	row, err := s.q.CreateSimSession(ctx, sqlcgen.CreateSimSessionParams{ID: session.ID, TenantID: session.TenantID, PackageID: session.PackageID, SourceRef: session.SourceRef, ScopeRef: session.ScopeRef, OwnerAccountID: session.OwnerAccountID, SharedAccountIds: session.SharedAccountIDs, Seed: session.Seed, InitParams: raw, Compute: session.Compute, Status: session.Status})
+	row, err := s.q.CreateSimSession(ctx, sqlcgen.CreateSimSessionParams{ID: session.ID, TenantID: session.TenantID, PackageID: session.PackageID, SourceRef: session.SourceRef, ScopeRef: session.ScopeRef, OwnerAccountID: session.OwnerAccountID, SharedAccountIds: session.SharedAccountIDs, Seed: session.Seed, InitParams: raw, Compute: session.Compute})
 	if err != nil {
 		return Session{}, err
 	}
@@ -457,18 +472,27 @@ func (s *txStore) GetSessionWithPackage(ctx context.Context, tenantID, sessionID
 	return sessionWithPackageFromRow(row)
 }
 
-// CountActiveIsolatedSessions 统计本租户当前占用集群资源的隔离执行会话数,供并发闸门使用。
+// CountActiveIsolatedSessions 统计本租户预留并发额度的可用隔离会话。
 func (s *txStore) CountActiveIsolatedSessions(ctx context.Context, tenantID int64) (int64, error) {
 	return s.q.CountActiveIsolatedSimSessions(ctx, tenantID)
 }
 
-// UpdateSessionStatus 更新仿真会话状态。
-func (s *txStore) UpdateSessionStatus(ctx context.Context, tenantID, sessionID int64, status int16) (Session, error) {
-	row, err := s.q.UpdateSimSessionStatus(ctx, sqlcgen.UpdateSimSessionStatusParams{TenantID: tenantID, ID: sessionID, Status: status})
+func (s *txStore) LockIsolatedSessionCreation(ctx context.Context, tenantID int64) error {
+	return s.q.LockIsolatedSimSessionCreation(ctx, tenantID)
+}
+
+// ArchiveSession 只允许归档，重复调用不会恢复执行。
+func (s *txStore) ArchiveSession(ctx context.Context, tenantID, sessionID int64) (Session, error) {
+	row, err := s.q.ArchiveSimSession(ctx, sqlcgen.ArchiveSimSessionParams{TenantID: tenantID, ID: sessionID})
 	if err != nil {
 		return Session{}, err
 	}
 	return sessionFromRow(row)
+}
+
+func (s *txStore) LockSessionActions(ctx context.Context, tenantID, sessionID int64) error {
+	_, err := s.q.LockSimSessionActionSequence(ctx, sqlcgen.LockSimSessionActionSequenceParams{TenantID: tenantID, ID: sessionID})
+	return err
 }
 
 // UpdateSessionAuthorizedAccounts 替换仿真会话共享账号,同时再次校验稳定来源归属。
@@ -545,16 +569,6 @@ func (s *txStore) ListActions(ctx context.Context, tenantID, sessionID int64) ([
 	return items, nil
 }
 
-// UpsertCheckpoint 保存或覆盖检查点结果快照。
-func (s *txStore) UpsertCheckpoint(ctx context.Context, cp Checkpoint) (Checkpoint, error) {
-	row, err := s.q.UpsertSimCheckpoint(ctx, sqlcgen.UpsertSimCheckpointParams{ID: cp.ID, TenantID: cp.TenantID, SessionID: cp.SessionID, CheckpointID: cp.CheckpointID, Answer: cp.Answer, Achieved: cp.Achieved})
-	if err != nil {
-		return Checkpoint{}, err
-	}
-	return Checkpoint{ID: row.ID, TenantID: row.TenantID, SessionID: row.SessionID, CheckpointID: row.CheckpointID, Answer: row.Answer, Achieved: row.Achieved, CreatedAt: timex.FromTimestamptz(row.CreatedAt)}, nil
-}
-
-// CreateShare 创建分享码索引。
 func (s *txStore) CreateShare(ctx context.Context, share Share) (Share, error) {
 	row, err := s.q.CreateSimShare(ctx, sqlcgen.CreateSimShareParams{ID: share.ID, TenantID: share.TenantID, SessionID: share.SessionID, Code: share.Code, CreatedBy: share.CreatedBy, ExpireAt: timex.Timestamptz(share.ExpireAt)})
 	if err != nil {

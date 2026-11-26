@@ -1,10 +1,12 @@
-// admin service_dashboard 文件实现 M9 看板跨模块只读聚合辅助逻辑。
+// 通过各模块只读契约汇总平台和学校看板。
 package admin
 
 import (
 	"context"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
 
@@ -67,6 +69,68 @@ func (s *Service) aggregateTenantOperations(ctx context.Context, tenants []contr
 		out.MaxConcurrentSandbox += int64(q.MaxConcurrentSandbox)
 		out.MaxCPU += int64(q.MaxCPU)
 		out.MaxMemoryMB += int64(q.MaxMemoryMB)
+	}
+	return out, nil
+}
+
+// PlatformDashboard 聚合平台级看板。
+func (s *Service) PlatformDashboard(ctx context.Context) (DashboardDTO, error) {
+	if _, err := requirePlatform(ctx); err != nil {
+		return DashboardDTO{}, err
+	}
+	stats, err := s.stats.PlatformStats(ctx)
+	if err != nil {
+		return DashboardDTO{}, apperr.ErrAdminDashboardIdentityFailed.WithCause(err)
+	}
+	tenants, err := s.identity.ListTenants(ctx)
+	if err != nil {
+		return DashboardDTO{}, apperr.ErrAdminDashboardIdentityFailed.WithCause(err)
+	}
+	ops, err := s.aggregateTenantOperations(ctx, tenants)
+	if err != nil {
+		return DashboardDTO{}, err
+	}
+	return DashboardDTO{Scope: ScopeGlobal, TenantCount: stats.TenantCount, AccountCount: stats.AccountCount, TeacherCount: stats.TeacherCount, StudentCount: stats.StudentCount, ActiveAccountCount: stats.ActiveAccountCount, CourseCount: ops.CourseCount, ActiveCourseCount: ops.ActiveCourseCount, ExperimentCount: ops.ExperimentCount, ActiveInstanceCount: ops.ActiveInstanceCount, ContestCount: ops.ContestCount, ActiveContestCount: ops.ActiveContestCount, ActiveSandboxCount: ops.ActiveSandboxCount, PendingApplyCount: stats.PendingApplyCount, ResourceQuotaSnapshot: ops.ResourceQuotaSnapshot(), GeneratedAt: timex.Now()}, nil
+}
+
+// SchoolDashboard 聚合学校级看板。
+func (s *Service) SchoolDashboard(ctx context.Context) (DashboardDTO, error) {
+	id, err := s.requireTenantAdmin(ctx)
+	if err != nil {
+		return DashboardDTO{}, err
+	}
+	stats, err := s.stats.TenantStats(ctx, id.TenantID)
+	if err != nil {
+		return DashboardDTO{}, apperr.ErrAdminDashboardIdentityFailed.WithCause(err)
+	}
+	out := DashboardDTO{Scope: ScopeTenant, TenantID: ids.ID(id.TenantID), AccountCount: stats.AccountCount, TeacherCount: stats.TeacherCount, StudentCount: stats.StudentCount, ActiveAccountCount: stats.ActiveAccountCount, GeneratedAt: timex.Now()}
+	t, err := s.teaching.Stats(ctx, id.TenantID)
+	if err != nil {
+		return DashboardDTO{}, apperr.ErrAdminDashboardTeachingFailed.WithCause(err)
+	}
+	out.CourseCount = t.CourseCount
+	out.ActiveCourseCount = t.ActiveCourseCount
+	e, err := s.experiment.Stats(ctx, contracts.ExperimentStatsQuery{TenantID: id.TenantID})
+	if err != nil {
+		return DashboardDTO{}, apperr.ErrAdminDashboardExperimentFailed.WithCause(err)
+	}
+	out.ExperimentCount = e.ExperimentCount
+	out.ActiveInstanceCount = e.ActiveInstanceCount
+	c, err := s.contest.Stats(ctx, id.TenantID)
+	if err != nil {
+		return DashboardDTO{}, apperr.ErrAdminDashboardContestFailed.WithCause(err)
+	}
+	out.ContestCount = c.ContestCount
+	out.ActiveContestCount = c.ActiveContestCount
+	q, err := s.sandbox.Stats(ctx, id.TenantID)
+	if err != nil {
+		return DashboardDTO{}, apperr.ErrAdminDashboardSandboxFailed.WithCause(err)
+	}
+	out.ActiveSandboxCount = q.ActiveSandboxCount
+	out.ResourceQuotaSnapshot = &ResourceQuotaSnapshotDTO{
+		MaxConcurrentSandbox: int64(q.MaxConcurrentSandbox),
+		MaxCPU:               int64(q.MaxCPU),
+		MaxMemoryMB:          int64(q.MaxMemoryMB),
 	}
 	return out, nil
 }

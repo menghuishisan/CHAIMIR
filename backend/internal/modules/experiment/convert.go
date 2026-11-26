@@ -1,8 +1,8 @@
-// experiment convert 文件负责领域模型与 HTTP/contract DTO 之间的纯转换。
 package experiment
 
 import (
 	"fmt"
+	"maps"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
@@ -25,21 +25,26 @@ func teacherComponentConfigDTOFromModel(cfg ComponentConfig) TeacherComponentCon
 	for _, env := range cfg.Envs {
 		spec := env.CompositionSnapshot.Spec
 		out.Envs = append(out.Envs, TeacherEnvComponentDTO{
-			ID:                       env.ID,
-			Runtimes:                 cloneRuntimeRefs(spec.Runtimes),
-			WorkspaceRuntimeInstance: spec.WorkspaceRuntimeInstance,
-			Infra:                    cloneComponentRefs(spec.Infra),
-			Tools:                    cloneComponentRefs(spec.Tools),
-			Links:                    cloneCompositionLinks(spec.Links),
-			AccessProfile:            spec.AccessProfile,
-			InitAssets:               cloneCompositionInitAssets(spec.InitAssets),
-			CompositionDigest:        env.CompositionSnapshot.Digest,
-			InitCodeRef:              env.InitCodeRef,
-			InitScriptRef:            env.InitScriptRef,
-			KeepAlive:                env.KeepAlive,
-			SnapshotEnabled:          env.SnapshotEnabled,
-			KeepAliveMinutes:         env.KeepAliveMinutes,
-			SnapshotRetentionMinutes: env.SnapshotRetentionMinutes,
+			EnvComponentRequest: EnvComponentRequest{
+				ID:                       env.ID,
+				Runtimes:                 cloneRuntimeRefs(spec.Runtimes),
+				WorkspaceRuntimeInstance: spec.WorkspaceRuntimeInstance,
+				Infra:                    cloneComponentRefs(spec.Infra),
+				Tools:                    cloneComponentRefs(spec.Tools),
+				Links:                    cloneCompositionLinks(spec.Links),
+				AccessProfile:            spec.AccessProfile,
+				ResourceProfile:          maps.Clone(spec.ResourceProfile),
+				NetworkProfile:           maps.Clone(spec.NetworkProfile),
+				InitAssets:               cloneCompositionInitAssets(spec.InitAssets),
+				InitChainSteps:           cloneCompositionChainSteps(spec.InitChainSteps),
+				InitCodeRef:              env.InitCodeRef,
+				InitScriptRef:            env.InitScriptRef,
+				KeepAlive:                env.KeepAlive,
+				SnapshotEnabled:          env.SnapshotEnabled,
+				KeepAliveMinutes:         env.KeepAliveMinutes,
+				SnapshotRetentionMinutes: env.SnapshotRetentionMinutes,
+			},
+			CompositionDigest: env.CompositionSnapshot.Digest,
 		})
 	}
 	return out
@@ -51,6 +56,15 @@ func cloneCompositionInitAssets(items []contracts.CompositionInitAsset) []contra
 		return nil
 	}
 	return append([]contracts.CompositionInitAsset(nil), items...)
+}
+
+func cloneCompositionChainSteps(items []contracts.CompositionChainStep) []contracts.CompositionChainStep {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]contracts.CompositionChainStep, len(items))
+	copy(out, items)
+	return out
 }
 
 // applyStudentProgress 把本人进度合并到学生实验列表(返回新切片,不改动传入的列表);没开始过的实验不带进度。
@@ -162,7 +176,7 @@ func instanceDTOFromModel(item ExperimentInstance, checkpoints []CheckpointResul
 	out := InstanceDTO{ID: ids.ID(item.ID), ExperimentID: ids.ID(item.ExperimentID), OwnerAccountID: ids.ID(item.OwnerAccountID), GroupID: ids.ID(item.GroupID), SourceRef: item.SourceRef, Sandboxes: item.SandboxRefs, Sims: item.SimSessionRefs, Status: item.Status, Score: item.Score, StartedAt: item.StartedAt, FinishedAt: item.FinishedAt, LastActiveAt: item.LastActiveAt}
 	out.Checkpoints = make([]CheckpointDTO, 0, len(checkpoints))
 	for _, cp := range checkpoints {
-		out.Checkpoints = append(out.Checkpoints, CheckpointDTO{ID: cp.CheckpointID, JudgeTaskRef: cp.JudgeTaskRef, Passed: cp.Passed, Score: cp.Score, DetailRef: cp.DetailRef, BindingOutput: cp.BindingOutput})
+		out.Checkpoints = append(out.Checkpoints, checkpointDTOFromModel(cp))
 	}
 	if len(stages) > 0 {
 		out.Stages = stages[0]
@@ -170,9 +184,10 @@ func instanceDTOFromModel(item ExperimentInstance, checkpoints []CheckpointResul
 	return out
 }
 
-// groupDTOFromModel 转换小组和成员为 HTTP 输出。
-// profiles 是经 M1 契约批量解析的账号档案;取不到时给确定性占位而不是留空,
-// 让界面能解释「这个学生已离校」而不是显示一片空白(§8 文案面向用户)。
+func checkpointDTOFromModel(cp CheckpointResult) CheckpointDTO {
+	return CheckpointDTO{ID: cp.CheckpointID, JudgeTaskRef: cp.JudgeTaskRef, JudgeStatus: cp.JudgeStatus, Passed: cp.Passed, Score: cp.Score, DetailRef: cp.DetailRef, BindingOutput: cp.BindingOutput}
+}
+
 func groupDTOFromModel(item ExperimentGroup, profiles map[int64]contracts.AccountInfo) GroupDTO {
 	out := GroupDTO{ID: ids.ID(item.ID), ExperimentID: ids.ID(item.ExperimentID), Name: item.Name, CreatedAt: item.CreatedAt}
 	out.Members = make([]GroupMemberDTO, 0, len(item.Members))
@@ -196,20 +211,25 @@ func groupDTOWithSharedInstance(group ExperimentGroup, profiles map[int64]contra
 	return out
 }
 
-// reportDTOFromModel 转换报告为 HTTP 输出。
-// 提交者姓名与学号经 M1 账号契约解析后随报告下发:报告表只存 student_id,
-// 而批改界面必须显示是谁交的;取不到时给确定性占位而非空白。
 func reportDTOFromModel(item ExperimentReport, profiles map[int64]contracts.AccountInfo) ReportDTO {
 	profile, ok := profiles[item.StudentID]
 	if !ok {
 		profile = contracts.AccountInfo{Name: "已离校学生"}
 	}
-	return ReportDTO{ID: ids.ID(item.ID), InstanceID: ids.ID(item.InstanceID), StudentID: ids.ID(item.StudentID), StudentName: profile.Name, StudentNo: profile.No, ContentRef: item.ContentRef, ManualScore: item.ManualScore, Comment: item.Comment, Status: item.Status, SubmittedAt: item.SubmittedAt}
+	score, comment := reportGrade(item)
+	return ReportDTO{ID: ids.ID(item.ID), InstanceID: ids.ID(item.InstanceID), StudentID: ids.ID(item.StudentID), StudentName: profile.Name, StudentNo: profile.No, ManualScore: score, Comment: comment, Status: item.Status, SubmittedAt: item.SubmittedAt}
 }
 
-// studentReportDTOFromModel 转换学生本人可见的报告结果,不把 content_ref 下发到浏览器。
 func studentReportDTOFromModel(item ExperimentReport) StudentReportDTO {
-	return StudentReportDTO{ID: ids.ID(item.ID), InstanceID: ids.ID(item.InstanceID), ManualScore: item.ManualScore, Comment: item.Comment, Status: item.Status, SubmittedAt: item.SubmittedAt}
+	score, comment := reportGrade(item)
+	return StudentReportDTO{ID: ids.ID(item.ID), InstanceID: ids.ID(item.InstanceID), ManualScore: score, Comment: comment, Status: item.Status, SubmittedAt: item.SubmittedAt}
+}
+
+func reportGrade(item ExperimentReport) (*float64, string) {
+	if item.Status != ReportStatusGraded {
+		return nil, ""
+	}
+	return &item.ManualScore, item.Comment
 }
 
 // sandboxRefFromContract 提取 M2 沙箱摘要中工作台需要的稳定字段。

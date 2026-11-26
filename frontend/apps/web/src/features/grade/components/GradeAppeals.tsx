@@ -1,20 +1,6 @@
-// 成绩领域的申诉处理复用区块。
-//
-// 学生对课程成绩有异议时提交申诉,后端把申诉分配给授课教师或学校管理员处理。
-// 受理会解锁该课程已通过的成绩审核(教师随后可以改分并重新报送);驳回则维持原成绩。
-// 两种处理的后果不同,故各自说明,并要求写处理说明 —— 学生会看到这个结论。
-//
-// 归属:申诉是批改/成绩内页(对齐清单 §3.2),不进侧栏。
-// 批改中心和校管申诉页共享本组件，页面只提供各自的入口与壳层。
-// 后端 GET /appeals 在 teacher 组,学生侧不建申诉列表(§6.6)。
-//
-// 校管复用同一区块(校管也在 teacher 组里,能看全校),由调用方用 scope 显式声明范围,组件不判角色枚举:
-// school 范围能看全校申诉并拿到「重算绩点」(admin 组能力);teacher 范围只看自己授课课程的申诉。
-// 学生姓名、学号与课程名随申诉记录由服务端给出,不为解析名字拉取课程、成员或账号目录。
-// 设计 §7.5:状态计数(写进地址)+ 队列 + 详情;队列行显示学生姓名、课程名、申诉时间、理由摘要;
-// 详情显示完整理由与该课当前成绩,底部「驳回」「受理」各附后果说明与处理说明输入(学生可见)。
+// 教师与校管共用申诉队列和处理表单；权限由服务端核验。
 
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useState, type ReactNode } from 'react'
 import { ChevronLeft, CircleCheck, CircleX, RefreshCw, Scale } from 'lucide-react'
 import {
   GradeAppealStatus,
@@ -46,7 +32,7 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../app/api'
-import { ResourceState } from '../../../components/ResourceState'
+import { ResourceError, ResourceState } from '../../../components/ResourceState'
 import { useAsyncResource, usePagedResource, useReviewQueue, useUrlState } from '../../../hooks'
 import { segmentCounts } from '../../../utils/facets'
 import { collectAllPages } from '../../../utils/allPages'
@@ -108,14 +94,7 @@ export function GradeAppeals({ scope }: GradeAppealsProps) {
     <AccountNameText name={appeal.student_name} no={appeal.student_no} compact />
   )
 
-  /**
-   * 审阅队列族(§6.5.3 第 ⑤ 族):左队列右详情。
-   * 这一族的动作是「逐条处理完一批」而不是「找一条记录」,所以详情与处理表单常驻右侧、
-   * 键盘上下切条、处理完自动进下一条 —— 原先的五列表格 + 弹窗确认要求
-   * 「看行 → 开弹窗 → 关弹窗 → 再找下一行」,每条都要四次视线跳转。
-   */
-  // 队列数据:用 useMemo 稳住引用,否则每次渲染都是新数组,下方 useCallback 的依赖每帧都变
-  const list = useMemo(() => appeals.data?.list ?? [], [appeals.data])
+  const list = appeals.data?.list ?? []
   const [selectedId, setSelectedId] = useState<string>()
   /** <lg 走两级页面(§6.4.1 规则 4):当前在队列层还是详情层 */
   const [mobileView, setMobileView] = useState<'queue' | 'detail'>('queue')
@@ -276,16 +255,7 @@ interface AppealDetailPaneProps {
   onRecompute: () => void
 }
 
-/**
- * AppealDetailPane 是审阅队列族的右侧详情与处理表单(§6.5.3 第 ⑤ 族)。
- *
- * 处理表单**内联在详情里而不是弹窗**:这一族要的是「看完就处」的连续节奏,
- * 弹窗会把一条的处理拆成「开窗 → 填 → 关窗 → 回列表找下一条」四步;
- * 内联之后受理/驳回就在眼前,提交后由 onHandled 直接落到下一条待处理项。
- *
- * 受理与驳回共用一个说明输入:两者都要写给学生看的结论,分开两个框会让人以为要填两次。
- * key 绑 appeal.id 由调用方保证 —— 切换条目时输入框必须清空,否则上一条的说明会漂到下一条。
- */
+/** AppealDetailPane 按申诉编号挂载，切换条目时清空处理说明。 */
 function AppealDetailPane({
   appeal,
   student,
@@ -301,11 +271,11 @@ function AppealDetailPane({
   const { errors, validate } = useFormValidation(useCallback(() => ({
     comment: comment.trim() ? null : '请写下处理说明,学生会看到这段话',
   }), [comment]), appeal.id)
-  // 该课当前成绩:教师与校管都可以读学生的成绩明细(后端 canReadStudent),取全部课程后找这一门
+  // 当前课程成绩经 M6 读取，教师不读取学生的跨课程学业记录。
   const currentGrade = useAsyncResource(
     () =>
-      collectAllPages((params) => api.grade.studentGrades(appeal.student_id, params), PAGINATION_MAX_SIZE).then(
-        (list) => list.find((grade) => grade.course_id === appeal.course_id) ?? null,
+      collectAllPages((params) => api.teaching.listGrades(appeal.course_id, params), PAGINATION_MAX_SIZE).then(
+        (list) => list.find((grade) => grade.student_id === appeal.student_id) ?? null,
       ),
     [appeal.course_id, appeal.student_id],
     () => false,
@@ -358,12 +328,16 @@ function AppealDetailPane({
         <p className="whitespace-pre-wrap text-sm text-ink">{appeal.reason}</p>
       </div>
 
-      <p className="text-sm text-ink-sub">
+      {currentGrade.status === 'error' ? (
+        <ResourceError
+          message={currentGrade.error?.message ?? '暂时读不到当前成绩,请重试。'}
+          traceId={currentGrade.error?.traceId}
+          onRetry={currentGrade.reload}
+        />
+      ) : <p className="text-sm text-ink-sub">
         该课当前成绩:{' '}
         {currentGrade.status === 'loading' ? (
           '正在读取…'
-        ) : currentGrade.status === 'error' ? (
-          '暂时读不到'
         ) : currentGrade.data ? (
           <span className="font-medium tabular-nums text-ink">
             {formatScore(currentGrade.data.final_total)} 分 · {currentGrade.data.credits} 学分
@@ -371,7 +345,7 @@ function AppealDetailPane({
         ) : (
           '还没有成绩'
         )}
-      </p>
+      </p>}
 
       {appeal.result_comment ? (
         <div className="flex flex-col gap-1 rounded-md bg-surface-hover p-4">
@@ -384,7 +358,7 @@ function AppealDetailPane({
         <>
           <ul className="flex flex-col gap-1 text-sm text-ink-sub">
             <li>
-              <span className="font-medium text-ink">受理</span>:解锁这门课的成绩,由授课教师调分后重新报送学校审核。
+              <span className="font-medium text-ink">受理</span>:解锁这门课的成绩,由授课教师调分后由系统复核发布。
             </li>
             <li>
               <span className="font-medium text-ink">驳回</span>:维持原成绩,申诉结束。
@@ -396,22 +370,19 @@ function AppealDetailPane({
             htmlFor={`appeal-comment-${appeal.id}`}
             required
             helper="写清处理结论与依据,学生会看到这段话"
-            error={errors.comment ?? formError}
+            error={errors.comment}
           >
             <Textarea
               id={`appeal-comment-${appeal.id}`}
               value={comment}
               rows={4}
-              invalid={Boolean(errors.comment ?? formError)}
+              invalid={Boolean(errors.comment)}
               onBlur={() => void validate(['comment'])}
-              onChange={(event) => {
-                setComment(event.target.value)
-                setFormError(undefined)
-              }}
+              onChange={(event) => setComment(event.target.value)}
             />
           </FormField>
+          {formError ? <Callout tone="danger">{formError}</Callout> : null}
 
-          {/* 动作条贴详情片底边;<lg 由 QueueDetailLayout 钉到屏幕底部 */}
           <div className="mt-auto flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
             <Button
               variant="outline"
@@ -433,7 +404,7 @@ function AppealDetailPane({
         </>
       ) : (
         <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-line pt-4">
-          <span className="text-sm text-ink-sub">这条申诉已处理完。</span>
+          <span className="text-sm text-ink-sub">{appeal.status === GradeAppealStatus.ACCEPTED ? '这条申诉正在调分。' : '这条申诉已处理完。'}</span>
           {canRecompute && appeal.status === GradeAppealStatus.ACCEPTED ? (
             <Button variant="outline" leftIcon={RefreshCw} onClick={onRecompute}>
               重新计算绩点
@@ -517,7 +488,7 @@ function RecomputeModal({ appeal, courseName, onClose, onDone }: RecomputeModalP
                 label="重算学期"
                 htmlFor="recompute-semester"
                 required
-                error={errors.semester ?? formError}
+                error={errors.semester}
                 helper="选申诉课程所属的学期"
               >
                 <Select
@@ -528,16 +499,14 @@ function RecomputeModal({ appeal, courseName, onClose, onDone }: RecomputeModalP
                   }))}
                   value={semesterId}
                   disabled={working}
-                  invalid={Boolean(errors.semester ?? formError)}
+                  invalid={Boolean(errors.semester)}
                   placeholder="选择学期"
-                  onValueChange={(value) => {
-                    setSemesterId(value)
-                    setFormError(undefined)
-                  }}
+                  onValueChange={setSemesterId}
                 />
               </FormField>
             )}
           </ResourceState>
+          {formError ? <Callout tone="danger">{formError}</Callout> : null}
 
           <Callout tone="info">
             正常情况下教师改分会自动触发重算。这里是事件未到达时的补救,重复重算不会有副作用。

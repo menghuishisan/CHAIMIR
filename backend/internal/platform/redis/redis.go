@@ -1,4 +1,4 @@
-// redis 封装 Redis 客户端(缓存/会话/限频/计数)。
+// Package redis 提供缓存、会话和限频使用的 Redis 操作。
 package redis
 
 import (
@@ -32,14 +32,19 @@ func New(ctx context.Context, cfg config.RedisConfig) (*Client, error) {
 		return nil, fmt.Errorf("REDIS_PING_TIMEOUT_SECONDS 必须大于 0")
 	}
 	rdb := goredis.NewClient(&goredis.Options{
-		Addr:     fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
-		Password: cfg.Password,
-		DB:       cfg.DB,
+		Addr:                  fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+		Password:              cfg.Password,
+		DB:                    cfg.DB,
+		ContextTimeoutEnabled: true,
 	})
 	pingCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.PingTimeoutSeconds)*time.Second)
 	defer cancel()
 	if err := rdb.Ping(pingCtx).Err(); err != nil {
-		return nil, fmt.Errorf("redis 连通性检查失败: %w", err)
+		startupErr := fmt.Errorf("redis 连通性检查失败: %w", err)
+		if closeErr := rdb.Close(); closeErr != nil {
+			return nil, errors.Join(startupErr, fmt.Errorf("关闭 Redis 客户端失败: %w", closeErr))
+		}
+		return nil, startupErr
 	}
 	return &Client{rdb: rdb}, nil
 }
@@ -52,7 +57,7 @@ func (c *Client) Ping(ctx context.Context) error {
 	return c.rdb.Ping(ctx).Err()
 }
 
-// Close 释放 Redis 连接资源,由进程退出流程统一调用。
+// Close 释放连接。未初始化的客户端无需关闭。
 func (c *Client) Close() error {
 	if c == nil || c.rdb == nil {
 		return nil

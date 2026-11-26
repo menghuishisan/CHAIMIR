@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -60,15 +61,14 @@ type CompositionLink struct {
 	ConfigBinding   string `json:"config_binding"`
 }
 
-// CompositionInitAsset 是组合发布时绑定到某个 runtime 实例的已审核初始化归档。
-// 归档只保存对象存储引用和完整性约束，实际读取、租户归属校验和解包仍由 M2 启动阶段执行。
+// CompositionInitAsset 将追加归档绑定到运行时实例；租户编译只接受本租户引用。
+// 平台共享素材由已自检运行时清单带入，启动时校验实际内容摘要并安全解包。
 type CompositionInitAsset struct {
 	Name                  string `json:"name"`
 	SourceRef             string `json:"source_ref"`
 	TargetRuntimeInstance string `json:"target_runtime_instance"`
 	TargetDomain          string `json:"target_domain"`
-	ExpectedSHA256        string `json:"expected_sha256,omitempty"`
-	ApplyPhase            string `json:"apply_phase,omitempty"`
+	ExpectedSHA256        string `json:"expected_sha256"`
 }
 
 // SandboxCompositionSpec 是单个环境的唯一声明来源。
@@ -83,8 +83,30 @@ type SandboxCompositionSpec struct {
 	ResourceProfile          map[string]string         `json:"resource_profile,omitempty"`
 	NetworkProfile           map[string]any            `json:"network_profile,omitempty"`
 	InitAssets               []CompositionInitAsset    `json:"init_assets,omitempty"`
+	InitChainSteps           []CompositionChainStep    `json:"init_chain_steps,omitempty"`
 	InitCodeRef              string                    `json:"init_code_ref,omitempty"`
 	InitScriptRef            string                    `json:"init_script_ref,omitempty"`
+}
+
+// CompositionChainStep 是环境开放前执行的链初始化，随组合摘要冻结。
+type CompositionChainStep struct {
+	RuntimeInstance string         `json:"runtime_instance"`
+	Op              string         `json:"op"`
+	Payload         map[string]any `json:"payload,omitempty"`
+	Target          string         `json:"target,omitempty"`
+}
+
+// ChainRuntimeInstance 解析步骤或断言的目标链；省略时使用工作区，实例归属仍由 M2 校验。
+func ChainRuntimeInstance(raw map[string]any, workspace string) (string, error) {
+	value, exists := raw["runtime_instance"]
+	if !exists {
+		value = workspace
+	}
+	instance, ok := value.(string)
+	if !ok || strings.TrimSpace(instance) == "" {
+		return "", fmt.Errorf("runtime_instance 必须是非空字符串")
+	}
+	return strings.TrimSpace(instance), nil
 }
 
 // ImageClosureItem 是已编译快照锁定的镜像地址和版本。
@@ -162,7 +184,7 @@ func AppendPrivateSidecarImageClosure(snapshot *SandboxCompositionSnapshot) erro
 			PrepullHold:    sidecar.PrepullHold,
 		}
 		for _, mount := range sidecar.EphemeralMounts {
-			item.EphemeralMounts = append(item.EphemeralMounts, ImageClosureMount{Name: mount.Name, MountPath: mount.MountPath})
+			item.EphemeralMounts = append(item.EphemeralMounts, ImageClosureMount(mount))
 		}
 		if mergeImageClosureItem(snapshot.ImageClosure, item) {
 			continue
@@ -379,8 +401,12 @@ func normalizeComposition(spec SandboxCompositionSpec) SandboxCompositionSpec {
 	sort.Slice(out.Infra, func(i, j int) bool { return out.Infra[i].Code < out.Infra[j].Code })
 	sort.Slice(out.Tools, func(i, j int) bool { return out.Tools[i].Code < out.Tools[j].Code })
 	sort.Slice(out.Links, func(i, j int) bool {
-		left := out.Links[i].SourceComponent + "\x00" + out.Links[i].SourceEndpoint + "\x00" + out.Links[i].TargetComponent + "\x00" + out.Links[i].TargetEndpoint
-		right := out.Links[j].SourceComponent + "\x00" + out.Links[j].SourceEndpoint + "\x00" + out.Links[j].TargetComponent + "\x00" + out.Links[j].TargetEndpoint
+		key := func(link CompositionLink) string {
+			return strings.Join([]string{link.SourceComponent, link.SourceEndpoint, link.TargetComponent, link.TargetEndpoint,
+				link.ConfigBinding, link.Protocol, link.AccessScope, strconv.FormatBool(link.RequiredAtStart)}, "\x00")
+		}
+		left := key(out.Links[i])
+		right := key(out.Links[j])
 		return left < right
 	})
 	return out

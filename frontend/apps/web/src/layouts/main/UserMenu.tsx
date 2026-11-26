@@ -16,6 +16,7 @@ import {
 import { api } from '../../app/api'
 import { useSession } from '../../components/RoleGuard'
 import { clearLoginTokens } from '../../utils/authSession'
+import { errorDiagnostics } from '../../utils/userFacingError'
 import { userRolesLabel } from '../../utils/labels/identity'
 
 export interface UserMenuProps {
@@ -44,8 +45,11 @@ export function UserMenu({ profilePath, loginPath }: UserMenuProps) {
     setSigningOut(true)
     try {
       await api.identity.logout()
-    } catch {
-      // 服务端注销失败不阻断退出:本地令牌必须清除,否则界面停留在已登录状态
+    } catch (logoutError) {
+      console.warn('auth_logout_failed', {
+        operation: 'user_menu_logout',
+        error: errorDiagnostics(logoutError),
+      })
     } finally {
       clearLoginTokens()
       navigate(loginPath, { replace: true })

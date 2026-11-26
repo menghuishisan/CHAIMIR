@@ -4,7 +4,9 @@ package transfer
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/pagex"
@@ -17,12 +19,13 @@ import (
 
 // Store 描述统一导入导出中心可被服务层使用的持久化契约。
 type Store interface {
+	CountFailures(context.Context, contracts.AlertMetricQuery) (int64, error)
 	CreateTask(ctx context.Context, task Task) (Task, error)
 	GetTask(ctx context.Context, tenantID, taskID int64) (Task, error)
-	DeletePendingTask(ctx context.Context, tenantID, taskID int64) error
 	// ListTasks 返回当前页、总数与「按类型」分段计数(套用状态筛选,不套用类型筛选),三者同一事务读取
 	ListTasks(ctx context.Context, query ListTasksQuery) ([]Task, int64, pagex.FacetGroup, error)
 	ClaimTask(ctx context.Context, task Task) (Task, error)
+	RenewTaskLease(ctx context.Context, tenantID, taskID int64, leaseToken string, leaseUntil time.Time) (bool, error)
 	CompleteTask(ctx context.Context, task Task, leaseToken string) (Task, error)
 	FailTask(ctx context.Context, task Task, leaseToken string) (Task, error)
 }
@@ -122,20 +125,6 @@ func (s *store) GetTask(ctx context.Context, tenantID, taskID int64) (Task, erro
 	return out, nil
 }
 
-// DeletePendingTask 删除尚未被 worker 领取的任务，仅用于模块请求落库失败时的补偿。
-func (s *store) DeletePendingTask(ctx context.Context, tenantID, taskID int64) error {
-	if s.db == nil {
-		return fmt.Errorf("transfer store 缺少 database")
-	}
-	err := s.withTaskTx(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		return sqlcgen.New(tx).DeletePendingTransferTask(ctx, sqlcgen.DeletePendingTransferTaskParams{TenantID: tenantID, ID: taskID})
-	})
-	if err != nil {
-		return mapStoreError(err)
-	}
-	return nil
-}
-
 // ListTasks 查询当前账号名下的导入导出任务,并在同一事务内取回符合条件的总数。
 // 总数与当前页在同一事务读取:分两次请求容易在任务状态推进时给出自相矛盾的分页。
 func (s *store) ListTasks(ctx context.Context, query ListTasksQuery) ([]Task, int64, pagex.FacetGroup, error) {
@@ -213,6 +202,26 @@ func (s *store) ClaimTask(ctx context.Context, task Task) (Task, error) {
 	return out, nil
 }
 
+// RenewTaskLease 仅允许当前持有者延长仍有效的任务租约。
+func (s *store) RenewTaskLease(ctx context.Context, tenantID, taskID int64, leaseToken string, leaseUntil time.Time) (bool, error) {
+	if s.db == nil {
+		return false, fmt.Errorf("transfer store 缺少 database")
+	}
+	var renewed bool
+	err := s.withTaskTx(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := sqlcgen.New(tx).RenewTransferTaskLease(ctx, sqlcgen.RenewTransferTaskLeaseParams{
+			TenantID: tenantID, ID: taskID, LeaseToken: leaseToken,
+			LeaseUntil: timex.RequiredTimestamptz(leaseUntil),
+		})
+		if err != nil {
+			return err
+		}
+		renewed = rows > 0
+		return nil
+	})
+	return renewed, mapStoreError(err)
+}
+
 // CompleteTask 仅允许持有有效租约的 worker 提交产物。
 func (s *store) CompleteTask(ctx context.Context, task Task, leaseToken string) (Task, error) {
 	if s.db == nil {
@@ -261,13 +270,19 @@ func (s *store) FailTask(ctx context.Context, task Task, leaseToken string) (Tas
 	return out, nil
 }
 
-// withTaskTx 按任务租户边界选择平台事务或租户 RLS 事务。
+// withTaskTx 复用同数据库、同作用域的普通事务，无外层事务时自行提交。
 func (s *store) withTaskTx(ctx context.Context, tenantID int64, fn func(context.Context, pgx.Tx) error) error {
 	if tenantID < 0 {
 		return apperr.ErrTransferTaskInvalid
 	}
 	if tenantID == 0 {
+		if joined, err := s.db.WithAppTxIfPresent(ctx, fn); joined || err != nil {
+			return err
+		}
 		return s.db.WithAppTx(ctx, fn)
+	}
+	if joined, err := s.db.WithTenantTxIfPresent(ctx, tenantID, fn); joined || err != nil {
+		return err
 	}
 	return s.db.WithTenantTxID(ctx, tenantID, fn)
 }
@@ -292,4 +307,15 @@ func mapTransitionError(err error) error {
 		return apperr.ErrTransferTaskInvalid
 	}
 	return apperr.ErrTransferTaskInvalid.WithCause(err)
+}
+
+// CountFailures 读取单校窗口内最终失败任务，不把待重试任务当作失败。
+func (s *store) CountFailures(ctx context.Context, q contracts.AlertMetricQuery) (int64, error) {
+	var n int64
+	err := s.withTaskTx(ctx, q.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		n, err = sqlcgen.New(tx).CountFailedTransfers(ctx, sqlcgen.CountFailedTransfersParams{TenantID: q.TenantID, UpdatedAt: timex.RequiredTimestamptz(q.From), UpdatedAt_2: timex.RequiredTimestamptz(q.To)})
+		return err
+	})
+	return n, err
 }

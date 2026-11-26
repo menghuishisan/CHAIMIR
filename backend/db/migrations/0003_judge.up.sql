@@ -94,6 +94,7 @@ CREATE INDEX IF NOT EXISTS idx_judger_status ON judger(status, selftest_status);
 CREATE INDEX IF NOT EXISTS idx_judge_task_lease ON judge_task(status, lease_until) WHERE status = 2;
 CREATE INDEX IF NOT EXISTS idx_judge_event_outbox_lease ON judge_event_outbox(status, lease_until) WHERE status = 2;
 CREATE INDEX IF NOT EXISTS idx_judge_task_queue ON judge_task(tenant_id, status, priority DESC, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_judge_task_alert_window ON judge_task(tenant_id, updated_at DESC) WHERE status IN (3,4);
 CREATE INDEX IF NOT EXISTS idx_judge_task_submitter ON judge_task(tenant_id, submitter_tenant_id, submitter_id);
 CREATE INDEX IF NOT EXISTS idx_judge_task_owner ON judge_task(tenant_id, source_owner_id, source_ref);
 CREATE INDEX IF NOT EXISTS idx_judge_result_latest ON judge_result(tenant_id, task_id, version DESC);

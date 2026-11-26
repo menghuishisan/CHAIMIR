@@ -252,6 +252,10 @@ func (a teachingAPI) createChapter(c *gin.Context) {
 
 // updateChapter 绑定章节编辑请求。
 func (a teachingAPI) updateChapter(c *gin.Context) {
+	courseID, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
 	chapterID, ok := httpx.PathID(c, "cid")
 	if !ok {
 		return
@@ -260,17 +264,21 @@ func (a teachingAPI) updateChapter(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingChapterInvalid) {
 		return
 	}
-	out, err := a.svc.UpdateChapter(c.Request.Context(), chapterID, req)
+	out, err := a.svc.UpdateChapter(c.Request.Context(), courseID, chapterID, req)
 	httpx.Write(c, out, err)
 }
 
 // deleteChapter 删除章节。
 func (a teachingAPI) deleteChapter(c *gin.Context) {
+	courseID, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
 	id, ok := httpx.PathID(c, "cid")
 	if !ok {
 		return
 	}
-	httpx.Write(c, struct{}{}, a.svc.DeleteChapter(c.Request.Context(), id))
+	httpx.Write(c, struct{}{}, a.svc.DeleteChapter(c.Request.Context(), courseID, id))
 }
 
 // createLesson 绑定课时创建请求。
@@ -415,6 +423,10 @@ func (a teachingAPI) issueCourseCoverAccess(c *gin.Context) {
 
 // updateLesson 绑定课时编辑请求。
 func (a teachingAPI) updateLesson(c *gin.Context) {
+	chapterID, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
 	id, ok := httpx.PathID(c, "lid")
 	if !ok {
 		return
@@ -423,17 +435,21 @@ func (a teachingAPI) updateLesson(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingLessonInvalid) {
 		return
 	}
-	out, err := a.svc.UpdateLesson(c.Request.Context(), id, req)
+	out, err := a.svc.UpdateLesson(c.Request.Context(), chapterID, id, req)
 	httpx.Write(c, out, err)
 }
 
 // deleteLesson 删除课时。
 func (a teachingAPI) deleteLesson(c *gin.Context) {
+	chapterID, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
 	id, ok := httpx.PathID(c, "lid")
 	if !ok {
 		return
 	}
-	httpx.Write(c, struct{}{}, a.svc.DeleteLesson(c.Request.Context(), id))
+	httpx.Write(c, struct{}{}, a.svc.DeleteLesson(c.Request.Context(), chapterID, id))
 }
 
 // joinCourse 绑定学生邀请码入课请求。
@@ -504,7 +520,7 @@ func (a teachingAPI) createAssignment(c *gin.Context) {
 		return
 	}
 	var req AssignmentRequest
-	if !httpx.BindJSONKnownFieldsWithError(c, &req, apperr.ErrTeachingAssignmentInvalid) {
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingAssignmentInvalid) {
 		return
 	}
 	out, err := a.svc.CreateAssignment(c.Request.Context(), courseID, req)
@@ -518,7 +534,7 @@ func (a teachingAPI) updateAssignment(c *gin.Context) {
 		return
 	}
 	var req AssignmentRequest
-	if !httpx.BindJSONKnownFieldsWithError(c, &req, apperr.ErrTeachingAssignmentInvalid) {
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingAssignmentInvalid) {
 		return
 	}
 	out, err := a.svc.UpdateAssignment(c.Request.Context(), id, req)
@@ -566,7 +582,7 @@ func (a teachingAPI) saveDraft(c *gin.Context) {
 		return
 	}
 	var req DraftRequest
-	if !httpx.BindJSONKnownFieldsWithError(c, &req, apperr.ErrTeachingDraftInvalid) {
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingDraftInvalid) {
 		return
 	}
 	out, err := a.svc.SaveDraft(c.Request.Context(), id, req)
@@ -590,7 +606,7 @@ func (a teachingAPI) submitAssignment(c *gin.Context) {
 		return
 	}
 	var req SubmitAssignmentRequest
-	if !httpx.BindJSONKnownFieldsWithError(c, &req, apperr.ErrTeachingSubmissionInvalid) {
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingSubmissionInvalid) {
 		return
 	}
 	out, err := a.svc.SubmitAssignment(c.Request.Context(), id, req)
@@ -627,7 +643,7 @@ func (a teachingAPI) gradeSubmission(c *gin.Context) {
 		return
 	}
 	var req GradeSubmissionRequest
-	if !httpx.BindJSONKnownFieldsWithError(c, &req, apperr.ErrTeachingSubmissionInvalid) {
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingSubmissionInvalid) {
 		return
 	}
 	out, err := a.svc.GradeSubmission(c.Request.Context(), id, req)

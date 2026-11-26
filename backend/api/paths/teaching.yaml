@@ -334,6 +334,7 @@
   get:
     tags: [teaching]
     summary: 作业详情
+    description: 学生仅可读取已发布作业；授课教师可读取本课程草稿作业用于编辑和批改。按作业编号访问仍执行状态与课程权限校验。
     operationId: teachingGetAssignment
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
@@ -402,6 +403,7 @@
   get:
     tags: [teaching]
     summary: 读取作业服务端草稿
+    description: 仅当前学生课程成员可读取已发布作业的本人草稿。
     operationId: teachingGetDraft
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
@@ -410,6 +412,7 @@
   post:
     tags: [teaching]
     summary: 保存作业服务端草稿
+    description: 仅当前学生课程成员可保存已发布作业的本人草稿。
     operationId: teachingSaveDraft
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]

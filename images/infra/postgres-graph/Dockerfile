@@ -8,6 +8,7 @@ LABEL org.opencontainers.image.description="Chaimir PostgreSQL instance for The 
 RUN apk add --no-cache \
     libcrypto3=3.5.8-r0 \
     libssl3=3.5.8-r0 \
+    openssl=3.5.8-r0 \
     libuuid=2.42.3-r1
 
 # The Graph 索引库运行在沙箱协同容器中,需满足平台统一的 1000:1000 身份契约。
@@ -17,4 +18,6 @@ RUN mkdir -p /var/lib/postgresql/data /var/run/postgresql /runtime-state/postgre
     && rm -f /usr/local/bin/gosu
 
 USER 1000:1000
+COPY --chmod=0755 entrypoint.sh /usr/local/bin/chaimir-postgres-graph-entrypoint
 EXPOSE 5432
+ENTRYPOINT ["/usr/local/bin/chaimir-postgres-graph-entrypoint"]

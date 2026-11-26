@@ -19,7 +19,7 @@ export interface JudgeTask {
   result?: JudgeTaskResult
 }
 
-export interface JudgeTaskResult {
+interface JudgeTaskResult {
   passed: boolean
   score: number
   max_score: number
@@ -29,7 +29,9 @@ export interface JudgeTaskResult {
   result_ref: string
 }
 
-export interface JudgeResultDetail {
+export type JudgeOutcome = 'a_win' | 'b_win' | 'draw'
+
+interface JudgeResultDetail {
   case?: string
   source?: string
   target?: string
@@ -37,6 +39,7 @@ export interface JudgeResultDetail {
   expected_label?: string
   actual?: string
   hint?: string
+  outcome?: JudgeOutcome
 }
 
 export interface JudgeManualScoreRequest {
@@ -103,7 +106,7 @@ export interface JudgerCatalog {
   judgers: CatalogJudger[]
 }
 
-export interface CatalogJudger {
+interface CatalogJudger {
   code: string
   name: string
   type: JudgerType

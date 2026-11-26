@@ -6,15 +6,15 @@ package sqlcgen
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
+	AdvanceCourseStatuses(ctx context.Context, arg AdvanceCourseStatusesParams) error
 	// 按编号一次读取本租户未删除课程,供成绩中心列表随记录下发课程名。
 	BatchGetCourses(ctx context.Context, arg BatchGetCoursesParams) ([]BatchGetCoursesRow, error)
 	ClaimJudgeOutbox(ctx context.Context, arg ClaimJudgeOutboxParams) ([]SubmissionJudgeOutbox, error)
 	ClaimJudgeOutboxAcrossTenants(ctx context.Context, arg ClaimJudgeOutboxAcrossTenantsParams) ([]SubmissionJudgeOutbox, error)
+	ClaimNextCourseEndedEvent(ctx context.Context) (ClaimNextCourseEndedEventRow, error)
 	ClaimPendingTeachingGradeEventOutbox(ctx context.Context, arg ClaimPendingTeachingGradeEventOutboxParams) ([]TeachingGradeEventOutbox, error)
 	CompleteJudgeOutbox(ctx context.Context, arg CompleteJudgeOutboxParams) (SubmissionJudgeOutbox, error)
 	CountAssignmentSubmissions(ctx context.Context, arg CountAssignmentSubmissionsParams) (int64, error)
@@ -75,11 +75,13 @@ type Querier interface {
 	GetCourseByID(ctx context.Context, arg GetCourseByIDParams) (GetCourseByIDRow, error)
 	GetCourseByInviteCode(ctx context.Context, inviteCode string) (GetCourseByInviteCodeRow, error)
 	GetCourseExperimentScoreRevision(ctx context.Context, arg GetCourseExperimentScoreRevisionParams) (int64, error)
+	GetCourseForUpdate(ctx context.Context, arg GetCourseForUpdateParams) (GetCourseForUpdateRow, error)
 	GetCourseGrade(ctx context.Context, arg GetCourseGradeParams) (GetCourseGradeRow, error)
 	GetCourseMember(ctx context.Context, arg GetCourseMemberParams) (CourseMember, error)
 	GetCourseReview(ctx context.Context, arg GetCourseReviewParams) (CourseReview, error)
 	GetDiscussionPost(ctx context.Context, arg GetDiscussionPostParams) (DiscussionPost, error)
 	GetLesson(ctx context.Context, arg GetLessonParams) (Lesson, error)
+	GetLessonForUpdate(ctx context.Context, arg GetLessonForUpdateParams) (Lesson, error)
 	GetLessonProgress(ctx context.Context, arg GetLessonProgressParams) (LessonProgress, error)
 	GetSubmission(ctx context.Context, arg GetSubmissionParams) (Submission, error)
 	GetSubmissionBySourceRef(ctx context.Context, arg GetSubmissionBySourceRefParams) (Submission, error)
@@ -97,8 +99,6 @@ type Querier interface {
 	ListCourseGradeSources(ctx context.Context, arg ListCourseGradeSourcesParams) ([]ListCourseGradeSourcesRow, error)
 	ListCourseGrades(ctx context.Context, arg ListCourseGradesParams) ([]ListCourseGradesRow, error)
 	ListCourseMembers(ctx context.Context, arg ListCourseMembersParams) ([]CourseMember, error)
-	ListCoursesDueToEnd(ctx context.Context, endAt pgtype.Timestamptz) ([]ListCoursesDueToEndRow, error)
-	ListCoursesDueToRun(ctx context.Context, startAt pgtype.Timestamptz) ([]ListCoursesDueToRunRow, error)
 	ListDiscussionPosts(ctx context.Context, arg ListDiscussionPostsParams) ([]ListDiscussionPostsRow, error)
 	ListDueCourseGradeExportRequests(ctx context.Context, arg ListDueCourseGradeExportRequestsParams) ([]CourseGradeExportRequest, error)
 	ListExperimentGradeSourceScores(ctx context.Context, arg ListExperimentGradeSourceScoresParams) ([]ListExperimentGradeSourceScoresRow, error)
@@ -118,6 +118,7 @@ type Querier interface {
 	ListTeacherCourseIDs(ctx context.Context, arg ListTeacherCourseIDsParams) ([]int64, error)
 	ListTeacherCourses(ctx context.Context, arg ListTeacherCoursesParams) ([]ListTeacherCoursesRow, error)
 	LockCourseGradeWrites(ctx context.Context, arg LockCourseGradeWritesParams) (bool, error)
+	MarkCourseEndedEventPublished(ctx context.Context, arg MarkCourseEndedEventPublishedParams) (int64, error)
 	MarkJudgeOutboxFailedResult(ctx context.Context, arg MarkJudgeOutboxFailedResultParams) (SubmissionJudgeOutbox, error)
 	MarkJudgeOutboxResult(ctx context.Context, arg MarkJudgeOutboxResultParams) (SubmissionJudgeOutbox, error)
 	MarkTeachingGradeEventOutboxFailed(ctx context.Context, arg MarkTeachingGradeEventOutboxFailedParams) (TeachingGradeEventOutbox, error)
@@ -134,7 +135,6 @@ type Querier interface {
 	SetCourseStatus(ctx context.Context, arg SetCourseStatusParams) (SetCourseStatusRow, error)
 	SetCourseVisibility(ctx context.Context, arg SetCourseVisibilityParams) (SetCourseVisibilityRow, error)
 	SoftDeleteChapter(ctx context.Context, arg SoftDeleteChapterParams) (Chapter, error)
-	SoftDeleteCourse(ctx context.Context, arg SoftDeleteCourseParams) (SoftDeleteCourseRow, error)
 	SoftDeleteDiscussionPost(ctx context.Context, arg SoftDeleteDiscussionPostParams) (DiscussionPost, error)
 	SoftDeleteLesson(ctx context.Context, arg SoftDeleteLessonParams) (Lesson, error)
 	// 学生作业列表的本人提交情况:当前页每份作业的已用次数与最近一次提交的状态,一次聚合。
@@ -145,7 +145,6 @@ type Querier interface {
 	UpdateCourse(ctx context.Context, arg UpdateCourseParams) (UpdateCourseRow, error)
 	UpdateLesson(ctx context.Context, arg UpdateLessonParams) (Lesson, error)
 	UpdateSubmissionAutoScore(ctx context.Context, arg UpdateSubmissionAutoScoreParams) (Submission, error)
-	UpdateSubmissionJudgeRef(ctx context.Context, arg UpdateSubmissionJudgeRefParams) (Submission, error)
 	UpdateSubmissionManualGrade(ctx context.Context, arg UpdateSubmissionManualGradeParams) (Submission, error)
 	UpsertCourseExperimentScore(ctx context.Context, arg UpsertCourseExperimentScoreParams) error
 	// 来源修订按定义单调递增；乱序得分事件不能恢复已下架或改绑的来源。

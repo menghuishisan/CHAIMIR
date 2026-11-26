@@ -1,4 +1,4 @@
-// crypto 提供密码哈希、对称加密、HMAC 哈希。
+// Package crypto 提供密码哈希、对称加密和安全随机凭证。
 package crypto
 
 import (
@@ -20,6 +20,8 @@ const (
 	argonSaltLen = 16
 )
 
+var argonParams = fmt.Sprintf("m=%d,t=%d,p=%d", argonMemory, argonTime, argonThreads)
+
 // HashPassword 用 argon2id 生成密码哈希。
 func HashPassword(password string) (string, error) {
 	salt, err := RandomBytes(argonSaltLen)
@@ -27,10 +29,10 @@ func HashPassword(password string) (string, error) {
 		return "", fmt.Errorf("生成 salt 失败: %w", err)
 	}
 	hash := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
-	return fmt.Sprintf("$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s",
-		argonMemory, argonTime, argonThreads,
-		encodeRawStd(salt),
-		encodeRawStd(hash),
+	return fmt.Sprintf("$argon2id$v=19$%s$%s$%s",
+		argonParams,
+		base64.RawStdEncoding.EncodeToString(salt),
+		base64.RawStdEncoding.EncodeToString(hash),
 	), nil
 }
 
@@ -40,27 +42,22 @@ func VerifyPassword(password, encoded string) (bool, error) {
 	if len(parts) != 6 || parts[1] != "argon2id" || parts[2] != "v=19" {
 		return false, fmt.Errorf("密码哈希格式非法")
 	}
-	var m, t uint32
-	var p uint8
-	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &m, &t, &p); err != nil {
-		return false, fmt.Errorf("解析 argon2 参数失败: %w", err)
-	}
-	if m != argonMemory || t != argonTime || p != argonThreads {
+	if parts[3] != argonParams {
 		return false, fmt.Errorf("argon2 参数不符合平台安全配置")
 	}
-	salt, err := decodeRawStd(parts[4])
+	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
 	if err != nil {
 		return false, fmt.Errorf("解析 salt 失败: %w", err)
 	}
-	want, err := decodeRawStd(parts[5])
+	want, err := base64.RawStdEncoding.DecodeString(parts[5])
 	if err != nil {
 		return false, fmt.Errorf("解析 hash 失败: %w", err)
 	}
 	if len(salt) != argonSaltLen || len(want) != argonKeyLen {
 		return false, fmt.Errorf("密码哈希长度非法")
 	}
-	got := argon2.IDKey([]byte(password), salt, t, m, p, argonKeyLen)
-	return EqualBytes(got, want), nil
+	got := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	return hmac.Equal(got, want), nil
 }
 
 // SHA256Hex 计算普通内容摘要的十六进制 SHA-256,用于版本、归档等非密钥完整性场景。
@@ -109,20 +106,5 @@ func EqualHexHMAC(a string, b string) bool {
 	if err != nil {
 		return false
 	}
-	return len(left) == len(right) && hmac.Equal(left, right)
-}
-
-// EqualBytes 对两段字节做常量时间比较。
-func EqualBytes(a []byte, b []byte) bool {
-	return hmac.Equal(a, b)
-}
-
-// encodeRawStd 用 RawStdEncoding 编码二进制片段,保持密码哈希字符串紧凑稳定。
-func encodeRawStd(data []byte) string {
-	return base64.RawStdEncoding.EncodeToString(data)
-}
-
-// decodeRawStd 解码 RawStdEncoding 编码片段。
-func decodeRawStd(value string) ([]byte, error) {
-	return base64.RawStdEncoding.DecodeString(value)
+	return hmac.Equal(left, right)
 }

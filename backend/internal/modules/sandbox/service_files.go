@@ -1,20 +1,22 @@
-// sandbox service_files 文件实现沙箱工作区文件写入和统一对象存储持久化流程。
 package sandbox
 
 import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"log/slog"
 	"path"
 	"strings"
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/storage"
+	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/upload"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
@@ -22,8 +24,57 @@ import (
 	"chaimir/pkg/logging"
 )
 
-// PutSandboxFile 把提交代码或公开脚本写入沙箱工作区,隐藏判题资产必须走私有域接口。
-func (s *Service) putSandboxFileContract(ctx context.Context, req contracts.SandboxFileWriteRequest) (int64, error) {
+// GetSandboxWorkspaceArchive 返回已保存工作区的内部对象引用,仅供实例重建恢复使用。
+func (s *Service) GetSandboxWorkspaceArchive(ctx context.Context, tenantID, sandboxID int64) (string, error) {
+	if tenantID <= 0 || sandboxID <= 0 {
+		return "", apperr.ErrSandboxContractRequestInvalid
+	}
+	var sb Sandbox
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		sb, err = tx.GetSandbox(ctx, tenantID, sandboxID)
+		return err
+	}); err != nil {
+		return "", apperr.ErrSandboxNotFound.WithCause(err)
+	}
+	return s.sandboxWorkspaceArchiveRef(sb)
+}
+
+// FindSavedSandboxWorkspaceArchiveBySourceRef 在每次显式重建时重取持久化指针，不依赖前一请求内存。
+func (s *Service) FindSavedSandboxWorkspaceArchiveBySourceRef(ctx context.Context, tenantID int64, sourceRef string) (string, error) {
+	sourceRef = strings.TrimSpace(sourceRef)
+	if tenantID <= 0 || !auth.ValidSourceRef(sourceRef) {
+		return "", apperr.ErrSandboxContractRequestInvalid
+	}
+	var sb Sandbox
+	err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		sb, err = tx.GetSavedSandboxBySourceRef(ctx, tenantID, sourceRef)
+		return err
+	})
+	if errors.Is(err, apperr.ErrSandboxNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", apperr.ErrSandboxFilePersistFailed.WithCause(err)
+	}
+	return s.sandboxWorkspaceArchiveRef(sb)
+}
+
+// sandboxWorkspaceArchiveRef 统一构造已保存公开归档引用，不返回初始化私有材料。
+func (s *Service) sandboxWorkspaceArchiveRef(sb Sandbox) (string, error) {
+	if strings.TrimSpace(sb.CodeHash) == "" || strings.TrimSpace(sb.CodeStorageKey) == "" {
+		return "", nil
+	}
+	ref, err := storage.ObjectRefString(s.objectStorage.BucketCode(), sb.CodeStorageKey)
+	if err != nil {
+		return "", apperr.ErrSandboxFilePersistFailed.WithCause(err)
+	}
+	return ref, nil
+}
+
+// PutSandboxFile 把公开文件写入沙箱工作区。
+func (s *Service) PutSandboxFile(ctx context.Context, req contracts.SandboxFileWriteRequest) (int64, error) {
 	if req.TenantID <= 0 || req.SandboxID <= 0 || req.ExpectedRevision <= 0 || !validSourceRef(req.SourceRef) {
 		return 0, apperr.ErrSandboxFileWriteRequestInvalid
 	}
@@ -39,8 +90,8 @@ func (s *Service) putSandboxFileContract(ctx context.Context, req contracts.Sand
 	if err != nil {
 		return 0, err
 	}
-	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
-		return 0, err
+	if !sandboxExecAllowed(sb) {
+		return 0, apperr.ErrSandboxStateInvalid
 	}
 	target := path.Join(runtime.AdapterSpec.WorkspaceDir, relative)
 	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.WriteFile, runtime.AdapterSpec.WorkspaceDir, target)
@@ -51,8 +102,8 @@ func (s *Service) putSandboxFileContract(ctx context.Context, req contracts.Sand
 		if err != nil {
 			return err
 		}
-		if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, workspaceExecTarget(runtime), command, content, false); err != nil {
-			return sandboxExecFailure(apperr.ErrSandboxFileInvalid, err, stderr)
+		if _, err := tx.MarkSandboxActive(ctx, req.TenantID, req.SandboxID); err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
 		detail, err := jsonBytes(map[string]any{"path": relative, "mode": "write"})
 		if err != nil {
@@ -60,6 +111,9 @@ func (s *Service) putSandboxFileContract(ctx context.Context, req contracts.Sand
 		}
 		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), req.TenantID, req.SandboxID, EventTypeFileSave, detail); err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, workspaceExecTarget(runtime), command, content, false); err != nil {
+			return sandboxExecFailure(apperr.ErrSandboxFileInvalid, err, stderr)
 		}
 		return nil
 	}); err != nil {
@@ -69,8 +123,8 @@ func (s *Service) putSandboxFileContract(ctx context.Context, req contracts.Sand
 	return revision, nil
 }
 
-// PutSandboxPrivateArchive 将隐藏测试、答案或评分脚本安全解包到私有判题域。
-func (s *Service) putSandboxPrivateArchiveContract(ctx context.Context, req contracts.SandboxPrivateArchiveInjectRequest) error {
+// PutSandboxPrivateArchive 把隐藏判题归档写入私有执行域。
+func (s *Service) PutSandboxPrivateArchive(ctx context.Context, req contracts.SandboxPrivateArchiveInjectRequest) error {
 	if req.TenantID <= 0 || req.SandboxID <= 0 || req.ContentBase64 == "" || !validSourceRef(req.SourceRef) {
 		return apperr.ErrSandboxPrivateArchiveInvalid
 	}
@@ -161,7 +215,7 @@ func (s *Service) ReadSandboxFile(ctx context.Context, tenantID, sandboxID int64
 		if err != nil {
 			return apperr.ErrSandboxFileReadFailed.WithCause(err)
 		}
-		if locked.Namespace != sb.Namespace || locked.CompositionDigest != sb.CompositionDigest {
+		if locked.Namespace != sb.Namespace || locked.CompositionDigest != sb.CompositionDigest || !sandboxExecAllowed(locked) {
 			return apperr.ErrConflict
 		}
 		stdout, stderr, err := s.orchestrator.Exec(ctx, locked.Namespace, workspaceExecTarget(runtime), command, nil, false)
@@ -237,15 +291,14 @@ func (s *Service) ListSandboxFilesForOwner(ctx context.Context, tenantID, accoun
 	return s.ListSandboxFiles(ctx, tenantID, sandboxID, relativePath)
 }
 
-// SaveSandboxFiles 校验来源归属后立即持久化当前工作区,返回保存后的代码引用与哈希。
-func (s *Service) saveSandboxFilesContract(ctx context.Context, req contracts.SandboxSaveRequest) (string, string, error) {
+// SaveSandboxFiles 立即保存工作区并返回代码引用与哈希。
+func (s *Service) SaveSandboxFiles(ctx context.Context, req contracts.SandboxSaveRequest) (string, string, error) {
 	if req.TenantID <= 0 || req.SandboxID <= 0 || !validSourceRef(req.SourceRef) {
 		return "", "", apperr.ErrSandboxContractRequestInvalid
 	}
 	return s.saveSandboxFilesForSource(ctx, req.TenantID, req.SandboxID, req.SourceRef)
 }
 
-// saveSandboxFilesForSource 在跨模块调用场景校验 source_ref 与沙箱归属一致。
 func (s *Service) saveSandboxFilesForSource(ctx context.Context, tenantID, sandboxID int64, sourceRef string) (string, string, error) {
 	sb, _, err := s.sandboxRuntimeForSource(ctx, tenantID, sandboxID, sourceRef)
 	if err != nil {
@@ -254,21 +307,20 @@ func (s *Service) saveSandboxFilesForSource(ctx context.Context, tenantID, sandb
 	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
 		return "", "", err
 	}
-	saved, err := s.saveSandboxFiles(ctx, tenantID, sandboxID)
+	saved, err := s.saveSandboxFiles(ctx, sb)
 	return saved.CodeStorageKey, saved.CodeHash, err
 }
 
-// saveSandboxFiles 取消开始前尚未执行的防抖任务,再复用唯一工作区持久化实现。
-func (s *Service) saveSandboxFiles(ctx context.Context, tenantID, sandboxID int64) (contracts.SandboxWorkspaceSave, error) {
-	s.cancelDebouncedSave(sandboxID)
-	return s.persistSandboxFiles(ctx, tenantID, sandboxID)
+func (s *Service) saveSandboxFiles(ctx context.Context, sb Sandbox) (contracts.SandboxWorkspaceSave, error) {
+	s.cancelDebouncedSave(sb.ID)
+	return s.persistSandboxFiles(ctx, sb)
 }
 
-// persistSandboxFiles 持沙箱行锁保存不可变归档,已开始的防抖回调不会取消后续任务。
-func (s *Service) persistSandboxFiles(ctx context.Context, tenantID, sandboxID int64) (contracts.SandboxWorkspaceSave, error) {
+func (s *Service) persistSandboxFiles(ctx context.Context, sb Sandbox) (contracts.SandboxWorkspaceSave, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.ExecTimeoutSeconds))
 	defer cancel()
-	sb, runtime, err := s.sandboxRuntime(ctx, tenantID, sandboxID)
+	tenantID, sandboxID := sb.TenantID, sb.ID
+	runtime, _, err := s.workspaceRuntimeForSandbox(ctx, sb)
 	if err != nil {
 		return contracts.SandboxWorkspaceSave{}, err
 	}
@@ -282,8 +334,15 @@ func (s *Service) persistSandboxFiles(ctx context.Context, tenantID, sandboxID i
 		if locked.Namespace != sb.Namespace || locked.CompositionDigest != sb.CompositionDigest {
 			return apperr.ErrConflict
 		}
+		if !sandboxWorkspaceSaveAllowed(locked, sb.resourceLeaseToken) {
+			return apperr.ErrSandboxStateInvalid
+		}
 		command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.PackTar, runtime.AdapterSpec.WorkspaceDir, runtime.AdapterSpec.WorkspaceDir)
-		stdout, stderr, err := s.orchestrator.Exec(ctx, locked.Namespace, workspaceExecTarget(runtime), command, nil, false)
+		target := workspaceExecTarget(runtime)
+		if sb.resourceLeaseToken != "" {
+			target = workspaceArchiveExecTarget(sb)
+		}
+		stdout, stderr, err := s.orchestrator.Exec(ctx, locked.Namespace, target, command, nil, false)
 		if err != nil {
 			return sandboxExecFailure(apperr.ErrSandboxFilePersistFailed, err, stderr)
 		}
@@ -332,15 +391,15 @@ func (s *Service) SaveSandboxFilesForOwner(ctx context.Context, tenantID, accoun
 	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
 		return FileSaveResponse{}, err
 	}
-	saved, err := s.saveSandboxFiles(ctx, tenantID, sandboxID)
+	saved, err := s.saveSandboxFiles(ctx, sb)
 	if err != nil {
 		return FileSaveResponse{}, err
 	}
 	return FileSaveResponse{CodeStorageKey: saved.CodeStorageKey, CodeHash: saved.CodeHash, WorkspaceRevision: saved.WorkspaceRevision}, nil
 }
 
-// ExecSandboxCommand 在沙箱内执行受限命令,供判题 worker 运行套件。
-func (s *Service) execSandboxCommandContract(ctx context.Context, req contracts.SandboxExecRequest) (contracts.SandboxExecResult, error) {
+// ExecSandboxCommand 在沙箱内执行受限内部命令。
+func (s *Service) ExecSandboxCommand(ctx context.Context, req contracts.SandboxExecRequest) (contracts.SandboxExecResult, error) {
 	if req.TenantID <= 0 || req.SandboxID <= 0 || !workload.ValidNonShellCommand(req.Command) || !validSourceRef(req.SourceRef) {
 		return contracts.SandboxExecResult{}, apperr.ErrSandboxContractRequestInvalid
 	}
@@ -361,15 +420,15 @@ func (s *Service) execSandboxCommandContract(ctx context.Context, req contracts.
 	}
 	execCtx, cancel := context.WithTimeout(ctx, timeDurationSeconds(int(timeoutSec)))
 	defer cancel()
-	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
-		return contracts.SandboxExecResult{}, err
-	}
 	target := runtimeExecTarget(runtime)
 	if strings.TrimSpace(req.Container) != "" {
 		target = strings.TrimSpace(req.Container)
 		if !safeExecTarget(target) {
 			return contracts.SandboxExecResult{}, apperr.ErrSandboxContractRequestInvalid
 		}
+	}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		return contracts.SandboxExecResult{}, err
 	}
 	stdout, stderr, err := s.orchestrator.Exec(execCtx, sb.Namespace, target, req.Command, req.Stdin, false)
 	if err != nil {
@@ -390,7 +449,6 @@ func (s *Service) execSandboxCommandContract(ctx context.Context, req contracts.
 	return contracts.SandboxExecResult{Stdout: stdout, Stderr: stderr}, nil
 }
 
-// safeExecTarget 限定内部执行目标为已命名 Pod/容器,避免服务调用方传入空白或特殊路径。
 func safeExecTarget(target string) bool {
 	podName, containerName := splitExecTarget(target)
 	return mountNamePattern.MatchString(podName) && mountNamePattern.MatchString(containerName)
@@ -404,7 +462,6 @@ func (s *Service) ObserveToolAccess(ctx context.Context, sb Sandbox) {
 	s.scheduleDebouncedSave(ctx, sb.TenantID, sb.ID)
 }
 
-// sandboxRuntime 查询沙箱及其运行时定义。
 func (s *Service) sandboxRuntime(ctx context.Context, tenantID, sandboxID int64) (Sandbox, Runtime, error) {
 	var sb Sandbox
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
@@ -424,7 +481,6 @@ func (s *Service) sandboxRuntime(ctx context.Context, tenantID, sandboxID int64)
 	return sb, runtime, nil
 }
 
-// sandboxForOwner 只校验租户内沙箱归属,不读取 metrics,供终端、文件和工具等交互入口使用。
 func (s *Service) sandboxForOwner(ctx context.Context, tenantID, accountID, sandboxID int64) (Sandbox, error) {
 	var sb Sandbox
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
@@ -446,7 +502,6 @@ func (s *Service) sandboxForOwner(ctx context.Context, tenantID, accountID, sand
 	return sb, nil
 }
 
-// requireSandboxModule 依据持久化来源阻止从共享引擎入口绕过关闭的业务模块。
 func (s *Service) requireSandboxModule(ctx context.Context, sb Sandbox) error {
 	module := contracts.TenantModuleFromSourceRef(sb.SourceRef)
 	if module == "" {
@@ -455,7 +510,6 @@ func (s *Service) requireSandboxModule(ctx context.Context, sb Sandbox) error {
 	return s.identity.RequireTenantModules(ctx, sb.TenantID, module)
 }
 
-// sandboxRuntimeForOwner 校验用户归属并加载运行时声明,避免交互路径被实时资源指标依赖阻断。
 func (s *Service) sandboxRuntimeForOwner(ctx context.Context, tenantID, accountID, sandboxID int64) (Sandbox, Runtime, error) {
 	sb, err := s.sandboxForOwner(ctx, tenantID, accountID, sandboxID)
 	if err != nil {
@@ -468,7 +522,6 @@ func (s *Service) sandboxRuntimeForOwner(ctx context.Context, tenantID, accountI
 	return sb, runtime, nil
 }
 
-// sandboxRuntimeForSource 查询沙箱运行时并确认调用来源与创建来源一致。
 func (s *Service) sandboxRuntimeForSource(ctx context.Context, tenantID, sandboxID int64, sourceRef string) (Sandbox, Runtime, error) {
 	sb, runtime, err := s.sandboxRuntime(ctx, tenantID, sandboxID)
 	if err != nil {
@@ -480,19 +533,25 @@ func (s *Service) sandboxRuntimeForSource(ctx context.Context, tenantID, sandbox
 	return sb, runtime, nil
 }
 
-// timeDurationSeconds 把正整数秒转换为 duration。
 func timeDurationSeconds(sec int) time.Duration {
 	return time.Duration(sec) * time.Second
 }
 
-// sandboxExecAllowed 限定内部命令只能在仍有计算资源且环境可执行时运行。
 func sandboxExecAllowed(sb Sandbox) bool {
 	phaseReady := sb.Phase == SandboxPhaseReady || sb.Phase == SandboxPhaseFullyReady
 	statusReady := sb.Status == SandboxStatusReady || sb.Status == SandboxStatusRunning || sb.Status == SandboxStatusIdle
-	return phaseReady && statusReady
+	return phaseReady && statusReady && sb.resourceLeaseToken == ""
 }
 
-// volumeDomainByName 查找运行时声明的卷安全域,用于内部私有资产注入等受控路径。
+func sandboxWorkspaceSaveAllowed(sb Sandbox, leaseToken string) bool {
+	if leaseToken == "" {
+		return sandboxExecAllowed(sb)
+	}
+	phaseReady := sb.Phase == SandboxPhaseReady || sb.Phase == SandboxPhaseFullyReady
+	statusReady := sb.Status == SandboxStatusReady || sb.Status == SandboxStatusRunning || sb.Status == SandboxStatusIdle || sb.Status == SandboxStatusRecycling
+	return phaseReady && statusReady && sb.resourceLeaseToken == leaseToken && sb.resourceLeaseUntil.After(timex.Now())
+}
+
 func volumeDomainByName(spec AdapterSpec, name string) (VolumeDomainSpec, bool) {
 	for _, domain := range spec.VolumeDomains {
 		if domain.Name == strings.TrimSpace(name) {
@@ -502,7 +561,6 @@ func volumeDomainByName(spec AdapterSpec, name string) (VolumeDomainSpec, bool) 
 	return VolumeDomainSpec{}, false
 }
 
-// workspaceCommand 根据运行时声明模板替换受控变量,不拼接 shell 片段。
 func workspaceCommand(template []string, workspaceDir, targetPath string) []string {
 	out := make([]string, 0, len(template))
 	for _, part := range template {
@@ -514,7 +572,6 @@ func workspaceCommand(template []string, workspaceDir, targetPath string) []stri
 	return out
 }
 
-// scheduleDebouncedSave 为沙箱写入安排一次延迟持久化,重复写入只保留最后一次。
 func (s *Service) scheduleDebouncedSave(ctx context.Context, tenantID, sandboxID int64) {
 	delay := time.Duration(s.cfg.FileSaveDebounceMs) * time.Millisecond
 	if delay <= 0 {
@@ -537,7 +594,13 @@ func (s *Service) scheduleDebouncedSave(ctx context.Context, tenantID, sandboxID
 		s.saveMu.Unlock()
 		saveCtx, cancel := context.WithTimeout(saveBase, timeDurationSeconds(s.cfg.ExecTimeoutSeconds))
 		defer cancel()
-		if _, err := s.persistSandboxFiles(saveCtx, tenantID, sandboxID); err != nil {
+		sb, _, err := s.sandboxRuntime(saveCtx, tenantID, sandboxID)
+		if err == nil {
+			// 防抖任务不是资源执行者，不能借用暂停或回收租约。
+			sb.resourceLeaseToken = ""
+			_, err = s.persistSandboxFiles(saveCtx, sb)
+		}
+		if err != nil {
 			s.recordDebouncedSaveFailure(saveCtx, tenantID, sandboxID, err)
 		}
 	})
@@ -545,7 +608,6 @@ func (s *Service) scheduleDebouncedSave(ctx context.Context, tenantID, sandboxID
 	s.saveMu.Unlock()
 }
 
-// recordDebouncedSaveFailure 记录防抖保存失败的结构化日志和沙箱技术事件。
 func (s *Service) recordDebouncedSaveFailure(ctx context.Context, tenantID, sandboxID int64, cause error) {
 	logging.ErrorContext(ctx, "sandbox debounced file save failed", apperr.AsAppError(cause).LogString(), slog.Int64("tenant_id", tenantID), slog.Int64("sandbox_id", sandboxID))
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
@@ -562,7 +624,6 @@ func (s *Service) recordDebouncedSaveFailure(ctx context.Context, tenantID, sand
 	}
 }
 
-// cancelDebouncedSave 取消指定沙箱尚未执行的防抖保存任务。
 func (s *Service) cancelDebouncedSave(sandboxID int64) {
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()

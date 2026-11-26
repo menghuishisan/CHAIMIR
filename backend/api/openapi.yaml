@@ -1,4 +1,4 @@
-﻿# openapi 汇总 Chaimir 后端公开 HTTP 契约及各领域路径定义。
+# openapi 汇总 Chaimir 后端公开 HTTP 契约及各领域路径定义。
 openapi: 3.0.3
 info:
   title: Chaimir 后端 API 契约
@@ -6,6 +6,7 @@ info:
   description: |
     Chaimir 区块链教学、实验、竞赛平台后端 API 契约。
     本文件是 `backend/api` 的接口描述层,不承载运行时业务实现。
+    JSON 请求统一严格解析单个值、拒绝未声明字段及尾随内容，并执行字段校验；动态 map 按所属业务契约校验。
     路径来源于 `docs/总-API接口总览.md`、各模块接口设计文档和后端模块 `api*.go` 已注册路由。
 servers:
   - url: https://{host}
@@ -282,8 +283,6 @@ paths:
     $ref: './paths/sim.yaml#/api/v1/sim/sessions/{id}/share'
   /api/v1/sim/sessions/{id}/stream:
     $ref: './paths/sim.yaml#/api/v1/sim/sessions/{id}/stream'
-  /api/v1/sim/internal/sessions/{id}/checkpoints:
-    $ref: './paths/sim.yaml#/api/v1/sim/internal/sessions/{id}/checkpoints'
   /api/v1/content/items:
     $ref: './paths/content.yaml#/api/v1/content/items'
   /api/v1/content/internal/items/system-import:
@@ -308,8 +307,10 @@ paths:
     $ref: './paths/content.yaml#/api/v1/content/items/{item}/{version}'
   /api/v1/content/items/{item}/{version}/full:
     $ref: './paths/content.yaml#/api/v1/content/items/{item}/{version}/full'
-  /api/v1/content/items/{item}/{version}/clone:
-    $ref: './paths/content.yaml#/api/v1/content/items/{item}/{version}/clone'
+  /api/v1/content/items/{item}/clone:
+    $ref: './paths/content.yaml#/api/v1/content/items/{item}/clone'
+  /api/v1/content/shared/{id}:
+    $ref: './paths/content.yaml#/api/v1/content/shared/{id}'
   /api/v1/content/attachments:
     $ref: './paths/content.yaml#/api/v1/content/attachments'
   /api/v1/content/attachments/download-grant:
@@ -526,8 +527,6 @@ paths:
     $ref: './paths/contest.yaml#/api/v1/contest/teams/{id}/lock'
   /api/v1/contest/submissions/{id}:
     $ref: './paths/contest.yaml#/api/v1/contest/submissions/{id}'
-  /api/v1/contest/matches/{id}/replay:
-    $ref: './paths/contest.yaml#/api/v1/contest/matches/{id}/replay'
   /api/v1/contest/matches/{id}/replay/download-grant:
     $ref: './paths/contest.yaml#/api/v1/contest/matches/{id}/replay/download-grant'
   /api/v1/contest/sandboxes/{id}:
@@ -564,6 +563,8 @@ paths:
     $ref: './paths/contest.yaml#/api/v1/contest/vuln-sources/{id}/sync'
   /api/v1/contest/vuln-problems:
     $ref: './paths/contest.yaml#/api/v1/contest/vuln-problems'
+  /api/v1/contest/vuln-problems/{id}:
+    $ref: './paths/contest.yaml#/api/v1/contest/vuln-problems/{id}'
   /api/v1/contest/vuln-problems/{id}/prevalidate:
     $ref: './paths/contest.yaml#/api/v1/contest/vuln-problems/{id}/prevalidate'
   /api/v1/contest/vuln-problems/{id}/finalize:
@@ -588,14 +589,6 @@ paths:
     $ref: './paths/admin.yaml#/api/v1/admin/audit'
   /api/v1/admin/audit/export:
     $ref: './paths/admin.yaml#/api/v1/admin/audit/export'
-  /api/v1/admin/configs:
-    $ref: './paths/admin.yaml#/api/v1/admin/configs'
-  /api/v1/admin/configs/{key}:
-    $ref: './paths/admin.yaml#/api/v1/admin/configs/{key}'
-  /api/v1/admin/configs/{key}/history:
-    $ref: './paths/admin.yaml#/api/v1/admin/configs/{key}/history'
-  /api/v1/admin/configs/{key}/rollback:
-    $ref: './paths/admin.yaml#/api/v1/admin/configs/{key}/rollback'
   /api/v1/admin/alert-rules:
     $ref: './paths/admin.yaml#/api/v1/admin/alert-rules'
   /api/v1/admin/alert-rules/{id}:

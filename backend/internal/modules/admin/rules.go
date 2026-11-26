@@ -1,4 +1,4 @@
-// admin rules 文件集中实现 M9 输入校验和监控入口安全规则。
+// 校验 M9 公开输入与外接监控地址。
 package admin
 
 import (
@@ -33,7 +33,7 @@ var alertConditionOperatorSet = map[string]struct{}{
 	"lte": {},
 }
 
-// ParseMonitoringPanels 解析并校验外接监控面板嵌入地址。
+// ParseMonitoringPanels 校验受控外部监控入口及允许的来源。
 func ParseMonitoringPanels(raw string, allowedOrigins []string) ([]MonitoringPanel, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -73,14 +73,14 @@ func validateScopeTenant(scope int16, tenantID int64) error {
 	switch scope {
 	case ScopeGlobal:
 		if tenantID != 0 {
-			return apperr.ErrAdminConfigInvalid
+			return apperr.ErrAdminAlertInvalid
 		}
 	case ScopeTenant:
 		if tenantID <= 0 {
-			return apperr.ErrAdminConfigInvalid
+			return apperr.ErrAdminAlertInvalid
 		}
 	default:
-		return apperr.ErrAdminConfigInvalid
+		return apperr.ErrAdminAlertInvalid
 	}
 	return nil
 }
@@ -154,4 +154,18 @@ func alertConditionNumber(value any) (float64, bool) {
 // finiteAlertConditionNumber 拒绝 NaN 和无穷值,避免不可持久化或不可比较的阈值进入规则表。
 func finiteAlertConditionNumber(value float64) bool {
 	return !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+// validateAlertRule 校验告警规则范围、指标、条件和等级。
+func validateAlertRule(req AlertRuleRequest) error {
+	if err := validateScopeTenant(req.Scope, req.TenantID.Int64()); err != nil {
+		return apperr.ErrAdminAlertInvalid
+	}
+	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Metric) != req.Metric || req.Level < AlertLevelNotice || req.Level > AlertLevelCritical {
+		return apperr.ErrAdminAlertInvalid
+	}
+	if err := validateAlertCondition(req.Metric, req.Condition); err != nil {
+		return apperr.ErrAdminAlertInvalid
+	}
+	return nil
 }

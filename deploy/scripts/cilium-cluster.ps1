@@ -346,6 +346,8 @@ function Approve-KubeletServingCertificates {
         }
         $csrList = $csrRaw | ConvertFrom-Json
         foreach ($csr in $csrList.items) {
+            # 期限覆盖积压请求的遍历,不等整批处理完后才检查超时。
+            if ((Get-Date) -ge $deadline) { break }
             $conditions = @($csr.status.conditions | Where-Object { $null -ne $_ })
             if ($csr.spec.signerName -ne "kubernetes.io/kubelet-serving" -or $conditions.Count -gt 0) {
                 continue
@@ -391,7 +393,6 @@ function Approve-KubeletServingCertificates {
 
             if ($canonicalSan) {
                 Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "certificate", "approve", $csr.metadata.name)
-                [void]$approvedNodes.Add($node)
                 continue
             }
             if ($staleSan) {
@@ -413,8 +414,10 @@ function Approve-KubeletServingCertificates {
             $staleCsrNames.Clear()
         }
 
+        # 批准请求不等于节点安装了新证书,就绪仅来自本轮实际证书验证。
+        $approvedNodes.Clear()
         foreach ($node in $nodes) {
-            $certDetails = @(& docker exec $node openssl x509 -in /var/lib/kubelet/pki/kubelet-server-current.pem -noout -subject -text 2>$null)
+            $certDetails = @(& docker exec $node openssl x509 -in /var/lib/kubelet/pki/kubelet-server-current.pem -noout -subject -text -checkend 0 2>$null)
             $certExitCode = $LASTEXITCODE
             if ($certExitCode -eq 0) {
                 $certText = $certDetails -join "`n"
@@ -787,9 +790,9 @@ function Wait-CiliumComponents {
 
 # Install-Cilium 使用固定 OCI Chart digest 和权威镜像锁安装 Cilium,随后等待数据面就绪。
 function Install-Cilium {
-    $agentDigest = Get-LockedDigest -LogicalImage "network/cilium"
-    $operatorDigest = Get-LockedDigest -LogicalImage "network/cilium-operator"
-    $envoyDigest = Get-LockedDigest -LogicalImage "network/cilium-envoy"
+    $agentDigest = Get-LockedDigest -LogicalImage "infra/cilium"
+    $operatorDigest = Get-LockedDigest -LogicalImage "infra/cilium-operator"
+    $envoyDigest = Get-LockedDigest -LogicalImage "infra/cilium-envoy"
 
     Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "apply", "-f", $trustedPolicyPath)
     $oldKubeconfig = [Environment]::GetEnvironmentVariable("SUPPLY_CHAIN_KUBECONFIG_HOST_PATH", "Process")
@@ -801,9 +804,9 @@ function Install-Cilium {
                 "compose", "--project-name", "chaimir-supply-chain", "--env-file", $composeEnvPath, "-f", $composePath,
                 "run", "--rm", "helm", "upgrade", "--install", "cilium", $ciliumChart,
                 "--namespace", "kube-system", "--values", "/workspace/deploy/charts/cilium/values.yaml",
-                "--set-string", "image.override=$registryHost/network/cilium@$agentDigest",
-                "--set-string", "operator.image.override=$registryHost/network/cilium-operator@$operatorDigest",
-                "--set-string", "envoy.image.override=$registryHost/network/cilium-envoy@$envoyDigest",
+                "--set-string", "image.override=$registryHost/infra/cilium@$agentDigest",
+                "--set-string", "operator.image.override=$registryHost/infra/cilium-operator@$operatorDigest",
+                "--set-string", "envoy.image.override=$registryHost/infra/cilium-envoy@$envoyDigest",
                 "--set", "imagePullSecrets[0].name=$imagePullSecret",
                 "--set-string", "cluster.name=$ClusterName", "--set", "cluster.id=1"
             )
@@ -1023,9 +1026,9 @@ function Assert-CiliumState {
         throw "Cilium 策略配置不符合基线: enable-policy=$($config.data.'enable-policy') cni-exclusive=$($config.data.'cni-exclusive')"
     }
 
-    $expectedAgent = "$registryHost/network/cilium@$(Get-LockedDigest -LogicalImage 'network/cilium')"
-    $expectedOperator = "$registryHost/network/cilium-operator@$(Get-LockedDigest -LogicalImage 'network/cilium-operator')"
-    $expectedEnvoy = "$registryHost/network/cilium-envoy@$(Get-LockedDigest -LogicalImage 'network/cilium-envoy')"
+    $expectedAgent = "$registryHost/infra/cilium@$(Get-LockedDigest -LogicalImage 'infra/cilium')"
+    $expectedOperator = "$registryHost/infra/cilium-operator@$(Get-LockedDigest -LogicalImage 'infra/cilium-operator')"
+    $expectedEnvoy = "$registryHost/infra/cilium-envoy@$(Get-LockedDigest -LogicalImage 'infra/cilium-envoy')"
     $actualAgent = ($agent.spec.template.spec.containers | Where-Object { $_.name -eq "cilium-agent" }).image
     $actualOperator = ($operator.spec.template.spec.containers | Where-Object { $_.name -eq "cilium-operator" }).image
     $actualEnvoy = ($envoy.spec.template.spec.containers | Where-Object { $_.name -eq "cilium-envoy" }).image

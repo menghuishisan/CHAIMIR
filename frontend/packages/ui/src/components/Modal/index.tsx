@@ -1,7 +1,7 @@
 /**
  * Modal:居中模态对话框(@radix-ui/react-dialog 组合封装)。
- * 组合导出:Modal(Root)/ ModalTrigger / ModalContent(size)/ ModalHeader /
- * ModalTitle / ModalDescription / ModalBody / ModalFooter / ModalClose。
+ * 组合导出:Modal(Root)/ ModalContent(size)/ ModalHeader /
+ * ModalTitle / ModalDescription / ModalBody / ModalFooter。
  * 焦点陷阱、Esc 关闭、点击遮罩关闭、标题/描述 aria 关联由 Radix 保证。
  * 动效:遮罩 fade-in/out,内容 modal-in / modal-out(出场时长为入场的 ~64%)。
  * transform 所有权(§4.3):居中用 inset + margin auto 实现,不占用 transform,
@@ -20,8 +20,6 @@ import { cn } from "../../lib/cn";
 import { Icon } from "../../lib/icon";
 
 export const Modal = DialogPrimitive.Root;
-export const ModalTrigger = DialogPrimitive.Trigger;
-export const ModalClose = DialogPrimitive.Close;
 
 /* 尺寸变体:只控制面板最大宽度;inset-x-4 保证窄屏两侧留白 */
 const modalContentVariants = cva(

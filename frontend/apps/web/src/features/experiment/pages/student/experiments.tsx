@@ -1,16 +1,4 @@
-// 实验实训页(学生侧栏,/student/experiments)。设计 §7.2:
-// 页头 + 一行工具条(按课程筛选、搜索);卡片网格,卡片显示实验名、所属课程(用学生自己的课程列表解析)、
-// 个人或小组、是否要交报告、阶段数与检查点数;整卡链向实验详情,卡内「进入实验」直接创建或恢复
-// 实验环境并进入工作台。课程筛选与搜索写进地址。
-//
-// 列表走学生专用投影 GET /experiment/student/experiments —— teacher 组的实验读取
-// 会返回 init_code_ref/judger_code/extra_input,那是答案链路,学生不可用。
-// 「进入实验」调 POST /experiments/{id}/instances:该接口对已有活跃实例幂等(见对齐清单 §6.8),
-// 因此不做「开始 / 继续」二态判断,一个按钮既创建也恢复。
-// 「个人或小组」「是否交报告」的全量计数来自接口分组计数,只在页头一行属性里说明;接口不接受这两项筛选,
-// 用当前页切片筛选会漏掉别的页,故不做成筛选。
-
-import { useCallback, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { FlaskConical, Play, Users } from 'lucide-react'
 import { ExperimentCollabMode, PAGINATION_MAX_SIZE, type StudentExperiment } from '@chaimir/api-client'
@@ -39,7 +27,6 @@ import { experimentCollabModeLabel, experimentInstanceStatusLabel } from '../../
 import { experimentInstanceStatusTone } from '../../statusPresentation'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
-/** 地址参数:course 是课程编号(空为全部课程),q 是搜索词 */
 const EXPERIMENTS_QUERY = {
   course: { defaultValue: '' },
   q: { defaultValue: '' },
@@ -48,9 +35,6 @@ const EXPERIMENTS_QUERY = {
 /** 课程筛选里「全部课程」的取值(Select 不接受空串作选项值) */
 const ALL_COURSES = 'all'
 
-/**
- * StudentExperimentsPage 列出可做实验并提供进入入口。
- */
 export default function StudentExperimentsPage() {
   const navigate = useNavigate()
   const [query, setQuery] = useUrlState(EXPERIMENTS_QUERY)
@@ -67,7 +51,6 @@ export default function StudentExperimentsPage() {
     [query.course, query.q],
     { urlPageKey: 'page' },
   )
-  // 学生自己的课程:用于筛选项与卡片上的课程名;一学期几门课,一页取完
   const courses = useAsyncResource(
     () => collectAllPages((params) => api.teaching.getCourses({ role: 'student', ...params }), PAGINATION_MAX_SIZE),
     [],
@@ -85,33 +68,26 @@ export default function StudentExperimentsPage() {
     [courses.data],
   )
 
-  // 全量分组计数(与当前筛选同口径),不用当前页切片去数
+  // 分组计数覆盖全部筛选结果，不能从当前页推算。
   const facets = experiments.status === 'success' ? experiments.data?.facets : undefined
   const groupCount = facetCount(facets, 'collab_mode', ExperimentCollabMode.GROUP)
   const reportCount = facetCount(facets, 'require_report', true)
 
-  /**
-   * enterExperiment 创建或恢复实例后进入沉浸式工作台。
-   * 小组实验必须带 my_group_id:后端按组成员关系校验,未分组时按钮本身不可用(该字段是学生
-   * 获取自身 group_id 的唯一来源,见 M7 接口设计 §3.1)。
-   */
-  const enterExperiment = useCallback(
-    async (experiment: StudentExperiment) => {
-      setEnteringId(experiment.id)
-      setActionError(undefined)
-      try {
-        const instance = await api.experiment.createInstance(experiment.id, {
-          group_id: experiment.my_group_id,
-        })
-        navigate(`/student/experiments/${experiment.id}/workspace?instance=${instance.instance_id}`)
-      } catch (error) {
-        setActionError(userFacingErrorMessage(error, '实验环境没能准备好,请稍后重试。'))
-      } finally {
-        setEnteringId(undefined)
-      }
-    },
-    [navigate],
-  )
+  const enterExperiment = async (experiment: StudentExperiment) => {
+    if (enteringId || (experiment.collab_mode === ExperimentCollabMode.GROUP && !experiment.my_group_id)) return
+    setEnteringId(experiment.id)
+    setActionError(undefined)
+    try {
+      const instance = await api.experiment.createInstance(experiment.id, {
+        group_id: experiment.my_group_id,
+      })
+      navigate(`/student/experiments/${experiment.id}/workspace?instance=${instance.instance_id}`)
+    } catch (error) {
+      setActionError(userFacingErrorMessage(error, '实验环境没能准备好,请稍后重试。'))
+    } finally {
+      setEnteringId(undefined)
+    }
+  }
 
   const filtered = query.course !== '' || query.q !== ''
   const list = experiments.data?.list ?? []
@@ -185,6 +161,7 @@ export default function StudentExperimentsPage() {
                   experiment={experiment}
                   courseName={experiment.course_id ? courseName.get(experiment.course_id) : undefined}
                   entering={enteringId === experiment.id}
+                  blocked={enteringId !== undefined}
                   onEnter={() => void enterExperiment(experiment)}
                 />
               </li>
@@ -208,15 +185,11 @@ interface ExperimentCardProps {
   experiment: StudentExperiment
   courseName: string | undefined
   entering: boolean
+  blocked: boolean
   onEnter: () => void
 }
 
-/**
- * ExperimentCard 一个实验:实验名(链向详情,整卡可点)、所属课程、个人或小组、是否交报告、阶段与检查点数、
- * 本人进度(实验状态、已通过的检查点、得分;没开始过写「还没开始」);
- * 「进入实验」浮在整卡链接之上单独可点。小组实验未分组时按钮不可用并写明原因。
- */
-function ExperimentCard({ experiment, courseName, entering, onEnter }: ExperimentCardProps) {
+function ExperimentCard({ experiment, courseName, entering, blocked, onEnter }: ExperimentCardProps) {
   const group = experiment.collab_mode === ExperimentCollabMode.GROUP
   const waitingGroup = group && !experiment.my_group_id
   const { stages, checkpoints } = experiment.components
@@ -248,7 +221,7 @@ function ExperimentCard({ experiment, courseName, entering, onEnter }: Experimen
           size="sm"
           leftIcon={Play}
           loading={entering}
-          disabled={waitingGroup}
+          disabled={waitingGroup || (blocked && !entering)}
           onClick={onEnter}
         >
           进入实验
@@ -259,10 +232,6 @@ function ExperimentCard({ experiment, courseName, entering, onEnter }: Experimen
   )
 }
 
-/**
- * ExperimentProgressLine 本人进度:实验状态 + 已通过的检查点 + 得分;没开始过写「还没开始」。
- * 检查点是少量可枚举的步骤,用链式区块表示(规范 §5.4)。
- */
 function ExperimentProgressLine({
   progress,
   checkpointCount,
@@ -282,7 +251,6 @@ function ExperimentProgressLine({
   )
 }
 
-/** ExperimentGridSkeleton 与真实卡片同形的骨架 */
 function ExperimentGridSkeleton() {
   return (
     <ul className="card-grid gap-4" aria-busy="true" aria-label="正在读取实验">

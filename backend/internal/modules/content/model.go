@@ -103,18 +103,17 @@ type PaperItemFace struct {
 
 // ItemListFilter 表示内容检索条件。
 type ItemListFilter struct {
-	Type            int16
-	CategoryID      int64
-	Difficulty      int16
-	Tag             string
-	KnowledgePoint  string
-	Keyword         string
-	Visibility      int16
-	Status          int16
-	AuthorID        int64
-	ViewerID        int64
-	OnlyShared      bool
-	PublishedShared bool
-	Page            int
-	Size            int
+	Type           int16
+	CategoryID     int64
+	Difficulty     int16
+	Tag            string
+	KnowledgePoint string
+	Keyword        string
+	Visibility     int16
+	Status         int16
+	AuthorID       int64
+	ViewerID       int64
+	OnlyShared     bool
+	Page           int
+	Size           int
 }

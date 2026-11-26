@@ -179,13 +179,16 @@ func validateSubmitRequest(req contracts.JudgeSubmitRequest) error {
 	if mode == JudgeSandboxModeReuse && strings.TrimSpace(req.TargetSandboxRef) == "" {
 		return apperr.ErrJudgeSubmitInvalid
 	}
-	if mode == JudgeSandboxModeReuse && strings.TrimSpace(req.SandboxSourceRef) == "" {
+	if mode == JudgeSandboxModeReuse && !auth.ValidSourceRef(strings.TrimSpace(req.SandboxSourceRef)) {
 		return apperr.ErrJudgeSubmitInvalid
 	}
 	if mode == JudgeSandboxModeFresh && strings.TrimSpace(req.TargetSandboxRef) != "" {
 		return apperr.ErrJudgeSubmitInvalid
 	}
 	if mode == JudgeSandboxModeFresh && strings.TrimSpace(req.SandboxSourceRef) != "" {
+		return apperr.ErrJudgeSubmitInvalid
+	}
+	if mode == JudgeSandboxModeFresh && strings.TrimSpace(req.SandboxCompositionDigest) != "" {
 		return apperr.ErrJudgeSubmitInvalid
 	}
 	return nil

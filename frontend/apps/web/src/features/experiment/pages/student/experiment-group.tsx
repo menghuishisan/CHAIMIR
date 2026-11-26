@@ -1,8 +1,3 @@
-// 实验小组卡(实验详情页头下方)。设计 §7.2:组名、成员、我的角色。
-// 小组信息走 GET /experiment/groups/{id} —— 学生没有小组发现接口,
-// 组号唯一来源是学生实验投影的 my_group_id(见 M7 接口设计 §3.1)。
-// 「我」由服务端会话里的账号编号认出,不接受客户端传参。
-
 import { Users } from 'lucide-react'
 import type { ExperimentGroup } from '@chaimir/api-client'
 import { Badge, Skeleton } from '@chaimir/ui'
@@ -11,14 +6,7 @@ import { ResourceError } from '../../../../components/ResourceState'
 import { useSession } from '../../../../components/RoleGuard'
 import { useAsyncResource } from '../../../../hooks'
 
-export interface ExperimentGroupCardProps {
-  groupId: string
-}
-
-/**
- * ExperimentGroupCard 展示本人所在小组:组名、成员与分工,本人带「我」标记。
- */
-export function ExperimentGroupCard({ groupId }: ExperimentGroupCardProps) {
+export function ExperimentGroupCard({ groupId }: { groupId: string }) {
   const group = useAsyncResource(() => api.experiment.getGroup(groupId), [groupId], () => false)
 
   return (
@@ -45,7 +33,6 @@ export function ExperimentGroupCard({ groupId }: ExperimentGroupCardProps) {
   )
 }
 
-/** GroupMembers 小组名与成员:姓名、学号、分工;本人排在第一位并带「我」 */
 function GroupMembers({ group }: { group: ExperimentGroup }) {
   const { me } = useSession()
   const members = [...group.members].sort(

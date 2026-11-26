@@ -14,6 +14,19 @@ type ContentItemRef struct {
 	ItemVersion string `json:"item_version"`
 }
 
+// ContentClonePlan 隐藏正文，只返回新引用及由 M5 持有的目标保存、对象补偿操作。
+type ContentClonePlan struct {
+	Refs    map[ContentItemRef]ContentItemRef
+	Save    func(context.Context) error
+	Discard func(context.Context) error
+}
+
+// ContentCloneService 仅供已授权并锁定来源课程的 M6/M7 复制真实依赖，不开放 HTTP。
+// Save 必须借用同数据库、同目标租户普通事务；调用方只在未尝试提交时 Discard。
+type ContentCloneService interface {
+	PrepareContentClone(ctx context.Context, sourceTenantID int64, refs []ContentItemRef) (ContentClonePlan, error)
+}
+
 // ContentItemSnapshot 是 M5 对外输出的题面或全量内容快照。
 type ContentItemSnapshot struct {
 	ItemCode        string         `json:"item_code"`
@@ -74,7 +87,7 @@ type ContentReadService interface {
 	GetContentFull(ctx context.Context, tenantID int64, ref ContentItemRef) (ContentItemSnapshot, error)
 	// BatchGetContentFace 批量读取题面内容,供组卷展开或题目列表批量渲染使用。
 	BatchGetContentFace(ctx context.Context, tenantID int64, refs []ContentItemRef) ([]ContentItemSnapshot, error)
-	// ReplaceUsageRefs 替换某业务来源持有的内容引用集合,用于删除保护与复用统计。
+	// ReplaceUsageRefs 替换引用集合；复用调用方同数据库、同租户的普通事务，随业务原子提交。
 	ReplaceUsageRefs(ctx context.Context, tenantID int64, sourceScope, sourceRef string, refs []ContentItemRef) error
 }
 
@@ -90,6 +103,6 @@ type ContentJudgeReadService interface {
 //
 // 硬约束:调用方必须使用服务端已验签的租户上下文,请求体 TenantID 只能为空或与上下文一致;AuthorType 只能是系统或外部源,不得伪装教师来源。
 type ContentImportService interface {
-	// SystemImportContent 把预验证后的自包含题目固化到内容中心。
+	// SystemImportContent 固化自包含题目；完全相同的重复导入返回原内容，不覆盖不同内容。
 	SystemImportContent(ctx context.Context, req ContentSystemImportRequest) (ContentItemSnapshot, error)
 }

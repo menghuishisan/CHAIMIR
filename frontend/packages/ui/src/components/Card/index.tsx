@@ -63,18 +63,3 @@ export type CardBodyProps = HTMLAttributes<HTMLDivElement>
 export function CardBody({ className, ...rest }: CardBodyProps) {
   return <div {...rest} className={cn('p-5', className)} />
 }
-
-export type CardFooterProps = HTMLAttributes<HTMLDivElement>
-
-/** 卡脚:上边线分隔,默认操作靠右排布 */
-export function CardFooter({ className, ...rest }: CardFooterProps) {
-  return (
-    <div
-      {...rest}
-      className={cn(
-        'flex items-center justify-end gap-3 border-t border-line px-5 py-4',
-        className
-      )}
-    />
-  )
-}

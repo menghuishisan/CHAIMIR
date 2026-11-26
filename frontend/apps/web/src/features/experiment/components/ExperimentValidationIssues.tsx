@@ -1,14 +1,7 @@
-// ExperimentValidationIssues 统一实验发布前校验的阻断与提醒列表。
-
 import { EXPERIMENT_VALIDATION_LEVEL, type ValidationIssue } from '@chaimir/api-client'
 import { Badge } from '@chaimir/ui'
 
-export interface ExperimentValidationIssuesProps {
-  issues: ValidationIssue[]
-}
-
-/** ExperimentValidationIssues 按校验级别展示用户下一步需要处理的事项。 */
-export function ExperimentValidationIssues({ issues }: ExperimentValidationIssuesProps) {
+export function ExperimentValidationIssues({ issues }: { issues: ValidationIssue[] }) {
   if (issues.length === 0) return null
   return (
     <ul className="flex flex-col gap-2">

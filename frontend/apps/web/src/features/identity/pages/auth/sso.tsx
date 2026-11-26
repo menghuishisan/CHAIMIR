@@ -1,6 +1,6 @@
 // SsoCallbackPage 统一认证中转页(公共页,路径 /auth/sso/:tenantCode):
 // 一页承担两件事 ——
-//   1) 从学校统一认证跳回时(URL 带 ticket):自动向后端验票换取会话并直达角色首页;
+//   1) 从学校统一认证跳回时(URL 带 ticket):验票并由会话能力恢复目标或进入角色首页;
 //   2) 直接进入本页时:提供 CAS 跳转入口与学校目录账号(LDAP)登录两种方式。
 // service 参数固定为本页自身地址(去掉 ticket 查询串),后端按来源白名单校验,
 // 前端不拼接任何外部地址,避免开放重定向。
@@ -10,7 +10,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { Button, Icon } from '@chaimir/ui'
 import { ArrowLeft, LoaderCircle } from 'lucide-react'
 import { api } from '../../../../app/api'
-import { loginEntryPath, persistLoginTokens } from '../../../../utils/authSession'
+import { completeLogin } from '../../../../utils/authSession'
 import { safeExternalHttpsUrl } from '../../../../utils/safeNavigation'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { passwordRequiredError, requiredError } from '../../authForm'
@@ -38,7 +38,9 @@ export default function SsoCallbackPage() {
   const [searchParams] = useSearchParams()
   const ticket = searchParams.get('ticket')
 
-  const [verifying, setVerifying] = useState(Boolean(ticket))
+  const [settledVerification, setSettledVerification] = useState<{ tenantCode: string; ticket: string } | null>(null)
+  const verifying = Boolean(ticket && tenantCode &&
+    (settledVerification?.tenantCode !== tenantCode || settledVerification.ticket !== ticket))
   const [redirecting, setRedirecting] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -48,29 +50,35 @@ export default function SsoCallbackPage() {
   }))
   const [formError, setFormError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  // 票据一次性:严格模式下 effect 会执行两次,重复验票会因票据已消耗而失败
-  const verifiedTicket = useRef<string | null>(null)
+  // 票据只能消费一次；保留请求供 Effect 重新订阅，学校与票据共同标识一次验票。
+  const verification = useRef<{
+    tenantCode: string
+    ticket: string
+    request: ReturnType<typeof api.identity.casCallback>
+  } | null>(null)
 
   // 带票据进入即自动验票换会话
   useEffect(() => {
     if (!ticket || !tenantCode) return
-    if (verifiedTicket.current === ticket) return
-    verifiedTicket.current = ticket
+    if (verification.current?.tenantCode !== tenantCode || verification.current.ticket !== ticket) {
+      verification.current = {
+        tenantCode,
+        ticket,
+        request: api.identity.casCallback(tenantCode, { ticket, service: ssoServiceUrl(tenantCode) }),
+      }
+    }
     let active = true
-    setVerifying(true)
-    api.identity
-      .casCallback(tenantCode, { ticket, service: ssoServiceUrl(tenantCode) })
+    verification.current.request
       .then((response) => {
         if (!active) return
-        persistLoginTokens(response)
-        navigate(loginEntryPath(response), { replace: true })
+        navigate(completeLogin(response), { replace: true })
       })
       .catch((callbackError) => {
         if (!active) return
         setFormError(userFacingErrorMessage(callbackError, '统一认证登录未能完成,请返回重新发起认证。'))
       })
       .finally(() => {
-        if (active) setVerifying(false)
+        if (active) setSettledVerification({ tenantCode, ticket })
       })
     return () => {
       active = false
@@ -102,8 +110,7 @@ export default function SsoCallbackPage() {
       setFormError(null)
       try {
         const response = await api.identity.ldapLogin(tenantCode, { username: username.trim(), password })
-        persistLoginTokens(response)
-        navigate(loginEntryPath(response), { replace: true })
+        navigate(completeLogin(response), { replace: true })
       } catch (loginError) {
         setFormError(userFacingErrorMessage(loginError, '统一认证登录失败,请确认账号和密码后重试。'))
       } finally {
@@ -130,8 +137,6 @@ export default function SsoCallbackPage() {
       <div className="w-full max-w-sm">
         <AuthHeading title="学校统一认证" description={`学校代号 ${tenantCode} · 用本校的统一身份认证账号登录`} />
 
-        {/* 主通路是去学校的认证系统:这是一次离站导航,不是本页表单的提交。
-            用玉不用朱砂 —— 认证页的主 CTA 是全页最大色块,朱砂只留给品牌章与落印(§1.2) */}
         <Button
           type="button"
           variant="primary"
@@ -143,7 +148,6 @@ export default function SsoCallbackPage() {
           前往学校统一认证登录
         </Button>
 
-        {/* 两种方式的分界:文字提示即层级,不做分隔线(FE-6 过渡靠密度) */}
         <div className="mt-8 flex items-center gap-3 text-sm text-on-dark-sub">
           <span aria-hidden="true" className="h-px flex-1 bg-dark-line" />
           <span>或用学校目录账号登录</span>
@@ -174,7 +178,6 @@ export default function SsoCallbackPage() {
 
           <AuthFormError message={formError} />
 
-          {/* 目录账号是次级方式,按钮压到 on-dark 级别,不与上方落印按钮争主次 */}
           <Button type="submit" variant="on-dark" size="lg" loading={submitting} className="mt-7 w-full">
             登录
           </Button>

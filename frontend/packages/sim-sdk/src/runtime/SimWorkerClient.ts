@@ -6,24 +6,12 @@ import type {
   SimEvent,
   SimInitParams,
   SimPackageDescriptor,
-  SimState,
 } from '../types';
 
-type WorkerRequest =
-  | { type: 'init'; requestId: number; builtinCode: string; initParams: SimInitParams; seed: number }
-  | { type: 'step'; requestId: number }
-  | { type: 'inject'; requestId: number; eventType: string; payload: JsonObject; target?: string }
-  | { type: 'sync-state'; requestId: number; tick: number; state: SimState }
-  | { type: 'back'; requestId: number }
-  | { type: 'reset'; requestId: number };
-
-type WorkerResponse =
-  | { type: 'ready'; requestId: number; descriptor: SimPackageDescriptor; snapshot: RuntimeSnapshot }
-  | { type: 'snapshot'; requestId: number; snapshot: RuntimeSnapshot; event?: SimEvent }
-  | { type: 'error'; requestId: number; message: string };
+import type { WorkerRequest, WorkerResponse } from './workerProtocol';
 
 export interface SimWorkerClientOptions {
-  /** 平台内置包 code(带 builtin__ 前缀);扩展包运行路径见 docs/总-前端设计规范.md §9,未定契约前不接受 */
+  /** 只装配平台内置包；扩展包在服务端隔离执行。 */
   builtinCode: string;
   initParams: SimInitParams;
   seed: number;
@@ -39,13 +27,7 @@ interface PendingRequest {
   timeoutId: ReturnType<typeof setTimeout>;
 }
 
-/**
- * SimWorkerClient 负责创建隔离 Worker 并发送带超时保护的命令。
- *
- * 播放节奏不在此处:自动推进必须等上一步的快照回到主线程后再排下一步,慢帧才不会让命令堆积,
- * 而 client 无从得知快照何时到达。故节奏、速度档与调度统一由消费端的播放控制持有
- * (见 apps/web 的 features/sim/playback.ts),client 只提供单次命令。
- */
+/** Worker 命令以响应确认并受超时约束；播放节奏由消费者按快照调度。 */
 export class SimWorkerClient {
   private readonly worker: Worker;
   private readonly options: SimWorkerClientOptions;
@@ -53,9 +35,6 @@ export class SimWorkerClient {
   private requestId = 1;
   private failed = false;
 
-  /**
-   * constructor 创建模块 Worker 并绑定主线程消息处理器。
-   */
   constructor(options: SimWorkerClientOptions) {
     this.options = options;
     this.worker = new Worker(new URL('./sim.worker.ts', import.meta.url), { type: 'module' });
@@ -63,9 +42,7 @@ export class SimWorkerClient {
     this.worker.onerror = (event) => this.failAll(this.userMessage('仿真运行环境异常,请刷新后重试', event.message));
   }
 
-  /**
-   * init 在 Worker 内装配内置仿真包并生成初始快照。
-   */
+  /** 装配内置包并生成初始快照。 */
   async init(): Promise<void> {
     await this.post({
       type: 'init',
@@ -76,56 +53,42 @@ export class SimWorkerClient {
     });
   }
 
-  /**
-   * step 推进一个 tick。
-   */
+  /** 推进一个推演时刻。 */
   async step(): Promise<void> {
     await this.post({ type: 'step', requestId: 0 });
   }
 
-  /**
-   * inject 注入用户交互事件。
-   */
-  async inject(eventType: string, payload: JsonObject = {}, target?: string): Promise<void> {
-    await this.post({ type: 'inject', requestId: 0, eventType, payload, target });
+  /** 只返回已执行的用户事件，供调用方按其真实时刻记录。 */
+  async inject(eventType: string, payload: JsonObject = {}, target?: string): Promise<SimEvent> {
+    const response = await this.post({ type: 'inject', requestId: 0, eventType, payload, target });
+    if (response.type !== 'snapshot' || !response.event || response.event.source !== 'user') {
+      throw this.failAll('仿真操作未能确认,请重新进入后重试');
+    }
+    return response.event;
   }
 
-  /**
-   * syncState 把受信任后端适配器返回的模型状态交给 Worker 生成统一渲染快照。
-   */
-  async syncState(tick: number, state: SimState): Promise<void> {
-    await this.post({ type: 'sync-state', requestId: 0, tick, state });
-  }
-
-  /**
-   * back 回退最近一次事件。
-   */
+  /** 回退最近一次事件。 */
   async back(): Promise<void> {
     await this.post({ type: 'back', requestId: 0 });
   }
 
-  /**
-   * reset 重置到初始状态。
-   */
+  /** 重置到初始状态。 */
   async reset(): Promise<void> {
     await this.post({ type: 'reset', requestId: 0 });
   }
 
-  /**
-   * destroy 终止 Worker。
-   */
+  /** 终止 Worker 并拒绝尚未完成的命令。 */
   destroy(): void {
+    this.failed = true;
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeoutId);
+      pending.reject(new Error('仿真运行环境已关闭'));
     }
     this.pending.clear();
     this.worker.terminate();
   }
 
-  /**
-   * post 发送带超时保护的 Worker 命令,并把响应关联回调用方。
-   */
-  private post(message: WorkerRequest): Promise<void> {
+  private post(message: WorkerRequest): Promise<WorkerResponse> {
     if (this.failed) {
       return Promise.reject(new Error(this.userMessage('仿真运行环境异常,请刷新后重试')));
     }
@@ -145,7 +108,7 @@ export class SimWorkerClient {
             reject(error);
             return;
           }
-          resolve();
+          resolve(response);
         },
         reject,
       });
@@ -153,18 +116,11 @@ export class SimWorkerClient {
     });
   }
 
-  /**
-   * handleMessage 处理 Worker 响应并触发 ready、snapshot 或 error 回调。
-   */
   private handleMessage(response: WorkerResponse): void {
     const pending = this.pending.get(response.requestId);
-    if (pending) {
-      this.pending.delete(response.requestId);
-      pending.resolve(response);
-      if (response.type === 'error') {
-        return;
-      }
-    }
+    if (!pending) return;
+    this.pending.delete(response.requestId);
+    pending.resolve(response);
     if (response.type === 'ready') {
       this.options.onReady?.(response.descriptor, response.snapshot);
       return;
@@ -173,15 +129,8 @@ export class SimWorkerClient {
       this.options.onSnapshot?.(response.snapshot, response.event);
       return;
     }
-    if (response.type === 'error' && this.failed) {
-      return;
-    }
-    this.failAll(response.message);
   }
 
-  /**
-   * failAll 进入失败态,终止 Worker 并拒绝所有等待中的命令。
-   */
   private failAll(message: string): Error {
     this.failed = true;
     this.worker.terminate();
@@ -195,11 +144,7 @@ export class SimWorkerClient {
     return error;
   }
 
-  /**
-   * userMessage 记录内部错误原因并返回纯用户向文案。
-   * 仿真在浏览器本地运行,没有后端签发的报障编号;前端不自造编号——它在运维侧查不到,
-   * 展示出来只会把用户挡在报障流程之外,所以技术原因只进控制台结构化日志。
-   */
+  // 本地执行没有服务端报障编号，内部原因只进入诊断日志。
   private userMessage(message: string, cause?: unknown): string {
     console.error('sim_client_error', {
       operation: 'worker-command',

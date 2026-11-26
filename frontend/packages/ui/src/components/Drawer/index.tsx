@@ -4,8 +4,8 @@
  * side=left:左侧全高抽屉,窄屏导航专用(应用壳侧栏抽屉化,§6.4);
  * side=bottom:窄屏底部 Sheet,顶部圆角,高度随内容、上限 88vh。
  * tone=light(默认)宣纸光面;tone=dark 墨色面板(导航抽屉与底层同世界)。
- * 组合导出:Drawer(Root)/ DrawerTrigger / DrawerContent(side/tone)/ DrawerHeader /
- * DrawerTitle / DrawerDescription / DrawerBody / DrawerFooter / DrawerClose。
+ * 组合导出:Drawer(Root)/ DrawerContent(side/tone)/ DrawerHeader /
+ * DrawerTitle / DrawerDescription / DrawerBody / DrawerFooter。
  * 焦点陷阱、Esc、遮罩关闭由 Radix 保证;动效 slide-in/out(出场短于入场),
  * 位移动画独占 Content 的 transform,定位用 inset,不冲突(§4.3)。
  */
@@ -22,8 +22,6 @@ import { cn } from "../../lib/cn";
 import { Icon } from "../../lib/icon";
 
 export const Drawer = DialogPrimitive.Root;
-export const DrawerTrigger = DialogPrimitive.Trigger;
-export const DrawerClose = DialogPrimitive.Close;
 
 /* 方位 × 色调变体:right/left 全高侧滑,bottom 底部上滑(窄屏 sheet) */
 const drawerContentVariants = cva("fixed z-drawer flex flex-col shadow-lg", {

@@ -41,5 +41,5 @@ case "$mnemonic_words" in
   *) echo "CHAIMIR_EVM_DEPLOYER_MNEMONIC 必须是有效长度的 BIP39 助记词" >&2; exit 2 ;;
 esac
 
-# 使用平台统一注入的助记词派生运行时账户,并保留编排显式传入的参数。
-exec anvil --host 0.0.0.0 --port "${CHAIMIR_RUNTIME_RPC_PORT}" --mnemonic "$CHAIMIR_EVM_DEPLOYER_MNEMONIC" "$@"
+# 从平台助记词派生账户；关闭默认的私钥和助记词输出，保留编排显式参数。
+exec anvil --quiet --host 0.0.0.0 --port "${CHAIMIR_RUNTIME_RPC_PORT}" --mnemonic "$CHAIMIR_EVM_DEPLOYER_MNEMONIC" "$@"

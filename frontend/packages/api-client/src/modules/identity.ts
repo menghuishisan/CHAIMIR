@@ -1,6 +1,3 @@
-// Identity API：认证、授权、用户管理
-// 对应后端 M1 模块
-
 import { ApiClient, encodePathSegment } from '../client'
 import type { AttachmentResponse } from '../client'
 import type { AccountStatus, ApplicationStatus, BaseIdentity, ImportTemplateFormat, TenantStatus } from '../constants/identity'
@@ -308,7 +305,7 @@ export class IdentityApi {
     const formData = new FormData()
     formData.append('type', targetType)
     formData.append('file', file)
-    return this.client.postFormData('/accounts/import/preview', formData, onProgress)
+    return this.client.sendFormData('POST', '/accounts/import/preview', formData, onProgress)
   }
 
   /** 发现当前租户本人未完成的账号或组织导入预览。 */
@@ -447,7 +444,7 @@ export class IdentityApi {
   async previewOrgImport(file: File, onProgress?: (progress: number) => void): Promise<ImportPreviewResponse> {
     const formData = new FormData()
     formData.append('file', file)
-    return this.client.postFormData('/org/import/preview', formData, onProgress)
+    return this.client.sendFormData('POST', '/org/import/preview', formData, onProgress)
   }
 
   /**
@@ -505,7 +502,7 @@ export class IdentityApi {
   ): Promise<Tenant> {
     const formData = new FormData()
     formData.append('file', file)
-    return this.client.postFormData('/tenant/logo', formData, onProgress)
+    return this.client.sendFormData('POST', '/tenant/logo', formData, onProgress)
   }
 
   /**

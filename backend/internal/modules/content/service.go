@@ -1,10 +1,10 @@
-// content service 文件定义 M5 服务依赖注入和通用业务编排,不接收数据库连接。
 package content
 
 import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
@@ -23,7 +23,7 @@ const (
 
 type objectStorage interface {
 	Delete(ctx context.Context, bucket, key string) error
-	Get(ctx context.Context, bucket, key string) (io.ReadCloser, error)
+	CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string) (int64, error)
 	Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error
 	BucketAttach() string
 }
@@ -35,10 +35,12 @@ type fileService interface {
 
 // Service 承载 content 模块业务编排,依赖 repo 接口和平台横切能力。
 type Service struct {
+	cleanupTimeout            time.Duration
 	store                     Store
 	ids                       snowflake.Generator
 	audit                     audit.Writer
 	storage                   objectStorage
+	codeBucket                string
 	files                     fileService
 	contentAttachmentMaxBytes int64
 	attachmentScanPolicy      upload.ScanPolicy
@@ -46,6 +48,7 @@ type Service struct {
 
 // ServiceDeps 是 content service 的装配依赖集合。
 type ServiceDeps struct {
+	CleanupTimeout            time.Duration
 	Store                     Store
 	IDs                       snowflake.Generator
 	Audit                     audit.Writer
@@ -57,6 +60,9 @@ type ServiceDeps struct {
 
 // NewService 构造 content 服务,不接收数据库连接,由装配层传入 Store。
 func NewService(deps ServiceDeps) (*Service, error) {
+	if deps.CleanupTimeout <= 0 {
+		return nil, fmt.Errorf("上传清理超时必须大于 0")
+	}
 	if deps.Store == nil {
 		return nil, fmt.Errorf("content service 缺少 store")
 	}
@@ -75,7 +81,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.ContentAttachmentMaxBytes <= 0 {
 		return nil, fmt.Errorf("content service 缺少附件大小配置")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, storage: deps.Storage, files: deps.FileService, contentAttachmentMaxBytes: deps.ContentAttachmentMaxBytes, attachmentScanPolicy: deps.AttachmentScanPolicy}, nil
+	return &Service{cleanupTimeout: deps.CleanupTimeout, store: deps.Store, ids: deps.IDs, audit: deps.Audit, storage: deps.Storage, codeBucket: deps.Storage.BucketCode(), files: deps.FileService, contentAttachmentMaxBytes: deps.ContentAttachmentMaxBytes, attachmentScanPolicy: deps.AttachmentScanPolicy}, nil
 }
 
 // currentIdentity 读取租户账号身份。
@@ -101,10 +107,13 @@ func mapContentReadError(err error) error {
 	if err == nil {
 		return nil
 	}
+	if _, ok := apperr.As(err); ok {
+		return err
+	}
 	if isNoRows(err) {
 		return apperr.ErrContentNotFound
 	}
-	return apperr.ErrContentInvalid.WithCause(err)
+	return apperr.AsAppError(err)
 }
 
 // mapContentMutationError 将状态不匹配导致的未命中归一为状态错误。
@@ -112,10 +121,13 @@ func mapContentMutationError(err error) error {
 	if err == nil {
 		return nil
 	}
+	if _, ok := apperr.As(err); ok {
+		return err
+	}
 	if isNoRows(err) {
 		return apperr.ErrContentStateInvalid
 	}
-	return apperr.ErrContentInvalid.WithCause(err)
+	return apperr.AsAppError(err)
 }
 
 // mapPaperError 将试卷读取错误归一。
@@ -123,10 +135,13 @@ func mapPaperError(err error) error {
 	if err == nil {
 		return nil
 	}
+	if _, ok := apperr.As(err); ok {
+		return err
+	}
 	if isNoRows(err) {
 		return apperr.ErrPaperNotFound
 	}
-	return apperr.ErrPaperInvalid.WithCause(err)
+	return apperr.AsAppError(err)
 }
 
 // toContractImport 转换内部系统导入 contract 请求。

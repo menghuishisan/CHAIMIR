@@ -46,6 +46,7 @@
   post:
     tags: [contest]
     summary: 编排竞赛题目
+    description: 对抗题用 battle_rule 选择对局规则；访问边界、参战角色和完整回放由平台规则确定，不接受 battle_config。环境仍取锁定题目版本的组合快照。
     operationId: contestAddProblem
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
@@ -179,6 +180,7 @@
   get:
     tags: [contest]
     summary: 对抗赛回放时间窗与服务端检查点
+    description: 每局 entry 为本队实际使用的锁定参战物，重提交不改变历史版本或角色。
     operationId: contestGetBattleReplayWindow
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
@@ -278,15 +280,6 @@
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ProblemIDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/contest/matches/{id}/replay:
-  get:
-    tags: [contest]
-    summary: 对局回放
-    operationId: contestGetBattleReplay
-    x-chaimir-audience: student
-    security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/matches/{id}/replay/download-grant:
   post:
     tags: [contest]
@@ -301,6 +294,7 @@
   get:
     tags: [contest]
     summary: 读取竞赛授权沙箱摘要
+    description: capabilities 与 M2 使用同一投影；文件与终端只属于工作区实例，chain_operations 按运行时实例分别返回非空操作数组，无链能力返回空对象。
     operationId: contestGetSandbox
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
@@ -457,9 +451,17 @@
     tags: [contest]
     summary: 学生可发现的竞赛列表
     operationId: contestListStudentContests
+    description: 仅返回本校或当前账号已入队的跨校非草稿赛事；身份取自会话，列表与总数使用同一可见范围。
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }, { $ref: "#/components/parameters/KeywordQuery" }]
+    parameters:
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
+      - { $ref: "#/components/parameters/KeywordQuery" }
+      - name: status
+        in: query
+        description: 按正式状态精确筛选，0 或省略表示全部，草稿不可见。
+        schema: { type: integer, minimum: 0, maximum: 6, default: 0 }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/student/contests/{id}:
   get:
@@ -489,6 +491,7 @@
   post:
     tags: [contest]
     summary: 创建或更新平台级漏洞源配置
+    description: 配置整份替换；敏感字段回传“已配置”保留同一路径原值，新值替换，删除或空值清除，新建禁止占位值。地址、方法和路径必须为文本，mapping 为文本路径对象；method 省略或空文本时为 GET，timeout_seconds 省略时沿用平台设置。headers 为文本映射，body 为请求内容。
     operationId: contestUpsertPlatformVulnSource
     x-chaimir-audience: platform-admin
     security: [{ bearerAuth: [] }]
@@ -497,14 +500,16 @@
 /api/v1/contest/vuln-sources:
   get:
     tags: [contest]
-    summary: 漏洞源配置列表
+    summary: 平台共享源及本校漏洞源列表
+    description: is_shared 表示平台共享源；共享配置只读，可同步为本校草稿，不返回 last_sync_at。
     operationId: contestListVulnSources
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [contest]
-    summary: 创建或更新漏洞源配置
+    summary: 创建或更新本校漏洞源配置
+    description: 仅更新本校来源；配置整份替换。敏感字段回传“已配置”保留同一路径原值，新值替换，删除或空值清除，新建禁止占位值。地址、方法和路径必须为文本，mapping 为文本路径对象；method 省略或空文本时为 GET，timeout_seconds 省略时沿用平台设置。headers 为文本映射，body 为请求内容。
     operationId: contestUpsertVulnSource
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
@@ -536,16 +541,37 @@
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [contest]
-    summary: 导入漏洞题草稿
-    operationId: contestImportVulnProblem
+    summary: 新建漏洞题草稿
+    operationId: contestCreateVulnProblem
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/vuln-problems/{id}:
+  get:
+    tags: [contest]
+    summary: 读取漏洞题草稿
+    description: 返回本校草稿与 updated_at，供恢复编辑及并发校验。
+    operationId: contestGetVulnProblem
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  put:
+    tags: [contest]
+    summary: 保存漏洞题草稿
+    description: 接收完整草稿与必填 expected_updated_at；仅更新草稿态的匹配版本并清空旧预验证，状态或版本变化返回 11006，案例编号重复返回 85012。
+    operationId: contestUpdateVulnProblem
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/vuln-problems/{id}/prevalidate:
   post:
     tags: [contest]
     summary: 预验证漏洞题
+    description: 无请求体；只执行已保存草稿中的 composition、初始化及判题配置，官方攻击仅用于正向预验证。
     operationId: contestPrevalidateVulnProblem
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]

@@ -95,7 +95,7 @@ selftest:
       command:
         - python
         - -c
-        - "import importlib.util; spec=importlib.util.spec_from_file_location('contract_ui','/app/contract_ui.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); abi=[{'type':'function','name':'transfer','inputs':[{'name':'to','type':'address'},{'name':'amount','type':'uint256'}]}]; r=m.build_call_data(abi,'transfer',['0x0000000000000000000000000000000000000001',5]); assert r['calldata'].startswith('0xa9059cbb')"
+        - "import importlib.util; spec=importlib.util.spec_from_file_location('contract_ui','/app/contract_ui.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); abi=[{'type':'function','name':'transfer','inputs':[{'name':'to','type':'address'},{'name':'amount','type':'uint256'}]}]; r=m.build_call_data(abi,'transfer(address,uint256)',['0x0000000000000000000000000000000000000001','5']); assert r['calldata'].startswith('0xa9059cbb'); abi=[{'type':'function','name':'set','inputs':[{'type':'tuple','components':[{'type':'uint256'},{'type':'bytes'}]}]}]; r=m.build_call_data(abi,'set((uint256,bytes))',[['7','0x0102']]); assert r['signature']=='set((uint256,bytes))' and len(r['calldata'])>10"
 supply_chain:
   sbom: true
   trivy_required: true

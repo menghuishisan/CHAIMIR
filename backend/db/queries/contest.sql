@@ -1,8 +1,8 @@
 -- contest.sql 定义 M8 竞赛模块的 sqlc 查询,仅访问竞赛模块自有表。
 -- name: CreateContest :one
-INSERT INTO contest (id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1, now(), now(), NULL)
-RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at;
+INSERT INTO contest (id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, created_at, updated_at, deleted_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, now(), now(), NULL)
+RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, is_leaderboard_push_pending, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at;
 
 -- name: CompleteAutoArchiveContest :execrows
 UPDATE contest AS c
@@ -27,13 +27,13 @@ WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.id = sqlc.arg(contest_id) AND c.st
 RETURNING c.id, c.tenant_id, c.created_at, c.archive_lease_token, c.archive_lease_until;
 
 -- name: GetContest :one
-SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, is_leaderboard_push_pending, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
 FROM contest
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL;
 
 -- name: GetContestForUpdate :one
 -- 编排保存和人工状态流转共用赛事父行锁,读取等待后的最新状态。
-SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, is_leaderboard_push_pending, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
 FROM contest
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 FOR UPDATE;
@@ -55,7 +55,7 @@ FROM battle_match
 WHERE id = $1;
 
 -- name: ListContests :many
-SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, is_leaderboard_push_pending, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
 FROM contest
 WHERE tenant_id = sqlc.arg(tenant_id)::bigint AND deleted_at IS NULL
   AND (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
@@ -71,10 +71,17 @@ WHERE tenant_id = sqlc.arg(tenant_id)::bigint AND deleted_at IS NULL
   AND (sqlc.arg(keyword)::text = '' OR strpos(lower(name), lower(sqlc.arg(keyword)::text)) > 0);
 
 -- name: ListStudentContests :many
--- status 传 0 回学生可发现的全部赛事(草稿态不可见);传具体状态时仍受可见区间约束。
-SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
-FROM contest
-WHERE tenant_id = sqlc.arg(tenant_id)::bigint AND deleted_at IS NULL AND status BETWEEN 2 AND 6
+-- 本校或当前成员的跨校正式赛事；调用方绑定会话租户与账号，不接受客户端指定身份。
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, is_leaderboard_push_pending, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
+FROM contest c
+WHERE c.deleted_at IS NULL AND c.status BETWEEN 2 AND 6
+  AND (c.tenant_id = sqlc.arg(tenant_id)::bigint OR EXISTS (
+    SELECT 1 FROM team t
+    JOIN team_member tm ON tm.tenant_id = t.tenant_id AND tm.team_id = t.id
+    WHERE t.tenant_id = c.tenant_id AND t.contest_id = c.id
+      AND tm.member_tenant_id = sqlc.arg(tenant_id)::bigint
+      AND tm.account_id = sqlc.arg(account_id)::bigint
+  ))
   AND (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
   AND (sqlc.arg(keyword)::text = '' OR strpos(lower(name), lower(sqlc.arg(keyword)::text)) > 0)
 ORDER BY updated_at DESC, id DESC
@@ -82,8 +89,15 @@ LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
 -- name: CountStudentContests :one
 SELECT COUNT(*)::bigint
-FROM contest
-WHERE tenant_id = sqlc.arg(tenant_id)::bigint AND deleted_at IS NULL AND status BETWEEN 2 AND 6
+FROM contest c
+WHERE c.deleted_at IS NULL AND c.status BETWEEN 2 AND 6
+  AND (c.tenant_id = sqlc.arg(tenant_id)::bigint OR EXISTS (
+    SELECT 1 FROM team t
+    JOIN team_member tm ON tm.tenant_id = t.tenant_id AND tm.team_id = t.id
+    WHERE t.tenant_id = c.tenant_id AND t.contest_id = c.id
+      AND tm.member_tenant_id = sqlc.arg(tenant_id)::bigint
+      AND tm.account_id = sqlc.arg(account_id)::bigint
+  ))
   AND (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
   AND (sqlc.arg(keyword)::text = '' OR strpos(lower(name), lower(sqlc.arg(keyword)::text)) > 0);
 
@@ -98,20 +112,31 @@ SET name = $3,
     start_at = $9,
     end_at = $10,
     freeze_minutes = $11,
-    rules = $12,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status IN (1, 2) AND deleted_at IS NULL
-RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at;
+RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, is_leaderboard_push_pending, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at;
 
 -- name: SetContestStatus :one
 UPDATE contest
 SET status = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at;
+RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, is_leaderboard_push_pending, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at;
+
+-- name: ListContestLifecycleTenantIDs :many
+-- 维护连接只定位学校；状态与审计交由该校普通租户事务提交。
+SELECT DISTINCT tenant_id
+FROM contest
+WHERE deleted_at IS NULL AND (
+    (status IN (2, 3, 4) AND end_at <= $1)
+    OR (status = 2 AND start_at <= $1 AND end_at > $1)
+    OR (status = 3 AND freeze_minutes > 0 AND end_at > $1
+        AND end_at - (freeze_minutes * INTERVAL '1 minute') <= $1)
+)
+ORDER BY tenant_id;
 
 -- name: ListContestsDueToRun :many
 -- 后台生命周期扫描只推进仍处于报名中的赛事;已越过结束时间的赛事由结束扫描直接收口。
-SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, is_leaderboard_push_pending, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
 FROM contest
 WHERE deleted_at IS NULL AND status = 2 AND start_at <= $1 AND end_at > $1
 ORDER BY start_at ASC, id ASC
@@ -119,7 +144,7 @@ FOR UPDATE SKIP LOCKED;
 
 -- name: ListContestsDueToFreeze :many
 -- 封榜窗口由服务端按 freeze_minutes 计算,不接受前端自行推进状态。
-SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, is_leaderboard_push_pending, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
 FROM contest
 WHERE deleted_at IS NULL AND status = 3 AND freeze_minutes > 0
   AND end_at > $1
@@ -129,32 +154,31 @@ FOR UPDATE SKIP LOCKED;
 
 -- name: ListContestsDueToEnd :many
 -- 报名中、进行中和封榜中的赛事过了结束时间都必须进入结束态,避免学生入口长期显示报名中。
-SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, is_leaderboard_push_pending, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
 FROM contest
 WHERE deleted_at IS NULL AND status IN (2, 3, 4) AND end_at <= $1
 ORDER BY end_at ASC, id ASC
 FOR UPDATE SKIP LOCKED;
 
 -- name: UpsertContestProblem :one
-INSERT INTO contest_problem (id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_config, battle_rule, seq, composition_digest, composition_snapshot)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+INSERT INTO contest_problem (id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_rule, seq, composition_digest, composition_snapshot)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (tenant_id, contest_id, item_code, item_version) DO UPDATE
 SET score = EXCLUDED.score,
     dynamic_score = EXCLUDED.dynamic_score,
-    battle_config = EXCLUDED.battle_config,
     battle_rule = EXCLUDED.battle_rule,
     seq = EXCLUDED.seq,
     composition_digest = EXCLUDED.composition_digest,
     composition_snapshot = EXCLUDED.composition_snapshot
-RETURNING id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_config, battle_rule, seq, composition_digest, composition_snapshot;
+RETURNING id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_rule, seq, composition_digest, composition_snapshot;
 
 -- name: GetContestProblem :one
-SELECT id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_config, battle_rule, seq, composition_digest, composition_snapshot
+SELECT id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_rule, seq, composition_digest, composition_snapshot
 FROM contest_problem
 WHERE tenant_id = $1 AND id = $2;
 
 -- name: ListContestProblems :many
-SELECT id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_config, battle_rule, seq, composition_digest, composition_snapshot
+SELECT id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_rule, seq, composition_digest, composition_snapshot
 FROM contest_problem
 WHERE tenant_id = $1 AND contest_id = $2
 ORDER BY seq ASC, id ASC;
@@ -178,7 +202,7 @@ WHERE tenant_id = sqlc.arg(tenant_id) AND contest_id = sqlc.arg(contest_id) AND 
 -- name: GetTeamByInviteCode :one
 SELECT id, tenant_id, contest_id, name, invite_code, status, created_at
 FROM team
-WHERE tenant_id = $1 AND invite_code = $2;
+WHERE tenant_id = $1 AND contest_id = $2 AND invite_code = $3;
 
 -- name: GetTeamForAccount :one
 SELECT t.id, t.tenant_id, t.contest_id, t.name, t.invite_code, t.status, t.created_at
@@ -210,12 +234,6 @@ SELECT id, tenant_id, team_id, account_id, member_tenant_id, is_leader, joined_a
 FROM team_member
 WHERE tenant_id = $1 AND team_id = $2
 ORDER BY is_leader DESC, joined_at ASC, id ASC;
-
--- name: AccountTeamIDs :many
-SELECT t.id
-FROM team t
-JOIN team_member m ON m.tenant_id = t.tenant_id AND m.team_id = t.id
-WHERE t.tenant_id = $1 AND t.contest_id = $2 AND m.member_tenant_id = $3 AND m.account_id = $4;
 
 -- name: GetContestAccessGrant :one
 SELECT id, tenant_id, contest_id, team_id, sandbox_id, member_tenant_id, member_account_id, capabilities, source_ref, grant_version, status, expires_at, created_at, updated_at
@@ -265,7 +283,7 @@ ORDER BY id;
 -- name: ListContestAccessGrantsForContest :many
 SELECT id, tenant_id, contest_id, team_id, sandbox_id, member_tenant_id, member_account_id, capabilities, source_ref, grant_version, status, expires_at, created_at, updated_at
 FROM contest_access_grant
-WHERE tenant_id = $1 AND contest_id = $2 AND status = 1
+WHERE tenant_id = $1 AND contest_id = $2
 ORDER BY sandbox_id, id;
 
 -- name: CreateSolveSubmission :one
@@ -291,9 +309,11 @@ FROM solve_submission
 WHERE id = $1;
 
 -- name: GetSolveSubmissionByJudgeTask :one
-SELECT id, tenant_id, contest_id, problem_id, team_id, submitter_tenant_id, submitter_id, content_ref, source_ref, scope_ref, judge_task_ref, passed, score, sandbox_ref, submitted_at
-FROM solve_submission
-WHERE tenant_id = $1 AND judge_task_ref = $2;
+SELECT s.id, s.tenant_id, s.contest_id, s.problem_id, s.team_id, s.submitter_tenant_id, s.submitter_id, s.content_ref, s.source_ref, s.scope_ref, s.judge_task_ref, s.passed, s.score, s.sandbox_ref, s.submitted_at
+FROM contest c
+JOIN solve_submission s ON s.tenant_id = c.tenant_id AND s.contest_id = c.id
+WHERE s.tenant_id = $1 AND s.judge_task_ref = $2
+FOR UPDATE OF c, s;
 
 -- name: UpdateSolveSubmissionResult :one
 UPDATE solve_submission
@@ -302,10 +322,18 @@ SET passed = $3,
 WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, contest_id, problem_id, team_id, submitter_tenant_id, submitter_id, content_ref, source_ref, scope_ref, judge_task_ref, passed, score, sandbox_ref, submitted_at;
 
--- name: RecentFailedSolveCount :one
-SELECT COUNT(*)::bigint
+-- name: ListRecentSolveTaskRefs :many
+SELECT judge_task_ref::text
 FROM solve_submission
-WHERE tenant_id = $1 AND contest_id = $2 AND problem_id = $3 AND team_id = $4 AND passed = false AND submitted_at >= now() - ($5::text || ' seconds')::interval;
+WHERE tenant_id = $1 AND contest_id = $2 AND problem_id = $3 AND team_id = $4
+  AND judge_task_ref IS NOT NULL AND submitted_at >= now() - ($5::text || ' seconds')::interval
+ORDER BY submitted_at DESC, id DESC;
+
+-- name: ListSolveSubmissionSourceRefs :many
+SELECT source_ref::text
+FROM solve_submission
+WHERE tenant_id = $1 AND contest_id = $2 AND problem_id = $3
+ORDER BY submitted_at DESC, id DESC;
 
 -- name: RecentSolveCount :one
 SELECT COUNT(*)::bigint
@@ -323,7 +351,12 @@ SET score = EXCLUDED.score,
 RETURNING id, tenant_id, contest_id, team_id, score::float8 AS score, solved_count, last_solve_at, rank, updated_at;
 
 -- name: SumTeamSolvedScore :one
-SELECT COALESCE(SUM(best.score), 0)::float8 AS score, COUNT(*)::int AS solved_count, MAX(best.submitted_at)::timestamptz AS last_solve_at
+SELECT GREATEST(COALESCE(SUM(best.score), 0) - COALESCE((
+           SELECT SUM((cr.evidence->>'penalty_score')::numeric)
+           FROM cheat_record cr
+           WHERE cr.tenant_id = $1 AND cr.contest_id = $2 AND cr.team_id = $3 AND cr.action = 2
+       ), 0), 0)::float8 AS score,
+       COUNT(*)::int AS solved_count, MAX(best.submitted_at)::timestamptz AS last_solve_at
 FROM (
     SELECT DISTINCT ON (problem_id) problem_id, score, submitted_at
     FROM solve_submission
@@ -337,34 +370,21 @@ FROM solve_submission
 WHERE tenant_id = $1 AND contest_id = $2 AND problem_id = $3 AND passed = true;
 
 -- name: ListLadder :many
-WITH eligible AS (
-    SELECT lr.id, lr.tenant_id, lr.contest_id, lr.team_id, c.mode AS contest_mode, lr.score::float8 AS score,
-           CASE WHEN c.mode = 1 THEN lr.solved_count ELSE 0 END AS solved_count,
-           CASE WHEN c.mode = 1 THEN lr.last_solve_at ELSE NULL::timestamptz END AS last_solve_at,
-           lr.updated_at
-    FROM ladder_rank lr
-    JOIN contest c ON c.tenant_id = lr.tenant_id AND c.id = lr.contest_id
-    WHERE lr.tenant_id = $1 AND lr.contest_id = $2
-      AND NOT EXISTS (
-          SELECT 1 FROM cheat_record cr
-          WHERE cr.tenant_id = lr.tenant_id
-            AND cr.contest_id = lr.contest_id
-            AND cr.team_id = lr.team_id
-            AND cr.action = 3
-      )
-), ranked AS (
-    SELECT eligible.*,
-           ROW_NUMBER() OVER (
-               ORDER BY score DESC,
-                        CASE WHEN contest_mode = 1 THEN solved_count END DESC,
-                        CASE WHEN contest_mode = 1 THEN last_solve_at END ASC NULLS LAST,
-                        team_id ASC
-           )::int AS rank
-    FROM eligible
-)
-SELECT id, tenant_id, contest_id, team_id, score, solved_count, last_solve_at, rank, updated_at
-FROM ranked
-ORDER BY rank ASC
+SELECT lr.id, lr.tenant_id, lr.contest_id, lr.team_id, lr.score::float8 AS score,
+       CASE WHEN c.mode = 1 THEN lr.solved_count ELSE 0 END AS solved_count,
+       CASE WHEN c.mode = 1 THEN lr.last_solve_at ELSE NULL::timestamptz END AS last_solve_at,
+       lr.rank, lr.updated_at
+FROM ladder_rank lr
+JOIN contest c ON c.tenant_id = lr.tenant_id AND c.id = lr.contest_id
+WHERE lr.tenant_id = $1 AND lr.contest_id = $2
+  AND NOT EXISTS (
+      SELECT 1 FROM cheat_record cr
+      WHERE cr.tenant_id = lr.tenant_id
+        AND cr.contest_id = lr.contest_id
+        AND cr.team_id = lr.team_id
+        AND cr.action = 3
+  )
+ORDER BY lr.rank ASC
 LIMIT $3 OFFSET $4;
 
 -- name: GetLadderByTeam :one
@@ -403,11 +423,34 @@ WITH ranked AS (
             AND cr.team_id = lr0.team_id
             AND cr.action = 3
       )
+), refreshed AS (
+    UPDATE ladder_rank lr
+    SET rank = ranked.new_rank, updated_at = now()
+    FROM ranked
+    WHERE lr.id = ranked.id AND lr.rank IS DISTINCT FROM ranked.new_rank
+    RETURNING lr.id
 )
-UPDATE ladder_rank lr
-SET rank = ranked.new_rank, updated_at = now()
-FROM ranked
-WHERE lr.id = ranked.id;
+UPDATE contest c
+SET is_leaderboard_push_pending = true
+WHERE c.tenant_id = $1 AND c.id = $2 AND c.deleted_at IS NULL;
+
+-- name: ListPendingLeaderboardContests :many
+SELECT id, tenant_id
+FROM contest
+WHERE is_leaderboard_push_pending AND deleted_at IS NULL AND id > sqlc.arg(after_id)
+ORDER BY id
+LIMIT sqlc.arg(page_limit);
+
+-- name: GetPendingLeaderboardContest :one
+SELECT id, tenant_id, status
+FROM contest
+WHERE tenant_id = $1 AND id = $2 AND is_leaderboard_push_pending AND deleted_at IS NULL
+FOR UPDATE;
+
+-- name: CompleteLeaderboardPush :exec
+UPDATE contest
+SET is_leaderboard_push_pending = false
+WHERE tenant_id = $1 AND id = $2;
 
 -- name: DeactivateBattleEntries :exec
 UPDATE battle_entry
@@ -586,7 +629,7 @@ WHERE m.tenant_id = $1 AND m.contest_id = $2
 GROUP BY m.status;
 
 -- name: ListBattleReplayMatchesForTeam :many
--- 回放专用时间窗只读取已完成对局,并由服务端携带本队视角和当时生效的参战物。
+-- 回放只读取已完成对局，本队角色和版本直接取对局绑定的参战物。
 WITH visible AS (
     SELECT
         m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id,
@@ -594,31 +637,20 @@ WITH visible AS (
         m.replay_ref, m.status, m.matched_at, m.finished_at,
         ROW_NUMBER() OVER (ORDER BY m.finished_at ASC, m.id ASC)::bigint AS sequence_no,
         CASE WHEN a.team_id = sqlc.arg(team_id)::bigint THEN 'a' ELSE 'b' END AS my_side,
-        active_entry.id AS active_entry_id,
-        active_entry.role AS active_entry_role,
-        active_entry.version_no AS active_entry_version_no,
-        active_entry.submitted_at AS active_entry_submitted_at
+        (CASE WHEN a.team_id = sqlc.arg(team_id)::bigint THEN a.id ELSE b.id END)::bigint AS entry_id,
+        (CASE WHEN a.team_id = sqlc.arg(team_id)::bigint THEN a.role ELSE b.role END)::smallint AS entry_role,
+        (CASE WHEN a.team_id = sqlc.arg(team_id)::bigint THEN a.version_no ELSE b.version_no END)::integer AS entry_version_no,
+        (CASE WHEN a.team_id = sqlc.arg(team_id)::bigint THEN a.submitted_at ELSE b.submitted_at END)::timestamptz AS entry_submitted_at
     FROM battle_match m
     JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
     JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
-    LEFT JOIN LATERAL (
-        SELECT be.id, be.role, be.version_no, be.submitted_at
-        FROM battle_entry be
-        WHERE be.tenant_id = m.tenant_id
-          AND be.contest_id = m.contest_id
-          AND be.problem_id = m.problem_id
-          AND be.team_id = sqlc.arg(team_id)::bigint
-          AND be.submitted_at <= m.finished_at
-        ORDER BY be.submitted_at DESC, be.version_no DESC, be.id DESC
-        LIMIT 1
-    ) active_entry ON true
     WHERE m.tenant_id = $1 AND m.contest_id = $2 AND m.status = 3
       AND (a.team_id = sqlc.arg(team_id)::bigint OR b.team_id = sqlc.arg(team_id)::bigint)
 )
 SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id,
        source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref,
        status, matched_at, finished_at, sequence_no, my_side,
-       active_entry_id, active_entry_role, active_entry_version_no, active_entry_submitted_at
+       entry_id, entry_role, entry_version_no, entry_submitted_at
 FROM visible
 WHERE sequence_no > sqlc.arg(page_offset)::bigint
   AND sequence_no <= sqlc.arg(page_offset)::bigint + sqlc.arg(page_limit)::bigint
@@ -672,14 +704,18 @@ SELECT
 FROM visible
 WHERE sequence_no <= sqlc.arg(page_offset)::bigint;
 
--- name: ListActiveBattleSourceRefsForArchive :many
-SELECT DISTINCT source_ref
-FROM battle_match
-WHERE tenant_id = $1
-  AND contest_id = $2
-  AND source_ref <> ''
-  AND status IN (1, 2)
-ORDER BY source_ref ASC;
+-- name: ListContestSandboxScopeRefsForArchive :many
+SELECT scope_ref
+FROM (
+    SELECT g.source_ref AS scope_ref
+    FROM contest_access_grant AS g
+    WHERE g.tenant_id = $1 AND g.contest_id = $2 AND g.source_ref <> ''
+    UNION
+    SELECT m.scope_ref
+    FROM battle_match AS m
+    WHERE m.tenant_id = $1 AND m.contest_id = $2 AND m.scope_ref <> ''
+) AS sandbox_scopes
+ORDER BY scope_ref ASC;
 
 -- name: FinishBattleMatch :one
 UPDATE battle_match AS m
@@ -789,11 +825,41 @@ SELECT id, tenant_id, type, name, config, default_level, enabled, last_sync_at, 
 FROM vuln_source
 WHERE (tenant_id = $1 OR tenant_id IS NULL) AND id = $2;
 
+-- name: LockVulnSource :one
+SELECT id, tenant_id, type, name, config, default_level, enabled, last_sync_at, created_at, updated_at
+FROM vuln_source
+WHERE tenant_id IS NOT DISTINCT FROM $1 AND id = $2
+FOR UPDATE;
+
 -- name: MarkVulnSourceSynced :one
 UPDATE vuln_source
 SET last_sync_at = now(), updated_at = now()
-WHERE (tenant_id = $1 OR tenant_id IS NULL) AND id = $2
+WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, type, name, config, default_level, enabled, last_sync_at, created_at, updated_at;
+
+-- name: CreateVulnProblem :one
+INSERT INTO vuln_problem (id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 1)
+RETURNING *;
+
+-- name: UpdateVulnProblem :one
+UPDATE vuln_problem
+SET source_id = sqlc.narg(source_id)::bigint,
+    external_ref = sqlc.narg(external_ref)::text,
+    title = sqlc.arg(title),
+    level = sqlc.arg(level),
+    runtime_mode = sqlc.arg(runtime_mode),
+    draft_body = sqlc.arg(draft_body),
+    prevalidate_status = 1,
+    prevalidate_detail = '{}'::jsonb,
+    composition_digest = NULL,
+    composition_snapshot = NULL,
+    content_item_code = NULL,
+    content_item_version = NULL,
+    updated_at = clock_timestamp()
+WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id) AND status = 1
+  AND updated_at = sqlc.arg(expected_updated_at)::timestamptz
+RETURNING *;
 
 -- name: UpsertVulnProblem :one
 INSERT INTO vuln_problem (id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, content_item_code, content_item_version, status, created_at, updated_at)
@@ -807,21 +873,19 @@ SET title = EXCLUDED.title,
     prevalidate_detail = '{}'::jsonb,
     composition_digest = NULL,
     composition_snapshot = NULL,
-    init_code_ref = NULL,
-    init_script_ref = NULL,
     content_item_code = NULL,
     content_item_version = NULL,
-    status = 1,
     updated_at = now()
-RETURNING id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, content_item_code, content_item_version, status, created_at, updated_at, composition_digest, composition_snapshot, init_code_ref, init_script_ref;
+WHERE vuln_problem.status = 1
+RETURNING id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, composition_digest, composition_snapshot, content_item_code, content_item_version, status, created_at, updated_at;
 
 -- name: GetVulnProblem :one
-SELECT id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, content_item_code, content_item_version, status, created_at, updated_at, composition_digest, composition_snapshot, init_code_ref, init_script_ref
+SELECT id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, composition_digest, composition_snapshot, content_item_code, content_item_version, status, created_at, updated_at
 FROM vuln_problem
 WHERE tenant_id = $1 AND id = $2;
 
 -- name: ListVulnProblems :many
-SELECT id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, content_item_code, content_item_version, status, created_at, updated_at, composition_digest, composition_snapshot, init_code_ref, init_script_ref
+SELECT id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, composition_digest, composition_snapshot, content_item_code, content_item_version, status, created_at, updated_at
 FROM vuln_problem
 WHERE tenant_id = sqlc.arg(tenant_id)::bigint
   AND (sqlc.arg(source_id)::bigint = 0 OR source_id = sqlc.arg(source_id)::bigint)
@@ -853,11 +917,10 @@ SET prevalidate_status = $3,
     prevalidate_detail = $4,
     composition_digest = $5,
     composition_snapshot = $6,
-    init_code_ref = $7,
-    init_script_ref = $8,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status = 1
-RETURNING id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, content_item_code, content_item_version, status, created_at, updated_at, composition_digest, composition_snapshot, init_code_ref, init_script_ref;
+  AND updated_at = sqlc.arg(expected_updated_at)::timestamptz
+RETURNING id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, composition_digest, composition_snapshot, content_item_code, content_item_version, status, created_at, updated_at;
 
 -- name: FinalizeVulnProblem :one
 UPDATE vuln_problem
@@ -866,7 +929,8 @@ SET content_item_code = $3,
     status = 2,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND prevalidate_status = 2 AND status = 1
-RETURNING id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, content_item_code, content_item_version, status, created_at, updated_at, composition_digest, composition_snapshot, init_code_ref, init_script_ref;
+  AND updated_at = sqlc.arg(expected_updated_at)::timestamptz
+RETURNING id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, composition_digest, composition_snapshot, content_item_code, content_item_version, status, created_at, updated_at;
 
 -- name: ContestStats :one
 SELECT

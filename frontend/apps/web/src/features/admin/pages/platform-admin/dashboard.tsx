@@ -1,7 +1,4 @@
-// 平台看板页(平台侧栏,/platform-admin/dashboard)。设计 §7.6:
-// 与学校看板同一结构,范围为全平台:关键数字多一项「学校」;「需要处理」为待审核入驻申请(看板接口已带这个数)、
-// 待处理告警、自检未通过的运行时;下方趋势图(时间范围切换在图表区右上角)。
-// 看板不是登录首屏(FE-5):平台管理员登录直达学校管理,看板是主动查看的概览。
+// 全平台运营概览、待办与趋势；不是登录落地页。
 
 import { LayoutDashboard } from 'lucide-react'
 import { AlertStatus, RuntimeSelftestStatus } from '@chaimir/api-client'
@@ -22,7 +19,7 @@ export default function PlatformDashboardPage() {
     [],
     dashboard.refreshVersion,
   )
-  // 运行时清单不分页(十几个),在全量里数自检未通过的就是全量口径
+  // 运行时目录不分页，按完整结果统计自检失败数量。
   const runtimes = useAsyncResource(() => api.sandbox.listRuntimes(), [dashboard.refreshVersion], () => false)
   const failedRuntimes =
     runtimes.status === 'success'

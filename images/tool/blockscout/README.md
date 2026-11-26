@@ -19,6 +19,8 @@ EVM 区块链浏览器镜像。
 ## bindings 与 links
 
 - 必需 bindings：[{"name":"chain_rpc","capability":"evm-json-rpc","source_component":"web","endpoint":"rpc","protocol":"HTTP","required_at_start":true,"config_binding":"env:ETHEREUM_JSONRPC_HTTP_URL"},{"name":"trace_rpc","capability":"evm-json-rpc","source_component":"web","endpoint":"rpc","protocol":"HTTP","required_at_start":true,"config_binding":"env:ETHEREUM_JSONRPC_TRACE_URL"},{"name":"database","capability":"postgres-compatible","source_component":"web","endpoint":"postgres","protocol":"TCP","required_at_start":true,"config_binding":"env:CHAIMIR_BLOCKSCOUT_DATABASE_ADDRESS"}]。
+- 数据库密码通过已有 jq 的 URI 编码进入原生 URL，保留空白、Unicode 和特殊字符；入口只接受 `ECTO_SSL_MODE=require`，连接串明确使用 `sslmode=require`。
+- 固定上游源码中的整串 URL 解码和凭据正则由 `database-url.patch` 替换为已有 Ecto 解析器；保留环境变量优先级和 `search_path` 归一化，构建时补丁不匹配立即失败。
 - 必需 links：无；本镜像不声明跨组件 link。
 - binding 的 endpoint、协议、配置键和启动前置以 manifest 为准；缺失、重复、错误能力或错误 provider 均拒绝编排。
 

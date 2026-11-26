@@ -21,6 +21,7 @@ The Graph 索引用 PostgreSQL 配套镜像。
 - 必需 bindings：无。
 - 必需 links：无；本镜像不声明跨组件 link。
 - binding 的 endpoint、协议、配置键和启动前置以 manifest 为准；缺失、重复、错误能力或错误 provider 均拒绝编排。
+- 可配置数据库名和账户，默认分别为 `graph` 和 `postgres`；消费者须使用与本组件一致的参数和数据库 Secret。
 
 ## 端口与服务
 
@@ -30,7 +31,7 @@ The Graph 索引用 PostgreSQL 配套镜像。
 
 ## command / args 语义
 
-- 组件 infra：command=无；args=["-c","max_connections=200"]。编排器把 command 首 token 作为 entrypoint，其余 command token 作为参数；manifest args 映射到 Container.Args。
+- 入口写入并校验受控 TLS 材料，再交给官方 PostgreSQL 入口；组件参数 `-c max_connections=200` 原样传递，TLS 配置由入口强制启用。
 
 ## 初始化材料与运行时注入
 
@@ -40,9 +41,9 @@ The Graph 索引用 PostgreSQL 配套镜像。
 
 ## Secret / KMS
 
-- Secret 环境键：POSTGRES_PASSWORD。
-- 必需材料映射：[{"component":"infra","env":"POSTGRES_PASSWORD","secret_key":"PG_PASSWORD","source":"deploy/config/chaimir.env","runtime_value":"secret-or-kms"}]
+- Secret 环境键：POSTGRES_PASSWORD、POSTGRES_TLS_CERTIFICATE、POSTGRES_TLS_PRIVATE_KEY，分别引用平台 PG_PASSWORD 与已有 PostgreSQL 证书、私钥来源；只注入 infra 组件。
 - Secret 只来自平台 Secret/KMS 运行时注入，不能写入 Dockerfile、manifest、README、镜像层或测试输出。
+- 每次启动将证书和私钥以 0600 权限写入 `/runtime-state/postgres/tls`，校验证书未过期且公钥匹配；写入后从交接环境移除证书与私钥变量。无效材料在启动 PostgreSQL 前拒绝。
 
 ## 持久化与隔离边界
 
@@ -58,6 +59,7 @@ The Graph 索引用 PostgreSQL 配套镜像。
 
 - 组件 infra readiness：{"type":"tcp","port":"postgres","period_seconds":2,"failure_threshold":30}。
 - 镜像自检 postgres-version：["postgres","--version"]。
+- 镜像自检 openssl-version：["openssl","version"]。
 
 ## 清理
 

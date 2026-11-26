@@ -139,7 +139,7 @@ export interface Paper {
   updated_at: string
 }
 
-export interface PaperItemFace {
+interface PaperItemFace {
   id: SnowflakeID
   code: string
   version: string

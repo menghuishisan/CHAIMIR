@@ -14,21 +14,21 @@ resources:
 
 # 中间件镜像引用由镜像晋级脚本从 images/image-digests.lock 同步。
 images:
-  - name: chaimir/middleware/clamav
-    newName: registry.chaimir.io/middleware/clamav
-    digest: sha256:c16cc3c7a3dcb1f7120bd1a7e4251cefdfbd6deaa4b847f1da6a0a2ab39dd354
-  - name: chaimir/middleware/rustfs
-    newName: registry.chaimir.io/middleware/rustfs
-    digest: sha256:9f8e59b58d1b00931b12a03dbbcc014d7ca3a2aadecfdb5361f16fe07b1d9e08
-  - name: chaimir/middleware/nats
-    newName: registry.chaimir.io/middleware/nats
-    digest: sha256:5041fe78edc2dc3211187e8ef7cb852cab27353dcf529f2d1e74229ba004af42
-  - name: chaimir/middleware/postgres
-    newName: registry.chaimir.io/middleware/postgres
-    digest: sha256:add149e1cf6d4114afb91ce12d1a50b6c177fb7a6ebdf2289846a468302274c4
-  - name: chaimir/middleware/redis
-    newName: registry.chaimir.io/middleware/redis
-    digest: sha256:172154d66e7ed5c9367fc683c6d7ea1a9756f3eaa3dacefadd3c108e6a547425
+  - name: chaimir/infra/clamav
+    newName: registry.chaimir.io/infra/clamav
+    # digest 由 images/sync-image-metadata.ps1 在正式晋升后写入
+  - name: chaimir/infra/rustfs
+    newName: registry.chaimir.io/infra/rustfs
+    # digest 由 images/sync-image-metadata.ps1 在正式晋升后写入
+  - name: chaimir/infra/nats
+    newName: registry.chaimir.io/infra/nats
+    # digest 由 images/sync-image-metadata.ps1 在正式晋升后写入
+  - name: chaimir/infra/postgres
+    newName: registry.chaimir.io/infra/postgres
+    # digest 由 images/sync-image-metadata.ps1 在正式晋升后写入
+  - name: chaimir/infra/redis
+    newName: registry.chaimir.io/infra/redis
+    # digest 由 images/sync-image-metadata.ps1 在正式晋升后写入
 
 # 注:chaimir-data-config(PG 库名/用户等非密值)由 deploy/config 这个 config component
 #   从「唯一」env 源 chaimir.env 统一生成,本 component 不再单独生成,避免重复定义。

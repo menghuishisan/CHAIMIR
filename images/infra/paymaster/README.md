@@ -4,6 +4,8 @@
 
 账户抽象代付 gas 教学服务镜像。
 
+内部请求 HMAC 使用完整 64 位十六进制签名和 16–128 位字母、数字、下划线或连字符 nonce。`CHAIMIR_IMAGE_SERVICE_AUTH_MAX_NONCES` 限制当前进程尚未过期的防重放记录；满额返回 503，不驱逐有效记录。
+
 ## 能力边界
 
 - 支持 capability：erc4337-paymaster；服务只为正式 ERC-4337 v0.6 EntryPoint 和已部署的 VerifyingPaymaster 生成赞助数据。

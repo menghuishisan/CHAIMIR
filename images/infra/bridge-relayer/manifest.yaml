@@ -54,6 +54,7 @@ infra:
   eco_tags:
     - evm
   resource_spec:
+    volume_source: binding:source_chain
     components:
       - name: infra
         image_url: "@self"

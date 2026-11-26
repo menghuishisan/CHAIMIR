@@ -1,9 +1,3 @@
-// 赛事详情页(教师深页,/teacher/contests/:contestId)。设计 §7.4:
-// 页头为赛事名 + 状态 + 一行属性;右侧主按钮是赛程的「下一步」(与列表页同一套判定与确认),
-// 编辑赛事在更多菜单;页头下方赛程条(与学生端详情同一组件);标签「赛题编排 / 防作弊审查 / 归档榜单」
-// 写进地址;草稿提示「发布前至少添加一道赛题」,没有赛题时「发布」不可用并写原因。
-// 单读走 teacher 组接口:它没有非草稿门槛,草稿态赛事正是教师要编排的。
-
 import { useState } from 'react'
 import { useParams } from 'react-router'
 import { Archive, MoreVertical, Pencil, ShieldAlert, Swords, Trophy } from 'lucide-react'
@@ -47,18 +41,13 @@ import { ContestTimeline } from '../../components/ContestTimeline'
 import { ContestProblems } from './contest-problems'
 import { ContestCheat } from './contest-cheat'
 
-/** 地址参数:tab 是当前标签 */
 const DETAIL_QUERY = {
   tab: { defaultValue: 'problems', allowed: ['problems', 'cheat', 'snapshot'] },
 } as const
 
-/**
- * TeacherContestDetailPage 读取赛事本体并按任务分区呈现管理能力。
- */
 export default function TeacherContestDetailPage() {
   const { contestId = '' } = useParams<{ contestId: string }>()
 
-  // 单读走 teacher 组:它没有非草稿门槛,而草稿态赛事正是教师要编排的那些
   const contest = useAsyncResource(
     () => api.contest.getContest(contestId),
     [contestId],
@@ -86,18 +75,16 @@ interface ContestDetailContentProps {
   onRefresh: () => void
 }
 
-/**
- * ContestDetailContent 渲染赛事页头(下一步 + 更多菜单)、赛程条与三个管理标签。
- * 赛题数量由赛题标签读取后回报:没有赛题时「发布」不可用(后端也会拒绝),标签上带数量。
- */
 function ContestDetailContent({ contest, onRefresh }: ContestDetailContentProps) {
   const [query, setQuery] = useUrlState(DETAIL_QUERY)
   const [editOpen, setEditOpen] = useState(false)
-  const [problemCount, setProblemCount] = useState<number>()
+  const problems = useAsyncResource(() => api.contest.getProblems(contest.id), [contest.id])
+  const problemCount = problems.status === 'success' || problems.status === 'empty'
+    ? problems.data?.length
+    : undefined
 
   const archived = contest.status === ContestStatus.ARCHIVED
   const isDraft = contest.status === ContestStatus.DRAFT
-  // 报名开始后赛程与赛制已对学生公开,只在草稿与报名中允许修改(沿用现有门槛)
   const contestEditable = isDraft || contest.status === ContestStatus.SIGNUP
   const freezeText = contest.freeze_minutes > 0 ? `封榜 ${contest.freeze_minutes} 分钟` : '不封榜'
 
@@ -162,13 +149,12 @@ function ContestDetailContent({ contest, onRefresh }: ContestDetailContentProps)
           </TabsTrigger>
         </TabsList>
 
-        {/* 赛题标签始终挂载(forceMount):页头「发布」需要它回报的赛题数量,切到其他标签时仅隐藏 */}
-        <TabsContent value="problems" forceMount className="data-[state=inactive]:hidden">
-          <ContestProblems contest={contest} readOnly={!isDraft} onCountChange={setProblemCount} />
+        <TabsContent value="problems">
+          <ContestProblems contest={contest} problems={problems} readOnly={!isDraft} />
         </TabsContent>
 
         <TabsContent value="cheat">
-          <ContestCheat contest={contest} readOnly={archived} />
+          <ContestCheat contest={contest} problems={problems} readOnly={archived} />
         </TabsContent>
 
         <TabsContent value="snapshot">
@@ -200,7 +186,6 @@ function ContestDetailContent({ contest, onRefresh }: ContestDetailContentProps)
   )
 }
 
-/** SnapshotRow 是快照榜单的一行。 */
 interface SnapshotRow {
   teamId: string
   teamName: string
@@ -210,7 +195,6 @@ interface SnapshotRow {
   lastSolveAt: string
 }
 
-/** ContestSnapshot 展示归档后的最终榜单。 */
 function ContestSnapshot({ contest }: { contest: Contest }) {
   const snapshot = useAsyncResource(
     () => api.contest.getResultSnapshot(contest.id),
@@ -219,12 +203,10 @@ function ContestSnapshot({ contest }: { contest: Contest }) {
   )
 
   const columns: TableColumn<SnapshotRow>[] = [
-    // 名次是窄的数字列:定宽靠左,不让表格把它摊成一大片空白
     { key: 'rank', header: '名次', align: 'right', mono: true, width: '88px' },
     {
       key: 'team',
       header: '队伍',
-      // 队名由接口按 team_id 读取后随快照条目给出
       render: (row) => <span className="text-ink">{row.teamName}</span>,
     },
     {
@@ -265,14 +247,12 @@ function ContestSnapshot({ contest }: { contest: Contest }) {
               <Badge tone="neutral">生成于 {formatDateTime(data.generated_at)}</Badge>
               <Badge tone="jade">{data.final_ranking.length} 支队伍上榜</Badge>
             </div>
-            {/* 列表型页内子视图走 DataPanel 片段(§6.5.5 B):快照不分页也不筛选,只用片本身 */}
             <DataPanel label="最终名次">
               <Table
                 columns={columns}
                 data={snapshotRows(data)}
                 rowKey={(row) => row.teamId}
                 elevated={false}
-                // <md 换行卡(§6.4.1 规则 3):名次一行、得分与通过题数一行
                 mobileCard={(row) => ({
                   title: `第 ${row.rank} 名 · ${row.teamName}`,
                   meta:
@@ -289,7 +269,6 @@ function ContestSnapshot({ contest }: { contest: Contest }) {
   )
 }
 
-/** snapshotRows 把公开快照条目转换为展示行并按名次升序。 */
 function snapshotRows(snapshot: ResultSnapshot): SnapshotRow[] {
   return snapshot.final_ranking
     .map((entry) => ({

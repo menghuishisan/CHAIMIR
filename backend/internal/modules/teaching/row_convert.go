@@ -114,7 +114,7 @@ func submissionFromRow(row sqlcgen.Submission) (Submission, error) {
 	if err != nil {
 		return Submission{}, err
 	}
-	return Submission{ID: row.ID, TenantID: row.TenantID, AssignmentID: row.AssignmentID, StudentID: row.StudentID, AttemptNo: row.AttemptNo, ContentRef: ref, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), AutoScore: pgtypex.Int4PtrValue(row.AutoScore), ManualScore: pgtypex.Int4PtrValue(row.ManualScore), FinalScore: pgtypex.Int4PtrValue(row.FinalScore), Comment: pgtypex.TextValue(row.Comment), IsLate: row.IsLate, Status: row.Status, SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}, nil
+	return Submission{ID: row.ID, TenantID: row.TenantID, AssignmentID: row.AssignmentID, StudentID: row.StudentID, AttemptNo: row.AttemptNo, ContentRef: ref, AutoScore: pgtypex.Int4PtrValue(row.AutoScore), ManualScore: pgtypex.Int4PtrValue(row.ManualScore), FinalScore: pgtypex.Int4PtrValue(row.FinalScore), Comment: pgtypex.TextValue(row.Comment), IsLate: row.IsLate, Status: row.Status, SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}, nil
 }
 
 // outboxFromRow 转换自动判题 outbox 行并解析额外输入。

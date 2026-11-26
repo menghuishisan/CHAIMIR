@@ -17,14 +17,12 @@ var maintenancePolicies = []MaintenancePolicy{
 		"sms_code", "activation_code", "sso_config", "import_preview", "import_batch", "audit_log",
 	}},
 	{Module: "sandbox", Role: "chaimir_maintenance_sandbox", Tables: []string{
-		"runtime", "runtime_image", "tool", "sandbox", "sandbox_tool", "sandbox_event", "sandbox_recycle_outbox", "tenant_quota",
+		"runtime", "runtime_image", "tool", "sandbox", "sandbox_event", "sandbox_recycle_outbox", "tenant_quota",
 	}},
 	{Module: "judge", Role: "chaimir_maintenance_judge", Tables: []string{
 		"judger", "judge_task", "judge_result", "judge_event_outbox", "submission_fingerprint",
 	}},
-	{Module: "sim", Role: "chaimir_maintenance_sim", Tables: []string{
-		"sim_package", "sim_package_review", "sim_session", "sim_action_log", "sim_checkpoint", "sim_share",
-	}},
+	{Module: "sim", Role: "chaimir_maintenance_sim", Tables: []string{}},
 	{Module: "teaching", Role: "chaimir_maintenance_teaching", Tables: []string{
 		"course", "chapter", "lesson", "course_member", "assignment", "assignment_item", "submission",
 		"submission_judge_outbox", "submission_draft", "lesson_progress", "discussion_post", "announcement",
@@ -46,7 +44,7 @@ var maintenancePolicies = []MaintenancePolicy{
 		"grade_appeal", "grade_update_cursor", "academic_warning", "transcript_record",
 	}},
 	{Module: "admin", Role: "chaimir_maintenance_admin", Tables: []string{
-		"audit_export_request",
+		"audit_export_request", "alert_rule", "alert_evaluation", "alert_event",
 	}},
 }
 

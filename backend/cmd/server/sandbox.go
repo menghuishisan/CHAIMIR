@@ -22,7 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// SandboxModuleDeps 汇总组合根装配 M2 需要的基础设施和跨模块契约。
+// SandboxModuleDeps 是 M2 装配所需的依赖。
 type SandboxModuleDeps struct {
 	Router       gin.IRouter
 	Database     *db.DB
@@ -75,45 +75,19 @@ func RegisterSandboxModule(ctx context.Context, deps SandboxModuleDeps) (*sandbo
 	if err := sandbox.RegisterEventSubscriptions(deps.EventBus, svc); err != nil {
 		return nil, err
 	}
-	task, err := sandboxRecycleTask(deps.Config, svc)
-	if err != nil {
+	if err := background.Start(ctx,
+		background.Task{
+			Name:     "sandbox.recycle",
+			Interval: time.Duration(deps.Config.RecyclePollIntervalSeconds) * time.Second,
+			Run:      svc.RunRecycleOnce,
+		},
+		background.Task{
+			Name:     "sandbox.recycle_outbox",
+			Interval: time.Duration(deps.Config.RecycleOutboxPollMs) * time.Millisecond,
+			Run:      svc.RunSandboxRecycleOutboxOnce,
+		},
+	); err != nil {
 		return nil, err
 	}
-	go background.Run(ctx, task)
-	outboxTask, err := sandboxRecycleOutboxTask(deps.Config, svc)
-	if err != nil {
-		return nil, err
-	}
-	go background.Run(ctx, outboxTask)
 	return svc, nil
-}
-
-// sandboxRecycleTask 把 M2 回收调度接入统一后台任务运行器。
-func sandboxRecycleTask(cfg config.SandboxConfig, svc *sandbox.Service) (background.Task, error) {
-	if svc == nil {
-		return background.Task{}, fmt.Errorf("sandbox recycle task 缺少 service")
-	}
-	if cfg.RecyclePollIntervalSeconds <= 0 {
-		return background.Task{}, fmt.Errorf("SANDBOX_RECYCLE_POLL_INTERVAL_SECONDS 必须大于 0")
-	}
-	return background.Task{
-		Name:     "sandbox.recycle",
-		Interval: time.Duration(cfg.RecyclePollIntervalSeconds) * time.Second,
-		Run:      svc.RunRecycleOnce,
-	}, nil
-}
-
-// sandboxRecycleOutboxTask 把 M2 回收事件 outbox 接入统一后台任务运行器。
-func sandboxRecycleOutboxTask(cfg config.SandboxConfig, svc *sandbox.Service) (background.Task, error) {
-	if svc == nil {
-		return background.Task{}, fmt.Errorf("sandbox recycle outbox task 缺少 service")
-	}
-	if cfg.RecycleOutboxPollMs <= 0 {
-		return background.Task{}, fmt.Errorf("SANDBOX_RECYCLE_OUTBOX_POLL_INTERVAL_MS 必须大于 0")
-	}
-	return background.Task{
-		Name:     "sandbox.recycle_outbox",
-		Interval: time.Duration(cfg.RecycleOutboxPollMs) * time.Millisecond,
-		Run:      svc.RunSandboxRecycleOutboxOnce,
-	}, nil
 }

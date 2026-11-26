@@ -7,7 +7,7 @@ import (
 	"chaimir/internal/platform/ids"
 )
 
-// MonitoringPanel 是外接监控系统的安全嵌入入口响应。
+// MonitoringPanel 是受控外部监控入口，不含平台或监控凭据。
 type MonitoringPanel struct {
 	Name string `json:"name"`
 	URL  string `json:"url"`
@@ -41,35 +41,6 @@ type DashboardDTO struct {
 	GeneratedAt           time.Time                 `json:"generated_at"`
 }
 
-// ConfigDTO 表示系统配置响应。
-type ConfigDTO struct {
-	ID        ids.ID         `json:"id"`
-	Scope     int16          `json:"scope"`
-	TenantID  ids.ID         `json:"tenant_id,omitempty"`
-	Key       string         `json:"key"`
-	Value     map[string]any `json:"value"`
-	Version   int32          `json:"version"`
-	UpdatedBy ids.ID         `json:"updated_by"`
-	UpdatedAt time.Time      `json:"updated_at"`
-}
-
-// ConfigUpdateRequest 是配置更新和回滚请求。
-type ConfigUpdateRequest struct {
-	Scope       int16          `json:"scope"`
-	TenantID    ids.ID         `json:"tenant_id,omitempty"`
-	Value       map[string]any `json:"value"`
-	Version     int32          `json:"version"`
-	ChangeLogID ids.ID         `json:"change_log_id,omitempty"`
-}
-
-// ConfigRollbackRequest 是配置回滚请求,只携带回滚所需的历史记录和当前版本。
-type ConfigRollbackRequest struct {
-	Scope       int16  `json:"scope"`
-	TenantID    ids.ID `json:"tenant_id,omitempty"`
-	Version     int32  `json:"version"`
-	ChangeLogID ids.ID `json:"change_log_id,omitempty"`
-}
-
 // AlertRuleRequest 是告警规则创建和编辑请求。
 type AlertRuleRequest struct {
 	Scope     int16          `json:"scope"`
@@ -86,21 +57,9 @@ type AlertEventRequest struct {
 	Status int16 `json:"status"`
 }
 
-// ConfigChangeLogDTO 表示配置变更历史响应。
-type ConfigChangeLogDTO struct {
-	ID         ids.ID         `json:"id"`
-	ConfigID   ids.ID         `json:"config_id"`
-	TenantID   ids.ID         `json:"tenant_id,omitempty"`
-	OldValue   map[string]any `json:"old_value"`
-	NewValue   map[string]any `json:"new_value"`
-	OperatorID ids.ID         `json:"operator_id"`
-	// OperatorName 操作人姓名:平台配置是平台管理员,学校配置是本校管理员;账号已移除时为空串
-	OperatorName string `json:"operator_name,omitempty"`
-	CreatedAt    string `json:"created_at"`
-}
-
 // AlertRuleDTO 表示告警规则响应。
 type AlertRuleDTO struct {
+	revision  int64
 	ID        ids.ID         `json:"id"`
 	Scope     int16          `json:"scope"`
 	TenantID  ids.ID         `json:"tenant_id,omitempty"`
@@ -115,6 +74,7 @@ type AlertRuleDTO struct {
 
 // AlertEventDTO 表示告警事件响应。
 type AlertEventDTO struct {
+	RuleName    string `json:"rule_name,omitempty"`
 	ID          ids.ID `json:"id"`
 	RuleID      ids.ID `json:"rule_id"`
 	TenantID    ids.ID `json:"tenant_id,omitempty"`
@@ -150,7 +110,7 @@ type BackupRecordDTO struct {
 	SizeBytes  int64  `json:"size_bytes"`
 	Status     int16  `json:"status"`
 	StartedAt  string `json:"started_at"`
-	FinishedAt string `json:"finished_at,omitempty"`
+	FinishedAt string `json:"finished_at"`
 }
 
 type AuditLogEntryDTO struct {
@@ -179,6 +139,8 @@ type BackupRecordCreate struct {
 	StorageRef string
 	SizeBytes  int64
 	Status     int16
+	StartedAt  time.Time
+	FinishedAt time.Time
 }
 
 // AuditExportRequest 是 M9 持久化的可重放审计导出请求。

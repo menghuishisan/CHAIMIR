@@ -3,7 +3,7 @@
 // 并列出 SDK 公开方法在 apps/web 内是否有引用(可达性)。
 // 用法:node scripts/audit/sdk-matrix.mjs
 import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join, relative, dirname, basename } from 'node:path'
+import { join, relative, basename } from 'node:path'
 import { execFileSync } from 'node:child_process'
 
 const ROOT = process.cwd()
@@ -34,34 +34,35 @@ for (const f of sdkFiles) {
   lines.forEach((line, i) => {
     const dm = /^\s{2}(?:async\s+)?([a-zA-Z_]\w*)\s*(?:<[^>]*>)?\(/.exec(line)
     if (dm && !['constructor', 'if', 'for', 'while', 'switch', 'return', 'catch'].includes(dm[1])) {
-      cur = { file: relative(ROOT, f).replace(/\\/g, '/'), line: i + 1, name: dm[1], module: basename(f, '.ts'), paths: [], verbs: [] }
+      cur = { file: relative(ROOT, f).replace(/\\/g, '/'), line: i + 1, name: dm[1], module: basename(f, '.ts'), paths: [] }
       methods.push(cur)
       return
     }
     if (!cur) return
-    // 路径字面量:模板串或普通串,以 / 开头
-    for (const pm of line.matchAll(/[`'"](\/[^`'"$]*(?:\$\{[^}]*\}[^`'"]*)*)[`'"]/g)) {
-      cur.paths.push(pm[1])
+    // 记录请求方法与路径;同一路径可能同时有 GET/PUT,两者必须分别核对。
+    const request = /\bclient\.(get|post|put|patch|delete)\s*\(\s*[`'"](\/[^`'"$]*(?:\$\{[^}]*\}[^`'"]*)*)[`'"]/i.exec(line)
+    if (request) {
+      cur.paths.push({ method: request[1].toUpperCase(), path: request[2] })
+      return
     }
-    for (const vm of line.matchAll(/\.(get|post|put|patch|delete|getPaged|getAttachment|upload|wsUrl|webSocketUrl)\b/g)) {
-      cur.verbs.push(vm[1])
+    for (const pm of line.matchAll(/[`'"](\/[^`'"$]*(?:\$\{[^}]*\}[^`'"]*)*)[`'"]/g)) {
+      cur.paths.push({ method: null, path: pm[1] })
     }
   })
 }
 
 // 归一化 SDK 路径:${x} -> {}
 const normSdk = (p) => p.replace(/\$\{[^}]*\}/g, '{}').replace(/\/+$/, '')
-const verbToMethod = { get: 'GET', getPaged: 'GET', getAttachment: 'GET', post: 'POST', put: 'PUT', patch: 'PATCH', delete: 'DELETE', upload: 'POST' }
 
 const findings = []
 for (const m of methods) {
   for (const raw of m.paths) {
-    const p = normSdk(raw)
+    const p = normSdk(raw.path)
     if (!p.startsWith('/')) continue
     // SDK 路径不含 /api/v1 前缀(由 client 拼),两种都试
     const cands = [p, '/api/v1' + p]
-    const hits = backend.filter((r) => cands.includes(r.norm))
-    findings.push({ ...m, rawPath: raw, path: p, hits: hits.map((h) => ({ method: h.method, path: h.path, guards: h.guards, file: h.file, line: h.line })) })
+    const hits = backend.filter((r) => cands.includes(r.norm) && (!raw.method || r.method === raw.method))
+    findings.push({ ...m, method: raw.method, rawPath: raw.path, path: p, hits: hits.map((h) => ({ method: h.method, path: h.path, guards: h.guards, file: h.file, line: h.line })) })
   }
 }
 
@@ -114,7 +115,7 @@ for (const f of findings) {
 if (!bad) console.log('  (无)')
 
 console.log(`\n=== C. SDK 公开方法在前端无任何引用(可达性缺口候选) ${unreachable.length} ===`)
-for (const m of unreachable) console.log(`  ${m.module}.${m.name}  [${m.file}:${m.line}]  paths=${m.paths.join(' , ') || '(无字面路径)'}`)
+for (const m of unreachable) console.log(`  ${m.module}.${m.name}  [${m.file}:${m.line}]  paths=${m.paths.map((item) => item.path).join(' , ') || '(无字面路径)'}`)
 
 console.log('\n=== D. 每条 SDK 路径的守卫组(供人工核对角色相容性) ===')
 const byModule = new Map()

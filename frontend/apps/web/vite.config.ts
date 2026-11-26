@@ -1,4 +1,3 @@
-// vite.config.ts 配置统一 Web 应用的构建环境、源码别名和本地开发服务。
 import { defineConfig } from 'vite'
 import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -134,53 +133,6 @@ function readFrontendSecurityHeaders(): Record<string, string> {
   return headers
 }
 
-const monacoAmdAssets = [
-  'loader.js',
-  'editor/editor.main.js',
-  'editor/editor.main.css',
-  'base/worker/workerMain.js',
-  'base/browser/ui/codicons/codicon/codicon.ttf',
-  'language/css/cssMode.js',
-  'language/css/cssWorker.js',
-  'language/html/htmlMode.js',
-  'language/html/htmlWorker.js',
-  'language/json/jsonMode.js',
-  'language/json/jsonWorker.js',
-  'language/typescript/tsMode.js',
-  'language/typescript/tsWorker.js',
-  'basic-languages/go/go.js',
-  'basic-languages/css/css.js',
-  'basic-languages/html/html.js',
-  'basic-languages/markdown/markdown.js',
-  'basic-languages/python/python.js',
-  'basic-languages/shell/shell.js',
-  'basic-languages/solidity/solidity.js',
-  'basic-languages/typescript/typescript.js',
-  'basic-languages/yaml/yaml.js',
-] as const
-
-/** monacoAmdAssetsPlugin 输出 Monaco 官方预构建 AMD 文件,避免 Rollup 解析近千个 ESM 模块。 */
-function monacoAmdAssetsPlugin(): Plugin {
-  const packageRoot = path.resolve(__dirname, '../../packages/ide/node_modules/monaco-editor/min/vs')
-  return {
-    name: 'chaimir-monaco-amd-assets',
-    generateBundle() {
-      for (const relativePath of monacoAmdAssets) {
-        const assetPath = path.resolve(packageRoot, relativePath)
-        const relative = path.relative(packageRoot, assetPath)
-        if (relative.startsWith('..') || path.isAbsolute(relative) || !fs.existsSync(assetPath)) {
-          throw new Error(`Monaco 资源缺失: ${relativePath}`)
-        }
-        this.emitFile({
-          type: 'asset',
-          fileName: `assets/monaco/vs/${relativePath}`,
-          source: fs.readFileSync(assetPath),
-        })
-      }
-    },
-  }
-}
-
 /**
  * tailwindAppStylesPlugins 只让 Tailwind 处理应用的唯一 CSS 入口。
  * Tailwind v4 会为每个 CSS 模块建立扫描器;Monaco 与终端带入的大量依赖 CSS
@@ -206,14 +158,13 @@ export default defineConfig({
   envDir: path.resolve(__dirname, '../..'),
   // Tailwind 插件的 Lightning CSS 优化与 Vite 生产 CSS 处理重复;
   // 关闭前者,保留 Vite 单一 CSS 产物链,避免 Alpine 构建基座重复执行原生优化。
-  plugins: [fontAssetsPlugin(), monacoAmdAssetsPlugin(), react(), ...tailwindAppStylesPlugins()],
+  plugins: [fontAssetsPlugin(), react(), ...tailwindAppStylesPlugins()],
   preview: {
     headers: readFrontendSecurityHeaders(),
   },
   // 路径别名不设:tsconfig 未声明对应 paths,只在 Vite 侧配别名会让 tsc 与打包解析结果不一致;
   // 全站统一用相对路径导入,单一解析规则。
   build: {
-    // Monaco 由同源 AMD 静态资源按需加载,主应用不再把编辑器模块图纳入 Rollup。
     chunkSizeWarningLimit: 550,
     // Docker 构建阶段会统一生成 gzip 静态资源;Vite 再逐文件计算压缩体积只增加构建耗时,
     // 不改变产物内容或运行期压缩策略。

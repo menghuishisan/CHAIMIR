@@ -8,21 +8,14 @@
 // 只装配平台内置包:教师与第三方扩展包在后端隔离容器内运行,归档字节从不下发浏览器
 // (理由见 docs/04-仿真可视化引擎/07-安全设计.md §2)。
 
-import type { JsonObject, SimInitParams, SimState } from '../types';
 import { SimEngine } from './engine';
 import { blockedCapability, installDeterminismGuards, sealGlobal } from './guards';
 import { getBuiltinSimulation } from '../registry/builtinRegistry';
 
-type WorkerRequest =
-  | { type: 'init'; requestId: number; builtinCode: string; initParams: SimInitParams; seed: number }
-  | { type: 'step'; requestId: number }
-  | { type: 'inject'; requestId: number; eventType: string; payload: JsonObject; target?: string }
-  | { type: 'sync-state'; requestId: number; tick: number; state: SimState }
-  | { type: 'back'; requestId: number }
-  | { type: 'reset'; requestId: number };
+import type { WorkerRequest, WorkerResponse } from './workerProtocol';
 
 let engine: SimEngine | undefined;
-const postToMain = self.postMessage.bind(self);
+const postToMain: (response: WorkerResponse) => void = self.postMessage.bind(self);
 
 self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
   handleRequest(event.data);
@@ -45,10 +38,6 @@ function handleRequest(request: WorkerRequest): void {
       case 'inject':
         readyEngine().inject(request.eventType, request.payload, request.target);
         postSnapshot(request.requestId, true);
-        return;
-      case 'sync-state':
-        readyEngine().syncState(request.tick, request.state);
-        postSnapshot(request.requestId);
         return;
       case 'back':
         readyEngine().back();

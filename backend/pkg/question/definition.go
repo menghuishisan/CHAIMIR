@@ -2,10 +2,9 @@
 package question
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -20,7 +19,7 @@ const (
 	ShortAnswer    Kind = "short_answer"
 )
 
-// Definition 只承载理论题定义,Answer只能供M5作者与M3私有执行边界使用。
+// Definition 承载理论题定义。只能通过 Face 对外提供题面。
 type Definition struct {
 	Kind       Kind            `json:"q_type"`
 	Options    []string        `json:"options"`
@@ -104,7 +103,7 @@ func (d Definition) Normalize(value any, allowEmpty bool) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encode theory response: %w", err)
 	}
-	if bytes.Equal(raw, []byte("null")) || len(raw) == 0 {
+	if string(raw) == "null" {
 		if allowEmpty {
 			return nil, nil
 		}
@@ -123,7 +122,7 @@ func (d Definition) Normalize(value any, allowEmpty bool) ([]string, error) {
 			}
 			return nil, fmt.Errorf("theory answer is empty")
 		}
-		if d.Kind == SingleChoice && !d.hasOption(answer) {
+		if d.Kind == SingleChoice && !slices.Contains(d.Options, answer) {
 			return nil, fmt.Errorf("choice answer is not a declared option")
 		}
 		return []string{answer}, nil
@@ -137,24 +136,28 @@ func (d Definition) Normalize(value any, allowEmpty bool) ([]string, error) {
 		}
 		return []string{"false"}, nil
 	case MultipleChoice, FillBlank:
-		var answers []string
-		if err := json.Unmarshal(raw, &answers); err != nil {
+		var values []*string
+		if err := json.Unmarshal(raw, &values); err != nil {
 			return nil, fmt.Errorf("theory answer must be text array: %w", err)
 		}
-		if d.Kind == FillBlank && len(answers) != d.BlankCount {
+		if d.Kind == FillBlank && len(values) != d.BlankCount {
 			return nil, fmt.Errorf("fill answer count differs from blank_count")
 		}
-		if len(answers) == 0 && !allowEmpty {
+		if len(values) == 0 && !allowEmpty {
 			return nil, fmt.Errorf("theory answer is empty")
 		}
-		seen := make(map[string]bool, len(answers))
-		for i, answer := range answers {
-			answer = strings.TrimSpace(answer)
+		answers := make([]string, len(values))
+		seen := make(map[string]bool, len(values))
+		for i, value := range values {
+			if value == nil {
+				return nil, fmt.Errorf("theory answer array must contain only strings")
+			}
+			answer := strings.TrimSpace(*value)
 			if answer == "" && !allowEmpty {
 				return nil, fmt.Errorf("theory answer contains empty text")
 			}
 			if d.Kind == MultipleChoice {
-				if !d.hasOption(answer) || seen[answer] {
+				if !slices.Contains(d.Options, answer) || seen[answer] {
 					return nil, fmt.Errorf("multiple choice contains invalid or repeated option")
 				}
 				seen[answer] = true
@@ -162,20 +165,10 @@ func (d Definition) Normalize(value any, allowEmpty bool) ([]string, error) {
 			answers[i] = answer
 		}
 		if d.Kind == MultipleChoice {
-			sort.Strings(answers)
+			slices.Sort(answers)
 		}
 		return answers, nil
 	default:
 		return nil, fmt.Errorf("unsupported theory q_type %q", d.Kind)
 	}
-}
-
-// hasOption 判断作答是否精确引用当前冻结题面的一项。
-func (d Definition) hasOption(answer string) bool {
-	for _, option := range d.Options {
-		if answer == option {
-			return true
-		}
-	}
-	return false
 }

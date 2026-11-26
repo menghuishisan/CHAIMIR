@@ -4,7 +4,6 @@ package sim
 import (
 	"errors"
 	"io"
-	"mime/multipart"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -19,17 +18,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var (
-	// simPackageMultipartValues 是提交仿真包允许出现的元数据字段白名单,未列出的字段直接拒绝。
-	// 不含 compute/backend_adapter/backend_config:执行位置与运行能力由服务端按作者类型派生。
-	simPackageMultipartValues = map[string]struct{}{
-		"code":        {},
-		"version":     {},
-		"name":        {},
-		"category":    {},
-		"scale_limit": {},
-	}
-)
+// 执行位置与运行能力由服务端派生，不接受上传者指定。
+var simPackageMultipartValues = map[string]struct{}{
+	"code":        {},
+	"version":     {},
+	"name":        {},
+	"category":    {},
+	"scale_limit": {},
+}
 
 // RegisterRoutes 注册仿真引擎 HTTP 与 WebSocket API。
 func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles contracts.IdentityService) error {
@@ -57,16 +53,11 @@ type simAPI struct {
 	svc *Service
 }
 
-// registerPublicRoutes 注册公开分享入口。
 func (a simAPI) registerPublicRoutes(g gin.IRouter) {
 	g.GET("/shared/:code", a.getShared)
 }
 
-// registerUserRoutes 注册租户用户可访问的查询、回放、分享和隔离执行接口。
-//
-// 没有 bundle 下载授权入口:内置包由 sim-sdk 在浏览器 Worker 内按 code 装配,
-// 扩展包 bundle 只经受控 k8s exec 投入隔离容器,从不下发浏览器
-// (见 docs/04-仿真可视化引擎/05-接口设计.md §2.1)。
+// 扩展包正文只投递到隔离容器，不提供浏览器下载入口。
 func (a simAPI) registerUserRoutes(g gin.IRouter) {
 	g.GET("/packages", a.listPackages)
 	g.GET("/packages/:key/versions", a.listPackageVersions)
@@ -75,30 +66,22 @@ func (a simAPI) registerUserRoutes(g gin.IRouter) {
 	g.POST("/sessions/:id/share", a.shareSession)
 }
 
-// registerStreamRoutes 注册浏览器 WebSocket 可用的后端计算实时流入口。
 func (a simAPI) registerStreamRoutes(g gin.IRouter) {
 	g.GET("/sessions/:id/stream", a.streamSession)
 }
 
-// registerTeacherRoutes 注册教师/学校管理员仿真包扩展接入接口。
-//
-// 没有运行能力查询入口:执行位置与运行能力都由服务端按作者类型派生,教师无从选择,
-// 一个"可用能力列表"对提交者没有任何可作用的选项(见 docs/04-仿真可视化引擎/05-接口设计.md §2.2)。
 func (a simAPI) registerTeacherRoutes(g gin.IRouter) {
 	g.POST("/packages", a.submitPackage)
 	g.PATCH("/packages/:key", a.updatePackage)
 	g.GET("/packages/:key/preview", a.previewPackage)
 }
 
-// registerInternalRoutes 注册内部服务会话和检查点接口。
 func (a simAPI) registerInternalRoutes(g gin.IRouter) {
 	g.POST("/sessions", a.createSession)
 	g.DELETE("/sessions/:id", a.destroySession)
 	g.POST("/sessions/recycle", a.recycleSessions)
-	g.POST("/sessions/:id/checkpoints", a.reportCheckpoint)
 }
 
-// registerPlatformRoutes 注册平台管理员审核和生命周期接口。
 func (a simAPI) registerPlatformRoutes(g gin.IRouter) {
 	g.GET("/reviews", a.listReviews)
 	g.POST("/reviews/:id/approve", a.approveReview)
@@ -137,19 +120,17 @@ func (a simAPI) listPackages(c *gin.Context) {
 	httpx.WritePageWithFacets(c, items, total, p, s, facets, err)
 }
 
-// listPackageVersions 查询某包所有版本。
 func (a simAPI) listPackageVersions(c *gin.Context) {
 	out, err := a.svc.ListPackageVersions(c.Request.Context(), c.Param("key"))
 	httpx.Write(c, out, err)
 }
 
-// submitPackage 绑定 multipart 仿真包上传。
 func (a simAPI) submitPackage(c *gin.Context) {
 	current, ok := currentTenantIdentity(c)
 	if !ok {
 		return
 	}
-	req, bundle, ok := a.bindPackageMultipart(c)
+	req, bundle, ok := readPackageMultipart(c, a.svc.upload.SimBundleMetadataMaxBytes, a.svc.upload.SimBundleMaxBytes)
 	if !ok {
 		return
 	}
@@ -157,7 +138,6 @@ func (a simAPI) submitPackage(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// updatePackage 绑定包更新请求。
 func (a simAPI) updatePackage(c *gin.Context) {
 	current, ok := currentTenantIdentity(c)
 	if !ok {
@@ -167,7 +147,7 @@ func (a simAPI) updatePackage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	req, bundle, ok := a.bindPackageMultipart(c)
+	req, bundle, ok := readPackageMultipart(c, a.svc.upload.SimBundleMetadataMaxBytes, a.svc.upload.SimBundleMaxBytes)
 	if !ok {
 		return
 	}
@@ -175,7 +155,6 @@ func (a simAPI) updatePackage(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// previewPackage 返回包预览所需审核报告。
 func (a simAPI) previewPackage(c *gin.Context) {
 	current, ok := currentTenantIdentity(c)
 	if !ok {
@@ -189,7 +168,6 @@ func (a simAPI) previewPackage(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// listReviews 查询审核记录。
 func (a simAPI) listReviews(c *gin.Context) {
 	page, size, ok := httpx.Page(c)
 	if !ok {
@@ -204,7 +182,6 @@ func (a simAPI) listReviews(c *gin.Context) {
 	httpx.WritePageWithFacets(c, items, total, p, s, facets.Map(), err)
 }
 
-// approveReview 通过审核。
 func (a simAPI) approveReview(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -218,7 +195,6 @@ func (a simAPI) approveReview(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// rejectReview 退回审核。
 func (a simAPI) rejectReview(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -236,7 +212,6 @@ func (a simAPI) rejectReview(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// archivePackage 下架包。
 func (a simAPI) archivePackage(c *gin.Context) {
 	packageID, ok := httpx.PathID(c, "key")
 	if !ok {
@@ -246,7 +221,6 @@ func (a simAPI) archivePackage(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// republishPackage 重新上架已下架包。
 func (a simAPI) republishPackage(c *gin.Context) {
 	packageID, ok := httpx.PathID(c, "key")
 	if !ok {
@@ -256,7 +230,6 @@ func (a simAPI) republishPackage(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// createSession 绑定内部会话创建请求。
 func (a simAPI) createSession(c *gin.Context) {
 	var req CreateSessionRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSimSessionInvalid) {
@@ -276,7 +249,6 @@ func (a simAPI) createSession(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// reportAction 绑定用户操作上报。
 func (a simAPI) reportAction(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -294,7 +266,6 @@ func (a simAPI) reportAction(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// getReplay 查询用户自己的回放。
 func (a simAPI) getReplay(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -308,7 +279,6 @@ func (a simAPI) getReplay(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// destroySession 归档单个内部会话。
 func (a simAPI) destroySession(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -327,7 +297,6 @@ func (a simAPI) destroySession(c *gin.Context) {
 	httpx.Write(c, struct{}{}, err)
 }
 
-// recycleSessions 按生命周期作用域批量归档内部会话。
 func (a simAPI) recycleSessions(c *gin.Context) {
 	var req RecycleRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSimSessionInvalid) {
@@ -347,24 +316,6 @@ func (a simAPI) recycleSessions(c *gin.Context) {
 	httpx.Write(c, struct{}{}, err)
 }
 
-// reportCheckpoint 绑定内部检查点上报。
-func (a simAPI) reportCheckpoint(c *gin.Context) {
-	id, ok := httpx.PathID(c, "id")
-	if !ok {
-		return
-	}
-	tenantID, ok := currentServiceTenantID(c)
-	if !ok {
-		return
-	}
-	var req ReportCheckpointRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrSimCheckpointInvalid) {
-		return
-	}
-	httpx.Write(c, struct{}{}, a.svc.ReportCheckpointFromHTTP(c.Request.Context(), tenantID, id, req))
-}
-
-// shareSession 创建分享码。
 func (a simAPI) shareSession(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -382,13 +333,11 @@ func (a simAPI) shareSession(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// getShared 按分享码读取公开剧本。
 func (a simAPI) getShared(c *gin.Context) {
 	out, err := a.svc.GetSharedReplay(c.Request.Context(), c.Param("code"))
 	httpx.Write(c, out, err)
 }
 
-// streamSession 建立后端计算仿真 WebSocket。
 func (a simAPI) streamSession(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -409,29 +358,19 @@ func (a simAPI) streamSession(c *gin.Context) {
 	}
 }
 
-// bindPackageMultipart 读取仿真包 multipart 元数据和 bundle 文件。
-func (a simAPI) bindPackageMultipart(c *gin.Context) (SubmitPackageRequest, BundleInput, bool) {
-	req, header, data, ok := readPackageMultipart(c, a.svc.upload.SimBundleMetadataMaxBytes, a.svc.upload.SimBundleMaxBytes)
-	if !ok {
-		return SubmitPackageRequest{}, BundleInput{}, false
-	}
-	return req, BundleInput{FileName: header.Filename, ContentType: header.Header.Get("Content-Type"), Data: data}, true
-}
-
 // readPackageMultipart 以 streaming 方式读取仿真包 multipart,拒绝未知字段和重复字段。
-func readPackageMultipart(c *gin.Context, metadataMaxBytes, bundleMaxBytes int64) (SubmitPackageRequest, *multipart.FileHeader, []byte, bool) {
+func readPackageMultipart(c *gin.Context, metadataMaxBytes, bundleMaxBytes int64) (SubmitPackageRequest, BundleInput, bool) {
 	if metadataMaxBytes <= 0 || bundleMaxBytes <= 0 {
 		response.Fail(c, apperr.ErrSimPackageInvalid)
-		return SubmitPackageRequest{}, nil, nil, false
+		return SubmitPackageRequest{}, BundleInput{}, false
 	}
 	reader, err := c.Request.MultipartReader()
 	if err != nil {
 		response.Fail(c, apperr.ErrSimPackageInvalid.WithCause(err))
-		return SubmitPackageRequest{}, nil, nil, false
+		return SubmitPackageRequest{}, BundleInput{}, false
 	}
 	fields := map[string]string{}
-	var header *multipart.FileHeader
-	var data []byte
+	var bundle BundleInput
 	var metadataUsed int64
 	for {
 		part, err := reader.NextPart()
@@ -440,71 +379,64 @@ func readPackageMultipart(c *gin.Context, metadataMaxBytes, bundleMaxBytes int64
 				break
 			}
 			response.Fail(c, apperr.ErrSimPackageInvalid.WithCause(err))
-			return SubmitPackageRequest{}, nil, nil, false
+			return SubmitPackageRequest{}, BundleInput{}, false
 		}
 		name := strings.TrimSpace(part.FormName())
 		if name == "" {
 			response.Fail(c, apperr.ErrSimPackageInvalid)
-			return SubmitPackageRequest{}, nil, nil, false
+			return SubmitPackageRequest{}, BundleInput{}, false
 		}
 		if part.FileName() != "" {
-			if name != "bundle" || header != nil {
+			if name != "bundle" || bundle.FileName != "" {
 				response.Fail(c, apperr.ErrSimPackageInvalid)
-				return SubmitPackageRequest{}, nil, nil, false
+				return SubmitPackageRequest{}, BundleInput{}, false
 			}
 			content, result, err := upload.ReadBounded(part, bundleMaxBytes)
 			if err != nil {
 				response.Fail(c, apperr.ErrSimBundleUnreadable.WithCause(err))
-				return SubmitPackageRequest{}, nil, nil, false
+				return SubmitPackageRequest{}, BundleInput{}, false
 			}
 			if result != upload.SizeOK {
 				response.Fail(c, apperr.ErrSimBundleUnreadable)
-				return SubmitPackageRequest{}, nil, nil, false
+				return SubmitPackageRequest{}, BundleInput{}, false
 			}
-			data = content
-			header = &multipart.FileHeader{Filename: part.FileName(), Header: part.Header}
+			bundle = BundleInput{FileName: part.FileName(), ContentType: part.Header.Get("Content-Type"), Data: content}
 			continue
 		}
 		if _, ok := simPackageMultipartValues[name]; !ok {
 			response.Fail(c, apperr.ErrSimPackageInvalid)
-			return SubmitPackageRequest{}, nil, nil, false
+			return SubmitPackageRequest{}, BundleInput{}, false
 		}
 		if _, exists := fields[name]; exists {
 			response.Fail(c, apperr.ErrSimPackageInvalid)
-			return SubmitPackageRequest{}, nil, nil, false
+			return SubmitPackageRequest{}, BundleInput{}, false
 		}
 		remaining := metadataMaxBytes - metadataUsed
 		if remaining <= 0 {
 			response.Fail(c, apperr.ErrSimPackageInvalid)
-			return SubmitPackageRequest{}, nil, nil, false
+			return SubmitPackageRequest{}, BundleInput{}, false
 		}
 		content, result, err := upload.ReadBounded(part, remaining)
 		if err != nil {
 			response.Fail(c, apperr.ErrSimPackageInvalid.WithCause(err))
-			return SubmitPackageRequest{}, nil, nil, false
+			return SubmitPackageRequest{}, BundleInput{}, false
 		}
 		if result != upload.SizeOK {
 			response.Fail(c, apperr.ErrSimPackageInvalid)
-			return SubmitPackageRequest{}, nil, nil, false
+			return SubmitPackageRequest{}, BundleInput{}, false
 		}
 		metadataUsed += int64(len(content))
 		fields[name] = string(content)
 	}
-	for _, required := range []string{"code", "version", "name", "category"} {
-		if _, ok := fields[required]; !ok {
-			response.Fail(c, apperr.ErrSimPackageInvalid)
-			return SubmitPackageRequest{}, nil, nil, false
-		}
-	}
-	if header == nil || len(data) == 0 {
+	// 未知和重复字段已拒绝，字段数相等即表示必填项齐全。
+	if len(fields) != len(simPackageMultipartValues) || bundle.FileName == "" || len(bundle.Data) == 0 {
 		response.Fail(c, apperr.ErrSimPackageInvalid)
-		return SubmitPackageRequest{}, nil, nil, false
+		return SubmitPackageRequest{}, BundleInput{}, false
 	}
-	req := SubmitPackageRequest{Code: fields["code"], Version: fields["version"], Name: fields["name"], Category: fields["category"], ScaleLimit: []byte(defaultJSON(fields["scale_limit"]))}
-	return req, header, data, true
+	req := SubmitPackageRequest{Code: fields["code"], Version: fields["version"], Name: fields["name"], Category: fields["category"], ScaleLimit: []byte(fields["scale_limit"])}
+	return req, bundle, true
 }
 
-// currentTenantIdentity 从服务端鉴权上下文读取租户身份。
 func currentTenantIdentity(c *gin.Context) (tenant.Identity, bool) {
 	id, ok := tenant.FromContext(c.Request.Context())
 	if !ok || id.TenantID <= 0 || id.AccountID <= 0 {
@@ -514,7 +446,6 @@ func currentTenantIdentity(c *gin.Context) (tenant.Identity, bool) {
 	return id, true
 }
 
-// currentPlatformIdentity 从上下文读取平台管理员身份。
 func currentPlatformIdentity(c *gin.Context) (tenant.Identity, bool) {
 	id, ok := tenant.FromContext(c.Request.Context())
 	if !ok || !id.IsPlatform || id.AccountID <= 0 {
@@ -524,7 +455,6 @@ func currentPlatformIdentity(c *gin.Context) (tenant.Identity, bool) {
 	return id, true
 }
 
-// currentServiceTenantID 读取内部服务租户边界。
 func currentServiceTenantID(c *gin.Context) (int64, bool) {
 	id, ok := tenant.FromContext(c.Request.Context())
 	if !ok || id.TenantID <= 0 || !id.IsSystem {
@@ -532,12 +462,4 @@ func currentServiceTenantID(c *gin.Context) (int64, bool) {
 		return 0, false
 	}
 	return id.TenantID, true
-}
-
-// defaultJSON 为空表单字段补 JSON 对象。
-func defaultJSON(raw string) string {
-	if strings.TrimSpace(raw) == "" {
-		return "{}"
-	}
-	return raw
 }

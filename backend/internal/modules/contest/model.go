@@ -21,10 +21,15 @@ type Contest struct {
 	StartAt       time.Time
 	EndAt         time.Time
 	FreezeMinutes int32
-	Rules         map[string]any
 	Status        int16
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+}
+
+// DynamicScoreConfig 定义按已解出队伍数衰减的计分参数。
+type DynamicScoreConfig struct {
+	MinScore      int32 `json:"min_score"`
+	DecayPerSolve int32 `json:"decay_per_solve"`
 }
 
 // ContestProblem 是竞赛内题目引用和赛内配置。
@@ -36,7 +41,6 @@ type ContestProblem struct {
 	ItemVersion         string
 	Score               int32
 	DynamicScore        *DynamicScoreConfig
-	BattleConfig        *BattleRuntimeConfig
 	BattleRule          int16
 	Seq                 int32
 	CompositionDigest   string
@@ -229,6 +233,13 @@ type VulnSource struct {
 	UpdatedAt    time.Time
 }
 
+// vulnSourceHTTPConfig 是来源保存与同步共用的已校验请求配置。
+type vulnSourceHTTPConfig struct {
+	endpoint, method, casesPath string
+	timeoutSeconds              int
+	headers, mapping            map[string]string
+}
+
 // VulnProblem 是漏洞题转化草稿和预验证记录。
 type VulnProblem struct {
 	ID                  int64
@@ -243,8 +254,6 @@ type VulnProblem struct {
 	PrevalidateDetail   map[string]any
 	CompositionDigest   string
 	CompositionSnapshot *contracts.SandboxCompositionSnapshot
-	InitCodeRef         string
-	InitScriptRef       string
 	ContentItemCode     string
 	ContentItemVersion  string
 	Status              int16

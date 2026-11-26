@@ -9,9 +9,14 @@ import (
 )
 
 type Querier interface {
+	ClaimExpiredSandboxSnapshotCleanup(ctx context.Context, arg ClaimExpiredSandboxSnapshotCleanupParams) (Sandbox, error)
 	ClaimPendingSandboxRecycleOutbox(ctx context.Context, arg ClaimPendingSandboxRecycleOutboxParams) ([]SandboxRecycleOutbox, error)
+	ClaimSandboxRecycle(ctx context.Context, arg ClaimSandboxRecycleParams) (Sandbox, error)
+	ClaimSandboxResources(ctx context.Context, arg ClaimSandboxResourcesParams) (Sandbox, error)
 	// 用户写入必须携带最近一次读取到的 revision;不一致时不更新,由 service 返回冲突。
 	ClaimSandboxWorkspaceRevision(ctx context.Context, arg ClaimSandboxWorkspaceRevisionParams) (int64, error)
+	CompleteExpiredSandboxSnapshotCleanup(ctx context.Context, arg CompleteExpiredSandboxSnapshotCleanupParams) (int64, error)
+	CompleteSandboxRecycle(ctx context.Context, arg CompleteSandboxRecycleParams) (int64, error)
 	CountActiveSandboxes(ctx context.Context, tenantID int64) (int64, error)
 	// 运行时列表的接入进度要知道每个运行时有几个可用镜像版本:一次分组计数,不逐个运行时取镜像列表。
 	CountAvailableRuntimeImagesByRuntime(ctx context.Context) ([]CountAvailableRuntimeImagesByRuntimeRow, error)
@@ -19,17 +24,19 @@ type Querier interface {
 	CreateSandbox(ctx context.Context, arg CreateSandboxParams) (Sandbox, error)
 	CreateSandboxEvent(ctx context.Context, arg CreateSandboxEventParams) (SandboxEvent, error)
 	CreateSandboxRecycleOutbox(ctx context.Context, arg CreateSandboxRecycleOutboxParams) (SandboxRecycleOutbox, error)
-	CreateSandboxTool(ctx context.Context, arg CreateSandboxToolParams) (SandboxTool, error)
 	DeleteCompositionPrepullByRuntimeImage(ctx context.Context, runtimeImageID int64) error
-	DeletePublishedCompositionSnapshot(ctx context.Context, compositionDigest string) error
+	DeleteCompositionSnapshot(ctx context.Context, compositionDigest string) error
 	DisableRuntimeImage(ctx context.Context, arg DisableRuntimeImageParams) (RuntimeImage, error)
+	EnsureRuntime(ctx context.Context, arg EnsureRuntimeParams) error
 	EnsureTenantQuota(ctx context.Context, arg EnsureTenantQuotaParams) (EnsureTenantQuotaRow, error)
+	EnsureTool(ctx context.Context, arg EnsureToolParams) error
 	FinishCompositionPrepull(ctx context.Context, arg FinishCompositionPrepullParams) (SandboxCompositionPrepull, error)
 	// 只允许仍处于接入中的同一自检批次写回,防止旧结果覆盖并发配置更新或停用。
 	FinishRuntimeSelftest(ctx context.Context, arg FinishRuntimeSelftestParams) (Runtime, error)
 	GetCompositionPrepullForUpdate(ctx context.Context, arg GetCompositionPrepullForUpdateParams) (SandboxCompositionPrepull, error)
-	GetPublishedCompositionSnapshot(ctx context.Context, compositionDigest string) (SandboxComposition, error)
+	GetCompositionSnapshot(ctx context.Context, compositionDigest string) (SandboxComposition, error)
 	GetRuntimeByCode(ctx context.Context, code string) (Runtime, error)
+	GetRuntimeByCodeForUpdate(ctx context.Context, code string) (Runtime, error)
 	GetRuntimeByID(ctx context.Context, id int64) (Runtime, error)
 	// 运行时更新必须在同一事务内比较旧执行契约并写入新状态,防止并发更新覆盖自检结论。
 	GetRuntimeByIDForUpdate(ctx context.Context, id int64) (Runtime, error)
@@ -46,17 +53,18 @@ type Querier interface {
 	GetTenantQuota(ctx context.Context, tenantID int64) (TenantQuotum, error)
 	GetTenantQuotaForUpdate(ctx context.Context, tenantID int64) (TenantQuotum, error)
 	GetToolByCode(ctx context.Context, code string) (Tool, error)
+	GetToolByCodeForUpdate(ctx context.Context, code string) (Tool, error)
 	InvalidateCompositionPrepullByRuntime(ctx context.Context, arg InvalidateCompositionPrepullByRuntimeParams) error
-	// 编排目录只取真正可调度的运行时与镜像版本,不把未完成自检或最新闭包预拉取的项暴露给教师。
+	// 目录提供已自检且可用的运行时与可用镜像版本；完整组合的预拉取证明在启动前校验。
 	// 一次 JOIN 平铺取回后由 repo 按运行时分组,既避免按运行时逐个查镜像的 N+1,
 	// 也不用 jsonb_agg —— 那会让生成的行类型退化成 interface{},把解码负担推给业务层。
 	ListCatalogRuntimes(ctx context.Context) ([]ListCatalogRuntimesRow, error)
 	// eco_tags 只在服务端计算各运行时兼容组件,不会直接下发给编排端。
 	ListCatalogTools(ctx context.Context) ([]ListCatalogToolsRow, error)
+	ListPendingSandboxStarts(ctx context.Context, arg ListPendingSandboxStartsParams) ([]Sandbox, error)
 	ListRecycleCandidates(ctx context.Context, arg ListRecycleCandidatesParams) ([]Sandbox, error)
 	ListRuntimeImages(ctx context.Context, runtimeID int64) ([]RuntimeImage, error)
 	ListRuntimes(ctx context.Context) ([]Runtime, error)
-	ListSandboxTools(ctx context.Context, arg ListSandboxToolsParams) ([]ListSandboxToolsRow, error)
 	ListSandboxesByScopeRef(ctx context.Context, arg ListSandboxesByScopeRefParams) ([]Sandbox, error)
 	ListSandboxesBySourceRef(ctx context.Context, arg ListSandboxesBySourceRefParams) ([]Sandbox, error)
 	ListSnapshotCleanupCandidates(ctx context.Context, limit int32) ([]Sandbox, error)
@@ -67,19 +75,23 @@ type Querier interface {
 	MarkSandboxActive(ctx context.Context, arg MarkSandboxActiveParams) (Sandbox, error)
 	MarkSandboxRecycleOutboxFailed(ctx context.Context, arg MarkSandboxRecycleOutboxFailedParams) (SandboxRecycleOutbox, error)
 	MarkSandboxRecycleOutboxPublished(ctx context.Context, arg MarkSandboxRecycleOutboxPublishedParams) (SandboxRecycleOutbox, error)
+	QueueSandboxRecycle(ctx context.Context, arg QueueSandboxRecycleParams) (int64, error)
+	ReadSandboxAlertMetrics(ctx context.Context, arg ReadSandboxAlertMetricsParams) (ReadSandboxAlertMetricsRow, error)
+	ReleaseSandboxResourceLease(ctx context.Context, arg ReleaseSandboxResourceLeaseParams) (int64, error)
+	RenewSandboxResourceLease(ctx context.Context, arg RenewSandboxResourceLeaseParams) (int64, error)
 	StartCompositionPrepull(ctx context.Context, arg StartCompositionPrepullParams) (SandboxCompositionPrepull, error)
+	StartRetainedSandbox(ctx context.Context, arg StartRetainedSandboxParams) (int64, error)
 	// 自检启动时写入唯一批次并退回接入中,并发契约更新或停用可使旧批次自然失效。
 	StartRuntimeSelftest(ctx context.Context, arg StartRuntimeSelftestParams) (Runtime, error)
 	StatsByTenant(ctx context.Context, tenantID int64) (StatsByTenantRow, error)
+	UpdateRuntime(ctx context.Context, arg UpdateRuntimeParams) (Runtime, error)
 	UpdateSandboxAuthorizedAccounts(ctx context.Context, arg UpdateSandboxAuthorizedAccountsParams) (Sandbox, error)
 	UpdateSandboxCode(ctx context.Context, arg UpdateSandboxCodeParams) (Sandbox, error)
 	UpdateSandboxPhaseStatus(ctx context.Context, arg UpdateSandboxPhaseStatusParams) (Sandbox, error)
 	UpdateSandboxSnapshot(ctx context.Context, arg UpdateSandboxSnapshotParams) (Sandbox, error)
-	UpdateSandboxToolStatus(ctx context.Context, arg UpdateSandboxToolStatusParams) (SandboxTool, error)
-	UpsertPublishedCompositionSnapshot(ctx context.Context, arg UpsertPublishedCompositionSnapshotParams) error
-	UpsertRuntime(ctx context.Context, arg UpsertRuntimeParams) (Runtime, error)
+	UpdateTool(ctx context.Context, arg UpdateToolParams) (Tool, error)
+	UpsertCompositionSnapshot(ctx context.Context, arg UpsertCompositionSnapshotParams) error
 	UpsertTenantQuota(ctx context.Context, arg UpsertTenantQuotaParams) (TenantQuotum, error)
-	UpsertTool(ctx context.Context, arg UpsertToolParams) (Tool, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -1,15 +1,4 @@
-// 系统公告页(校管侧栏 /school-admin/announcements、平台侧栏 /platform-admin/announcements 共用)。设计 §7.7:
-// 页头 +「发布公告」;已发布公告列表行(标题、范围标签:全平台 / 全校 / 指定角色、发布时间),点开就地展开全文;
-// 发布弹窗里范围选择在上、正文在下,发布前显示「将通知谁」的一句确认。指标条与常驻说明卡去掉。
-//
-// 这是「发」的一侧:发布公告。「收」的一侧是顶栏铃铛进入的通知收件箱 ——
-// 两者不互相替代(规范 §10)。平台管理端没有收件箱(无租户、站内信在数据模型层不成立),
-// 公告能力就落在这一页。
-//
-// 发布范围按发布方分叉,这是后端的硬边界:
-//   学校管理员发本校或定向角色(scope=平台会被 validateAnnouncementRequest 拒);
-//   平台管理员发全平台(它的会话没有租户,发本校范围会落到一个不存在的归属上)。
-// 故由调用方通过 publisher 显式声明,页面不在运行时判角色枚举。
+// 平台与学校共用的公告发布和查看页面。
 
 import { useCallback, useState } from 'react'
 import { Megaphone, Plus, Send } from 'lucide-react'
@@ -65,16 +54,12 @@ const TARGET_ROLE_OPTIONS = [UserRole.TEACHER, UserRole.STUDENT, UserRole.SCHOOL
 
 /** 两个发布方的空列表说明。 */
 const PUBLISHER_COPY: Record<AnnouncementPublisher, { emptyDescription: string }> = {
-  platform: { emptyDescription: '发布公告后会推送到所有学校师生的通知收件箱。' },
-  school: { emptyDescription: '发布公告后会推送到师生的通知收件箱;平台下发的公告也会出现在这里。' },
+  platform: { emptyDescription: '发布的公告会显示在所有学校师生通知收件箱的公告列表。' },
+  school: { emptyDescription: '发布的公告会显示在本校通知收件箱的公告列表;平台公告也会出现在这里。' },
 }
 
 export interface AnnouncementsPageProps {
-  /**
-   * 发布方身份。
-   * 决定可选范围:platform 只能发全平台,school 能发本校与定向角色 ——
-   * 后端按会话身份强制这一边界,前端按声明渲染,不给必然被拒的选项。
-   */
+  /** 发布方决定可选范围，服务端独立校验。 */
   publisher: AnnouncementPublisher
 }
 
@@ -202,12 +187,7 @@ interface AnnouncementFormModalProps {
   onPublished: () => void
 }
 
-/**
- * AnnouncementFormModal 发布一条公告。
- * 定向公告必须选至少一个角色(后端 validateAnnouncementRequest 要求),
- * 全校公告则不能带角色 —— 故按范围切换时清空角色选择。
- * 平台发布方只有一种范围(全平台),此时不渲染范围选择器。
- */
+/** 发布公告；切换范围时清空不适用的角色选择。 */
 function AnnouncementFormModal({ publisher, onClose, onPublished }: AnnouncementFormModalProps) {
   const isPlatform = publisher === 'platform'
   const [title, setTitle] = useState('')
@@ -239,7 +219,7 @@ function AnnouncementFormModal({ publisher, onClose, onPublished }: Announcement
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (!validate()) return
+      if (working || !validate()) return
       setFormError(undefined)
       setWorking(true)
       try {
@@ -259,7 +239,7 @@ function AnnouncementFormModal({ publisher, onClose, onPublished }: Announcement
         setWorking(false)
       }
     },
-    [content, expireAt, isRoleScoped, onPublished, roles, scopeValue, title, validate],
+    [content, expireAt, isRoleScoped, onPublished, roles, scopeValue, title, validate, working],
   )
 
   return (
@@ -267,13 +247,13 @@ function AnnouncementFormModal({ publisher, onClose, onPublished }: Announcement
       <ModalContent size="xl">
         <ModalHeader>
           <ModalTitle>发布公告</ModalTitle>
-          <ModalDescription>公告会推送到对应人员的通知收件箱。</ModalDescription>
+          <ModalDescription>公告会显示在对应人员通知收件箱的公告列表。</ModalDescription>
         </ModalHeader>
         <form onSubmit={submit} noValidate>
           <ModalBody className="flex flex-col gap-4">
             {isPlatform ? (
               <Callout tone="info" title="这条公告对全平台可见">
-                所有学校的师生与管理员都会收到。平台公告不支持只发给某些角色。
+                所有学校的师生与管理员都能查看。平台公告不支持只发给某些角色。
               </Callout>
             ) : (
               <FormField label="可见范围" required>

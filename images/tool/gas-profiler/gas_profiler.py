@@ -5,22 +5,48 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import statistics
 import sys
 
 
 def load_gas_values(raw: str) -> list[int]:
-    """从标准输入 JSON 读取 gasUsed 数值列表。"""
     payload = json.loads(raw)
-    receipts = payload if isinstance(payload, list) else payload.get("receipts", [])
-    return [int(item["gasUsed"]) for item in receipts if "gasUsed" in item]
+    if isinstance(payload, list):
+        receipts = payload
+    elif isinstance(payload, dict) and isinstance(payload.get("receipts"), list):
+        receipts = payload["receipts"]
+    else:
+        raise ValueError("input must be a receipt array or an object with a receipts array")
+
+    values: list[int] = []
+    for item in receipts:
+        if not isinstance(item, dict) or "gasUsed" not in item:
+            raise ValueError("every receipt must contain gasUsed")
+        value = item["gasUsed"]
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            raise ValueError("gasUsed must be an integer or JSON-RPC quantity")
+        if isinstance(value, int):
+            parsed = value
+        elif re.fullmatch(r"0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)", value):
+            parsed = int(value, 16)
+        elif re.fullmatch(r"0|[1-9][0-9]*", value):
+            parsed = int(value, 10)
+        else:
+            raise ValueError("gasUsed must be a non-negative integer")
+        if parsed < 0:
+            raise ValueError("gasUsed must be non-negative")
+        values.append(parsed)
+    return values
 
 
 def main() -> int:
-    """解析参数并输出 gas 统计 JSON。"""
     parser = argparse.ArgumentParser(description="Chaimir gas profiler")
     parser.parse_args()
-    values = load_gas_values(sys.stdin.read())
+    try:
+        values = load_gas_values(sys.stdin.read())
+    except ValueError as error:
+        parser.error(str(error))
     result = {
         "count": len(values),
         "total": sum(values),

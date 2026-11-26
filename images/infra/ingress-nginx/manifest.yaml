@@ -1,0 +1,118 @@
+# 本文件声明 infra/ingress-nginx 上游固定镜像的来源、配置、端口和生产门禁。
+schema_version: 1
+category: infra
+name: ingress-nginx
+image: infra/ingress-nginx
+labels:
+  app.kubernetes.io/name: ingress-nginx
+  app.kubernetes.io/component: ingress
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: infra
+  chaimir.io/image: infra/ingress-nginx
+  chaimir.io/data-driven: "false"
+  chaimir.io/student-access: "false"
+  chaimir.io/sensitivity: edge-gateway
+  chaimir.io/scope: ingress
+  chaimir.io/source: platform-built
+description: ingress-nginx 控制器 Wolfi 安全运行镜像。
+source:
+  type: platform-built
+upstream:
+  registry: cgr.dev
+  image: chainguard/wolfi-base
+  version: "2026-08-26"
+  digest: sha256:6677ae802613d558c16d8bbb2ef2ec89e2e33089bbf78c8f3090ac159bf02d4c
+  source_repository: https://github.com/chainguard-forks/ingress-nginx
+  source_commit: 5a85da174c066f62bbce8315fb1c4f2e71446683
+  packages:
+    - ingress-nginx-controller-1.15=1.15.10-r2
+    - ingress-nginx-controller-compat-1.15=1.15.10-r2
+    - libcrypto3=3.6.3-r5
+    - libssl3=3.6.3-r5
+  reuse_policy: wolfi-package-build
+  license: Apache-2.0
+private_delivery:
+  offline_bundle: true
+  import_project: infra
+data_driven: false
+capabilities:
+  - ingress-controller
+  - authenticated-routing
+env_keys:
+  config:
+    - WS_ALLOWED_ORIGINS
+  secret: []
+secrets_required: []
+ports:
+  - name: http
+    container_port: 80
+    protocol: TCP
+    expose: gateway
+    purpose: HTTP ingress
+  - name: https
+    container_port: 443
+    protocol: TCP
+    expose: gateway
+    purpose: HTTPS ingress
+  - name: webhook
+    container_port: 8443
+    protocol: TCP
+    expose: internal
+    purpose: Admission webhook
+  - name: health
+    container_port: 10254
+    protocol: TCP
+    expose: internal
+    purpose: 控制器健康检查与监控指标
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: false
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: true
+  drop_capabilities:
+    - ALL
+  add_capabilities:
+    - NET_BIND_SERVICE
+  network_policy: deny-all
+security_exceptions:
+  - field: read_only_root_filesystem
+    reason: ingress-nginx 需要写临时 Nginx 配置、PID 和缓存目录。
+    writable_mounts:
+      - runtime-state
+  - field: automount_service_account_token
+    reason: ingress-nginx 控制器必须监听 Ingress、Service、EndpointSlice 和 Secret 等集群资源,使用专用最小权限 ServiceAccount 访问 Kubernetes API。
+  - field: add_capabilities
+    reason: 控制器以非 root 用户监听 80/443,只授予 NET_BIND_SERVICE 并继续丢弃其余 Linux capabilities。
+student_access:
+  enabled: false
+data_volumes:
+  - name: runtime-state
+    mount_path: /tmp/nginx
+    backup_required: false
+backup:
+  required: false
+  mode: declarative-config-only
+network:
+  expose: gateway
+  default_deny: true
+resources:
+  cpu_request: 100m
+  cpu_limit: "1"
+  memory_request: 128Mi
+  memory_limit: 512Mi
+  ephemeral_storage_limit: 512Mi
+selftest:
+  upstream_healthcheck:
+    type: http
+    path: /healthz
+    port: 10254
+build:
+  context: images/infra/ingress-nginx
+  dockerfile: Dockerfile
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest: true

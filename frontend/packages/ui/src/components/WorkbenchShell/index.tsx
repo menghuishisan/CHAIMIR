@@ -1,23 +1,6 @@
 /**
- * WorkbenchShell:沉浸式工作台壳(深色语境,规范 §7.1 三区骨架)。
- *
- * 主体优先:中间**主舞台**是主体,左**辅助区**放解释与操作,右**事件流**放随时间增长的消息。
- * 两侧各自可独立收起为 `--wb-rail-w` 宽的竖向把手,收起后主舞台自适应占满释放的宽度
- * (舞台取 flex-1,不做宽度计算);把手上保留面板名与未读计数 —— 收起不等于失联。
- * 折叠状态本机持久化(键名 chaimir.workbench.*),只在用户显式收放过之后才生效;
- * 没有偏好时按视口给默认值:宽屏展开、窄屏收起(舞台优先)。
- *
- * 主舞台永不滚动:<main> 不给 overflow,舞台内的图形取剩余高度、清单自行滚动。
- * 槽位内容的滚动同样归内容自己 —— 壳把面板做成定高的 flex 列,好让「手风琴占满剩余高度 +
- * 操作常驻底部」这类布局成立;壳自己套一层 overflow 会让它们失效。
- *
- * 快捷键(规范 §7.3):壳持有本台唯一的快捷键登记处与按键监听。顶栏主操作经 WorkbenchTopbar 的
- * shortcuts 声明,槽位里的部件(播放控制、代码编辑区)用 useWorkbenchShortcuts 声明;
- * 顶栏「快捷键」按钮列出的就是这份登记,列出的与生效的不会分家。
- *
- * 使用契约:沉浸态必须独占路由挂载(规范 §7/§4.4 光面退场),不得作为覆盖层叠在
- * 日常页之上——否则背景可被 Tab 穿透与滚动。全屏墨色底层与进出场由沉浸路由壳提供,
- * 本组件填满该壳(不自行 fixed 定位),避免两处争夺同一块全屏层。
+ * 沉浸式工作台壳：面板折叠、顶栏和快捷键登记由壳统一管理，滚动由各槽位内容负责。
+ * 本组件填满独占路由的沉浸壳，不重复固定定位；布局契约见前端设计 §7。
  */
 import {
   ChevronDown,
@@ -50,6 +33,7 @@ import {
   type WorkbenchShortcut,
 } from "../../lib/workbenchShortcuts";
 import { Popover, PopoverContent, PopoverTrigger } from "../Popover";
+import { IconButton } from "../IconButton";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 
 /** 横排断点:与 Tailwind lg(1024px)一致,禁止另造魔法断点 */
@@ -212,10 +196,7 @@ export interface WorkbenchTopbarProps {
   shortcuts?: readonly WorkbenchShortcut[];
 }
 
-/**
- * WorkbenchTopbar:工作台顶条 —— 最左退出、标题/副标题、居中进度、右侧单一主 CTA。
- * 焦点环用负向 offset 内收,避免在 48px 高的条内被裁切。
- */
+/** WorkbenchTopbar 将标题与操作在窄屏分行，保留主操作的完整点击区域。 */
 export function WorkbenchTopbar({
   onExit,
   exitLabel = "保存并退出",
@@ -228,24 +209,31 @@ export function WorkbenchTopbar({
 }: WorkbenchTopbarProps) {
   useWorkbenchShortcuts(shortcuts);
   return (
-    <header className="flex h-14 shrink-0 items-center border-b border-dark-line bg-dark-bg">
+    <header className="flex min-h-14 shrink-0 flex-wrap items-center border-b border-dark-line bg-dark-bg">
       <button
         type="button"
         onClick={onExit}
-        // pressable 已含颜色过渡契约(theme.css),不再叠加 transition-colors
-        className="pressable flex h-full shrink-0 items-center gap-1.5 border-r border-dark-line px-4 text-sm text-on-dark-sub hover:bg-dark-surface hover:text-on-dark focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2"
+        className="pressable flex h-14 shrink-0 items-center gap-1.5 border-r border-dark-line px-4 text-sm text-on-dark-sub hover:bg-dark-surface hover:text-on-dark focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2"
       >
         <Icon icon={ChevronLeft} size="sm" />
         {exitLabel}
       </button>
-      <div className="min-w-0 px-4">
+      <div className="min-w-0 flex-1 px-4">
         <div className="truncate text-base font-semibold leading-tight text-on-dark">{title}</div>
-        {subtitle && <div className="truncate text-sm leading-tight text-on-dark-sub">{subtitle}</div>}
+        {subtitle && (
+          <div className="truncate text-sm leading-tight text-on-dark-sub">{subtitle}</div>
+        )}
       </div>
       {titleExtra && <div className="flex shrink-0 items-center gap-1">{titleExtra}</div>}
-      <div className="flex min-w-0 flex-1 items-center justify-center overflow-x-auto px-2">{progress}</div>
-      <ShortcutsButton />
-      {cta && <div className="flex shrink-0 items-center pl-2 pr-4">{cta}</div>}
+      <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-y-2 border-t border-dark-line px-2 py-2 sm:w-auto sm:flex-auto sm:border-t-0 sm:py-0">
+        {progress && (
+          <div className="flex min-w-0 flex-auto items-center overflow-x-auto px-2">
+            <div className="mx-auto shrink-0">{progress}</div>
+          </div>
+        )}
+        <ShortcutsButton />
+        {cta && <div className="flex shrink-0 items-center px-2">{cta}</div>}
+      </div>
     </header>
   );
 }
@@ -379,20 +367,15 @@ function WorkbenchPanel({ workbench, side, label, count, wide, children }: Workb
             {unread}
           </span>
         ) : null}
-        <button
-          type="button"
+        <IconButton
+          variant="on-dark"
+          size="sm"
+          aria-label={collapsed ? `展开${label}` : `收起${label}`}
           aria-expanded={!collapsed}
           aria-controls={contentId}
           onClick={toggle}
-          // pressable 已含颜色过渡契约(theme.css),不再叠加 transition-colors
-          className="pressable hit-target relative shrink-0 rounded-sm text-on-dark-sub hover:text-on-dark focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
-        >
-          <span className="sr-only">{collapsed ? `展开${label}` : `收起${label}`}</span>
-          <Icon
-            icon={wide ? (isLeft ? PanelLeftClose : PanelRightClose) : collapsed ? panelOpenIcon(isLeft) : panelCloseIcon(isLeft)}
-            size="sm"
-          />
-        </button>
+          icon={wide ? (isLeft ? PanelLeftClose : PanelRightClose) : collapsed ? panelOpenIcon(isLeft) : panelCloseIcon(isLeft)}
+        />
       </div>
       <div
         id={contentId}

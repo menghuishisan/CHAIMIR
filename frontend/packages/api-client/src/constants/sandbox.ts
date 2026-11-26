@@ -1,8 +1,6 @@
-// 沙箱契约常量：维护前端需要与后端 sandbox/contracts 枚举编号对齐的值。
-
 import { API_BASE_PATH } from './http'
 
-/** 平台内置工具入口模板的固定前缀，与后端 validBuiltinEndpointTemplate 保持一致。 */
+/** 内置工具入口须绑定到当前沙箱。 */
 export const SANDBOX_BUILTIN_ENDPOINT_TEMPLATE_PREFIX = `${API_BASE_PATH}/sandbox/sandboxes/{sandbox_id}`
 
 export enum SandboxPhase {
@@ -23,10 +21,7 @@ export enum SandboxStatus {
   IDLE = 8,
 }
 
-/**
- * SANDBOX_COMPONENT_CATEGORY 区分教师可见的学生工具与只参与编排的基础设施组件。
- * 平台工具目录与编排目录都按它分组:基础设施不是学生工具入口(§7.2)。
- */
+/** 基础设施只参与组合，不出现在学生工具入口。 */
 export const SANDBOX_COMPONENT_CATEGORY = {
   TOOL: 'tool',
   INFRA: 'infra',

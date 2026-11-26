@@ -1,4 +1,3 @@
-// sandbox service_tool_readiness 统一冻结工具规格和实时就绪判断,供详情与所有访问入口复用。
 package sandbox
 
 import (
@@ -7,95 +6,104 @@ import (
 	"fmt"
 	"strings"
 
-	"chaimir/internal/contracts"
-	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
 
-var errToolNotReady = errors.New("工具工作负载或服务端点尚未就绪")
+var (
+	errToolNotReady = errors.New("工具工作负载或服务端点尚未就绪")
+	errToolFailed   = errors.New("工具工作负载启动失败")
+)
 
-// currentSandboxTools 投影当前工具状态;目录和上次启动检查不能覆盖冻结规格或实时就绪事实。
-func (s *Service) currentSandboxTools(ctx context.Context, sb Sandbox, tools []SandboxTool) ([]SandboxTool, error) {
-	if len(tools) == 0 {
-		return tools, nil
-	}
-	var snapshot contracts.SandboxCompositionSnapshot
-	if err := jsonx.DecodeStrictKnownFields(sb.CompositionSnapshot, &snapshot); err != nil {
+func frozenSandboxTools(sb Sandbox) ([]SandboxTool, error) {
+	snapshot, err := verifiedCompositionSnapshot(sb)
+	if err != nil {
 		return nil, apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
 	}
-	if snapshot.Digest != sb.CompositionDigest || snapshot.Digest == "" {
-		return nil, apperr.ErrSandboxCreateRequestInvalid
-	}
-	frozen := make(map[int64]contracts.CompiledComponentSnapshot, len(snapshot.Components))
+	tools := make([]SandboxTool, 0, len(snapshot.Components))
+	seen := make(map[string]struct{}, len(snapshot.Components))
 	for _, component := range snapshot.Components {
-		if _, exists := frozen[component.ComponentID]; exists {
+		if component.Category == "infra" {
+			continue
+		}
+		if _, exists := seen[component.Code]; exists {
 			return nil, apperr.ErrSandboxCreateRequestInvalid
 		}
-		frozen[component.ComponentID] = component
-	}
-	out := append([]SandboxTool(nil), tools...)
-	for index := range out {
-		tool := &out[index]
-		component, ok := frozen[tool.ToolID]
-		if !ok || component.Code != tool.ToolCode {
-			return nil, apperr.ErrSandboxToolIncompatible
-		}
+		seen[component.Code] = struct{}{}
 		spec, err := toolResourceSpecFromJSON(component.ResourceSpec)
 		if err != nil {
 			return nil, apperr.ErrSandboxToolIncompatible.WithCause(err)
 		}
-		tool.ResourceSpec = spec
-		tool.Kind = component.Kind
-		definition := Tool{ID: tool.ToolID, Code: tool.ToolCode, Kind: tool.Kind, ResourceSpec: tool.ResourceSpec}
-		tool.AccessEndpoint = toolEndpoint(sb.ID, definition)
-		if tool.Kind != SandboxToolKindWebEmbed && tool.Kind != SandboxToolKindCommand {
-			continue
-		}
-		if !sandboxExecAllowed(sb) {
-			tool.Status = SandboxToolStatusStarting
-			if sb.Status == SandboxStatusFailed || sb.Status == SandboxStatusDestroyed {
-				tool.Status = SandboxToolStatusFailed
-			}
-			continue
-		}
-		if s.orchestrator == nil {
-			return nil, apperr.ErrSandboxToolProxyUnavailable.WithCause(fmt.Errorf("工具就绪检查缺少编排器"))
-		}
-		if err := s.orchestrator.ToolReady(ctx, sb, definition); err != nil {
-			if !errors.Is(err, errToolNotReady) {
-				return nil, apperr.ErrSandboxToolProxyUnavailable.WithCause(err)
-			}
-			// 正常启动或就绪回退保持准备态;启动已超时的失败记录保留,真实恢复后仍可重读解锁。
-			if tool.Status != SandboxToolStatusFailed {
-				tool.Status = SandboxToolStatusStarting
-			}
-			continue
-		}
-		tool.Status = SandboxToolStatusReady
+		definition := Tool{ID: component.ComponentID, Code: component.Code, Kind: component.Kind, ResourceSpec: spec}
+		tools = append(tools, SandboxTool{ToolCode: component.Code, Kind: component.Kind, ResourceSpec: spec, AccessEndpoint: toolEndpoint(sb.ID, definition)})
 	}
-	return out, nil
+	return tools, nil
 }
 
-// readySandboxTool 在已完成主体授权后选择工具,再使用同一实时状态门禁决定是否开放。
-func (s *Service) readySandboxTool(ctx context.Context, sb Sandbox, tools []SandboxTool, kind int16, code string) (SandboxTool, error) {
+func (s *Service) currentSandboxTools(ctx context.Context, sb Sandbox) ([]SandboxTool, error) {
+	tools, err := frozenSandboxTools(sb)
+	if err != nil {
+		return nil, err
+	}
+	var failures []error
+	for index := range tools {
+		status, err := s.sandboxToolStatus(ctx, sb, tools[index])
+		if err != nil {
+			failures = append(failures, fmt.Errorf("读取工具状态失败: tool_code=%s: %w", tools[index].ToolCode, err))
+		}
+		tools[index].Status = status
+	}
+	if err := errors.Join(failures...); err != nil {
+		return nil, apperr.ErrSandboxToolProxyUnavailable.WithCause(err)
+	}
+	return tools, nil
+}
+
+func (s *Service) sandboxToolStatus(ctx context.Context, sb Sandbox, tool SandboxTool) (int16, error) {
+	if !sandboxExecAllowed(sb) {
+		if sb.Status == SandboxStatusFailed || sb.Status == SandboxStatusDestroyed {
+			return SandboxToolStatusFailed, nil
+		}
+		return SandboxToolStatusStarting, nil
+	}
+	if tool.Kind != SandboxToolKindWebEmbed && tool.Kind != SandboxToolKindCommand {
+		return SandboxToolStatusReady, nil
+	}
+	if s.orchestrator == nil {
+		return 0, fmt.Errorf("工具就绪检查缺少编排器")
+	}
+	definition := Tool{Code: tool.ToolCode, Kind: tool.Kind, ResourceSpec: tool.ResourceSpec}
+	switch err := s.orchestrator.ToolReady(ctx, sb, definition); {
+	case err == nil:
+		return SandboxToolStatusReady, nil
+	case errors.Is(err, errToolFailed):
+		return SandboxToolStatusFailed, nil
+	case errors.Is(err, errToolNotReady):
+		return SandboxToolStatusStarting, nil
+	default:
+		return 0, err
+	}
+}
+
+func (s *Service) readySandboxTool(ctx context.Context, sb Sandbox, kind int16, code string) (SandboxTool, error) {
 	if !sandboxExecAllowed(sb) {
 		return SandboxTool{}, apperr.ErrSandboxStateInvalid
 	}
+	tools, err := frozenSandboxTools(sb)
+	if err != nil {
+		return SandboxTool{}, err
+	}
 	for _, tool := range tools {
-		if !strings.EqualFold(tool.ToolCode, strings.TrimSpace(code)) {
+		if !strings.EqualFold(tool.ToolCode, strings.TrimSpace(code)) || tool.Kind != kind {
 			continue
 		}
-		current, err := s.currentSandboxTools(ctx, sb, []SandboxTool{tool})
+		tool.Status, err = s.sandboxToolStatus(ctx, sb, tool)
 		if err != nil {
-			return SandboxTool{}, err
+			return SandboxTool{}, apperr.ErrSandboxToolProxyUnavailable.WithCause(err)
 		}
-		if current[0].Kind != kind {
-			return SandboxTool{}, apperr.ErrSandboxToolNotFound
-		}
-		if current[0].Status != SandboxToolStatusReady {
+		if tool.Status != SandboxToolStatusReady {
 			return SandboxTool{}, apperr.ErrSandboxToolProxyUnavailable.WithCause(errToolNotReady)
 		}
-		return current[0], nil
+		return tool, nil
 	}
 	return SandboxTool{}, apperr.ErrSandboxToolNotFound
 }

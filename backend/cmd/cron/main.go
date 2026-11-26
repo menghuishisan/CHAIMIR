@@ -84,10 +84,6 @@ func run() error {
 		return err
 	}
 	defer database.Close()
-	objects, err := storage.New(ctx, cfg.ObjectStorage)
-	if err != nil {
-		return err
-	}
 	ids, err := snowflake.NewNode(cfg.Snowflake.CronNodeID)
 	if err != nil {
 		return err
@@ -96,15 +92,31 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	return runBackup(ctx, cfg, objects, ids, recorder)
+	return runBackup(ctx, cfg, ids, recorder)
 }
 
 // runBackup 执行数据库与对象存储备份,最终把结果写入 M9 backup_record。
-func runBackup(ctx context.Context, cfg *config.Config, objects *storage.Storage, ids snowflake.Generator, recorder *admin.BackupRecorder) error {
-	if cfg == nil || objects == nil || ids == nil || recorder == nil {
+func runBackup(ctx context.Context, cfg *config.Config, ids snowflake.Generator, recorder *admin.BackupRecorder) (resultErr error) {
+	if cfg == nil || ids == nil || recorder == nil {
 		return fmt.Errorf("备份任务依赖不完整")
 	}
 	batch := "backup-" + platformids.Format(ids.Generate())
+	result := admin.BackupRecordCreate{Type: admin.BackupTypeFull, Status: admin.BackupStatusFailed, StartedAt: timex.Now()}
+	// 失败结果只依赖数据库，不能要求已故障的对象存储再写标记。
+	defer func() {
+		result.FinishedAt = timex.Now()
+		if err := recorder.RecordResult(ctx, result); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("记录备份结果失败: %w", err))
+			return
+		}
+		if resultErr == nil {
+			slog.Info("backup completed", slog.String("batch", batch), slog.Int64("size_bytes", result.SizeBytes))
+		}
+	}()
+	objects, err := storage.New(ctx, cfg.ObjectStorage)
+	if err != nil {
+		return err
+	}
 	workDir, err := os.MkdirTemp("", "chaimir-backup-")
 	if err != nil {
 		return fmt.Errorf("创建备份工作目录失败: %w", err)
@@ -115,18 +127,8 @@ func runBackup(ctx context.Context, cfg *config.Config, objects *storage.Storage
 		}
 	}()
 
-	var sizeBytes int64
-	var storageRef string
-	status := admin.BackupStatusFailed
 	dumpPath := filepath.Join(workDir, "postgres.dump")
 	if err := dumpPostgres(ctx, cfg, dumpPath); err != nil {
-		failRef, failErr := writeFailureMarker(ctx, objects, batch, err)
-		if failErr != nil {
-			return errors.Join(err, failErr)
-		}
-		if recordErr := recorder.RecordResult(ctx, admin.BackupRecordCreate{Type: admin.BackupTypeFull, StorageRef: failRef, Status: status}); recordErr != nil {
-			return errors.Join(err, recordErr)
-		}
 		return err
 	}
 	dbKey, err := storage.ObjectKey(0, "admin", "backup", batch, "postgres.dump")
@@ -135,28 +137,14 @@ func runBackup(ctx context.Context, cfg *config.Config, objects *storage.Storage
 	}
 	dbSize, ref, err := uploadFile(ctx, objects, objects.BucketBackup(), dbKey, dumpPath)
 	if err != nil {
-		failRef, failErr := writeFailureMarker(ctx, objects, batch, err)
-		if failErr != nil {
-			return errors.Join(err, failErr)
-		}
-		if recordErr := recorder.RecordResult(ctx, admin.BackupRecordCreate{Type: admin.BackupTypeFull, StorageRef: failRef, Status: status}); recordErr != nil {
-			return errors.Join(err, recordErr)
-		}
 		return err
 	}
-	sizeBytes += dbSize
+	result.SizeBytes += dbSize
 	objectSize, bucketSummaries, err := mirrorObjectBuckets(ctx, objects, batch)
 	if err != nil {
-		failRef, failErr := writeFailureMarker(ctx, objects, batch, err)
-		if failErr != nil {
-			return errors.Join(err, failErr)
-		}
-		if recordErr := recorder.RecordResult(ctx, admin.BackupRecordCreate{Type: admin.BackupTypeFull, StorageRef: failRef, SizeBytes: sizeBytes, Status: status}); recordErr != nil {
-			return errors.Join(err, recordErr)
-		}
 		return err
 	}
-	sizeBytes += objectSize
+	result.SizeBytes += objectSize
 	storageRef, manifestSize, err := writeBackupManifest(ctx, objects, backupManifest{
 		Version:   1,
 		Batch:     batch,
@@ -169,24 +157,14 @@ func runBackup(ctx context.Context, cfg *config.Config, objects *storage.Storage
 			ContentType: backupContentType,
 		},
 		ObjectBuckets:  bucketSummaries,
-		TotalSizeBytes: sizeBytes,
+		TotalSizeBytes: result.SizeBytes,
 	})
 	if err != nil {
-		failRef, failErr := writeFailureMarker(ctx, objects, batch, err)
-		if failErr != nil {
-			return errors.Join(err, failErr)
-		}
-		if recordErr := recorder.RecordResult(ctx, admin.BackupRecordCreate{Type: admin.BackupTypeFull, StorageRef: failRef, SizeBytes: sizeBytes, Status: status}); recordErr != nil {
-			return errors.Join(err, recordErr)
-		}
 		return err
 	}
-	sizeBytes += manifestSize
-	status = admin.BackupStatusSucceeded
-	if err := recorder.RecordResult(ctx, admin.BackupRecordCreate{Type: admin.BackupTypeFull, StorageRef: storageRef, SizeBytes: sizeBytes, Status: status}); err != nil {
-		return err
-	}
-	slog.Info("backup completed", slog.String("batch", batch), slog.Int64("size_bytes", sizeBytes))
+	result.SizeBytes += manifestSize
+	result.StorageRef = storageRef
+	result.Status = admin.BackupStatusSucceeded
 	return nil
 }
 
@@ -211,19 +189,6 @@ func writeBackupManifest(ctx context.Context, objects *storage.Storage, manifest
 		return "", 0, err
 	}
 	return ref, int64(len(data)), nil
-}
-
-// writeFailureMarker 写入失败标记对象,保证 backup_record.storage_ref 始终指向真实受控对象。
-func writeFailureMarker(ctx context.Context, objects *storage.Storage, batch string, cause error) (string, error) {
-	key, err := storage.ObjectKey(0, "admin", "backup", batch, "failed.txt")
-	if err != nil {
-		return "", err
-	}
-	body := []byte(logging.SanitizeError(cause.Error()))
-	if err := objects.Put(ctx, objects.BucketBackup(), key, bytes.NewReader(body), int64(len(body)), "text/plain; charset=utf-8"); err != nil {
-		return "", err
-	}
-	return storage.ObjectRefString(objects.BucketBackup(), key)
 }
 
 // dumpPostgres 使用官方 pg_dump 生成可由 pg_restore 恢复的自定义格式数据库备份。

@@ -18,6 +18,7 @@ on:
       - "images/image-digests.lock"
       - ".github/workflows/backend.yml"
       - "deploy/ci/**"
+      - "images/lib/ImageMetadata.psm1"
   pull_request:
     paths:
       - "backend/**"
@@ -31,6 +32,7 @@ on:
       - "images/image-digests.lock"
       - ".github/workflows/backend.yml"
       - "deploy/ci/**"
+      - "images/lib/ImageMetadata.psm1"
 
 permissions:
   contents: read
@@ -69,8 +71,13 @@ jobs:
           backend_required=false
           migrate_required=false
           cron_required=false
-          # 共用源码和流水线影响三个服务;服务目录与内置声明各归属真实消费者。
-          if printf '%s\n' "$changed_paths" | grep -E '^(backend/|\.github/workflows/backend\.yml$|deploy/ci/)' >/dev/null; then
+          # 后端流水线独占三个 service 镜像；通用 images 流水线不再重复构建。
+          if printf '%s\n' "$changed_paths" | grep -E '^(backend/|\.github/workflows/backend\.yml$)' >/dev/null; then
+            backend_required=true
+            migrate_required=true
+            cron_required=true
+          fi
+          if printf '%s\n' "$changed_paths" | grep -E '^(deploy/ci/|images/lib/ImageMetadata\.psm1$)' >/dev/null; then
             backend_required=true
             migrate_required=true
             cron_required=true
@@ -78,33 +85,57 @@ jobs:
           if printf '%s\n' "$changed_paths" | grep -E '^images/service/backend/' >/dev/null; then
             backend_required=true
           fi
-          if printf '%s\n' "$changed_paths" | grep -E '^images/service/migrate/|^images/(tool|infra|runtime|judger)/.+/manifest\.yaml$' >/dev/null; then
+          if printf '%s\n' "$changed_paths" | grep -E '^images/service/migrate/' >/dev/null; then
             migrate_required=true
           fi
           if printf '%s\n' "$changed_paths" | grep -E '^images/service/cron/' >/dev/null; then
             cron_required=true
           fi
-          dependencies=(base/go-builder base/runtime-min middleware/postgres)
+          # migrate 镜像把平台 manifest 作为运行期目录复制进镜像。
+          if printf '%s\n' "$changed_paths" | grep -E '^images/(tool|infra|runtime|judger)/.+/manifest\.yaml$' >/dev/null; then
+            migrate_required=true
+          fi
+          service_digest_stale() {
+            local service="$1"
+            local previous current
+            previous="$(git show "$base:images/image-digests.lock" 2>/dev/null | awk -v image="$service" '$1 == image { print $2 }')"
+            current="$(awk -v image="$service" '$1 == image { print $2 }' images/image-digests.lock)"
+            [[ ! "$current" =~ ^sha256:[0-9a-f]{64}$ || "$previous" == "$current" ]]
+          }
+          dependencies=(base/go-builder base/runtime-min infra/postgres)
           for dependency in "${dependencies[@]}"; do
             previous_digest="$(git show "$base:images/image-digests.lock" 2>/dev/null | awk -v image="$dependency" '$1 == image { print $2 }')"
             current_digest="$(awk -v image="$dependency" '$1 == image { print $2 }' images/image-digests.lock)"
             if [[ ! "$current_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-              echo "images/image-digests.lock 缺少有效 $dependency digest" >&2
-              exit 1
+              case "$dependency" in
+                base/go-builder|base/runtime-min)
+                  if [[ "$backend_required" == "true" || "$migrate_required" == "true" ]]; then
+                    echo "images/image-digests.lock 缺少有效 $dependency digest" >&2
+                    exit 1
+                  fi
+                  ;;
+                infra/postgres)
+                  if [[ "$cron_required" == "true" ]]; then
+                    echo "images/image-digests.lock 缺少有效 $dependency digest" >&2
+                    exit 1
+                  fi
+                  ;;
+              esac
+              continue
             fi
             if [[ "$previous_digest" != "$current_digest" ]]; then
               case "$dependency" in
                 base/go-builder)
-                  backend_required=true
-                  migrate_required=true
-                  cron_required=true
+                  if service_digest_stale service/backend; then backend_required=true; fi
+                  if service_digest_stale service/migrate; then migrate_required=true; fi
+                  if service_digest_stale service/cron; then cron_required=true; fi
                   ;;
                 base/runtime-min)
-                  backend_required=true
-                  migrate_required=true
+                  if service_digest_stale service/backend; then backend_required=true; fi
+                  if service_digest_stale service/migrate; then migrate_required=true; fi
                   ;;
-                middleware/postgres)
-                  cron_required=true
+                infra/postgres)
+                  if service_digest_stale service/cron; then cron_required=true; fi
                   ;;
               esac
             fi
@@ -222,24 +253,6 @@ jobs:
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: v2.4.3
-      - id: build-dependencies
-        name: 读取后端服务不可变依赖
-        shell: bash
-        run: |
-          set -euo pipefail
-          read_digest() {
-            local logical="$1"
-            local digest
-            digest="$(awk -v image="$logical" '$1 == image { print $2 }' images/image-digests.lock)"
-            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-              echo "images/image-digests.lock 缺少有效 $logical digest" >&2
-              exit 1
-            fi
-            printf '%s' "$digest"
-          }
-          echo "go_builder=${{ secrets.HARBOR_REGISTRY }}/base/go-builder@$(read_digest base/go-builder)" >> "$GITHUB_OUTPUT"
-          echo "runtime=${{ secrets.HARBOR_REGISTRY }}/base/runtime-min@$(read_digest base/runtime-min)" >> "$GITHUB_OUTPUT"
-          echo "postgres=${{ secrets.HARBOR_REGISTRY }}/middleware/postgres@$(read_digest middleware/postgres)" >> "$GITHUB_OUTPUT"
       - name: 构建+扫描+签名+推送(backend)
         id: backend-image
         if: needs.detect-image-build.outputs.backend_required == 'true'
@@ -249,9 +262,6 @@ jobs:
           tag: ${{ github.sha }}
           context: .
           dockerfile: images/service/backend/Dockerfile
-          build-args: |
-            GO_BUILDER_IMAGE=${{ steps.build-dependencies.outputs.go_builder }}
-            RUNTIME_IMAGE=${{ steps.build-dependencies.outputs.runtime }}
           registry: ${{ secrets.HARBOR_REGISTRY }}
           registry-username: ${{ secrets.HARBOR_USERNAME }}
           registry-password: ${{ secrets.HARBOR_PASSWORD }}
@@ -266,9 +276,6 @@ jobs:
           tag: ${{ github.sha }}
           context: .
           dockerfile: images/service/migrate/Dockerfile
-          build-args: |
-            GO_BUILDER_IMAGE=${{ steps.build-dependencies.outputs.go_builder }}
-            RUNTIME_IMAGE=${{ steps.build-dependencies.outputs.runtime }}
           registry: ${{ secrets.HARBOR_REGISTRY }}
           registry-username: ${{ secrets.HARBOR_USERNAME }}
           registry-password: ${{ secrets.HARBOR_PASSWORD }}
@@ -283,9 +290,6 @@ jobs:
           tag: ${{ github.sha }}
           context: .
           dockerfile: images/service/cron/Dockerfile
-          build-args: |
-            GO_BUILDER_IMAGE=${{ steps.build-dependencies.outputs.go_builder }}
-            PG_CLIENT_IMAGE=${{ steps.build-dependencies.outputs.postgres }}
           registry: ${{ secrets.HARBOR_REGISTRY }}
           registry-username: ${{ secrets.HARBOR_USERNAME }}
           registry-password: ${{ secrets.HARBOR_PASSWORD }}

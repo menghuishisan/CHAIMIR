@@ -82,7 +82,7 @@
   post:
     tags: [grade]
     summary: 通过成绩审核
-    description: 显式semester_id优先于报送学期；均未给出时按课程学期精确解析。所有来源共用租户和名称校验，不推断近似学期。
+    description: 显式semester_id优先于报送学期，按课程学期精确校验。审核、受影响学生的GPA/预警、锁outbox及审计同事务提交；任一步失败全部回滚。
     operationId: gradeApproveReview
     x-chaimir-audience: school-admin
     security: [{ bearerAuth: [] }]
@@ -113,8 +113,9 @@
   get:
     tags: [grade]
     summary: 学生学期成绩与分页课程明细
+    description: 仅学生本人和本校校管可读。先筛选M11已审核且锁定课程再分页；学期GPA按所选范围，累计GPA按当前全部已发布课程加权。教师通过M6任教课程查看成绩。
     operationId: gradeStudentGrades
-    x-chaimir-audience: user
+    x-chaimir-audience: school-admin-or-student
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: semester, in: query, schema: { type: string } }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -122,8 +123,9 @@
   get:
     tags: [grade]
     summary: 学生 GPA
+    description: 仅学生本人和本校校管可读；各学期摘要只含已发布课程，累计值为当前全部已发布课程的学分加权GPA。
     operationId: gradeStudentGPA
-    x-chaimir-audience: user
+    x-chaimir-audience: school-admin-or-student
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -131,10 +133,12 @@
   post:
     tags: [grade]
     summary: 重算学生 GPA
+    description: 指定semester_id；在同一事务内重算全部已发布学期和累计值、更新目标学期预警并取得响应摘要。读取或写入失败均回滚。
     operationId: gradeRecomputeStudentGrade
     x-chaimir-audience: school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/grade-center/appeals:
   get:
@@ -165,6 +169,7 @@
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/grade-center/appeals/{id}/reject:
   post:
@@ -220,16 +225,18 @@
   post:
     tags: [grade]
     summary: 扫描生成学业预警
+    description: 省略semester_id时只扫描当前学期；重复命中更新原记录事实，保留已知悉和投递状态，created仅计新建数。
     operationId: gradeScanWarnings
     x-chaimir-audience: school-admin
     security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/grade-center/transcripts:
   post:
     tags: [grade]
     summary: 生成成绩单 PDF
     operationId: gradeGenerateTranscript
-    x-chaimir-audience: user
+    x-chaimir-audience: school-admin-or-student
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -238,7 +245,7 @@
     tags: [grade]
     summary: 获取成绩单短时下载授权 JSON
     operationId: gradeDownloadTranscript
-    x-chaimir-audience: user
+    x-chaimir-audience: school-admin-or-student
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

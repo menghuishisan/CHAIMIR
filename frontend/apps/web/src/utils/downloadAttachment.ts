@@ -1,5 +1,3 @@
-// downloadAttachment 统一触发后端附件响应的浏览器下载。
-
 import type { AttachmentResponse } from '@chaimir/api-client'
 
 /**

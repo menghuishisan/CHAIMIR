@@ -1,11 +1,6 @@
-// submissionWindow.ts 判断学生还能不能提交这份作业(设计 §7.2 作业作答 / 作业结果):
-// 作答页据此决定可编辑还是只读,结果页据此决定显示「再交一次」还是一句原因。
-// 规则与服务端提交校验同口径(teaching/service_assignment.go SubmitAssignment):
-// 已用次数达到上限不接收;截止后只有「不接收」策略拒收,其余策略按迟交处理。
-// 前端判断只用于呈现,最终以服务端为准。纯函数,供 node:test 直接运行。
+import { LatePolicy } from '@chaimir/api-client'
 
-/** 迟交策略「截止后不接收」,与 @chaimir/api-client 的 LatePolicy.REJECT 一致(本文件不在运行时导入它) */
-const LATE_POLICY_REJECT = 1
+// 前端只决定作答入口与提示；提交资格仍由服务端校验。
 
 /** 判断用到的作业字段与已提交次数 */
 export interface SubmissionWindowInput {
@@ -39,7 +34,7 @@ export function submissionWindow(
   if (remaining === 0) {
     return { open: false, late, remaining, reason: `提交次数已用完(共 ${input.maxAttempts} 次)` }
   }
-  if (late && input.latePolicy === LATE_POLICY_REJECT) {
+  if (late && input.latePolicy === LatePolicy.REJECT) {
     return { open: false, late, remaining, reason: '已过截止时间,这份作业不再接收提交' }
   }
   return { open: true, late, remaining, reason: undefined }

@@ -1,15 +1,4 @@
-// 竞赛答题工作台(学生沉浸态,/student/contests/:contestId/workspace)。
-//
-// 一道题的作答方式由题目自己声明(对齐清单 §6.19),工作台按声明分叉,不猜:
-//   题面带运行时     → 起实操环境写代码,提交时由授权网关保存当前工作区快照;
-//   题面带答案提交键 → 给一个答案输入框,按声明的键提交;
-//   对抗题(带对抗配置) → 起环境做参战物,提交参战后由平台自动匹配对局。
-// 三者都没有的题目,说明它还没声明作答方式并指引联系老师 —— 不构造任何猜测的提交体。
-//
-// 答案黑盒:题面来自 M5 的 face 投影(答案、判题配置与 flag 已在后端剥离),
-// 本页只读 face,不请求 full,也不展示任何判题细节。
-
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { History, LoaderCircle, Send, Swords, Trophy, TriangleAlert } from 'lucide-react'
 import {
@@ -19,6 +8,8 @@ import {
   BattleRule,
   CONTEST_SUBMISSION_ERROR_CODES,
   ContestMode,
+  ContestStatus,
+  JudgeTaskStatusCode,
   type BattleEntry,
   type Contest,
   type ContestProblem,
@@ -34,37 +25,29 @@ import {
   Pagination,
   WorkbenchShell,
   WorkbenchTopbar,
+  type BadgeTone,
   type WorkbenchShortcut,
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { AppStatusScreen } from '../../../../components/AppStatusScreen'
+import { ResourceError } from '../../../../components/ResourceState'
 import {
   SandboxIdeWorkspace,
   type SandboxWorkspaceApi,
+  type SandboxWorkspaceHandle,
 } from '../../../sandbox/components/SandboxIdeWorkspace'
-import { useSession } from '../../../../components/RoleGuard'
+import { useWorkspaceActions } from '../../../sandbox/components/workspace/useWorkspaceActions'
 import { useAsyncResource, usePagedResource, useTicketedWebSocket } from '../../../../hooks'
+import type { AsyncResourceState } from '../../../../hooks/useAsyncResource'
 import { useImmersive } from '../../../../layouts/immersive/context'
 import { ContestCountdown } from '../../components/ContestCountdown'
 import { readString } from '../../jsonReaders'
 import { formatDateTime } from '../../../../utils/formatters'
 import { battleRoleLabel, contestStatusLabel } from '../../../../utils/labels/contest'
-import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { errorDiagnostics, userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { CONTEST_LADDER_PREVIEW_SIZE } from '../../queryLimits'
 import { battleEntryRoles, isContestAnswerable, isContestLeaderboardFrozen } from '../../rules'
-
-/** 题面开放载荷里的键:与题库正文写入的键一致。 */
-const FACE_KEYS = {
-  scenario: 'scenario',
-  statement: 'statement',
-  title: 'title',
-  /** 实操题的环境声明:题库按 M2 组合契约写入,竞赛按它起环境 */
-  composition: 'composition',
-  runtimes: 'runtimes',
-  runtimeCode: 'runtime_code',
-  submitKey: 'submit_key',
-} as const
 
 /** 竞赛工作区只通过 M8 授权网关访问沙箱,不复用 M2 租户内路径。 */
 const contestWorkspaceApi: SandboxWorkspaceApi = {
@@ -86,9 +69,6 @@ const contestWorkspaceApi: SandboxWorkspaceApi = {
     api.contest.getSandboxToolProxyUrl(sandboxId, toolCode, proxyPath, toolOrigin),
 }
 
-/**
- * StudentContestWorkspacePage 装配竞赛答题工作台。
- */
 export default function StudentContestWorkspacePage() {
   const { contestId = '' } = useParams<{ contestId: string }>()
   const { exit } = useImmersive()
@@ -165,7 +145,6 @@ interface ContestWorkbenchProps {
 }
 
 /**
- * ContestWorkbench 持有当前赛题、实操环境与提交状态。
  * 当前赛题写在地址的 problem 参数里:赛事详情的赛题行直接链到某一题,刷新后仍是这题;
  * 参数不属于本场赛题时回到第一题(地址可被手改,属外部输入)。
  */
@@ -219,7 +198,6 @@ function ContestWorkbench({ contest, problems }: ContestWorkbenchProps) {
     />
   )
 }
-
 interface ContestWorkbenchSessionProps {
   contest: Contest
   problems: ContestProblem[]
@@ -227,7 +205,6 @@ interface ContestWorkbenchSessionProps {
   onProblemChange: (problemId: string) => void
 }
 
-/** ContestWorkbenchSession 持有已授权题面的环境、提交和榜单状态。 */
 function ContestWorkbenchSession({
   contest,
   problems,
@@ -236,8 +213,7 @@ function ContestWorkbenchSession({
 }: ContestWorkbenchSessionProps) {
   const { title, exit } = useImmersive()
   const navigate = useNavigate()
-  const { me } = useSession()
-  const spec = useMemo(() => problemSpec(problem), [problem])
+  const spec = problemSpec(problem)
 
   const [sandboxId, setSandboxId] = useState<string>()
   const [sandboxReady, setSandboxReady] = useState(false)
@@ -246,8 +222,7 @@ function ContestWorkbenchSession({
     spec.battleRule === undefined ? undefined : battleEntryRoles(spec.battleRule)[0]
   )
   const [submission, setSubmission] = useState<ContestSubmission>()
-  const [busy, setBusy] = useState(false)
-  const [actionError, setActionError] = useState<string>()
+  const { workspaceRef, busy, actionError, setActionError, perform } = useWorkspaceActions()
 
   const environmentRequestRef = useRef(0)
   const submissionRequestRef = useRef(0)
@@ -263,14 +238,11 @@ function ContestWorkbenchSession({
     [contest.id, contest.mode],
     () => false
   )
-  const allowedBattleRoles = useMemo(
-    () => (spec.battleRule === undefined ? [] : battleEntryRoles(spec.battleRule)),
-    [spec.battleRule]
-  )
-  const envRequestRef = useMemo(() => `contest-problem:${problem.id}`, [problem.id])
+  const allowedBattleRoles = spec.battleRule === undefined ? [] : battleEntryRoles(spec.battleRule)
+  const envRequestRef = `contest-problem:${problem.id}`
   const answerable = isContestAnswerable(contest.status)
   const submissionReady =
-    spec.kind === 'code'
+    spec.kind === 'environment'
       ? Boolean(sandboxId && sandboxReady)
       : spec.kind === 'answer'
         ? Boolean(spec.submitKey && answer.trim())
@@ -285,28 +257,34 @@ function ContestWorkbenchSession({
     [contest.id],
     () => false
   )
-  const reloadLadder = ladder.reload
-  const reloadOwnRecord = ownRecord.reload
+  const [ladderFeed, setLadderFeed] = useState<'waiting' | 'live' | 'invalid'>('waiting')
 
-  // 榜单实时更新:订阅本场比赛的榜单 topic(经 M10 统一业务 WS,短时票据建连)。
-  // 推送只当刷新信号 —— 榜单本身回接口读,推送内容不用来改本地状态。
-  const ladderTopic = useMemo(
-    () =>
-      me.account.tenant_id
-        ? api.contest.getLeaderboardTopic(me.account.tenant_id, contest.id)
-        : undefined,
-    [contest.id, me.account.tenant_id]
-  )
+  // 推送只触发重读，不在浏览器重建排行榜。
   const ladderSocket = useTicketedWebSocket({
-    url: ladderTopic ? api.eventWebSocketUrl() : undefined,
+    url: contest.status === ContestStatus.RUNNING ? api.eventWebSocketUrl() : undefined,
     onOpen: () => {
-      if (ladderTopic) {
-        ladderSocket.send(JSON.stringify({ action: 'subscribe', topics: [ladderTopic] }))
-      }
+      setLadderFeed('waiting')
+      ladderSocket.send(
+        JSON.stringify({ action: 'subscribe', topics: [contest.leaderboard_topic] })
+      )
     },
     onMessage: (data) => {
-      if (data.includes('"type":"subscribed"')) return
-      ladder.reload()
+      try {
+        const frame: unknown = JSON.parse(data)
+        if (!frame || typeof frame !== 'object' || Array.isArray(frame)) throw new Error('榜单推送格式不正确')
+        if ('type' in frame && frame.type === 'subscribed') {
+          if (!('topics' in frame) || !Array.isArray(frame.topics) || !frame.topics.includes(contest.leaderboard_topic)) {
+            throw new Error('榜单订阅确认与请求主题不一致')
+          }
+          setLadderFeed('live')
+          ladder.reload()
+        } else if ('contest_id' in frame && frame.contest_id === contest.id) {
+          ladder.reload()
+        }
+      } catch (cause) {
+        console.error('[contest] 榜单推送读取失败', errorDiagnostics(cause))
+        setLadderFeed('invalid')
+      }
     },
   })
 
@@ -332,9 +310,10 @@ function ContestWorkbenchSession({
       if (error instanceof ApiError && error.code === API_ERROR_CODES.RESOURCE_NOT_FOUND) return
       setActionError(userFacingErrorMessage(error, '实操环境状态暂时读不到,请稍后重试。'))
     }
-  }, [contest.id, envRequestRef, problem.id, spec.hasEnvironment])
+  }, [contest.id, envRequestRef, problem.id, setActionError, spec.hasEnvironment])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- effect starts an external request; state updates belong to its async callbacks
     void restoreEnv()
     return () => {
       environmentRequestRef.current += 1
@@ -342,17 +321,10 @@ function ContestWorkbenchSession({
     }
   }, [restoreEnv])
 
-  /**
-   * createEnv 起一个实操环境。
-   * 环境内容取自赛题锁定版本已发布的组合快照,故请求只带一个幂等引用 ——
-   * 学生端不声明运行时或工具,也就无法绕过赛题冻结的执行内容(对齐清单 §6.3)。
-   */
-  const createEnv = useCallback(async () => {
+  function createEnv() {
     if (!spec.hasEnvironment) return
-    const request = ++environmentRequestRef.current
-    setBusy(true)
-    setActionError(undefined)
-    try {
+    return perform(async () => {
+      const request = ++environmentRequestRef.current
       const env = await api.contest.createEnv(contest.id, problem.id, {
         request_ref: envRequestRef,
       })
@@ -360,61 +332,35 @@ function ContestWorkbenchSession({
       setSandboxId(env.sandbox_id)
       setSandboxReady(false)
       toast.success('实操环境已开始准备')
-    } catch (error) {
-      if (request !== environmentRequestRef.current) return
-      setActionError(userFacingErrorMessage(error, '实操环境没能准备好,请稍后重试。'))
-    } finally {
-      if (request === environmentRequestRef.current) setBusy(false)
-    }
-  }, [contest.id, envRequestRef, problem.id, spec.hasEnvironment])
+    })
+  }
 
-  /** handleSandboxReadinessChange 同步当前环境可操作性,代码快照由提交接口固化。 */
-  const handleSandboxReadinessChange = useCallback(async (ready: boolean) => {
-    setSandboxReady(ready)
-  }, [])
-
-  /** submitSolve 提交解题赛答案:代码题只发送当前环境标识,快照由 M8 经 M2 固化。 */
-  const submitSolve = useCallback(async () => {
+  function submitSolve() {
+    if (!answerable) return
     if (!submissionReady) {
-      setActionError(spec.kind === 'code' ? '请先准备好实操环境。' : '请先填写答案。')
+      setActionError(spec.kind === 'environment' ? '请先准备好实操环境。' : '请先填写答案。')
       return
     }
-    submissionRequestRef.current += 1
-    setBusy(true)
-    setActionError(undefined)
-    try {
+    return perform(async () => {
+      submissionRequestRef.current += 1
       const contentRef: Record<string, unknown> =
         spec.submitKey && answer.trim() !== '' ? { [spec.submitKey]: answer.trim() } : {}
       const result = await api.contest.submitSolve(contest.id, problem.id, {
         content_ref: contentRef,
-        sandbox_ref: spec.kind === 'code' ? sandboxId : undefined,
+        sandbox_ref: spec.kind === 'environment' ? sandboxId : undefined,
       })
       submissionRequestRef.current += 1
       setSubmission(result)
       if (result.passed) {
-        void reloadLadder()
-        void reloadOwnRecord()
+        ladder.reload()
+        ownRecord.reload()
       }
-      toast.success(result.passed ? '提交通过' : '已提交,等判定结果')
-    } catch (error) {
-      setActionError(userFacingErrorMessage(error, '提交没有成功,请稍后重试。'))
-    } finally {
-      setBusy(false)
-    }
-  }, [
-    answer,
-    contest.id,
-    problem.id,
-    reloadLadder,
-    reloadOwnRecord,
-    sandboxId,
-    spec.kind,
-    spec.submitKey,
-    submissionReady,
-  ])
+      toast.success('已提交')
+    })
+  }
 
-  /** submitBattle 提交参战物:参战后由平台自动匹配对局,结果在对局回放里看。 */
-  const submitBattle = useCallback(async () => {
+  function submitBattle() {
+    if (!answerable) return
     if (!sandboxId || !sandboxReady) {
       setActionError('请先准备好实操环境,再提交参战物。')
       return
@@ -423,9 +369,7 @@ function ContestWorkbenchSession({
       setActionError('请选择符合题面要求的参战角色。')
       return
     }
-    setBusy(true)
-    setActionError(undefined)
-    try {
+    return perform(async () => {
       await api.contest.submitBattleEntry(contest.id, {
         problem_id: problem.id,
         sandbox_id: sandboxId,
@@ -433,12 +377,8 @@ function ContestWorkbenchSession({
       })
       toast.success('参战物已提交,等待匹配对局')
       entries.reload()
-    } catch (error) {
-      setActionError(userFacingErrorMessage(error, '参战提交没有成功,请稍后重试。'))
-    } finally {
-      setBusy(false)
-    }
-  }, [allowedBattleRoles, contest.id, entries, problem.id, role, sandboxId, sandboxReady])
+    })
+  }
 
   /** refreshSubmission 读取服务端最近一次提交:刷新与关闭重开都恢复真实历史。 */
   const refreshSubmission = useCallback(async () => {
@@ -456,9 +396,10 @@ function ContestWorkbenchSession({
       }
       setActionError(userFacingErrorMessage(error, '判定结果暂时读不到,稍后再试一次。'))
     }
-  }, [contest.id, problem.id, spec.kind])
+  }, [contest.id, problem.id, setActionError, spec.kind])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- effect starts an external request; state updates belong to its async callbacks
     void refreshSubmission()
   }, [refreshSubmission])
 
@@ -494,7 +435,7 @@ function ContestWorkbenchSession({
       workbench="contest"
       topbar={
         <WorkbenchTopbar
-          onExit={exit}
+          onExit={() => void perform(exit, true)}
           exitLabel="退出赛场"
           shortcuts={submitShortcuts}
           title={title}
@@ -555,13 +496,16 @@ function ContestWorkbenchSession({
         <ProblemBrief
           problems={problems}
           currentId={problem.id}
-          onPick={onProblemChange}
+          onPick={(id) => {
+            if (id !== problem.id) void perform(() => onProblemChange(id), true)
+          }}
           spec={spec}
         />
       }
       leftLabel="赛题"
       stage={
         <ProblemStage
+          workspaceRef={workspaceRef}
           spec={spec}
           sandboxId={sandboxId}
           busy={busy}
@@ -569,7 +513,7 @@ function ContestWorkbenchSession({
           answer={answer}
           onAnswerChange={setAnswer}
           onCreateEnv={() => void createEnv()}
-          onReadinessChange={handleSandboxReadinessChange}
+          onReadinessChange={setSandboxReady}
         />
       }
       right={
@@ -589,15 +533,19 @@ function ContestWorkbenchSession({
               entryPageSize={entries.pageSize}
               entryTotal={entries.total}
               onEntryPageChange={entries.setPage}
-              onOpenReplay={() => navigate(`/student/contests/${contest.id}/replay`)}
+              onOpenReplay={() =>
+                void perform(() => navigate(`/student/contests/${contest.id}/replay`), true)
+              }
             />
           ) : (
             <SubmissionPanel submission={submission} onRefresh={() => void refreshSubmission()} />
           )}
           <LadderPanel
-            ranks={ladder.data?.list ?? []}
+            resource={ladder}
             mode={contest.mode}
-            live={ladderSocket.status === 'open'}
+            live={ladderSocket.status === 'open' && ladderFeed === 'live'}
+            feedError={ladderFeed === 'invalid' ? '榜单自动更新暂不可用，请重新连接。' : ladderSocket.error ?? (ladderSocket.status === 'closed' ? '榜单自动更新已断开。' : undefined)}
+            onReconnect={ladderSocket.reconnect}
             frozen={isContestLeaderboardFrozen(contest.status)}
           />
         </div>
@@ -621,7 +569,7 @@ function ContestWorkbenchSession({
                 当前不在作答时间内,只能查看题面与榜单。
               </span>
             ) : null}
-            {answerable && !submissionReady && spec.kind === 'code' ? (
+            {answerable && !submissionReady && spec.kind === 'environment' ? (
               <span className="mt-0.5 text-xs text-on-dark-sub">
                 实操环境准备好后即可提交,平台会在提交时保存当前工作区。
               </span>
@@ -641,32 +589,25 @@ function ContestWorkbenchSession({
   )
 }
 
-/** ProblemSpec 是一道题声明出来的作答方式。 */
 interface ProblemSpec {
-  kind: 'code' | 'answer' | 'battle' | 'undeclared'
+  kind: 'environment' | 'answer' | 'battle' | 'undeclared'
   title: string
   scenario: string
   statement: string
-  /** hasEnvironment 表示题目锁定版本里声明了可启动的实操环境 */
   hasEnvironment: boolean
-  /** runtimeName 只用于告诉学生这道题在什么链上做,不参与启动请求 */
   runtimeName: string
   submitKey?: string
   battleRule?: BattleRule
 }
 
-/**
- * problemSpec 从题面读出这道题怎么答。
- * 环境由题目锁定版本的组合声明唯一提供 —— 学生端不拼装运行时与工具,
- * 故这里只判断「有没有环境」并取出链名用于文案(对齐清单 §6.3)。
- */
+// 答案键与实操环境独立；学生端不拼装组合或读取私有判题配置。
 function problemSpec(problem: ContestProblem): ProblemSpec {
   const face = problem.face ?? {}
   const runtimeName = readCompositionRuntime(face)
   const base = {
-    title: readString(face, FACE_KEYS.title) || `第 ${problem.seq} 题`,
-    scenario: readString(face, FACE_KEYS.scenario),
-    statement: readString(face, FACE_KEYS.statement),
+    title: readString(face, 'title') || `第 ${problem.seq} 题`,
+    scenario: readString(face, 'scenario'),
+    statement: readString(face, 'statement'),
     hasEnvironment: runtimeName !== '',
     runtimeName,
   }
@@ -675,23 +616,22 @@ function problemSpec(problem: ContestProblem): ProblemSpec {
     return { ...base, kind: 'battle', battleRule: problem.battle_rule }
   }
 
-  const submitKey = readString(face, FACE_KEYS.submitKey)
+  const submitKey = readString(face, 'submit_key').trim()
   return {
     ...base,
-    kind: runtimeName !== '' ? 'code' : submitKey !== '' ? 'answer' : 'undeclared',
+    kind: submitKey !== '' ? 'answer' : runtimeName !== '' ? 'environment' : 'undeclared',
     submitKey: submitKey || undefined,
   }
 }
 
-/** readCompositionRuntime 从题面的组合声明里读出运行时摘要;没有声明即回空串。 */
 function readCompositionRuntime(face: Record<string, unknown>): string {
-  const composition = face[FACE_KEYS.composition]
+  const composition = face.composition
   if (typeof composition !== 'object' || composition === null) return ''
-  const runtimes = (composition as Record<string, unknown>)[FACE_KEYS.runtimes]
+  const runtimes = (composition as Record<string, unknown>).runtimes
   if (!Array.isArray(runtimes)) return ''
   return runtimes
     .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
-    .map((item) => readString(item, FACE_KEYS.runtimeCode))
+    .map((item) => readString(item, 'runtime_code'))
     .filter(Boolean)
     .join(' / ')
 }
@@ -703,9 +643,6 @@ interface ProblemBriefProps {
   spec: ProblemSpec
 }
 
-/**
- * ProblemBrief 渲染赛题清单与当前题面。
- */
 function ProblemBrief({ problems, currentId, onPick, spec }: ProblemBriefProps) {
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
@@ -752,6 +689,7 @@ function ProblemBrief({ problems, currentId, onPick, spec }: ProblemBriefProps) 
 }
 
 interface ProblemStageProps {
+  workspaceRef: React.Ref<SandboxWorkspaceHandle>
   spec: ProblemSpec
   sandboxId?: string
   busy: boolean
@@ -759,13 +697,11 @@ interface ProblemStageProps {
   answer: string
   onAnswerChange: (value: string) => void
   onCreateEnv: () => void
-  onReadinessChange: (ready: boolean) => Promise<void>
+  onReadinessChange: (ready: boolean) => void
 }
 
-/**
- * ProblemStage 按题目声明的作答方式渲染中间区。
- */
 function ProblemStage({
+  workspaceRef,
   spec,
   sandboxId,
   busy,
@@ -786,69 +722,67 @@ function ProblemStage({
     )
   }
 
-  if (spec.kind === 'answer') {
-    return (
-      <div className="flex h-full flex-col gap-3 p-6">
-        <label className="flex flex-col gap-1">
-          <span className="text-sm text-on-dark">你的答案</span>
-          <Input
-            variant="dark"
-            value={answer}
-            disabled={!answerable}
-            placeholder="按题面要求填写"
-            className="font-mono text-sm"
-            onChange={(event) => onAnswerChange(event.target.value)}
-          />
-        </label>
-        <p className="text-xs text-on-dark-sub">
-          填好后点右上角「提交答案」。同一题连续提交有冷却时间,判错也会短暂锁一会儿。
-        </p>
-      </div>
-    )
-  }
-
-  if (!sandboxId) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-        <p className="text-base text-on-dark">
-          {spec.kind === 'battle' ? '准备参战物需要一个实操环境' : '这道题要在实操环境里完成'}
-        </p>
-        <p className="max-w-md text-sm text-on-dark-sub">
-          环境按题目锁定版本里的声明准备,起好后可以写代码、开终端、做链上操作。
-          {spec.runtimeName ? `这道题用的是 ${spec.runtimeName}。` : ''}
-        </p>
-        <Button
-          variant="primary"
-          loading={busy}
-          disabled={!answerable || !spec.hasEnvironment}
-          onClick={onCreateEnv}
-        >
-          准备实操环境
-        </Button>
-        {!spec.hasEnvironment ? (
-          <p className="text-xs text-on-dark-danger">
-            这道题的题目版本里没有声明实操环境,暂时起不了。请把题号告诉老师。
-          </p>
-        ) : null}
-      </div>
-    )
-  }
-
   return (
-    <SandboxIdeWorkspace
-      sandboxId={sandboxId}
-      workspaceApi={contestWorkspaceApi}
-      onReadinessChange={onReadinessChange}
-      onRebuild={onCreateEnv}
-      rebuilding={busy}
-    />
+    <div className="flex h-full min-h-0 flex-col">
+      {spec.kind === 'answer' ? (
+        <div className="flex shrink-0 flex-col gap-3 p-4">
+          <label className="flex flex-col gap-1">
+            <span className="text-sm text-on-dark">你的答案</span>
+            <Input
+              variant="dark"
+              value={answer}
+              disabled={!answerable || busy}
+              placeholder="按题面要求填写"
+              className="font-mono text-sm"
+              onChange={(event) => onAnswerChange(event.target.value)}
+            />
+          </label>
+          <p className="text-xs text-on-dark-sub">
+            填好后点右上角「提交答案」。同一题连续提交有冷却时间,判错也会短暂锁一会儿。
+          </p>
+        </div>
+      ) : null}
+      {spec.hasEnvironment || spec.kind !== 'answer' ? (
+        sandboxId ? (
+          <div className="min-h-0 flex-1">
+            <SandboxIdeWorkspace
+              ref={workspaceRef}
+              sandboxId={sandboxId}
+              workspaceApi={contestWorkspaceApi}
+              onReadinessChange={onReadinessChange}
+              onRebuild={onCreateEnv}
+              rebuilding={busy}
+            />
+          </div>
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 overflow-y-auto p-6 text-center">
+            <p className="text-base text-on-dark">
+              {spec.kind === 'battle' ? '准备参战物需要一个实操环境' : '这道题要在实操环境里完成'}
+            </p>
+            <p className="max-w-md text-sm text-on-dark-sub">
+              环境按题目锁定版本里的声明准备,起好后可以写代码、开终端、做链上操作。
+              {spec.runtimeName ? `这道题用的是 ${spec.runtimeName}。` : ''}
+            </p>
+            <Button
+              variant="primary"
+              loading={busy}
+              disabled={!answerable || !spec.hasEnvironment}
+              onClick={onCreateEnv}
+            >
+              准备实操环境
+            </Button>
+            {!spec.hasEnvironment ? (
+              <p className="text-xs text-on-dark-danger">
+                这道题的题目版本里没有声明实操环境,暂时起不了。请把题号告诉老师。
+              </p>
+            ) : null}
+          </div>
+        )
+      ) : null}
+    </div>
   )
 }
 
-/**
- * SubmissionPanel 展示最近一次提交的判定结果。
- * 判题是异步的:提交回来时可能还没有结论,故给一个重读入口而不是假装已完成。
- */
 function SubmissionPanel({
   submission,
   onRefresh,
@@ -856,19 +790,42 @@ function SubmissionPanel({
   submission?: ContestSubmission
   onRefresh: () => void
 }) {
+  const state =
+    submission &&
+    (
+      {
+        [JudgeTaskStatusCode.QUEUED]: { label: '排队中', tone: 'neutral' },
+        [JudgeTaskStatusCode.JUDGING]: { label: '评测中', tone: 'info' },
+        [JudgeTaskStatusCode.DONE]: {
+          label: submission.passed ? '已通过' : '未通过',
+          tone: submission.passed ? 'success' : 'warning',
+        },
+        [JudgeTaskStatusCode.FAILED]: { label: '评测未完成', tone: 'danger' },
+        [JudgeTaskStatusCode.CANCELLED]: { label: '已取消', tone: 'neutral' },
+      } satisfies Record<JudgeTaskStatusCode, { label: string; tone: BadgeTone }>
+    )[submission.judge_status]
+
   return (
     <section className="flex flex-col gap-2 border-b border-dark-line p-4">
       <h2 className="text-sm font-medium text-on-dark">提交结果</h2>
-      {submission ? (
+      {submission && state ? (
         <div className="flex flex-col gap-2 rounded-md border border-dark-line bg-dark-surface p-2">
           <div className="flex items-center justify-between gap-2">
-            <Badge onDark tone={submission.passed ? 'success' : 'neutral'}>
-              {submission.passed ? '已通过' : '判定中或未通过'}
+            <Badge onDark tone={state.tone}>
+              {state.label}
             </Badge>
-            <span className="font-mono text-xs tabular-nums text-on-dark-sub">
-              {submission.score} 分
-            </span>
+            {submission.judge_status === JudgeTaskStatusCode.DONE ? (
+              <span className="font-mono text-xs tabular-nums text-on-dark-sub">
+                {submission.score === null ? '得分结算中' : `${submission.score} 分`}
+              </span>
+            ) : null}
           </div>
+          {submission.judge_status === JudgeTaskStatusCode.FAILED ||
+          submission.judge_status === JudgeTaskStatusCode.CANCELLED ? (
+            <p className="text-xs text-on-dark-sub">
+              这次评测未能完成，请重新提交；不会按答错处理。
+            </p>
+          ) : null}
           <span className="font-mono text-xs text-on-dark-faint">
             {formatDateTime(submission.submitted_at)}
           </span>
@@ -900,7 +857,6 @@ interface BattlePanelProps {
 }
 
 /**
- * BattlePanel 承载参战角色选择与参战历史。
  * 只有最新一版参战物生效(后端按版本号取 is_active),历史版本留档便于对照。
  */
 function BattlePanel({
@@ -946,17 +902,7 @@ function BattlePanel({
         {entryStatus === 'loading' ? (
           <p className="text-xs text-on-dark-sub">正在读取参战历史...</p>
         ) : entryStatus === 'error' ? (
-          <div className="flex flex-col gap-2 rounded-md border border-danger bg-danger-bg p-3">
-            <p className="text-xs text-on-dark">
-              {entryError ?? '参战历史暂时读不到,请稍后重试。'}
-            </p>
-            {entryTraceId ? (
-              <p className="font-mono text-xs text-on-dark-faint">报障编号: {entryTraceId}</p>
-            ) : null}
-            <Button variant="on-dark" size="sm" onClick={onEntryRetry}>
-              重新加载
-            </Button>
-          </div>
+          <ResourceError onDark message={entryError ?? '参战历史暂时读不到,请稍后重试。'} traceId={entryTraceId} onRetry={onEntryRetry} />
         ) : entryStatus === 'empty' ? (
           <p className="text-xs text-on-dark-sub">还没有提交过参战物。</p>
         ) : (
@@ -995,19 +941,21 @@ function BattlePanel({
 }
 
 interface LadderPanelProps {
-  ranks: LadderRank[]
+  resource: AsyncResourceState<{ list: LadderRank[] }>
   mode: ContestMode
   /** 榜单实时通道是否已连上;没连上时说明需要手动刷新 */
   live: boolean
+  feedError?: string
+  onReconnect: () => void
   /** 封榜期:榜单不再更新,当前名次可能与最终结果不同 */
   frozen: boolean
 }
 
 /**
- * LadderPanel 展示天梯前列。
  * 队伍只显示名次与分数:队伍编号是内部标识,榜单上显示它既不可读也没有意义。
  */
-function LadderPanel({ ranks, mode, live, frozen }: LadderPanelProps) {
+function LadderPanel({ resource, mode, live, feedError, onReconnect, frozen }: LadderPanelProps) {
+  const ranks = resource.data?.list ?? []
   return (
     <section className="flex flex-col gap-2 p-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -1023,7 +971,11 @@ function LadderPanel({ ranks, mode, live, frozen }: LadderPanelProps) {
           </Badge>
         ) : null}
       </div>
-      {ranks.length === 0 ? (
+      {resource.status === 'error' ? (
+        <ResourceError onDark message={resource.error?.message ?? '榜单暂时无法读取，请重试。'} traceId={resource.error?.traceId} onRetry={resource.reload} />
+      ) : resource.status === 'loading' ? (
+        <p role="status" className="text-xs text-on-dark-sub">正在读取榜单...</p>
+      ) : ranks.length === 0 ? (
         <p className="text-xs text-on-dark-sub">还没有队伍上榜。</p>
       ) : (
         <ol className="flex flex-col gap-1">
@@ -1044,6 +996,12 @@ function LadderPanel({ ranks, mode, live, frozen }: LadderPanelProps) {
           ))}
         </ol>
       )}
+      {feedError ? (
+        <div role="status" className="flex flex-col items-start gap-2">
+          <p className="text-xs text-on-dark-sub">{feedError}</p>
+          <Button variant="on-dark" size="sm" onClick={onReconnect}>重新连接</Button>
+        </div>
+      ) : null}
       <p className="text-xs text-on-dark-faint">
         {frozen
           ? '封榜期间榜单不再更新,最终名次以赛后公布为准。'
@@ -1054,5 +1012,3 @@ function LadderPanel({ ranks, mode, live, frozen }: LadderPanelProps) {
     </section>
   )
 }
-
-/** readString 从开放对象里读字符串;缺失或类型不符回空串。 */

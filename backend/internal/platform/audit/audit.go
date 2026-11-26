@@ -1,7 +1,15 @@
-// audit 提供统一审计写入契约与请求级审计上下文,供各模块复用同一条审计链路。
+// Package audit 构造审计条目，由身份模块统一写入。
 package audit
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/response"
+	"chaimir/pkg/apperr"
+)
 
 // Entry 表示一条要写入 M1 audit_log 的审计记录。
 type Entry struct {
@@ -22,21 +30,34 @@ type Writer interface {
 	Write(ctx context.Context, e Entry) error
 }
 
-type requestContextKey struct{}
+type requestIPKey struct{}
 
-// RequestContext 是从 HTTP 或事件入口抽出的横切审计元数据。
-type RequestContext struct {
-	IP      string
-	TraceID string
+// WithRequestIP 保存 HTTP 入口解析的客户端 IP。
+func WithRequestIP(ctx context.Context, ip string) context.Context {
+	return context.WithValue(ctx, requestIPKey{}, ip)
 }
 
-// WithRequestContext 把请求元数据写入 context,供业务成功后构造审计条目。
-func WithRequestContext(ctx context.Context, req RequestContext) context.Context {
-	return context.WithValue(ctx, requestContextKey{}, req)
-}
-
-// RequestContextFrom 读取请求元数据;缺失时返回零值。
-func RequestContextFrom(ctx context.Context) RequestContext {
-	req, _ := ctx.Value(requestContextKey{}).(RequestContext)
-	return req
+// BuildEntry 校验动作与目标，从当前上下文补齐审计 IP 和追踪编号。
+func BuildEntry(ctx context.Context, tenantID, actorID int64, actorRole int16, action, targetType string, targetID int64, detail map[string]any) (Entry, error) {
+	action = strings.TrimSpace(action)
+	targetType = strings.TrimSpace(targetType)
+	if action == "" || targetType == "" {
+		return Entry{}, fmt.Errorf("审计条目缺少 action 或 target_type")
+	}
+	detailJSON, err := jsonx.ObjectBytes(detail, apperr.ErrInternal)
+	if err != nil {
+		return Entry{}, err
+	}
+	ip, _ := ctx.Value(requestIPKey{}).(string)
+	return Entry{
+		TenantID:   tenantID,
+		ActorID:    actorID,
+		ActorRole:  actorRole,
+		Action:     action,
+		TargetType: targetType,
+		TargetID:   targetID,
+		Detail:     string(detailJSON),
+		IP:         ip,
+		TraceID:    response.TraceFromContext(ctx),
+	}, nil
 }

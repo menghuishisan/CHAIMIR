@@ -64,10 +64,43 @@ func (q *Queries) ArchiveRetiredBuiltinSimPackages(ctx context.Context, liveKeys
 	return items, nil
 }
 
+const archiveSimSession = `-- name: ArchiveSimSession :one
+UPDATE sim_session
+SET status = 2, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at
+`
+
+type ArchiveSimSessionParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) ArchiveSimSession(ctx context.Context, arg ArchiveSimSessionParams) (SimSession, error) {
+	row := q.db.QueryRow(ctx, archiveSimSession, arg.TenantID, arg.ID)
+	var i SimSession
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.PackageID,
+		&i.SourceRef,
+		&i.ScopeRef,
+		&i.OwnerAccountID,
+		&i.SharedAccountIds,
+		&i.Seed,
+		&i.InitParams,
+		&i.Compute,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const archiveSimSessionsByScopeRef = `-- name: ArchiveSimSessionsByScopeRef :many
 UPDATE sim_session
-SET status = 5, updated_at = now()
-WHERE tenant_id = $1 AND scope_ref = $2 AND source_ref = $3 AND status IN (1, 2, 3, 4)
+SET status = 2, updated_at = now()
+WHERE tenant_id = $1 AND scope_ref = $2 AND source_ref = $3
 RETURNING id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at
 `
 
@@ -176,8 +209,7 @@ type ClaimSimPackagesForPreviewRow struct {
 }
 
 // 认领待隔离预览的包:审核中、且报告里两项动态校验都还没有结论。
-// 四项审核门禁中 determinism_check 与 worker_preview 只能由隔离预览产出,
-// 没有这个认领查询就没有生产者,教师提交的包会永久停在待审(见 docs/04-仿真可视化引擎/06-业务流程与状态机.md §4)。
+// determinism_check 与 worker_preview 仅由隔离预览产出，空报告不能上架。
 // FOR UPDATE SKIP LOCKED:多副本部署时各副本认领互不重复,也不互相阻塞。
 func (q *Queries) ClaimSimPackagesForPreview(ctx context.Context, arg ClaimSimPackagesForPreviewParams) ([]ClaimSimPackagesForPreviewRow, error) {
 	rows, err := q.db.Query(ctx, claimSimPackagesForPreview,
@@ -283,12 +315,9 @@ func (q *Queries) CompleteSimReview(ctx context.Context, arg CompleteSimReviewPa
 const countActiveIsolatedSimSessions = `-- name: CountActiveIsolatedSimSessions :one
 SELECT COUNT(*)::bigint
 FROM sim_session
-WHERE tenant_id = $1 AND compute = 2 AND status IN (1, 2, 3)
+WHERE tenant_id = $1 AND compute = 2 AND status = 1
 `
 
-// 统计本租户当前占用集群资源的隔离执行会话数,供并发闸门
-// SIM_BACKEND_MAX_CONCURRENT_SESSIONS_PER_TENANT 使用。
-// 一个隔离会话一个 Pod,没有这道闸门循环建会话可耗尽节点;浏览器执行的会话不占集群资源故不计入。
 func (q *Queries) CountActiveIsolatedSimSessions(ctx context.Context, tenantID int64) (int64, error) {
 	row := q.db.QueryRow(ctx, countActiveIsolatedSimSessions, tenantID)
 	var column_1 int64
@@ -616,7 +645,7 @@ func (q *Queries) CreateSimPackageReview(ctx context.Context, arg CreateSimPacka
 
 const createSimSession = `-- name: CreateSimSession :one
 INSERT INTO sim_session (id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), now())
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1, now(), now())
 RETURNING id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at
 `
 
@@ -631,7 +660,6 @@ type CreateSimSessionParams struct {
 	Seed             int64   `json:"seed"`
 	InitParams       []byte  `json:"init_params"`
 	Compute          int16   `json:"compute"`
-	Status           int16   `json:"status"`
 }
 
 func (q *Queries) CreateSimSession(ctx context.Context, arg CreateSimSessionParams) (SimSession, error) {
@@ -646,7 +674,6 @@ func (q *Queries) CreateSimSession(ctx context.Context, arg CreateSimSessionPara
 		arg.Seed,
 		arg.InitParams,
 		arg.Compute,
-		arg.Status,
 	)
 	var i SimSession
 	err := row.Scan(
@@ -670,6 +697,7 @@ func (q *Queries) CreateSimSession(ctx context.Context, arg CreateSimSessionPara
 const createSimShare = `-- name: CreateSimShare :one
 INSERT INTO sim_share (id, tenant_id, session_id, code, created_by, status, expire_at, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, 1, $6, now(), now())
+ON CONFLICT (code) DO NOTHING
 RETURNING id, tenant_id, session_id, code, created_by, status, expire_at, created_at, updated_at
 `
 
@@ -909,6 +937,41 @@ WHERE id = $1
 
 func (q *Queries) GetSimPackageByID(ctx context.Context, id int64) (SimPackage, error) {
 	row := q.db.QueryRow(ctx, getSimPackageByID, id)
+	var i SimPackage
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Version,
+		&i.Name,
+		&i.Category,
+		&i.Compute,
+		&i.ScaleLimit,
+		&i.BundleKey,
+		&i.BundleHash,
+		&i.Entry,
+		&i.BackendAdapter,
+		&i.BackendConfig,
+		&i.InteractionSchema,
+		&i.CodeTrace,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getSimPackageForUpdate = `-- name: GetSimPackageForUpdate :one
+SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, entry,
+       backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
+FROM sim_package
+WHERE id = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetSimPackageForUpdate(ctx context.Context, id int64) (SimPackage, error) {
+	row := q.db.QueryRow(ctx, getSimPackageForUpdate, id)
 	var i SimPackage
 	err := row.Scan(
 		&i.ID,
@@ -1359,6 +1422,34 @@ func (q *Queries) ListSimReviews(ctx context.Context, arg ListSimReviewsParams) 
 	return items, nil
 }
 
+const lockIsolatedSimSessionCreation = `-- name: LockIsolatedSimSessionCreation :exec
+SELECT pg_advisory_xact_lock(hashtextextended('sim.isolated-session:' || $1::bigint::text, 0))
+`
+
+func (q *Queries) LockIsolatedSimSessionCreation(ctx context.Context, tenantID int64) error {
+	_, err := q.db.Exec(ctx, lockIsolatedSimSessionCreation, tenantID)
+	return err
+}
+
+const lockSimSessionActionSequence = `-- name: LockSimSessionActionSequence :one
+SELECT id
+FROM sim_session
+WHERE tenant_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type LockSimSessionActionSequenceParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) LockSimSessionActionSequence(ctx context.Context, arg LockSimSessionActionSequenceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, lockSimSessionActionSequence, arg.TenantID, arg.ID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const mergeSimValidationReport = `-- name: MergeSimValidationReport :one
 UPDATE sim_package_review
 SET preview_report = preview_report || $1,
@@ -1425,6 +1516,33 @@ type ReleaseSimPreviewLeaseParams struct {
 // 基础设施异常不等同于包校验失败:释放仍由本 worker 持有的租约,交给下一轮重试。
 func (q *Queries) ReleaseSimPreviewLease(ctx context.Context, arg ReleaseSimPreviewLeaseParams) (int64, error) {
 	result, err := q.db.Exec(ctx, releaseSimPreviewLease, arg.ReviewID, arg.PackageID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const renewSimPreviewLease = `-- name: RenewSimPreviewLease :execrows
+UPDATE sim_package_review
+SET preview_lease_until = $1::timestamptz, updated_at = now()
+WHERE id = $2 AND package_id = $3 AND result = 1
+  AND preview_lease_token = $4 AND preview_lease_until > now()
+`
+
+type RenewSimPreviewLeaseParams struct {
+	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
+	ReviewID   int64              `json:"review_id"`
+	PackageID  int64              `json:"package_id"`
+	LeaseToken string             `json:"lease_token"`
+}
+
+func (q *Queries) RenewSimPreviewLease(ctx context.Context, arg RenewSimPreviewLeaseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renewSimPreviewLease,
+		arg.LeaseUntil,
+		arg.ReviewID,
+		arg.PackageID,
+		arg.LeaseToken,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -1581,42 +1699,6 @@ func (q *Queries) UpdateSimSessionAuthorizedAccounts(ctx context.Context, arg Up
 	return i, err
 }
 
-const updateSimSessionStatus = `-- name: UpdateSimSessionStatus :one
-UPDATE sim_session
-SET status = $3, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-  AND status IN (1, 2, 3, 4)
-  AND $3 IN (2, 3, 4, 5, 6)
-RETURNING id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at
-`
-
-type UpdateSimSessionStatusParams struct {
-	TenantID int64 `json:"tenant_id"`
-	ID       int64 `json:"id"`
-	Status   int16 `json:"status"`
-}
-
-func (q *Queries) UpdateSimSessionStatus(ctx context.Context, arg UpdateSimSessionStatusParams) (SimSession, error) {
-	row := q.db.QueryRow(ctx, updateSimSessionStatus, arg.TenantID, arg.ID, arg.Status)
-	var i SimSession
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.PackageID,
-		&i.SourceRef,
-		&i.ScopeRef,
-		&i.OwnerAccountID,
-		&i.SharedAccountIds,
-		&i.Seed,
-		&i.InitParams,
-		&i.Compute,
-		&i.Status,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const upsertBuiltinSimPackage = `-- name: UpsertBuiltinSimPackage :one
 INSERT INTO sim_package (
     id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, entry,
@@ -1689,47 +1771,6 @@ func (q *Queries) UpsertBuiltinSimPackage(ctx context.Context, arg UpsertBuiltin
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const upsertSimCheckpoint = `-- name: UpsertSimCheckpoint :one
-INSERT INTO sim_checkpoint (id, tenant_id, session_id, checkpoint_id, answer, achieved, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, now())
-ON CONFLICT (tenant_id, session_id, checkpoint_id) DO UPDATE
-SET answer = EXCLUDED.answer,
-    achieved = EXCLUDED.achieved,
-    created_at = now()
-RETURNING id, tenant_id, session_id, checkpoint_id, answer, achieved, created_at
-`
-
-type UpsertSimCheckpointParams struct {
-	ID           int64  `json:"id"`
-	TenantID     int64  `json:"tenant_id"`
-	SessionID    int64  `json:"session_id"`
-	CheckpointID string `json:"checkpoint_id"`
-	Answer       []byte `json:"answer"`
-	Achieved     bool   `json:"achieved"`
-}
-
-func (q *Queries) UpsertSimCheckpoint(ctx context.Context, arg UpsertSimCheckpointParams) (SimCheckpoint, error) {
-	row := q.db.QueryRow(ctx, upsertSimCheckpoint,
-		arg.ID,
-		arg.TenantID,
-		arg.SessionID,
-		arg.CheckpointID,
-		arg.Answer,
-		arg.Achieved,
-	)
-	var i SimCheckpoint
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.SessionID,
-		&i.CheckpointID,
-		&i.Answer,
-		&i.Achieved,
-		&i.CreatedAt,
 	)
 	return i, err
 }

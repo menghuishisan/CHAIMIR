@@ -107,10 +107,16 @@ func validateAssignmentRequest(req AssignmentRequest) (AssignmentRequest, time.T
 	if req.LatePolicy == LatePolicyPenalize && !hasLatePenaltyRule(req.LatePenalty) {
 		return AssignmentRequest{}, time.Time{}, apperr.ErrTeachingAssignmentInvalid
 	}
+	var totalScore int64
 	for i := range req.Items {
 		req.Items[i].ItemCode = strings.TrimSpace(req.Items[i].ItemCode)
 		req.Items[i].ItemVersion = strings.TrimSpace(req.Items[i].ItemVersion)
 		if req.Items[i].ItemCode == "" || req.Items[i].ItemVersion == "" || req.Items[i].Score <= 0 || req.Items[i].Seq <= 0 {
+			return AssignmentRequest{}, time.Time{}, apperr.ErrTeachingAssignmentInvalid
+		}
+		// 先用宽整数检查总分,避免后续自动分和人工分相加时回绕。
+		totalScore += int64(req.Items[i].Score)
+		if totalScore > math.MaxInt32 {
 			return AssignmentRequest{}, time.Time{}, apperr.ErrTeachingAssignmentInvalid
 		}
 	}
@@ -238,6 +244,22 @@ func ensureTeacherOwned(course Course, accountID int64) error {
 	return nil
 }
 
+// ensureChapterInCourse 校验路径中的课程与章节属于同一棵课程目录。
+func ensureChapterInCourse(chapter Chapter, courseID int64) error {
+	if chapter.CourseID != courseID {
+		return apperr.ErrTeachingChapterInvalid
+	}
+	return nil
+}
+
+// ensureLessonInChapter 校验路径中的章节与课时属于同一棵课程目录。
+func ensureLessonInChapter(lesson Lesson, chapterID int64) error {
+	if lesson.ChapterID != chapterID {
+		return apperr.ErrTeachingLessonInvalid
+	}
+	return nil
+}
+
 // ensureCourseJoinable 校验课程是否允许学生加入。
 func ensureCourseJoinable(course Course) error {
 	if course.Status != CourseStatusPublished && course.Status != CourseStatusRunning {
@@ -289,7 +311,27 @@ func applyLatePolicy(assignment Assignment, now time.Time) (bool, error) {
 	return false, nil
 }
 
-// applyLatePenalty 根据作业迟交策略计算最终分,保留原始批改分用于追溯。
+// 缺失必需的分数时返回 nil，区别于已结算的零分。
+func finalAssignmentScore(assignment Assignment, submission Submission) (*int32, error) {
+	if (submission.AutoScore == nil && jsonx.Int32FromAny(submission.ContentRef["auto_max_score"], 0) > 0) ||
+		(submission.ManualScore == nil && manualMaximumScore(submission.ContentRef) > 0) {
+		return nil, nil
+	}
+	var total int32
+	if submission.AutoScore != nil {
+		total += *submission.AutoScore
+	}
+	if submission.ManualScore != nil {
+		total += *submission.ManualScore
+	}
+	final, err := applyLatePenalty(assignment, total, submission.IsLate)
+	if err != nil {
+		return nil, err
+	}
+	return &final, nil
+}
+
+// 保留原始分数用于追溯；迟交扣分只影响最终分。
 func applyLatePenalty(assignment Assignment, rawScore int32, isLate bool) (int32, error) {
 	if rawScore < 0 {
 		return 0, apperr.ErrTeachingSubmissionInvalid

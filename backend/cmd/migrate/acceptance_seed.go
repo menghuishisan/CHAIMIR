@@ -49,7 +49,6 @@ type acceptanceSeedIDs struct {
 	Runtime                int64
 	RuntimeImage           int64
 	Sandbox                int64
-	SandboxTool            int64
 	SandboxEvent           int64
 	SandboxContestSolve    int64
 	SandboxBattle          int64
@@ -92,7 +91,6 @@ type acceptanceSeedIDs struct {
 	ExperimentReport       int64
 	SimSession             int64
 	SimAction              int64
-	SimCheckpoint          int64
 	SimShare               int64
 	Contest                int64
 	ContestProblem         int64
@@ -113,7 +111,6 @@ type acceptanceSeedIDs struct {
 	GradeAppeal            int64
 	AcademicWarning        int64
 	Transcript             int64
-	SystemConfig           int64
 	AlertRule              int64
 	AlertEvent             int64
 	Statistics             int64
@@ -149,7 +146,7 @@ var acceptanceIDs = acceptanceSeedIDs{
 	SchoolAdmin: 910000000000000101, TeacherMain: 910000000000000102, TeacherAssist: 910000000000000103, TeacherIsolation: 910000000000000104,
 	StudentA: 910000000000000201, StudentB: 910000000000000202, StudentC: 910000000000000203, StudentIsolation: 910000000000000204, AuthSession: 910000000000000301,
 	Runtime: 910000000000001001, RuntimeImage: 910000000000001002,
-	Sandbox: 910000000000001021, SandboxTool: 910000000000001022, SandboxEvent: 910000000000001023,
+	Sandbox: 910000000000001021, SandboxEvent: 910000000000001023,
 	SandboxContestSolve: 910000000000001031, SandboxBattle: 910000000000001041,
 	Judger: platformJudgerID("testcase-evm"), JudgerOnchain: platformJudgerID("onchain-assert"), JudgeTask: 910000000000002011, JudgeResult: 910000000000002012,
 	ContestJudgeTask: 910000000000002015, ContestJudgeResult: 910000000000002016,
@@ -160,13 +157,12 @@ var acceptanceIDs = acceptanceSeedIDs{
 	Discussion: 910000000000005044, CourseNotice: 910000000000005045, CourseReview: 910000000000005046, GradeWeight: 910000000000005047, CourseGradeA: 910000000000005048,
 	Experiment: 910000000000006001, ExperimentGroup: 910000000000006011, GroupMemberA: 910000000000006012, GroupMemberB: 910000000000006013,
 	ExperimentInstance: 910000000000006021, CheckpointResult: 910000000000006022, ExperimentReport: 910000000000006023,
-	SimSession: 910000000000007001, SimAction: 910000000000007002, SimCheckpoint: 910000000000007003, SimShare: 910000000000007004,
 	Contest: 910000000000008001, ContestProblem: 910000000000008002, TeamA: 910000000000008011, TeamAMember: 910000000000008012, SolveSubmission: 910000000000008021,
 	LadderRank: 910000000000008031, ResultSnapshot: 910000000000008032, VulnSource: 910000000000008041, VulnProblem: 910000000000008042,
 	SystemAnnouncement: 910000000000010001, NotificationA: 910000000000010011, PreferenceA: 910000000000010012, AnnouncementReadA: 910000000000010013,
 	GradeLevel: 910000000000011001, Semester: 910000000000011002, GradeReview: 910000000000011003, GradeAppeal: 910000000000011004,
 	AcademicWarning: 910000000000011005, Transcript: 910000000000011006,
-	SystemConfig: 910000000000012001, AlertRule: 910000000000012002, AlertEvent: 910000000000012003, Statistics: 910000000000012004, BackupRecord: 910000000000012005,
+	AlertRule: 910000000000012002, AlertEvent: 910000000000012003, Statistics: 910000000000012004, BackupRecord: 910000000000012005,
 	TransferTask:       910000000000013001,
 	AuditEntry:         910000000000099001,
 	ApplicationPending: 910000000000014001, ApplicationRejected: 910000000000014002, ApplicationApproved: 910000000000014003,
@@ -977,7 +973,7 @@ func acceptanceBattleReplayActions() []contracts.JudgeReplayAction {
 	return []contracts.JudgeReplayAction{
 		{
 			Seq: 1, Op: "deploy",
-			Payload: map[string]any{"artifact": "VaultDefense", "role": "defense", "project_dir": "/workspace/battle/entry_b", "artifact_path": "out/VaultDefense.sol/VaultDefense.json"},
+			Payload: map[string]any{"artifact": "VaultDefense", "role": "defense", "project_dir": "/workspace/battle/defense", "artifact_path": "out/VaultDefense.sol/VaultDefense.json"},
 			Output: map[string]any{
 				"contract_ref":     "defense",
 				"contract_address": defenseAddress,
@@ -993,7 +989,7 @@ func acceptanceBattleReplayActions() []contracts.JudgeReplayAction {
 		},
 		{
 			Seq: 3, Op: "deploy",
-			Payload: map[string]any{"artifact": "ReentrancyAttack", "role": "attack", "target_ref": "defense", "project_dir": "/workspace/battle/entry_a", "artifact_path": "out/ReentrancyAttack.sol/ReentrancyAttack.json"},
+			Payload: map[string]any{"artifact": "ReentrancyAttack", "role": "attack", "target_ref": "defense", "project_dir": "/workspace/battle/attack", "artifact_path": "out/ReentrancyAttack.sol/ReentrancyAttack.json"},
 			Output: map[string]any{
 				"contract_ref":     "attack",
 				"contract_address": attackAddress,

@@ -129,18 +129,16 @@ type RecycleRequest struct {
 	Reason    string `json:"reason"`
 }
 
-// FileWriteRequest 是用户或内部服务写入工作区文件的请求。
+// FileWriteRequest 是账号写入授权工作区的请求，租户取服务端会话。
 type FileWriteRequest struct {
-	TenantID     ids.ID `json:"tenant_id"`
 	RelativePath string `json:"relative_path"`
 	// 指针区分未提供内容与合法的零字节文件,不把空字符串判作缺字段。
 	ContentBase64    *string `json:"content_base64" binding:"required"`
 	ExpectedRevision int64   `json:"expected_revision"`
 }
 
-// ChainRequest 是链部署或交易的统一请求体。
+// ChainRequest 是链部署或交易的请求体，归属取会话或已验证的服务身份。
 type ChainRequest struct {
-	TenantID        ids.ID         `json:"tenant_id"`
 	RuntimeInstance string         `json:"runtime_instance"`
 	Payload         map[string]any `json:"payload"`
 }
@@ -181,7 +179,7 @@ type PrepullResponse struct {
 	ImageCount        int    `json:"image_count"`
 }
 
-// PrepullRequest 是组合预拉取请求,只允许提交已发布组合摘要。
+// PrepullRequest 是组合预拉取请求,只允许提交已冻结组合摘要。
 type PrepullRequest struct {
 	CompositionDigest string `json:"composition_digest"`
 }

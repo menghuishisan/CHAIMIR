@@ -40,8 +40,6 @@ type SendSMSRequest struct {
 	TenantID ids.ID `json:"tenant_id"`
 }
 
-type RefreshRequest struct{}
-
 type PathTicketRequest struct {
 	Path string `json:"path"`
 }

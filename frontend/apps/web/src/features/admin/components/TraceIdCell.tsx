@@ -1,13 +1,10 @@
-// TraceIdCell 显示审计记录的「追踪编号」(校管与平台两个审计页共用一份)。
-//
-// 编号只用于报障时复述:表格里展开成 36 位全量会吃掉四分之一表宽,读者依然读不出内容,
-// 因此表格里只显示前 8 位,整串交给复制按钮与 title;详情抽屉里地方够,传 full 显示整串。
+// 审计追踪编号：表格显示前8位，详情和复制保留完整值。
 
 import { Copy } from 'lucide-react'
 import { IconButton, toast } from '@chaimir/ui'
 import { copyText } from '../../../utils/clipboard'
 
-/** 表格里展示的编号位数:足以在报障时区分不同记录,又不挤占数据列。 */
+/** 表格只预览前缀，报障应复制完整编号。 */
 const TRACE_ID_PREVIEW_LENGTH = 8
 
 export interface TraceIdCellProps {

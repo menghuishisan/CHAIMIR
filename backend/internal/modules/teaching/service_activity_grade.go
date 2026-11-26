@@ -664,6 +664,7 @@ func (s *Service) ExportGrades(ctx context.Context, courseID int64) (transfer.Ta
 	if err != nil {
 		return transfer.TaskDTO{}, err
 	}
+	var task transfer.Task
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		course, err := tx.GetCourse(ctx, id.TenantID, courseID)
 		if err != nil {
@@ -672,29 +673,22 @@ func (s *Service) ExportGrades(ctx context.Context, courseID int64) (transfer.Ta
 		if err := ensureTeacherOwned(course, id.AccountID); err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		return transfer.TaskDTO{}, mapGradeError(err)
-	}
-	fileName := "course-" + ids.Format(courseID) + "-grades.xlsx"
-	task, err := s.transfers.CreateTask(ctx, transfer.NewTaskRequest{
-		TenantID:    id.TenantID,
-		AccountID:   id.AccountID,
-		Channel:     transfer.ChannelExport,
-		Subject:     gradeExportSubject,
-		FileName:    fileName,
-		ContentType: upload.XLSXContentType,
-	})
-	if err != nil {
-		return transfer.TaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
-	}
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.CreateCourseGradeExportRequest(ctx, CourseGradeExportRequest{TransferTaskID: task.TaskID, TenantID: id.TenantID, AccountID: id.AccountID, CourseID: courseID})
-		return err
-	}); err != nil {
-		if cleanupErr := s.transfers.DeletePendingTask(ctx, id.TenantID, task.TaskID); cleanupErr != nil {
-			logging.ErrorContext(ctx, "teaching grade export task compensation failed", cleanupErr.Error(), slog.Int64("tenant_id", id.TenantID), slog.Int64("course_id", courseID), slog.Int64("transfer_task_id", task.TaskID))
+		task, err = s.transfers.CreateTask(ctx, transfer.NewTaskRequest{
+			TenantID:    id.TenantID,
+			AccountID:   id.AccountID,
+			Channel:     transfer.ChannelExport,
+			Subject:     gradeExportSubject,
+			FileName:    "course-" + ids.Format(courseID) + "-grades.xlsx",
+			ContentType: upload.XLSXContentType,
+		})
+		if err != nil {
+			return err
 		}
+		if _, err := tx.CreateCourseGradeExportRequest(ctx, CourseGradeExportRequest{TransferTaskID: task.TaskID, TenantID: id.TenantID, AccountID: id.AccountID, CourseID: courseID}); err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "teaching.grade.export", auditTargetCourse, courseID, map[string]any{"transfer_task_id": task.TaskID})
+	}); err != nil {
 		return transfer.TaskDTO{}, apperr.ErrTeachingGradeExportFailed.WithCause(err)
 	}
 	return exportTaskDTO(task), nil
@@ -728,29 +722,35 @@ func (s *Service) runGradeExportRequest(ctx context.Context, req CourseGradeExpo
 	if err != nil {
 		return s.reconcileGradeExportRequest(ctx, req)
 	}
-	data, err := s.buildGradeExportXLSX(ctx, req)
-	if err == nil {
-		artifactFileName, nameErr := transfer.LeaseArtifactFileName(task.FileName, task.LeaseToken)
-		plan, planErr := s.files.PlanUpload(ctx, storage.PlanUploadRequest{TenantID: req.TenantID, AccountID: req.AccountID, Module: "transfer", ResourceType: string(transfer.ChannelExport), ResourceID: ids.Format(task.TaskID), FileName: artifactFileName, ContentType: upload.XLSXContentType, Size: int64(len(data)), ExpectedBucket: s.storage.BucketReport(), AllowedFileName: true, Content: data, KindValidator: func(fileName, contentType string, content []byte) bool {
+	var data []byte
+	var plan storage.UploadPlan
+	commitAttempted := false
+	err = s.transfers.RunWithLease(ctx, task, func(workCtx context.Context) error {
+		var err error
+		data, err = s.buildGradeExportXLSX(workCtx, req)
+		if err != nil {
+			return err
+		}
+		artifactFileName, err := transfer.LeaseArtifactFileName(task.FileName, task.LeaseToken)
+		if err != nil {
+			return err
+		}
+		plan, err = s.files.PlanUpload(workCtx, storage.PlanUploadRequest{TenantID: req.TenantID, AccountID: req.AccountID, Module: "transfer", ResourceType: string(transfer.ChannelExport), ResourceID: ids.Format(task.TaskID), FileName: artifactFileName, ContentType: upload.XLSXContentType, Size: int64(len(data)), ExpectedBucket: s.storage.BucketReport(), AllowedFileName: true, Content: data, KindValidator: func(fileName, contentType string, content []byte) bool {
 			return upload.CSVOrXLSXKind(fileName, contentType, content) == upload.KindXLSX
 		}})
-		if nameErr != nil {
-			planErr = nameErr
+		if err != nil {
+			return err
 		}
-		if planErr == nil {
-			planErr = s.storage.Put(ctx, plan.Bucket, plan.Key, bytes.NewReader(data), int64(len(data)), upload.XLSXContentType)
-		}
-		if planErr == nil {
-			_, planErr = s.transfers.CompleteTask(ctx, task, transfer.CompleteTaskRequest{ObjectRef: plan.ObjectRef, Size: int64(len(data))})
-			if planErr != nil {
-				if cleanupErr := s.storage.Delete(ctx, plan.Bucket, plan.Key); cleanupErr != nil {
-					logging.ErrorContext(ctx, "teaching grade export artifact cleanup failed", cleanupErr.Error(), slog.Int64("tenant_id", req.TenantID), slog.Int64("transfer_task_id", req.TransferTaskID))
-				}
-			}
-		}
-		err = planErr
+		return s.storage.Put(workCtx, plan.Bucket, plan.Key, bytes.NewReader(data), int64(len(data)), upload.XLSXContentType)
+	})
+	if err == nil {
+		commitAttempted = true
+		_, err = s.transfers.CompleteTask(ctx, task, transfer.CompleteTaskRequest{ObjectRef: plan.ObjectRef, Size: int64(len(data))})
 	}
 	if err != nil {
+		if plan.Key != "" {
+			err = storage.CompensateUpload(ctx, s.cleanupTimeout, err, commitAttempted, func(ctx context.Context) error { return s.storage.Delete(ctx, plan.Bucket, plan.Key) })
+		}
 		return s.failGradeExportRequest(ctx, req, task, err)
 	}
 	return s.deleteGradeExportRequest(ctx, req)
@@ -837,12 +837,12 @@ func (s *Service) reconcileGradeExportRequest(ctx context.Context, req CourseGra
 func (s *Service) failGradeExportRequest(ctx context.Context, req CourseGradeExportRequest, task transfer.Task, cause error) error {
 	failed, err := s.transfers.FailTask(ctx, task, cause, timex.Now())
 	if err != nil {
-		return s.deferGradeExportRequest(ctx, req, timex.Now().Add(time.Duration(s.cfg.GradeExportWorkerPollMs)*time.Millisecond))
+		return errors.Join(cause, err, s.deferGradeExportRequest(ctx, req, timex.Now().Add(time.Duration(s.cfg.GradeExportWorkerPollMs)*time.Millisecond)))
 	}
 	if failed.Status == transfer.StatusFailed {
-		return s.deleteGradeExportRequest(ctx, req)
+		return errors.Join(cause, s.deleteGradeExportRequest(ctx, req))
 	}
-	return s.deferGradeExportRequest(ctx, req, failed.NextAttemptAfter)
+	return errors.Join(cause, s.deferGradeExportRequest(ctx, req, failed.NextAttemptAfter))
 }
 
 // deferGradeExportRequest schedules the next attempt in the request table owned by M6.
@@ -907,23 +907,6 @@ func (s *Service) listCourseGradesForExport(ctx context.Context, tx TxStore, ten
 			return out, nil
 		}
 	}
-}
-
-// publishGradeUpdated 在作业提交回写后持久化成绩更新事件。
-func (s *Service) publishGradeUpdated(ctx context.Context, tenantID, assignmentID, studentID int64) error {
-	var courseID int64
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		assignment, err := tx.GetAssignment(ctx, tenantID, assignmentID)
-		if err != nil {
-			return err
-		}
-		courseID = assignment.CourseID
-		return s.enqueueTeachingGradeEventOutbox(ctx, tx, tenantID, courseID, studentID)
-	}); err != nil {
-		return mapAssignmentError(err)
-	}
-	s.drainTeachingGradeEventOutboxBestEffort(ctx)
-	return nil
 }
 
 // enqueueTeachingGradeEventOutbox 在成绩写入同一事务内保存 M11 消费的成绩事件。

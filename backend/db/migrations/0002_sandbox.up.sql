@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS sandbox (
     snapshot_enabled BOOLEAN NOT NULL DEFAULT false,
     code_storage_key VARCHAR(255) NOT NULL,
     code_hash VARCHAR(128),
+    recycle_saved BOOLEAN NOT NULL DEFAULT false,
     workspace_revision BIGINT NOT NULL DEFAULT 1 CHECK (workspace_revision > 0),
     init_code_ref VARCHAR(255),
     init_script_ref VARCHAR(255),
@@ -94,24 +95,19 @@ CREATE TABLE IF NOT EXISTS sandbox (
     keep_alive_until TIMESTAMPTZ,
     last_active_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     expire_at TIMESTAMPTZ NOT NULL,
+    resource_lease_token VARCHAR(64) NOT NULL DEFAULT '',
+    resource_lease_until TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, id),
+    CONSTRAINT chk_sandbox_resource_lease CHECK (
+        (resource_lease_token = '') = (resource_lease_until IS NULL)
+        AND (status IN (1, 2, 4, 5, 6, 7, 8) OR resource_lease_token = '')
+    ),
     CONSTRAINT chk_sandbox_shared_accounts_positive CHECK (0 < ALL(shared_account_ids)),
     CONSTRAINT chk_sandbox_shared_accounts_no_null CHECK (array_position(shared_account_ids, NULL) IS NULL),
     CONSTRAINT chk_sandbox_shared_accounts_exclude_owner CHECK (NOT (shared_account_ids @> ARRAY[owner_account_id])),
     FOREIGN KEY (tenant_id, owner_account_id) REFERENCES account(tenant_id, id)
-);
-
-CREATE TABLE IF NOT EXISTS sandbox_tool (
-    id BIGINT PRIMARY KEY,
-    tenant_id BIGINT NOT NULL REFERENCES tenant(id),
-    sandbox_id BIGINT NOT NULL,
-    tool_id BIGINT NOT NULL REFERENCES tool(id),
-    access_endpoint VARCHAR(255) NOT NULL,
-    status SMALLINT NOT NULL CHECK (status IN (1, 2, 3)),
-    FOREIGN KEY (tenant_id, sandbox_id) REFERENCES sandbox(tenant_id, id) ON DELETE CASCADE,
-    UNIQUE (tenant_id, sandbox_id, tool_id)
 );
 
 CREATE TABLE IF NOT EXISTS sandbox_event (
@@ -130,7 +126,6 @@ CREATE TABLE IF NOT EXISTS sandbox_recycle_outbox (
     sandbox_id BIGINT NOT NULL,
     source_ref VARCHAR(128) NOT NULL,
     scope_ref VARCHAR(128) NOT NULL,
-    owner_account_id BIGINT NOT NULL,
     reason VARCHAR(64) NOT NULL,
     trace_id VARCHAR(128) NOT NULL,
     recycled_at TIMESTAMPTZ NOT NULL,
@@ -176,23 +171,21 @@ WHERE source_ref LIKE 'contest:____:battle:%' AND status <> 5;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_sandbox_same_scope_source_active
 ON sandbox(tenant_id, source_ref, scope_ref)
 WHERE source_ref = scope_ref AND status <> 5;
-CREATE INDEX IF NOT EXISTS idx_sandbox_snapshot_expire ON sandbox(snapshot_expire_at);
+CREATE INDEX IF NOT EXISTS idx_sandbox_snapshot_cleanup ON sandbox(snapshot_expire_at, resource_lease_until) WHERE status = 5 AND snapshot_expire_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_sandbox_resource_lease ON sandbox(resource_lease_until, updated_at) WHERE status = 4;
 CREATE INDEX IF NOT EXISTS idx_sandbox_event_tenant_sandbox_created ON sandbox_event(tenant_id, sandbox_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sandbox_event_alert_window ON sandbox_event(tenant_id, created_at DESC)
+    WHERE event_type IN ('phase_change','error') AND detail->>'status' IN ('2','6');
 CREATE INDEX IF NOT EXISTS idx_sandbox_recycle_outbox_status ON sandbox_recycle_outbox(status, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_sandbox_recycle_outbox_tenant_status ON sandbox_recycle_outbox(tenant_id, status, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_sandbox_recycle_outbox_tenant_sandbox ON sandbox_recycle_outbox(tenant_id, sandbox_id);
 
 ALTER TABLE sandbox ENABLE ROW LEVEL SECURITY;
-ALTER TABLE sandbox_tool ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sandbox_event ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sandbox_recycle_outbox ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tenant_quota ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY sandbox_tenant_rls ON sandbox
-USING (tenant_id = current_setting('app.tenant_id')::BIGINT)
-WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
-
-CREATE POLICY sandbox_tool_tenant_rls ON sandbox_tool
 USING (tenant_id = current_setting('app.tenant_id')::BIGINT)
 WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 

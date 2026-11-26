@@ -1,4 +1,3 @@
-// sandbox api 文件负责注册 M2 HTTP/WS 路由、绑定请求、组合鉴权并调用 service。
 package sandbox
 
 import (
@@ -321,12 +320,7 @@ func (a sandboxAPI) createSandbox(c *gin.Context) {
 		return
 	}
 	req.SourceRef = sourceRef
-	contractReq, err := contractCreateFromDTO(req)
-	if err != nil {
-		response.Fail(c, err)
-		return
-	}
-	out, err := a.svc.CreateSandbox(c.Request.Context(), contractReq)
+	out, err := a.svc.CreateSandbox(c.Request.Context(), contractCreateFromDTO(req))
 	httpx.Write(c, out, err)
 }
 
@@ -451,7 +445,6 @@ func (a sandboxAPI) writeFile(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxFileWriteRequestInvalid) {
 		return
 	}
-	req.TenantID = ids.ID(current.TenantID)
 	if strings.TrimSpace(req.RelativePath) == "" {
 		req.RelativePath = c.Query("path")
 	}
@@ -530,7 +523,8 @@ func (a sandboxAPI) terminal(c *gin.Context) {
 		if err := conn.BindSession(c.Request.Context(), ws.SessionKey{TenantID: current.TenantID, AccountID: current.AccountID, Scope: sandboxTerminalSessionScope(id)}); err != nil {
 			return apperr.ErrSandboxOwnershipInvalid.WithCause(err)
 		}
-		return a.svc.AttachTerminal(conn.Context(), target, conn.Reader(), conn.Writer())
+		stdin, sizes := conn.TerminalInput()
+		return a.svc.AttachTerminalForOwner(conn.Context(), current.TenantID, current.AccountID, target, stdin, conn.Writer(), sizes)
 	}); err != nil {
 		response.Fail(c, apperr.ErrSandboxToolProxyUnavailable.WithCause(err))
 	}
@@ -546,13 +540,12 @@ func (a sandboxAPI) toolProxy(c *gin.Context) {
 	if !ok {
 		return
 	}
-	sb, tool, err := a.svc.ToolProxyTargetForOwner(c.Request.Context(), current.TenantID, current.AccountID, id, c.Param("tool_code"))
+	sb, target, err := a.svc.ToolProxyTargetForOwner(c.Request.Context(), current.TenantID, current.AccountID, id, c.Param("tool_code"), c.Param("proxy_path"))
 	if err != nil {
 		response.Fail(c, err)
 		return
 	}
 	a.svc.ObserveToolAccess(c.Request.Context(), sb)
-	target := toolProxyURL(sb, tool)
 	externalPrefix := toolProxyExternalPrefix(id, c.Param("tool_code"))
 	if !a.prepareToolBrowserAccess(c, externalPrefix) {
 		return
@@ -798,18 +791,6 @@ func serviceSourceRef(c *gin.Context) (string, bool) {
 	return "", false
 }
 
-// toolProxyURL 生成集群内 Web 工具 Service 目标地址,不暴露外部直链。
-func toolProxyURL(sb Sandbox, tool SandboxTool) *url.URL {
-	serviceName, servicePort, ok := toolProxyRouteTarget(tool.ResourceSpec)
-	if !ok {
-		return &url.URL{Scheme: "http"}
-	}
-	return &url.URL{
-		Scheme: "http",
-		Host:   fmt.Sprintf("%s.%s.svc.cluster.local:%d", serviceName, sb.Namespace, servicePort),
-	}
-}
-
 // toolProxyExternalPrefix 返回浏览器可见的工具代理前缀,用于保持 Web 工具重定向不跳出鉴权入口。
 func toolProxyExternalPrefix(sandboxID int64, toolCode string) string {
 	return "/api/v1/sandbox/sandboxes/" + ids.Format(sandboxID) + "/tools/" + url.PathEscape(strings.TrimSpace(toolCode))
@@ -822,26 +803,4 @@ func toolProxyCleanRequestURI(c *gin.Context) string {
 	query.Del(auth.BrowserAccessTicketQuery)
 	u.RawQuery = query.Encode()
 	return u.RequestURI()
-}
-
-// toolProxyRouteTarget 解析工具声明的首个平台代理路由,与 K8s Service 创建共用 resource_spec。
-func toolProxyRouteTarget(spec ToolResourceSpec) (string, int32, bool) {
-	for _, route := range spec.Routes {
-		serviceName := strings.TrimSpace(route.Service)
-		portName := strings.TrimSpace(route.Port)
-		if serviceName == "" || portName == "" {
-			continue
-		}
-		for _, service := range spec.Services {
-			if strings.TrimSpace(service.Name) != serviceName {
-				continue
-			}
-			for _, port := range service.Ports {
-				if strings.TrimSpace(port.Name) == portName && port.Port > 0 {
-					return serviceName, port.Port, true
-				}
-			}
-		}
-	}
-	return "", 0, false
 }

@@ -1,13 +1,5 @@
-/**
- * Select:单选下拉框(基于 Radix Select 封装)。
- * Trigger 样式与盒式 Input 一致;Content 走 Portal + z-modal,
- * 确保弹窗内的下拉项位于 Modal 遮罩之上,
- * 进出场 pop-in / pop-out 且 transform-origin 对齐触发源(§4.3 浮层从触发源缩放淡入);
- * 选项带 Check 指示,键盘导航与 typeahead 由 Radix 保证。
- * 深色面板(沉浸式工作台,§7.1)传 onDark,改用墨底语义令牌 —— 页面不在深色语境里另拼一套配色。
- */
 import * as SelectPrimitive from "@radix-ui/react-select";
-import type { FocusEventHandler } from "react";
+import type { AriaAttributes, FocusEventHandler } from "react";
 import { cva } from "class-variance-authority";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "../../lib/cn";
@@ -19,7 +11,7 @@ export interface SelectOption {
   disabled?: boolean;
 }
 
-export interface SelectProps {
+export interface SelectProps extends Pick<AriaAttributes, "aria-describedby" | "aria-invalid"> {
   value?: string;
   onValueChange?: (value: string) => void;
   /** 实际触发器失焦时执行字段校验。 */
@@ -40,10 +32,7 @@ export interface SelectProps {
   className?: string;
 }
 
-/**
- * 触发器外观:与盒式 Input 同视觉,占位态用弱化文字色(data-placeholder)。
- * 导出给「看起来像下拉框」的选择器复用(如可搜索的账号选择),下拉框的外观只在这里定义一次。
- */
+/** 可搜索选择器与单选下拉框复用同一触发器外观。 */
 export const selectTriggerVariants = cva(
   "inline-flex pointer-coarse:min-h-11 w-full items-center justify-between gap-2 rounded-md border px-3 transition-colors duration-fast focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-50",
   {
@@ -60,7 +49,7 @@ export const selectTriggerVariants = cva(
   },
 );
 
-/** Select 单选下拉框;浮层在弹窗之上,失焦交给触发按钮做校验 */
+/** Select 由 Radix 管理键盘与浮层；表单语义传到实际触发器。 */
 export function Select({
   value,
   onValueChange,
@@ -72,10 +61,12 @@ export function Select({
   size = "md",
   onDark = false,
   "aria-label": ariaLabel,
+  "aria-describedby": ariaDescribedBy,
+  "aria-invalid": ariaInvalid,
   id,
   className,
 }: SelectProps) {
-  const isSm = size === "sm";
+  const hasError = invalid || (ariaInvalid !== undefined && ariaInvalid !== false && ariaInvalid !== "false");
   return (
     <SelectPrimitive.Root value={value} onValueChange={onValueChange} disabled={disabled}>
       {/* 触发器:与盒式 Input 同视觉,占位态用弱化文字色 */}
@@ -83,8 +74,9 @@ export function Select({
         id={id}
         onBlur={onBlur}
         aria-label={ariaLabel}
-        aria-invalid={invalid || undefined}
-        className={cn(selectTriggerVariants({ tone: onDark ? "dark" : "light", size: isSm ? "sm" : "md", invalid }), className)}
+        aria-describedby={ariaDescribedBy}
+        aria-invalid={invalid || ariaInvalid || undefined}
+        className={cn(selectTriggerVariants({ tone: onDark ? "dark" : "light", size, invalid: hasError }), className)}
       >
         <SelectPrimitive.Value placeholder={placeholder} />
         <SelectPrimitive.Icon className={onDark ? "text-on-dark-sub" : "text-ink-sub"}>
@@ -118,7 +110,7 @@ export function Select({
                   onDark
                     ? "text-on-dark data-[highlighted]:bg-dark-surface"
                     : "text-ink data-[highlighted]:bg-surface-hover",
-                  isSm ? "text-sm" : "text-base",
+                  size === "sm" ? "text-sm" : "text-base",
                 )}
               >
                 <SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText>

@@ -14,11 +14,11 @@ import (
 
 // packageFromRow 转换平台级仿真包行。
 func packageFromRow(row sqlcgen.SimPackage) (Package, error) {
-	scale, err := decodeMap(row.ScaleLimit)
+	scale, err := jsonx.ObjectMapStrict(row.ScaleLimit)
 	if err != nil {
 		return Package{}, apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包 %d 的 scale_limit 数据异常: %w", row.ID, err))
 	}
-	backendConfig, err := decodeMap(row.BackendConfig)
+	backendConfig, err := jsonx.ObjectMapStrict(row.BackendConfig)
 	if err != nil {
 		return Package{}, apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包 %d 的 backend_config 数据异常: %w", row.ID, err))
 	}
@@ -101,7 +101,7 @@ func reviewInfoFromRow(row sqlcgen.ListSimReviewsRow) (ReviewInfo, error) {
 
 // sessionFromRow 转换仿真会话行。
 func sessionFromRow(row sqlcgen.SimSession) (Session, error) {
-	params, err := decodeMap(row.InitParams)
+	params, err := jsonx.ObjectMapStrict(row.InitParams)
 	if err != nil {
 		return Session{}, apperr.ErrSimSessionDataCorrupt.WithCause(fmt.Errorf("仿真会话 %d 的 init_params 数据异常: %w", row.ID, err))
 	}
@@ -122,17 +122,17 @@ func sessionFromRow(row sqlcgen.SimSession) (Session, error) {
 	}, nil
 }
 
-// sessionWithPackageFromRow 转换回放所需的会话和包摘要。
+// sessionWithPackageFromRow 保留回放和隔离执行所需的包信息。
 func sessionWithPackageFromRow(row sqlcgen.GetSimSessionWithPackageRow) (SessionWithPackage, error) {
 	session, err := sessionFromRow(sqlcgen.SimSession{ID: row.ID, TenantID: row.TenantID, PackageID: row.PackageID, SourceRef: row.SourceRef, ScopeRef: row.ScopeRef, OwnerAccountID: row.OwnerAccountID, SharedAccountIds: row.SharedAccountIds, Seed: row.Seed, InitParams: row.InitParams, Compute: row.Compute, Status: row.Status, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt})
 	if err != nil {
 		return SessionWithPackage{}, err
 	}
-	scaleLimit, err := decodeMap(row.ScaleLimit)
+	scaleLimit, err := jsonx.ObjectMapStrict(row.ScaleLimit)
 	if err != nil {
 		return SessionWithPackage{}, apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包 %d 的 scale_limit 数据异常: %w", row.PackageID, err))
 	}
-	backendConfig, err := decodeMap(row.BackendConfig)
+	backendConfig, err := jsonx.ObjectMapStrict(row.BackendConfig)
 	if err != nil {
 		return SessionWithPackage{}, apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包 %d 的 backend_config 数据异常: %w", row.PackageID, err))
 	}
@@ -140,12 +140,18 @@ func sessionWithPackageFromRow(row sqlcgen.GetSimSessionWithPackageRow) (Session
 	if err != nil {
 		return SessionWithPackage{}, apperr.ErrSimPackageDataCorrupt.WithCause(fmt.Errorf("仿真包 %d 的 interaction_schema 数据异常: %w", row.PackageID, err))
 	}
-	return SessionWithPackage{Session: session, PackageCode: row.Code, PackageVersion: row.Version, PackageName: row.Name, Category: row.Category, ScaleLimit: scaleLimit, BundleKey: row.BundleKey, BundleHash: row.BundleHash, BackendAdapter: pgtypex.TextValue(row.BackendAdapter), BackendConfig: backendConfig, InteractionSchema: interactionSchema, PackageStatus: row.PackageStatus}, nil
+	return SessionWithPackage{
+		Session: session, PackageCode: row.Code, PackageVersion: row.Version,
+		PackageName: row.Name, Category: row.Category, ScaleLimit: scaleLimit,
+		BundleKey: row.BundleKey, BundleHash: row.BundleHash, Entry: pgtypex.TextValue(row.Entry),
+		BackendAdapter: pgtypex.TextValue(row.BackendAdapter), BackendConfig: backendConfig,
+		InteractionSchema: interactionSchema, PackageStatus: row.PackageStatus,
+	}, nil
 }
 
 // actionFromRow 转换操作序列行。
 func actionFromRow(row sqlcgen.SimActionLog) (Action, error) {
-	payload, err := decodeMap(row.Payload)
+	payload, err := jsonx.ObjectMapStrict(row.Payload)
 	if err != nil {
 		return Action{}, apperr.ErrSimSessionDataCorrupt.WithCause(fmt.Errorf("仿真会话 %d 的操作记录 %d payload 数据异常: %w", row.SessionID, row.Seq, err))
 	}
@@ -155,14 +161,6 @@ func actionFromRow(row sqlcgen.SimActionLog) (Action, error) {
 // shareFromRow 转换分享码索引。
 func shareFromRow(row sqlcgen.SimShare) Share {
 	return Share{ID: row.ID, TenantID: row.TenantID, SessionID: row.SessionID, Code: row.Code, CreatedBy: row.CreatedBy, Status: row.Status, ExpireAt: timex.FromTimestamptz(row.ExpireAt), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}
-}
-
-// decodeMap 解码 JSONB 对象为空 map。
-func decodeMap(raw []byte) (map[string]any, error) {
-	if len(raw) == 0 {
-		return map[string]any{}, nil
-	}
-	return jsonx.ObjectMapStrict(raw)
 }
 
 // reportFromJSON 解码审核报告。

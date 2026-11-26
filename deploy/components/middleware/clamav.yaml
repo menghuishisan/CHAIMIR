@@ -51,7 +51,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clamav
-          image: chaimir/middleware/clamav:placeholder
+          image: chaimir/infra/clamav:placeholder
           ports:
             - name: clamd
               containerPort: 3310

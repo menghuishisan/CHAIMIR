@@ -1,7 +1,3 @@
-// UnsavedChangesGuard 在有未保存内容时拦住离开(设计 §6.7:长表单和多步骤流程有未保存内容时离开页面要先提醒)。
-// 站内跳转弹出确认框(数据路由的 useBlocker,见 app/App.tsx);刷新、关闭标签页或离开本站时
-// 浏览器只允许显示它自己的确认框(beforeunload)。只有路径变化才拦:页面自己改地址参数(筛选、标签页)不算离开。
-
 import { useCallback, useEffect, useState } from 'react'
 import { useBlocker, type BlockerFunction } from 'react-router'
 import {
@@ -15,6 +11,7 @@ import {
   ModalHeader,
   ModalTitle,
 } from '@chaimir/ui'
+import { errorDiagnostics } from '../../utils/userFacingError'
 
 export interface UnsavedChangesGuardProps {
   /** 当前是否有未保存内容 */
@@ -25,7 +22,7 @@ export interface UnsavedChangesGuardProps {
   onSave?: () => Promise<boolean>
 }
 
-/** UnsavedChangesGuard 拦截站内跳转与页面卸载;自身只渲染确认框 */
+/** 拦截离开未保存页面；同路径的筛选与标签页变化不算离开。 */
 export function UnsavedChangesGuard({ when, description, onSave }: UnsavedChangesGuardProps) {
   const shouldBlock = useCallback<BlockerFunction>(
     ({ currentLocation, nextLocation }) =>
@@ -48,41 +45,46 @@ export function UnsavedChangesGuard({ when, description, onSave }: UnsavedChange
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [when])
 
-  // 拦下之后内容已经保存完(例如自动保存刚好完成):离开不再丢东西,直接放行
+  // 手动保存自己负责放行，避免 dirty 先更新时重复继续同一跳转。
   useEffect(() => {
-    if (blocker.state === 'blocked' && !when) blocker.proceed()
-  }, [blocker, when])
+    if (blocker.state === 'blocked' && !when && !saving) blocker.proceed()
+  }, [blocker, when, saving])
 
   const open = blocker.state === 'blocked'
 
-  /** stay 留在本页:取消这次跳转 */
   const stay = () => {
     setSaveFailed(false)
     if (blocker.state === 'blocked') blocker.reset()
   }
 
-  /** leave 不保存,继续这次跳转 */
   const leave = () => {
     setSaveFailed(false)
     if (blocker.state === 'blocked') blocker.proceed()
   }
 
-  /** saveAndLeave 先保存,保存成功才离开 */
   const saveAndLeave = async () => {
-    if (!onSave) return
+    if (!onSave || saving) return
     setSaving(true)
     setSaveFailed(false)
     try {
       const saved = await onSave()
       if (saved) leave()
       else setSaveFailed(true)
+    } catch (error) {
+      console.error('离开页面前保存失败', errorDiagnostics(error))
+      setSaveFailed(true)
     } finally {
       setSaving(false)
     }
   }
 
   return (
-    <Modal open={open} onOpenChange={(next) => (next ? undefined : stay())}>
+    <Modal
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && !saving) stay()
+      }}
+    >
       <ModalContent size="sm">
         <ModalHeader>
           <ModalTitle>还有改动没有保存</ModalTitle>

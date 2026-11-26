@@ -1,4 +1,4 @@
-"""钱包模拟器,提供确定性的教学钱包签名接口。"""
+"""提供当前会话的临时教学钱包和 EVM 签名。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from eth_account.messages import encode_defunct
 from eth_utils import to_checksum_address
 
 def required_positive_int(name: str) -> int:
-    """读取必填正整数配置,拒绝镜像自行选择运行参数。"""
     raw = os.environ.get(name, "").strip()
     if not raw:
         raise RuntimeError(f"{name} is required")
@@ -30,7 +29,7 @@ MAX_BODY_BYTES = required_positive_int("CHAIMIR_MAX_BODY_BYTES")
 HTTP_TIMEOUT_SECONDS = required_positive_int("CHAIMIR_HTTP_TIMEOUT_SECONDS")
 MAX_HEADER_BYTES = 16 * 1024
 MAX_HEADER_COUNT = 64
-ACCOUNT = Account.create(os.urandom(32))
+ACCOUNT = Account.create()
 
 INDEX_HTML = """<!doctype html>
 <html lang="zh-CN">
@@ -89,7 +88,7 @@ INDEX_HTML = """<!doctype html>
     <label for="data">Data</label>
     <input id="data" value="0x">
     <button class="secondary" onclick="signTxOnly()">签名交易</button>
-    <p class="muted">交易签名结果由工作台提交到当前组合的链运行时,工具本身不直连节点。</p>
+    <p class="muted">把结果中的 raw_transaction 填入工作台的链交易参数，例如 {"raw_transaction":"0x..."}，选择对应链后提交。</p>
   </section>
   <section>
     <h2>结果</h2>
@@ -109,19 +108,19 @@ function show(id, value) {
   document.getElementById(id).textContent = JSON.stringify(value, null, 2);
 }
 async function refreshAccount() {
-  try { show('account', await requestJSON('/accounts')); } catch (e) { show('account', e); }
+  try { show('account', await requestJSON('./accounts')); } catch (e) { show('account', e); }
 }
 async function importWallet() {
   try {
     const private_key = document.getElementById('privateKey').value;
-    const data = await requestJSON('/import', { method: 'POST', body: JSON.stringify({ private_key }) });
+    const data = await requestJSON('./import', { method: 'POST', body: JSON.stringify({ private_key }) });
     show('result', data); await refreshAccount();
   } catch (e) { show('result', e); }
 }
 async function signMessage() {
   try {
     const message = document.getElementById('message').value;
-    show('result', await requestJSON('/sign', { method: 'POST', body: JSON.stringify({ message }) }));
+    show('result', await requestJSON('./sign', { method: 'POST', body: JSON.stringify({ message }) }));
   } catch (e) { show('result', e); }
 }
 function txPayload() {
@@ -136,7 +135,7 @@ function txPayload() {
   };
 }
 async function signTxOnly() {
-  try { show('result', await requestJSON('/tx', { method: 'POST', body: JSON.stringify(txPayload()) })); }
+  try { show('result', await requestJSON('./tx', { method: 'POST', body: JSON.stringify(txPayload()) })); }
   catch (e) { show('result', e); }
 }
 refreshAccount();
@@ -146,7 +145,6 @@ refreshAccount();
 
 
 def parse_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
-    """读取并校验 JSON 请求体,避免超大载荷进入签名流程。"""
     if handler.headers.get("Transfer-Encoding"):
         raise ValueError("transfer encoding is unsupported")
     content_lengths = handler.headers.get_all("Content-Length", [])
@@ -179,11 +177,12 @@ def parse_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
 
 def sign_message(message: str) -> dict[str, str]:
     """按 Ethereum personal_sign 语义生成教学签名。"""
+    account = ACCOUNT
     signable = encode_defunct(text=message)
-    signed = Account.sign_message(signable, private_key=ACCOUNT.key)
+    signed = Account.sign_message(signable, private_key=account.key)
     recovered = Account.recover_message(signable, signature=signed.signature)
     return {
-        "address": ACCOUNT.address,
+        "address": account.address,
         "message": message,
         "signature": "0x" + signed.signature.hex(),
         "message_hash": "0x" + signed.message_hash.hex(),
@@ -192,17 +191,16 @@ def sign_message(message: str) -> dict[str, str]:
 
 
 def import_wallet(private_key: str) -> dict[str, str]:
-    """导入教学测试私钥并返回当前账户地址。"""
     global ACCOUNT
     private_key = private_key.strip()
     if not private_key:
         raise ValueError("private_key is required")
-    ACCOUNT = Account.from_key(private_key)
-    return {"address": ACCOUNT.address, "scheme": "ethereum-personal-sign"}
+    account = Account.from_key(private_key)
+    ACCOUNT = account
+    return {"address": account.address, "scheme": "ethereum-personal-sign"}
 
 
 def parse_int_field(payload: dict[str, Any], name: str, default: int | None = None) -> int:
-    """解析交易数字字段,拒绝负数和无法解析的输入。"""
     value = payload.get(name, default)
     if value is None or value == "":
         raise ValueError(f"{name} is required")
@@ -219,6 +217,7 @@ def parse_int_field(payload: dict[str, Any], name: str, default: int | None = No
 
 def sign_transaction(payload: dict[str, Any]) -> dict[str, str]:
     """签名一笔 EVM 交易,广播由 M2 链能力负责。"""
+    account = ACCOUNT
     to_addr = str(payload.get("to", "")).strip()
     if not to_addr:
         raise ValueError("to is required")
@@ -243,22 +242,19 @@ def sign_transaction(payload: dict[str, Any]) -> dict[str, str]:
         "data": data,
     }
     try:
-        signed = Account.sign_transaction(tx, ACCOUNT.key)
+        signed = Account.sign_transaction(tx, account.key)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("transaction fields are invalid") from exc
-    raw = getattr(signed, "raw_transaction", getattr(signed, "rawTransaction", b""))
     return {
-        "address": ACCOUNT.address,
-        "raw_transaction": "0x" + raw.hex(),
+        "address": account.address,
+        "raw_transaction": "0x" + signed.raw_transaction.hex(),
         "transaction_hash": "0x" + signed.hash.hex(),
     }
 
 
 class WalletSimHandler(BaseHTTPRequestHandler):
-    """处理钱包模拟请求。"""
 
     def parse_request(self) -> bool:
-        """拒绝过多或过大的请求头,避免连接长期占用工作线程。"""
         if not super().parse_request():
             return False
         header_bytes = sum(len(key) + len(value) + 4 for key, value in self.headers.items())
@@ -269,12 +265,10 @@ class WalletSimHandler(BaseHTTPRequestHandler):
         return True
 
     def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
-        """以结构化 JSON 返回协议和输入错误,避免默认 HTML 错误页泄漏实现细节。"""
         self.close_connection = True
         self.write_json({"status": "error", "error": message or "request failed"}, status=code)
 
     def do_GET(self) -> None:
-        """返回健康检查和模拟账户。"""
         if self.path == "/":
             self.write_html(INDEX_HTML.encode("utf-8"))
             return
@@ -297,7 +291,6 @@ class WalletSimHandler(BaseHTTPRequestHandler):
         self.send_error(404, "not found")
 
     def do_POST(self) -> None:
-        """根据请求体生成可验证的教学钱包签名。"""
         self.close_connection = True
         if self.path not in {"/sign", "/import", "/tx"}:
             self.send_error(404, "not found")
@@ -336,11 +329,9 @@ class WalletSimHandler(BaseHTTPRequestHandler):
         self.write_json(sign_message(message))
 
     def log_message(self, format: str, *args: object) -> None:
-        """关闭默认访问日志。"""
         return
 
     def write_json(self, payload: dict[str, object], status: int = 200) -> None:
-        """写出 JSON 响应。"""
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -351,7 +342,6 @@ class WalletSimHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def write_html(self, body: bytes) -> None:
-        """写出钱包模拟器操作页面。"""
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -360,7 +350,6 @@ class WalletSimHandler(BaseHTTPRequestHandler):
 
 
 class BoundedThreadingHTTPServer(ThreadingHTTPServer):
-    """为工具 HTTP 端口设置有限连接超时和请求头上限。"""
 
     daemon_threads = True
     allow_reuse_address = True

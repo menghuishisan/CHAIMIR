@@ -1,7 +1,4 @@
-// auditDetail.ts 把审计记录的 detail(各模块写入的 JSON 文本)整理成详情抽屉里的几行说明。
-// detail 的键名由各模块自取,是开放结构:界面只展示登记过的项、按固定顺序,内部编号(课程编号、来源引用等)不展示;
-// 状态、学生这类要查表才能说清的项,由调用方按动作给出文案,给不出就不展示,不把原始值抛到界面上。
-// 纯函数,供 node:test 直接运行:不得使用 enum,也不得在运行时导入 @chaimir/*。
+// 审计详情只展示登记过的字段；领域状态和学生信息由调用方解析，不暴露原始编号。
 
 import { formatFileSize } from '../../utils/formatters.ts'
 
@@ -79,10 +76,7 @@ const FIELDS: readonly DetailField[] = [
 /** 依次尝试作为「对象名」的项:名称、编码、题目编码、文件名 */
 const HINT_KEYS = ['name', 'code', 'item_code', 'file_name'] as const
 
-/**
- * parseDetail 解析 detail 文本;不是 JSON 对象时返回 undefined。
- * detail 由后端写入,解析失败只可能是历史数据格式不同:此时详情里不展示附加项,其余字段照常显示。
- */
+/** 只接受 JSON 对象，无效内容不进入详情展示。 */
 function parseDetail(detail: string | undefined): Record<string, unknown> | undefined {
   if (!detail) return undefined
   let raw: unknown

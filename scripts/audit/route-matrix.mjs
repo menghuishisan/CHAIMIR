@@ -1,5 +1,5 @@
 // 一次性审查脚本:解析后端 gin 路由的绝对路径与守卫链,与 backend/api/paths/*.yaml 及
-// openapi.yaml 做三方比对,并列出同 handler 多次注册的双轨嫌疑。
+// openapi.yaml 做三方比对,并列出同一方法和路径的重复注册。
 //
 // 解析方式:按函数体作用域收集 Group 定义与路由注册,再按 register* 调用点把形参 gin.IRouter
 // 绑定到实参(支持变量与内联 g.Group(...) 表达式);路由行上的内联中间件也计入守卫链。
@@ -259,16 +259,19 @@ if (AS_JSON) {
   for (const p of yamlNotIndexed) console.log('  ' + p)
   console.log(`\n=== D. openapi.yaml 索引了但 paths/*.yaml 无 (${indexedNotYaml.length}) ===`)
   for (const p of indexedNotYaml) console.log('  ' + p)
-  const byHandler = new Map()
+  const byRegistration = new Map()
   for (const r of routes) {
-    const key = `${dirname(r.file)}::${r.handler}`
-    byHandler.set(key, [...(byHandler.get(key) || []), r])
+    const key = `${r.method} ${norm(r.path)}`
+    byRegistration.set(key, [...(byRegistration.get(key) || []), r])
   }
-  console.log('\n=== E. 同一 handler 注册多次(双轨嫌疑) ===')
+  console.log('\n=== E. 相同方法和路径的重复注册 ===')
   let dup = 0
-  for (const [k, v] of byHandler) {
-    const uniq = [...new Set(v.map((r) => `${r.method} ${norm(r.path)}`))]
-    if (uniq.length > 1) { dup++; console.log(`  ${k}\n      ${v.map((r) => `${r.method} ${norm(r.path)} @${r.line} guards=${r.guards}`).join('\n      ')}`) }
+  for (const [key, entries] of byRegistration) {
+    if (entries.length < 2) continue
+    dup++
+    const handlers = [...new Set(entries.map((r) => r.handler))]
+    const handlerSummary = handlers.length > 1 ? ` handlers=${handlers.join(', ')}` : ` handler=${handlers[0]}`
+    console.log(`  ${key}${handlerSummary}\n      ${entries.map((r) => `@${r.line} ${r.file} guards=${r.guards}`).join('\n      ')}`)
   }
   if (!dup) console.log('  (无)')
 }

@@ -1,9 +1,7 @@
-// sandbox service_chain 文件实现跨运行时统一链部署、交易、查询和重置能力。
 package sandbox
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -11,20 +9,20 @@ import (
 )
 
 // ChainDeploy 调用统一链部署能力。
-func (s *Service) chainDeployContract(ctx context.Context, req contracts.SandboxChainDeployRequest) (map[string]any, error) {
+func (s *Service) ChainDeploy(ctx context.Context, req contracts.SandboxChainDeployRequest) (map[string]any, error) {
 	if req.TenantID <= 0 || req.SandboxID <= 0 || strings.TrimSpace(req.RuntimeInstance) == "" || len(req.Payload) == 0 || !validSourceRef(req.SourceRef) {
 		return nil, apperr.ErrSandboxDeployRequestInvalid
 	}
 	var out map[string]any
-	err := s.withSandboxChainLock(ctx, req.TenantID, req.SandboxID, func() error {
-		sb, runtime, cap, err := s.chainCapability(ctx, req.TenantID, req.SandboxID, req.SourceRef, req.RuntimeInstance)
+	err := s.withSandboxChainLock(ctx, req.TenantID, req.SandboxID, func(ctx context.Context, tx TxStore) error {
+		sb, runtime, cap, err := s.chainCapability(ctx, tx, req.TenantID, req.SandboxID, req.SourceRef, req.RuntimeInstance)
 		if err != nil {
 			return err
 		}
 		if err := ensureRuntimeAction(runtime, ChainOperationDeploy); err != nil {
 			return err
 		}
-		if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		if err := markSandboxExecutionActiveTx(ctx, tx, sb); err != nil {
 			return err
 		}
 		out, err = cap.Deploy(ctx, sb, runtime, req.Payload)
@@ -37,69 +35,41 @@ func (s *Service) chainDeployContract(ctx context.Context, req contracts.Sandbox
 }
 
 // runtimeForSandboxInstance 从不可变组合快照选择指定运行时实例,并恢复编译后的适配器。
-func (s *Service) runtimeForSandboxInstance(ctx context.Context, sb Sandbox, instanceCode string) (Runtime, error) {
+func (s *Service) runtimeForSandboxInstance(ctx context.Context, tx TxStore, sb Sandbox, instanceCode string) (Runtime, error) {
 	instanceCode = strings.TrimSpace(instanceCode)
 	if instanceCode == "" {
 		return Runtime{}, apperr.ErrSandboxContractRequestInvalid
 	}
-	var snapshot contracts.SandboxCompositionSnapshot
-	if len(sb.CompositionSnapshot) == 0 {
-		return Runtime{}, apperr.ErrSandboxCapabilityUnavailable
-	}
-	if err := json.Unmarshal(sb.CompositionSnapshot, &snapshot); err != nil {
+	snapshot, err := verifiedCompositionSnapshot(sb)
+	if err != nil {
 		return Runtime{}, apperr.ErrSandboxCapabilityUnavailable.WithCause(err)
 	}
-	var frozen contracts.CompiledRuntimeSnapshot
-	found := false
-	for _, item := range snapshot.Runtimes {
-		if strings.TrimSpace(item.InstanceCode) == instanceCode {
-			if found {
-				return Runtime{}, apperr.ErrSandboxCapabilityUnavailable
-			}
-			frozen = item
-			found = true
-		}
-	}
-	if !found || frozen.RuntimeID <= 0 || strings.TrimSpace(frozen.Code) == "" || len(frozen.AdapterSpec) == 0 {
-		return Runtime{}, apperr.ErrSandboxCapabilityUnavailable
-	}
-	var runtime Runtime
-	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		var err error
-		runtime, err = tx.GetRuntimeByID(ctx, frozen.RuntimeID)
-		return err
-	}); err != nil {
-		return Runtime{}, apperr.ErrSandboxRuntimeNotFound.WithCause(err)
-	}
-	if runtime.Code != frozen.Code || runtime.PluginRef != frozen.PluginRef || runtime.Status != RuntimeStatusAvailable || runtime.SelftestStatus != RuntimeSelftestPassed {
-		return Runtime{}, apperr.ErrSandboxCapabilityUnavailable
-	}
-	var compiled AdapterSpec
-	if err := json.Unmarshal(frozen.AdapterSpec, &compiled); err != nil {
+	frozenRuntime, frozenImage, err := runtimeSnapshotForInstance(snapshot, instanceCode)
+	if err != nil {
 		return Runtime{}, apperr.ErrSandboxCapabilityUnavailable.WithCause(err)
 	}
-	runtime.AdapterSpec = compiled
-	runtime.AdapterLevel = frozen.AdapterLevel
-	runtime.CapabilityImpl = frozen.CapabilityImpl
-	runtime.PluginRef = frozen.PluginRef
+	runtime, _, err := admittedRuntimeSnapshot(ctx, tx, frozenRuntime, frozenImage)
+	if err != nil {
+		return Runtime{}, apperr.ErrSandboxCapabilityUnavailable.WithCause(err)
+	}
 	return runtime, nil
 }
 
 // ChainSendTx 调用统一链交易能力。
-func (s *Service) chainSendTxContract(ctx context.Context, req contracts.SandboxChainTxRequest) (map[string]any, error) {
+func (s *Service) ChainSendTx(ctx context.Context, req contracts.SandboxChainTxRequest) (map[string]any, error) {
 	if req.TenantID <= 0 || req.SandboxID <= 0 || strings.TrimSpace(req.RuntimeInstance) == "" || len(req.Payload) == 0 || !validSourceRef(req.SourceRef) {
 		return nil, apperr.ErrSandboxTxRequestInvalid
 	}
 	var out map[string]any
-	err := s.withSandboxChainLock(ctx, req.TenantID, req.SandboxID, func() error {
-		sb, runtime, cap, err := s.chainCapability(ctx, req.TenantID, req.SandboxID, req.SourceRef, req.RuntimeInstance)
+	err := s.withSandboxChainLock(ctx, req.TenantID, req.SandboxID, func(ctx context.Context, tx TxStore) error {
+		sb, runtime, cap, err := s.chainCapability(ctx, tx, req.TenantID, req.SandboxID, req.SourceRef, req.RuntimeInstance)
 		if err != nil {
 			return err
 		}
 		if err := ensureRuntimeAction(runtime, ChainOperationTransaction); err != nil {
 			return err
 		}
-		if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		if err := markSandboxExecutionActiveTx(ctx, tx, sb); err != nil {
 			return err
 		}
 		out, err = cap.SendTx(ctx, sb, runtime, req.Payload)
@@ -112,54 +82,59 @@ func (s *Service) chainSendTxContract(ctx context.Context, req contracts.Sandbox
 }
 
 // ChainQuery 调用统一链查询能力。
-func (s *Service) chainQueryContract(ctx context.Context, req contracts.SandboxChainQueryRequest) (map[string]any, error) {
+func (s *Service) ChainQuery(ctx context.Context, req contracts.SandboxChainQueryRequest) (map[string]any, error) {
 	if req.TenantID <= 0 || req.SandboxID <= 0 || strings.TrimSpace(req.RuntimeInstance) == "" || req.Target == "" || !validSourceRef(req.SourceRef) {
 		return nil, apperr.ErrSandboxContractRequestInvalid
 	}
-	sb, runtime, cap, err := s.chainCapability(ctx, req.TenantID, req.SandboxID, req.SourceRef, req.RuntimeInstance)
-	if err != nil {
-		return nil, err
-	}
-	if err := ensureRuntimeAction(runtime, ChainOperationQuery); err != nil {
-		return nil, err
-	}
-	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
-		return nil, err
-	}
-	out, err := cap.Query(ctx, sb, runtime, req.Target)
-	if err != nil {
-		return nil, apperr.ErrSandboxChainFailed.WithCause(err)
-	}
-	return out, nil
-}
-
-// ChainReset 调用统一链重置能力。
-func (s *Service) chainResetContract(ctx context.Context, req contracts.SandboxChainResetRequest) error {
-	if req.TenantID <= 0 || req.SandboxID <= 0 || strings.TrimSpace(req.RuntimeInstance) == "" || !validSourceRef(req.SourceRef) {
-		return apperr.ErrSandboxContractRequestInvalid
-	}
-	return s.withSandboxChainLock(ctx, req.TenantID, req.SandboxID, func() error {
-		sb, runtime, cap, err := s.chainCapability(ctx, req.TenantID, req.SandboxID, req.SourceRef, req.RuntimeInstance)
+	var out map[string]any
+	err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
+		sb, runtime, cap, err := s.chainCapability(ctx, tx, req.TenantID, req.SandboxID, req.SourceRef, req.RuntimeInstance)
 		if err != nil {
 			return err
 		}
-		if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		if err := ensureRuntimeAction(runtime, ChainOperationQuery); err != nil {
 			return err
 		}
+		if err := markSandboxExecutionActiveTx(ctx, tx, sb); err != nil {
+			return err
+		}
+		out, err = cap.Query(ctx, sb, runtime, req.Target)
+		if err != nil {
+			return apperr.ErrSandboxChainFailed.WithCause(err)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// ChainReset 调用统一链重置能力。
+func (s *Service) ChainReset(ctx context.Context, req contracts.SandboxChainResetRequest) error {
+	if req.TenantID <= 0 || req.SandboxID <= 0 || strings.TrimSpace(req.RuntimeInstance) == "" || !validSourceRef(req.SourceRef) {
+		return apperr.ErrSandboxContractRequestInvalid
+	}
+	return s.withSandboxChainLock(ctx, req.TenantID, req.SandboxID, func(ctx context.Context, tx TxStore) error {
+		sb, runtime, cap, err := s.chainCapability(ctx, tx, req.TenantID, req.SandboxID, req.SourceRef, req.RuntimeInstance)
+		if err != nil {
+			return err
+		}
+		instance := strings.TrimSpace(req.RuntimeInstance)
+		plan := CreateSandboxPlan{Sandbox: sb, Runtimes: []RuntimePlan{{InstanceCode: instance, Runtime: runtime}}}
 		if strings.TrimSpace(runtime.AdapterSpec.CapabilityCommands.ResetStrategy) == "recreate_runtime" {
-			plan, planErr := s.planForExistingSandbox(ctx, sb)
-			if planErr != nil {
-				return planErr
+			var snapshot contracts.SandboxCompositionSnapshot
+			snapshot, err = verifiedCompositionSnapshot(sb)
+			if err != nil {
+				return apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
 			}
-			if err := s.orchestrator.ResetSandboxRuntime(ctx, plan); err != nil {
-				return apperr.ErrSandboxChainFailed.WithCause(err)
+			plan, err = s.loadPreparedSnapshotPlan(ctx, tx, snapshot)
+			if err != nil {
+				return err
 			}
-			return nil
+			plan.Sandbox = sb
 		}
-		if len(runtime.AdapterSpec.CapabilityCommands.Reset.Command) == 0 {
-			return apperr.ErrSandboxCapabilityUnavailable
+		if err := markSandboxExecutionActiveTx(ctx, tx, sb); err != nil {
+			return err
 		}
-		if err := cap.Reset(ctx, sb, runtime); err != nil {
+		if err := s.resetRuntimeForPlan(ctx, plan, instance, cap); err != nil {
 			return apperr.ErrSandboxChainFailed.WithCause(err)
 		}
 		return nil
@@ -167,12 +142,12 @@ func (s *Service) chainResetContract(ctx context.Context, req contracts.SandboxC
 }
 
 // withSandboxChainLock 持有数据库事务级 advisory lock,覆盖真实插件调用的整个生命周期。
-func (s *Service) withSandboxChainLock(ctx context.Context, tenantID, sandboxID int64, fn func() error) error {
+func (s *Service) withSandboxChainLock(ctx context.Context, tenantID, sandboxID int64, fn func(context.Context, TxStore) error) error {
 	return s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		if err := tx.LockSandboxChain(ctx, tenantID, sandboxID); err != nil {
 			return apperr.ErrSandboxChainFailed.WithCause(err)
 		}
-		return fn()
+		return fn(ctx, tx)
 	})
 }
 
@@ -181,16 +156,20 @@ func (s *Service) ChainDeployForOwner(ctx context.Context, tenantID, accountID, 
 	if tenantID <= 0 || accountID <= 0 || sandboxID <= 0 || strings.TrimSpace(runtimeInstance) == "" || len(payload) == 0 {
 		return nil, apperr.ErrSandboxDeployRequestInvalid
 	}
+	if _, err := s.sandboxForOwner(ctx, tenantID, accountID, sandboxID); err != nil {
+		return nil, err
+	}
+
 	var out map[string]any
-	err := s.withSandboxChainLock(ctx, tenantID, sandboxID, func() error {
-		sb, runtime, cap, err := s.chainCapabilityForOwner(ctx, tenantID, accountID, sandboxID, runtimeInstance)
+	err := s.withSandboxChainLock(ctx, tenantID, sandboxID, func(ctx context.Context, tx TxStore) error {
+		sb, runtime, cap, err := s.chainCapabilityForOwner(ctx, tx, tenantID, accountID, sandboxID, runtimeInstance)
 		if err != nil {
 			return err
 		}
 		if err := ensureRuntimeAction(runtime, ChainOperationDeploy); err != nil {
 			return err
 		}
-		if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		if err := markSandboxExecutionActiveTx(ctx, tx, sb); err != nil {
 			return err
 		}
 		out, err = cap.Deploy(ctx, sb, runtime, payload)
@@ -207,16 +186,20 @@ func (s *Service) ChainSendTxForOwner(ctx context.Context, tenantID, accountID, 
 	if tenantID <= 0 || accountID <= 0 || sandboxID <= 0 || strings.TrimSpace(runtimeInstance) == "" || len(payload) == 0 {
 		return nil, apperr.ErrSandboxTxRequestInvalid
 	}
+	if _, err := s.sandboxForOwner(ctx, tenantID, accountID, sandboxID); err != nil {
+		return nil, err
+	}
+
 	var out map[string]any
-	err := s.withSandboxChainLock(ctx, tenantID, sandboxID, func() error {
-		sb, runtime, cap, err := s.chainCapabilityForOwner(ctx, tenantID, accountID, sandboxID, runtimeInstance)
+	err := s.withSandboxChainLock(ctx, tenantID, sandboxID, func(ctx context.Context, tx TxStore) error {
+		sb, runtime, cap, err := s.chainCapabilityForOwner(ctx, tx, tenantID, accountID, sandboxID, runtimeInstance)
 		if err != nil {
 			return err
 		}
 		if err := ensureRuntimeAction(runtime, ChainOperationTransaction); err != nil {
 			return err
 		}
-		if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		if err := markSandboxExecutionActiveTx(ctx, tx, sb); err != nil {
 			return err
 		}
 		out, err = cap.SendTx(ctx, sb, runtime, payload)
@@ -233,28 +216,36 @@ func (s *Service) ChainQueryForOwner(ctx context.Context, tenantID, accountID, s
 	if tenantID <= 0 || accountID <= 0 || sandboxID <= 0 || strings.TrimSpace(runtimeInstance) == "" || target == "" {
 		return nil, apperr.ErrSandboxContractRequestInvalid
 	}
-	sb, runtime, cap, err := s.chainCapabilityForOwner(ctx, tenantID, accountID, sandboxID, runtimeInstance)
-	if err != nil {
+	if _, err := s.sandboxForOwner(ctx, tenantID, accountID, sandboxID); err != nil {
 		return nil, err
 	}
-	if err := ensureRuntimeAction(runtime, ChainOperationQuery); err != nil {
-		return nil, err
-	}
-	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
-		return nil, err
-	}
-	out, err := cap.Query(ctx, sb, runtime, target)
-	if err != nil {
-		return nil, apperr.ErrSandboxChainFailed.WithCause(err)
-	}
-	return out, nil
+
+	var out map[string]any
+	err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		sb, runtime, cap, err := s.chainCapabilityForOwner(ctx, tx, tenantID, accountID, sandboxID, runtimeInstance)
+		if err != nil {
+			return err
+		}
+		if err := ensureRuntimeAction(runtime, ChainOperationQuery); err != nil {
+			return err
+		}
+		if err := markSandboxExecutionActiveTx(ctx, tx, sb); err != nil {
+			return err
+		}
+		out, err = cap.Query(ctx, sb, runtime, target)
+		if err != nil {
+			return apperr.ErrSandboxChainFailed.WithCause(err)
+		}
+		return nil
+	})
+	return out, err
 }
 
 // chainCapability 查询沙箱运行时并解析 L2 能力实现器。
-func (s *Service) chainCapability(ctx context.Context, tenantID, sandboxID int64, sourceRef, runtimeInstance string) (Sandbox, Runtime, ChainCapability, error) {
-	sb, _, err := s.sandboxRuntime(ctx, tenantID, sandboxID)
+func (s *Service) chainCapability(ctx context.Context, tx TxStore, tenantID, sandboxID int64, sourceRef, runtimeInstance string) (Sandbox, Runtime, ChainCapability, error) {
+	sb, err := tx.GetSandbox(ctx, tenantID, sandboxID)
 	if err != nil {
-		return Sandbox{}, Runtime{}, nil, err
+		return Sandbox{}, Runtime{}, nil, apperr.ErrSandboxNotFound.WithCause(err)
 	}
 	if sb.SourceRef != strings.TrimSpace(sourceRef) {
 		return Sandbox{}, Runtime{}, nil, apperr.ErrSandboxOwnershipInvalid
@@ -262,7 +253,7 @@ func (s *Service) chainCapability(ctx context.Context, tenantID, sandboxID int64
 	if !sandboxExecAllowed(sb) {
 		return Sandbox{}, Runtime{}, nil, apperr.ErrSandboxStateInvalid
 	}
-	runtime, err := s.runtimeForSandboxInstance(ctx, sb, runtimeInstance)
+	runtime, err := s.runtimeForSandboxInstance(ctx, tx, sb, runtimeInstance)
 	if err != nil {
 		return Sandbox{}, Runtime{}, nil, err
 	}
@@ -274,15 +265,18 @@ func (s *Service) chainCapability(ctx context.Context, tenantID, sandboxID int64
 }
 
 // chainCapabilityForOwner 查询用户自己的沙箱运行时并解析 L2 能力实现器。
-func (s *Service) chainCapabilityForOwner(ctx context.Context, tenantID, accountID, sandboxID int64, runtimeInstance string) (Sandbox, Runtime, ChainCapability, error) {
-	sb, _, err := s.sandboxRuntimeForOwner(ctx, tenantID, accountID, sandboxID)
+func (s *Service) chainCapabilityForOwner(ctx context.Context, tx TxStore, tenantID, accountID, sandboxID int64, runtimeInstance string) (Sandbox, Runtime, ChainCapability, error) {
+	sb, err := tx.GetSandbox(ctx, tenantID, sandboxID)
 	if err != nil {
-		return Sandbox{}, Runtime{}, nil, err
+		return Sandbox{}, Runtime{}, nil, apperr.ErrSandboxNotFound.WithCause(err)
+	}
+	if !sandboxAccountAuthorized(sb, accountID) {
+		return Sandbox{}, Runtime{}, nil, apperr.ErrSandboxOwnershipInvalid
 	}
 	if !sandboxExecAllowed(sb) {
 		return Sandbox{}, Runtime{}, nil, apperr.ErrSandboxStateInvalid
 	}
-	runtime, err := s.runtimeForSandboxInstance(ctx, sb, runtimeInstance)
+	runtime, err := s.runtimeForSandboxInstance(ctx, tx, sb, runtimeInstance)
 	if err != nil {
 		return Sandbox{}, Runtime{}, nil, err
 	}
@@ -295,23 +289,24 @@ func (s *Service) chainCapabilityForOwner(ctx context.Context, tenantID, account
 
 // markSandboxExecutionActive 记录链能力调用活跃度,并把 ready/idle 沙箱切回 running。
 func (s *Service) markSandboxExecutionActive(ctx context.Context, sb Sandbox) error {
+	return s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
+		return markSandboxExecutionActiveTx(ctx, tx, sb)
+	})
+}
+
+func markSandboxExecutionActiveTx(ctx context.Context, tx TxStore, sb Sandbox) error {
 	if !sandboxExecAllowed(sb) {
 		return apperr.ErrSandboxStateInvalid
 	}
-	return s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
-		if _, err := tx.MarkSandboxActive(ctx, sb.TenantID, sb.ID); err != nil {
-			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
-		}
-		return nil
-	})
+	if _, err := tx.MarkSandboxActive(ctx, sb.TenantID, sb.ID); err != nil {
+		return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+	}
+	return nil
 }
 
 // resolveCapability 只从服务端注册表解析 L2/L3 能力,禁止按 plugin_ref 动态加载任意代码。
 func (s *Service) resolveCapability(runtime Runtime) (ChainCapability, error) {
-	key := strings.TrimSpace(runtime.CapabilityImpl)
-	if runtime.AdapterLevel == RuntimeAdapterLevelPlugin {
-		key = strings.TrimSpace(runtime.PluginRef)
-	}
+	key := runtimeCapabilityKey(runtime.AdapterLevel, runtime.CapabilityImpl, runtime.PluginRef)
 	if key == "" {
 		return nil, apperr.ErrSandboxCapabilityUnavailable
 	}
@@ -320,6 +315,13 @@ func (s *Service) resolveCapability(runtime Runtime) (ChainCapability, error) {
 		return nil, apperr.ErrSandboxCapabilityUnavailable
 	}
 	return cap, nil
+}
+
+func runtimeCapabilityKey(level int16, implementation, plugin string) string {
+	if level == RuntimeAdapterLevelPlugin {
+		return strings.TrimSpace(plugin)
+	}
+	return strings.TrimSpace(implementation)
 }
 
 // ensureRuntimeAction enforces the runtime's declared native action boundary before invoking a capability.

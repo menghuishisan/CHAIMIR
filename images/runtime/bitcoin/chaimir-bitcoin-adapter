@@ -83,34 +83,39 @@ send_raw_and_confirm() {
   printf '%s' "$txid"
 }
 
-ensure_wallet
-ensure_funds
+case "$action" in
+  deploy|tx|query) ;;
+  *) fail "unknown chain action" 64 ;;
+esac
+
+# 先验证整份载荷，错误输入不能触发钱包准备或链状态修改。
+payload="$(jq -ces 'if length == 1 and (.[0] | type) == "object" then .[0] else error("payload must be one object") end')" || fail "chain payload must be one JSON object" 22
 case "$action" in
   deploy)
-    payload="$(cat)"; [ -n "$payload" ] || payload='{}'
-    data="$(printf '%s' "$payload" | jq -r '.data // empty')"
-    [ -n "$data" ] || fail "deploy payload requires data" 22
+    data="$(printf '%s' "$payload" | jq -er '.data | select(type == "string" and length > 0)')" || fail "deploy payload requires text data" 22
     hex="$(encode_payload "$data")"
     outputs="$(jq -cn --arg data "$hex" '{data:$data}')"
+    ensure_wallet
+    ensure_funds
     raw="$(wallet_cli createrawtransaction '[]' "$outputs")" || fail "无法创建 OP_RETURN 交易" 70
     txid="$(send_raw_and_confirm "$raw")"
     jq -cn --arg txid "$txid" --arg data "$hex" '{txid:$txid,op_return_hex:$data,confirmed:true}'
     ;;
   tx)
-    payload="$(cat)"; [ -n "$payload" ] || payload='{}'
-    to="$(printf '%s' "$payload" | jq -r '.to // empty')"
-    [ -n "$to" ] || to="$(wallet_cli getnewaddress "" legacy)"
+    to="$(printf '%s' "$payload" | jq -er 'if has("to") then .to | select(type == "string") else "" end')" || fail "tx destination must be text" 22
     amount="$(printf '%s' "$payload" | jq -r '.amount // empty')"
     [ -n "$amount" ] || fail "tx payload requires amount" 22
     printf '%s' "$amount" | grep -Eq '^[0-9]+(\.[0-9]{1,8})?$' || fail "Bitcoin amount 格式不正确" 22
+    printf '%s' "$amount" | jq -e 'tonumber > 0' >/dev/null || fail "Bitcoin amount must be positive" 22
+    ensure_wallet
+    ensure_funds
+    [ -n "$to" ] || to="$(wallet_cli getnewaddress "" legacy)"
     txid="$(wallet_cli sendtoaddress "$to" "$amount")" || fail "无法发送 Bitcoin regtest 交易" 70
     mine_confirmations 1
     jq -cn --arg txid "$txid" --arg to "$to" --arg amount "$amount" '{txid:$txid,to:$to,amount:$amount,confirmed:true}'
     ;;
   query)
-    payload="$(cat)"; [ -n "$payload" ] || payload='{}'
-    target="$(printf '%s' "$payload" | jq -r '.target // empty')"
-    [ -n "$target" ] || fail "query target is required" 22
+    target="$(printf '%s' "$payload" | jq -er '.target | select(type == "string" and length > 0)')" || fail "query target is required" 22
     case "$target" in
       chain)
         cli getblockchaininfo | jq '{chain,blocks,best_block_hash:.bestblockhash}'
@@ -119,10 +124,11 @@ case "$action" in
         wallet_cli getbalances | jq '{mine:.mine}'
         ;;
       tx:*)
-        cli getrawtransaction "${target#tx:}" true
+        txid="${target#tx:}"
+        printf '%s' "$txid" | grep -Eq '^[0-9a-fA-F]{64}$' || fail "transaction identifier must be 64 hexadecimal digits" 22
+        cli getrawtransaction "$txid" true
         ;;
       *) fail "unsupported query target" 22 ;;
     esac
     ;;
-  *) fail "unknown chain action" 64 ;;
 esac

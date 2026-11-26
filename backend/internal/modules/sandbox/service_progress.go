@@ -1,4 +1,3 @@
-// sandbox service_progress 文件实现沙箱启动进度的统一 WebSocket 推送编排。
 package sandbox
 
 import (
@@ -12,7 +11,6 @@ import (
 	"chaimir/pkg/logging"
 )
 
-// progressTopic 生成租户内单沙箱进度主题,确保不同租户和沙箱不会串线。
 func progressTopic(tenantID, sandboxID int64) string {
 	return "tenant:" + ids.Format(tenantID) + ":sandbox:" + ids.Format(sandboxID) + ":progress"
 }
@@ -39,12 +37,15 @@ func (s *Service) broadcastProgress(ctx context.Context, tenantID, sandboxID int
 	}
 }
 
-// progressFromState 把内部状态转换为用户可理解的阶段文案,不暴露 Pod、Namespace 或镜像错误。
 func progressFromState(phase, status int16, traceID string) ProgressMessage {
-	if status == SandboxStatusFailed {
+	switch status {
+	case SandboxStatusFailed:
 		return ProgressMessage{Phase: phase, Status: status, Stage: SandboxProgressStageFailed, Message: "实验环境准备失败,请稍后重试", TraceID: traceID}
-	}
-	if status == SandboxStatusRecycling || status == SandboxStatusDestroyed {
+	case SandboxStatusPaused:
+		return ProgressMessage{Phase: phase, Status: status, Stage: SandboxProgressStagePaused, Message: "实验环境已暂停，恢复后可继续"}
+	case SandboxStatusDestroyed:
+		return ProgressMessage{Phase: phase, Status: status, Stage: SandboxProgressStageDestroyed, Message: "实验环境已释放"}
+	case SandboxStatusRecycling:
 		return ProgressMessage{Phase: phase, Status: status, Stage: SandboxProgressStageRecycling, Message: "实验环境正在释放"}
 	}
 	switch phase {

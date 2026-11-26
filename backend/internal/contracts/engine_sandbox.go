@@ -4,12 +4,30 @@ package contracts
 import (
 	"context"
 	"io"
+	"net/url"
+
+	"chaimir/pkg/terminal"
 )
 
 const (
 	// SandboxPrivateDomainJudge 表示 M3 注入隐藏测试与评分脚本的私有卷域名称。
 	SandboxPrivateDomainJudge = "judge-private"
 )
+
+// SandboxCompositionClonePlan 保留镜像闭包，返回改写素材后的快照和本次对象补偿。
+// 准备失败也可能已复制对象，调用方必须在未尝试提交时调用 Discard。
+type SandboxCompositionClonePlan struct {
+	Snapshot      SandboxCompositionSnapshot
+	InitCodeRef   string
+	InitScriptRef string
+	Save          func(context.Context) error
+	Discard       func(context.Context) error
+}
+
+// SandboxCompositionCloneService 仅供已授权课程的 M7 复制登记过的环境快照。
+type SandboxCompositionCloneService interface {
+	PrepareCompositionClone(ctx context.Context, sourceTenantID int64, snapshot SandboxCompositionSnapshot, initCodeRef, initScriptRef string) (SandboxCompositionClonePlan, error)
+}
 
 const (
 	// SandboxPhaseAllocating 表示沙箱处于资源分配阶段。
@@ -73,8 +91,6 @@ type SandboxCreateRequest struct {
 	SnapshotEnabled          bool                       `json:"snapshot_enabled"`
 	KeepAliveMinutes         int32                      `json:"keep_alive_minutes"`
 	SnapshotRetentionMinutes int32                      `json:"snapshot_retention_minutes"`
-	// PrivateSidecars 仅供服务端内部判题等场景挂载非学生可访问执行容器。
-	PrivateSidecars []SandboxPrivateSidecarSpec `json:"private_sidecars,omitempty"`
 }
 
 // SandboxEnvVarSpec 描述内部私有执行容器允许注入的非敏感字面量环境变量。
@@ -123,10 +139,10 @@ type SandboxToolAccess struct {
 
 // SandboxCapabilities 是后端按实际运行时和已注册实现计算出的前端工作台能力。
 type SandboxCapabilities struct {
-	FileWorkspace   bool     `json:"file_workspace"`
-	Terminal        bool     `json:"terminal"`
-	CommandTools    bool     `json:"command_tools"`
-	ChainOperations []string `json:"chain_operations"`
+	FileWorkspace   bool                `json:"file_workspace"`
+	Terminal        bool                `json:"terminal"`
+	CommandTools    bool                `json:"command_tools"`
+	ChainOperations map[string][]string `json:"chain_operations"`
 }
 
 // SandboxResourceUsage 是单个沙箱实时用量和已申请资源摘要,用于状态查询和配额可视化。
@@ -143,22 +159,24 @@ type SandboxResourceUsage struct {
 // SandboxInfo 是跨模块传递给服务端调用方的沙箱摘要。
 // Namespace 仅允许调用方用于服务端内部资源归属校验和补偿排障,不得透传给前端工作台响应。
 type SandboxInfo struct {
-	SandboxID           int64                 `json:"sandbox_id"`
-	TenantID            int64                 `json:"tenant_id"`
-	Namespace           string                `json:"namespace"`
-	SourceRef           string                `json:"source_ref"`
-	ScopeRef            string                `json:"scope_ref"`
-	CompositionDigest   string                `json:"composition_digest"`
-	OwnerAccountID      int64                 `json:"owner_account_id"`
-	RuntimeCode         string                `json:"runtime_code"`
-	RuntimeImageVersion string                `json:"runtime_image_version"`
-	RuntimeInstances    []string              `json:"runtime_instances"`
-	Phase               int16                 `json:"phase"`
-	Status              int16                 `json:"status"`
-	ToolAccess          []SandboxToolAccess   `json:"tool_access"`
-	Capabilities        SandboxCapabilities   `json:"capabilities"`
-	ResourceUsage       *SandboxResourceUsage `json:"resource_usage"`
-	WorkspaceRevision   int64                 `json:"workspace_revision"`
+	SandboxID                int64                 `json:"sandbox_id"`
+	TenantID                 int64                 `json:"tenant_id"`
+	Namespace                string                `json:"namespace"`
+	SourceRef                string                `json:"source_ref"`
+	ScopeRef                 string                `json:"scope_ref"`
+	CompositionDigest        string                `json:"composition_digest"`
+	AccessProfile            SandboxAccessProfile  `json:"access_profile"`
+	OwnerAccountID           int64                 `json:"owner_account_id"`
+	RuntimeCode              string                `json:"runtime_code"`
+	RuntimeImageVersion      string                `json:"runtime_image_version"`
+	RuntimeInstances         []string              `json:"runtime_instances"`
+	WorkspaceRuntimeInstance string                `json:"workspace_runtime_instance"`
+	Phase                    int16                 `json:"phase"`
+	Status                   int16                 `json:"status"`
+	ToolAccess               []SandboxToolAccess   `json:"tool_access"`
+	Capabilities             SandboxCapabilities   `json:"capabilities"`
+	ResourceUsage            *SandboxResourceUsage `json:"resource_usage"`
+	WorkspaceRevision        int64                 `json:"workspace_revision"`
 }
 
 // SandboxAccessPrincipal 是 M8 等业务网关经自身授权表核验后传给 M2 的受控访问主体。
@@ -250,11 +268,6 @@ type SandboxProgressMessage struct {
 	Stage   string `json:"stage"`
 	Message string `json:"message"`
 	TraceID string `json:"trace_id,omitempty"`
-}
-
-// SandboxToolProxyTarget 是 M8 浏览器工具代理所需的内部 Service 目标。
-type SandboxToolProxyTarget struct {
-	TargetURL string `json:"target_url"`
 }
 
 // SandboxFileWriteRequest 是内部服务写入沙箱工作区文件的请求。
@@ -408,11 +421,11 @@ type SandboxService interface {
 	CompilePlatformSandboxComposition(ctx context.Context, spec SandboxCompositionSpec) (SandboxCompositionSnapshot, error)
 	// ReplacePlatformSandboxCompositionSnapshot 用最终私有组合快照替换编译过程产生的基础快照。
 	ReplacePlatformSandboxCompositionSnapshot(ctx context.Context, previousDigests []string, snapshot SandboxCompositionSnapshot) error
-	// PrepullPlatformComposition 按最终组合快照的全部 runtime 镜像闭包执行真实预拉取。
-	PrepullPlatformComposition(ctx context.Context, compositionDigest string) error
+	// PrepareCompositions 为冻结组合摘要准备完整镜像闭包,供发布、预验证和判题启动前共用。
+	PrepareCompositions(ctx context.Context, compositionDigests []string) error
 	// ValidateSandboxTemplate 校验业务模块保存/发布的沙箱模板能解析到可调度运行时、镜像和工具,但不创建资源。
 	ValidateSandboxTemplate(ctx context.Context, req SandboxCreateRequest) error
-	// CreateSandbox 创建沙箱并返回控制面摘要,实际启动过程异步推进。
+	// CreateSandbox 提交创建事务后返回含编号与冻结能力的受理快照，启动异步推进；重复请求返回已有沙箱当前状态。
 	CreateSandbox(ctx context.Context, req SandboxCreateRequest) (SandboxInfo, error)
 	// GetSandbox 查询单个沙箱当前状态与工具接入信息。
 	GetSandbox(ctx context.Context, tenantID, sandboxID int64) (SandboxInfo, error)
@@ -426,9 +439,9 @@ type SandboxService interface {
 	SaveSandboxFilesForPrincipal(ctx context.Context, access SandboxPrincipalRequest) (SandboxWorkspaceSave, error)
 	RunCommandToolForPrincipal(ctx context.Context, req SandboxCommandToolRequest) (SandboxCommandToolResult, error)
 	TerminalTargetForPrincipal(ctx context.Context, access SandboxPrincipalRequest, container string) (SandboxTerminalTarget, error)
-	AttachSandboxTerminal(ctx context.Context, access SandboxPrincipalRequest, target SandboxTerminalTarget, stdin io.Reader, stdout io.Writer) error
+	AttachSandboxTerminal(ctx context.Context, access SandboxPrincipalRequest, target SandboxTerminalTarget, stdin io.Reader, stdout io.Writer, sizes terminal.SizeQueue) error
 	ProgressSubscriptionForPrincipal(ctx context.Context, access SandboxPrincipalRequest) (string, SandboxProgressMessage, error)
-	ToolProxyTargetForPrincipal(ctx context.Context, access SandboxPrincipalRequest, toolCode string) (SandboxToolProxyTarget, error)
+	ToolProxyTargetForPrincipal(ctx context.Context, access SandboxPrincipalRequest, toolCode, proxyPath string) (*url.URL, error)
 	ObserveSandboxToolAccess(ctx context.Context, access SandboxPrincipalRequest) error
 	ChainDeployForPrincipal(ctx context.Context, access SandboxPrincipalRequest, runtimeInstance string, payload map[string]any) (map[string]any, error)
 	ChainSendTxForPrincipal(ctx context.Context, access SandboxPrincipalRequest, runtimeInstance string, payload map[string]any) (map[string]any, error)

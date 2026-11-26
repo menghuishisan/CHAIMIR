@@ -335,4 +335,10 @@ ORDER BY created_at DESC, id DESC;
 SELECT id, tenant_id, source_ref, problem_ref, submitter_id, submitter_tenant_id, code_hash, sim_vector, created_at
 FROM submission_fingerprint
 WHERE tenant_id = $1 AND problem_ref = $2 AND ($3::text = '' OR source_ref <> $3)
+  AND source_ref = ANY(sqlc.arg(source_refs)::text[])
 ORDER BY created_at DESC, id DESC;
+
+-- name: ReadJudgeAlertMetrics :one
+SELECT (SELECT count(*)::bigint FROM judge_task WHERE status=1) AS queue_length,
+ (SELECT COALESCE(count(*) FILTER (WHERE status=4)::float8 / NULLIF(count(*),0),0)::float8
+  FROM judge_task WHERE status IN (3,4) AND updated_at BETWEEN sqlc.arg(window_from)::timestamptz AND sqlc.arg(observed_at)::timestamptz) AS failed_rate;

@@ -140,6 +140,7 @@
   post:
     tags: [sim]
     summary: 上报仿真操作
+    description: 仅浏览器运行会话可上报已执行动作，按连续序号和不递减时刻保存；隔离会话由服务端执行后登记，本接口拒绝写入。
     operationId: simReportAction
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
@@ -150,6 +151,7 @@
   get:
     tags: [sim]
     summary: 读取仿真回放
+    description: 返回固定包版本、种子、初始参数、操作序列及从会话状态派生的 read_only；已归档只能只读回放。
     operationId: simGetReplay
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
@@ -168,20 +170,10 @@
   get:
     tags: [sim]
     summary: 后端计算仿真流 WebSocket
+    description: 可用会话执行受控命令；已归档会话仅复现记录，拒绝 event 注入。服务端帧携带权威 read_only，临时隔离环境随连接回收。
     operationId: simStreamSession
     x-chaimir-audience: user
     x-chaimir-websocket: true
     security: [{ wsTicketAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "101": { description: WebSocket 升级成功 }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/sim/internal/sessions/{id}/checkpoints:
-  post:
-    tags: [sim]
-    summary: 上报仿真检查点
-    operationId: simReportCheckpoint
-    x-chaimir-audience: internal
-    x-chaimir-internal: true
-    security: [{ serviceAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

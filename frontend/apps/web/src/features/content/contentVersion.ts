@@ -1,6 +1,4 @@
-// contentVersion.ts 题目版本号工具:已发布题目「建新版本并编辑」时自动取下一个空闲版本号。
-// 已发布版本不可变(后端 UpdateDraftItem 只改草稿),所以改题 = 复制出新版本草稿再改。
-// 纯函数,供 node:test 直接运行:不得使用 enum,也不得在运行时导入 @chaimir/*。
+// 为题目新版本计算未占用的修订号。
 
 /**
  * nextFreeVersion 从 current 的修订位加一开始,找第一个不在 existing 里的版本号;
@@ -9,9 +7,10 @@
 export function nextFreeVersion(current: string, existing: readonly string[]): string {
   const taken = new Set(existing)
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(current)
-  const [major, minor, patch] = match ? [match[1], match[2], Number(match[3])] : ['1', '0', 0]
-  for (let next = patch + 1; ; next += 1) {
-    const candidate = `${major}.${minor}.${next}`
+  const prefix = match ? `${match[1]}.${match[2]}` : '1.0'
+  // 大修订号也必须每次前进，避免浮点精度使候选值不变。
+  for (let next = match ? BigInt(match[3]) + 1n : 1n; ; next += 1n) {
+    const candidate = `${prefix}.${next}`
     if (!taken.has(candidate)) return candidate
   }
 }

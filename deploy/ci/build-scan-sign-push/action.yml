@@ -18,8 +18,12 @@ inputs:
   dockerfile:
     description: Dockerfile 路径
     required: true
-  build-args:
-    description: 逐行传入 docker build 的构建参数,格式为 KEY=VALUE
+  candidate-locks:
+    description: 当前批次上游镜像的 digest 锁片段目录
+    required: false
+    default: ""
+  required-candidates:
+    description: 必须由当前批次提供的直接依赖，逻辑镜像名以空格分隔
     required: false
     default: ""
   registry:
@@ -42,9 +46,6 @@ outputs:
   digest:
     description: 推送到 Harbor 后解析出的不可变镜像 digest
     value: ${{ steps.digest.outputs.digest }}
-  digest_ref:
-    description: 生产部署与离线拉取使用的 image@digest 引用
-    value: ${{ steps.digest.outputs.digest_ref }}
 
 runs:
   using: composite
@@ -77,6 +78,38 @@ runs:
           exit 1
         fi
 
+    - id: image-inputs
+      name: 解析不可变镜像构建参数
+      shell: pwsh
+      env:
+        IMAGE: ${{ inputs.image }}
+        REGISTRY: ${{ inputs.registry }}
+        DOCKERFILE: ${{ inputs.dockerfile }}
+        CANDIDATE_LOCKS: ${{ inputs.candidate-locks }}
+        REQUIRED_CANDIDATES: ${{ inputs.required-candidates }}
+      run: |
+        Import-Module ./images/lib/ImageMetadata.psm1
+        $prefix = "$env:REGISTRY/"
+        if (-not $env:IMAGE.StartsWith($prefix, [StringComparison]::Ordinal)) { throw '镜像必须发布到配置的 Harbor' }
+        $logical = $env:IMAGE.Substring($prefix.Length)
+        if ($logical -cnotmatch '^[a-z0-9-]+/[a-z0-9-]+$') { throw "无效的逻辑镜像名: $logical" }
+        $lock = Read-ChaimirDigestLock -Path ./images/image-digests.lock -Required
+        $candidate = if ($env:CANDIDATE_LOCKS) { Read-ChaimirDigestFragments -Directory $env:CANDIDATE_LOCKS } else { @{} }
+        foreach ($image in ($env:REQUIRED_CANDIDATES -split ' ')) {
+            if ($image -and -not $candidate.ContainsKey($image)) { throw "当前构建缺少上游镜像的候选 digest: $image" }
+        }
+        foreach ($image in $candidate.Keys) { $lock[$image] = $candidate[$image] }
+        $dockerfileText = Get-Content -LiteralPath $env:DOCKERFILE -Raw
+        $sources = Get-ChaimirImageBuildSources -ManifestPath "./images/$logical/manifest.yaml" -DockerfileText $dockerfileText
+        $resolved = Resolve-ChaimirImageBuildArguments -Sources $sources -Registry $env:REGISTRY -DigestLock $lock
+        if ($logical -eq 'service/frontend') {
+            $frontend = Get-ChaimirFrontendBuildArguments -Path ./frontend/.env.example -DockerfileText $dockerfileText
+            foreach ($key in $frontend.Keys) { $resolved[$key] = $frontend[$key] }
+        }
+        $lines = @(foreach ($key in $resolved.Keys) { "$key=$($resolved[$key])" })
+        $delimiter = [guid]::NewGuid().ToString('N')
+        @("args<<$delimiter") + @($lines | Where-Object { $_ }) + @($delimiter) >> $env:GITHUB_OUTPUT
+
     - name: 登录 Harbor
       shell: bash
       env:
@@ -90,7 +123,7 @@ runs:
     - name: 多阶段构建镜像
       shell: bash
       env:
-        BUILD_ARGS: ${{ inputs.build-args }}
+        BUILD_ARGS: ${{ steps.image-inputs.outputs.args }}
       run: |
         build_args=()
         while IFS= read -r build_arg; do

@@ -1,4 +1,4 @@
-// timex 统一平台时间边界处理,确保写库、事件和 API 机器时间都使用 UTC。
+// Package timex 统一平台的 UTC 时间和日期格式。
 package timex
 
 import (
@@ -17,9 +17,6 @@ func Now() time.Time {
 
 // UTC 将有效时间归一到 UTC;零值保持零值,避免破坏可选字段语义。
 func UTC(t time.Time) time.Time {
-	if t.IsZero() {
-		return time.Time{}
-	}
 	return t.UTC()
 }
 

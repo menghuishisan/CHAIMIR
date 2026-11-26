@@ -51,7 +51,7 @@ try {
     & kubectl --context $Context --request-timeout=30s apply -f $namespacePath | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "创建密钥源命名空间失败" }
 } finally {
-    if (Test-Path -LiteralPath $namespacePath) { Remove-Item -LiteralPath $namespacePath -Force }
+    if (Test-Path -LiteralPath $namespacePath) { Remove-Item -LiteralPath $namespacePath }
 }
 # Kubernetes CLI 不允许 --from-env-file 与 --from-file 混用;统一构造一个
 # Secret data 映射,只发布契约文件声明的键,避免旧的契约外值进入集群。
@@ -74,6 +74,6 @@ try {
     & kubectl --context $Context --request-timeout=30s apply -f $secretManifestPath | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "更新密钥源失败" }
 } finally {
-    if (Test-Path -LiteralPath $secretManifestPath) { Remove-Item -LiteralPath $secretManifestPath -Force }
+    if (Test-Path -LiteralPath $secretManifestPath) { Remove-Item -LiteralPath $secretManifestPath }
 }
 Write-Output "密钥源已更新;敏感值未输出"

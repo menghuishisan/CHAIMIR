@@ -9,7 +9,7 @@ import { Link, useNavigate } from 'react-router'
 import { ShieldCheck } from 'lucide-react'
 import { Icon } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { loginEntryPath, persistLoginTokens } from '../../../../utils/authSession'
+import { completeLogin } from '../../../../utils/authSession'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { passwordRequiredError, requiredError } from '../../authForm'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
@@ -23,8 +23,7 @@ import {
 } from '../../components/AuthUI'
 
 /**
- * PlatformLoginPage 渲染账号密码表单并在成功后进入平台管理首个功能页。
- * 落点由服务端返回的角色决定(不接受任何客户端传入角色),改密要求同样由服务端裁决。
+ * PlatformLoginPage 使用平台账号认证，落点与必要改密由统一会话能力决定。
  */
 export default function PlatformLoginPage() {
   const navigate = useNavigate()
@@ -48,8 +47,7 @@ export default function PlatformLoginPage() {
       setFormError(null)
       try {
         const response = await api.identity.loginPlatform({ username: username.trim(), password, remember: false })
-        persistLoginTokens(response)
-        navigate(loginEntryPath(response), { replace: true })
+        navigate(completeLogin(response), { replace: true })
       } catch (loginError) {
         setFormError(userFacingErrorMessage(loginError, '登录失败,请检查账号和密码后重试。'))
       } finally {

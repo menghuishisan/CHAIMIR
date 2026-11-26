@@ -36,7 +36,7 @@ IPFS/Kubo 内容寻址存储节点镜像。
 
 ## 初始化材料与运行时注入
 
-- 镜像层不内置租户、链、协议或私有材料；声明的 init_assets：无。首次启动由镜像内固定 Kubo 源码编译出的初始化器生成实例本地 node identity，写入 runtime-state 后交给官方 `ipfs init`，初始化临时文件随即删除；该身份不是平台 Secret/KMS 材料。
+- 首次启动由固定 Kubo 源码编译的初始化器生成实例身份，通过 `runtime-state` 内的私有临时目录交给官方 `ipfs init`。无论生成或初始化是否成功都清理临时目录，保留初始化与清理错误；已有 repo 不重新生成身份。实例身份不是平台 Secret/KMS 材料。
 - genesis、rollup、checkpoint、Hyperlane、Chainlink、合约或 subgraph 材料必须由平台受控对象存储、初始化资产和 CompositionSpec 注入并校验来源及 SHA-256；缺失时严格失败。
 - 数据卷声明：无顶层 data_volumes 声明。
 

@@ -1,12 +1,6 @@
-// Monaco 封装：为实验 IDE 提供统一编辑器生命周期和只读/变更事件装配。
-// 编辑器把 Ctrl/⌘ + 回车 让给所在工作台(判分、提交,规范 §7.3),其余键位保持 Monaco 默认。
-
 import type { EditorMountOptions, MountedEditor } from './types'
 
-/** Monaco 默认把 Ctrl/⌘ + 回车 绑在「在下方插入一行」上;让出后按键冒泡到工作台 */
 const RELEASED_COMMAND = 'editor.action.insertLineAfter'
-
-/** 键位让出规则是全局的,整个页面生命周期只登记一次 */
 let keysReleased = false
 
 const monacoThemeTokens = {
@@ -21,10 +15,11 @@ const monacoThemeTokens = {
 /**
  * mountMonacoEditor 动态加载 monaco-editor 并挂载到指定容器，避免四端首屏强制加载编辑器资源。
  */
-export async function mountMonacoEditor(container: HTMLElement, options: EditorMountOptions): Promise<MountedEditor> {
-  const runtime = await import('./monaco-runtime')
-  await runtime.prepareMonacoLanguage(options.language)
-  const monaco = runtime.monaco
+export async function mountMonacoEditor(
+  container: HTMLElement,
+  options: EditorMountOptions
+): Promise<MountedEditor> {
+  const { monaco } = await import('./monaco-runtime')
   if (!keysReleased) {
     // 「-命令」是 Monaco 的移除规则:撤下该命令的默认键位,而不是改绑到别的命令上
     monaco.editor.addKeybindingRule({
@@ -38,9 +33,7 @@ export async function mountMonacoEditor(container: HTMLElement, options: EditorM
   monaco.editor.defineTheme('chaimir-dark', {
     base: 'vs-dark',
     inherit: true,
-    rules: [
-      { token: '', background: colorWithoutHash(editorBackground) }
-    ],
+    rules: [{ token: '', background: colorWithoutHash(editorBackground) }],
     colors: {
       'editor.background': editorBackground,
       'editor.lineHighlightBackground': cssColor(monacoThemeTokens.lineHighlight),
@@ -48,7 +41,7 @@ export async function mountMonacoEditor(container: HTMLElement, options: EditorM
       'editorIndentGuide.background': cssColor(monacoThemeTokens.indentGuide),
       'editorSuggestWidget.background': cssColor(monacoThemeTokens.suggestBackground),
       'editorSuggestWidget.border': cssColor(monacoThemeTokens.suggestBorder),
-    }
+    },
   })
 
   const editor = monaco.editor.create(container, {
@@ -63,14 +56,14 @@ export async function mountMonacoEditor(container: HTMLElement, options: EditorM
     scrollBeyondLastLine: false,
     theme: 'chaimir-dark',
   })
-  const changeSubscription = editor.onDidChangeModelContent(() => {
-    options.onChange?.(editor.getValue())
-  })
+  // 空 lineEnding 沿用模型的换行符，preserveBOM 避免编辑后丢失原文件标记。
+  const getValue = () => editor.getValue({ preserveBOM: true, lineEnding: '' })
+  const changeSubscription = editor.onDidChangeModelContent(() => options.onChange?.(getValue()))
 
   return {
-    getValue: () => editor.getValue(),
+    getValue,
     setValue: (value) => {
-      if (editor.getValue() !== value) {
+      if (getValue() !== value) {
         editor.setValue(value)
       }
     },
@@ -82,7 +75,6 @@ export async function mountMonacoEditor(container: HTMLElement, options: EditorM
   }
 }
 
-/** cssColor 读取设计令牌的计算值，供 Monaco 主题配置使用。 */
 function cssColor(token: string): string {
   const value = getComputedStyle(document.documentElement).getPropertyValue(token).trim()
   if (!value) {
@@ -91,7 +83,6 @@ function cssColor(token: string): string {
   return value
 }
 
-/** colorWithoutHash 把 CSS 颜色转换为 Monaco 需要的不带井号格式。 */
 function colorWithoutHash(color: string): string {
   return color.startsWith('#') ? color.slice(1) : color
 }

@@ -19,12 +19,13 @@ import (
 
 // deliveryConfig 只保存统一传输层策略,不包含业务状态或模块分发逻辑。
 type deliveryConfig struct {
-	retryMax       int
-	retryDelay     time.Duration
-	requestTimeout time.Duration
-	ackWait        time.Duration
-	deadPrefix     string
-	stream         string
+	retryMax          int
+	retryDelay        time.Duration
+	requestTimeout    time.Duration
+	ackWait           time.Duration
+	inactiveThreshold time.Duration
+	deadPrefix        string
+	stream            string
 }
 
 // deadLetterMessage 保留原事件与消费身份,供修复后受控重放和业务状态核对。
@@ -44,9 +45,10 @@ type deadLetterMessage struct {
 func newDeliveryConfig(cfg config.NATSConfig) deliveryConfig {
 	return deliveryConfig{
 		retryMax: cfg.ConsumerRetryMax, retryDelay: time.Duration(cfg.ConsumerRetryDelayMs) * time.Millisecond,
-		requestTimeout: time.Duration(cfg.RequestTimeoutMs) * time.Millisecond,
-		ackWait:        time.Duration(cfg.ConsumerAckWaitSeconds) * time.Second,
-		deadPrefix:     strings.TrimSpace(cfg.DeadLetterPrefix), stream: cfg.StreamName,
+		requestTimeout:    time.Duration(cfg.RequestTimeoutMs) * time.Millisecond,
+		ackWait:           time.Duration(cfg.ConsumerAckWaitSeconds) * time.Second,
+		inactiveThreshold: time.Duration(cfg.StreamMaxAgeSeconds) * time.Second,
+		deadPrefix:        strings.TrimSpace(cfg.DeadLetterPrefix), stream: cfg.StreamName,
 	}
 }
 
@@ -140,7 +142,7 @@ func (b *natsBus) publishDeadLetter(ctx context.Context, subject, queue string, 
 // requestContext 为所有管理/发布/确认请求设置上限,不延长调用方已有期限。
 func (b *natsBus) requestContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if ctx == nil {
-		ctx = context.Background()
+		ctx = b.ctx
 	}
 	return context.WithTimeout(ctx, b.cfg.requestTimeout)
 }

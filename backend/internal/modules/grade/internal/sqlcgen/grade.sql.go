@@ -369,6 +369,19 @@ func (q *Queries) CountAcademicWarningsByStatus(ctx context.Context, arg CountAc
 	return items, nil
 }
 
+const countCurrentUnackedWarnings = `-- name: CountCurrentUnackedWarnings :one
+SELECT count(*)::bigint FROM academic_warning w
+JOIN semester s ON s.id=w.semester_id AND s.tenant_id=w.tenant_id
+WHERE s.is_current AND w.status=1
+`
+
+func (q *Queries) CountCurrentUnackedWarnings(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countCurrentUnackedWarnings)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countGradeAppeals = `-- name: CountGradeAppeals :one
 SELECT count(*)::bigint
 FROM grade_appeal
@@ -530,6 +543,8 @@ func (q *Queries) CountStudentGradeAppeals(ctx context.Context, arg CountStudent
 const createAcademicWarning = `-- name: CreateAcademicWarning :one
 INSERT INTO academic_warning (id, tenant_id, student_id, semester_id, type, detail, status, created_at, notify_trace_id)
 VALUES ($1, $2, $3, $4, $5, $6, 1, now(), $7)
+ON CONFLICT (tenant_id, student_id, semester_id, type)
+DO UPDATE SET detail = EXCLUDED.detail
 RETURNING id, tenant_id, student_id, semester_id, type, detail, status, created_at, notify_trace_id, notify_status, notify_attempts, notify_lease_token, notify_lease_until, notify_next_attempt_at, notify_last_error
 `
 
@@ -810,6 +825,15 @@ func (q *Queries) CreateTranscriptRecord(ctx context.Context, arg CreateTranscri
 		&i.GeneratedAt,
 	)
 	return i, err
+}
+
+const deleteStudentSemesterGrades = `-- name: DeleteStudentSemesterGrades :exec
+DELETE FROM student_semester_grade WHERE student_id = $1
+`
+
+func (q *Queries) DeleteStudentSemesterGrades(ctx context.Context, studentID int64) error {
+	_, err := q.db.Exec(ctx, deleteStudentSemesterGrades, studentID)
+	return err
 }
 
 const getCurrentSemester = `-- name: GetCurrentSemester :one
@@ -1199,6 +1223,47 @@ func (q *Queries) ListGradeAppeals(ctx context.Context, arg ListGradeAppealsPara
 	return items, nil
 }
 
+const listGradePublications = `-- name: ListGradePublications :many
+SELECT o.course_id, COALESCE(r.semester_id, 0)::bigint AS semester_id, o.revision,
+       COALESCE(o.locked AND r.status = 2 AND r.is_locked, false)::boolean AS published
+FROM (SELECT DISTINCT ON (course_id) tenant_id, course_id, review_id, revision, locked
+      FROM grade_lock_outbox ORDER BY course_id, revision DESC) o
+JOIN grade_review r ON r.tenant_id = o.tenant_id AND r.id = o.review_id
+ORDER BY o.course_id
+`
+
+type ListGradePublicationsRow struct {
+	CourseID   int64 `json:"course_id"`
+	SemesterID int64 `json:"semester_id"`
+	Revision   int64 `json:"revision"`
+	Published  bool  `json:"published"`
+}
+
+func (q *Queries) ListGradePublications(ctx context.Context) ([]ListGradePublicationsRow, error) {
+	rows, err := q.db.Query(ctx, listGradePublications)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGradePublicationsRow{}
+	for rows.Next() {
+		var i ListGradePublicationsRow
+		if err := rows.Scan(
+			&i.CourseID,
+			&i.SemesterID,
+			&i.Revision,
+			&i.Published,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listGradeReviews = `-- name: ListGradeReviews :many
 SELECT id, tenant_id, course_id, semester_id, submitter_id, reviewer_id, status, is_locked, comment, submitted_at, reviewed_at
 FROM grade_review
@@ -1255,35 +1320,32 @@ func (q *Queries) ListGradeReviews(ctx context.Context, arg ListGradeReviewsPara
 	return items, nil
 }
 
-const listKnownStudentSemesterGrades = `-- name: ListKnownStudentSemesterGrades :many
-SELECT id, tenant_id, student_id, semester_id, total_credits, gpa, cumulative_gpa, computed_at
+const listGradeWarningStudents = `-- name: ListGradeWarningStudents :many
+SELECT student_id
 FROM student_semester_grade
 WHERE ($1::bigint = 0 OR student_id = $1::bigint)
-ORDER BY student_id ASC, semester_id ASC
+  AND semester_id = $2::bigint
+ORDER BY student_id
 `
 
-func (q *Queries) ListKnownStudentSemesterGrades(ctx context.Context, studentID int64) ([]StudentSemesterGrade, error) {
-	rows, err := q.db.Query(ctx, listKnownStudentSemesterGrades, studentID)
+type ListGradeWarningStudentsParams struct {
+	StudentID  int64 `json:"student_id"`
+	SemesterID int64 `json:"semester_id"`
+}
+
+func (q *Queries) ListGradeWarningStudents(ctx context.Context, arg ListGradeWarningStudentsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listGradeWarningStudents, arg.StudentID, arg.SemesterID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []StudentSemesterGrade{}
+	items := []int64{}
 	for rows.Next() {
-		var i StudentSemesterGrade
-		if err := rows.Scan(
-			&i.ID,
-			&i.TenantID,
-			&i.StudentID,
-			&i.SemesterID,
-			&i.TotalCredits,
-			&i.Gpa,
-			&i.CumulativeGpa,
-			&i.ComputedAt,
-		); err != nil {
+		var student_id int64
+		if err := rows.Scan(&student_id); err != nil {
 			return nil, err
 		}
-		items = append(items, i)
+		items = append(items, student_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1831,6 +1893,20 @@ func (q *Queries) UnlockGradeReview(ctx context.Context, arg UnlockGradeReviewPa
 		&i.ReviewedAt,
 	)
 	return i, err
+}
+
+const updateDefaultWarningRules = `-- name: UpdateDefaultWarningRules :one
+UPDATE grade_level_config
+SET warning_rules = $1, updated_at = now()
+WHERE is_default = true
+RETURNING warning_rules
+`
+
+func (q *Queries) UpdateDefaultWarningRules(ctx context.Context, warningRules []byte) ([]byte, error) {
+	row := q.db.QueryRow(ctx, updateDefaultWarningRules, warningRules)
+	var warning_rules []byte
+	err := row.Scan(&warning_rules)
+	return warning_rules, err
 }
 
 const updateGradeAppealStatus = `-- name: UpdateGradeAppealStatus :one

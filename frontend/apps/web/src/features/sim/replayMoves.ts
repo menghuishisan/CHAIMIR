@@ -62,9 +62,9 @@ export function replayMoves(actions: SimActionLog[]): ReplayMove[] {
  * 元素目标按 Worker 的记录约定从 payload.target 取回并同时作为顶层 target 传入,
  * 与当初记录这条动作时的入参完全一致(见 sim.worker.ts userEventInput)。
  */
-export function moveCommand(client: SimWorkerClient, move: ReplayMove): Promise<void> {
+export async function moveCommand(client: SimWorkerClient, move: ReplayMove): Promise<void> {
   if (move.kind === 'tick') {
     return client.step()
   }
-  return client.inject(move.command.eventType, move.command.payload, move.command.target)
+  await client.inject(move.command.eventType, move.command.payload, move.command.target)
 }

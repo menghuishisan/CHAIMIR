@@ -1,8 +1,4 @@
-// AuditLogPage 是校管「审计日志」与平台「平台审计」共用的审计查询页(设计 §7.7)。
-// 布局:工具条(对象类型、动作、操作人、时间范围,平台端另有学校;全部写进地址)+ 右上「导出」;
-// 表格列为时间(精确到秒)、操作人、动作、对象、来源地址、追踪编号(可复制),整行打开详情抽屉看完整字段。
-// 动作下拉里的数字来自接口返回的分组计数(与当前其他筛选同口径的全量)。只能查询与导出,不能修改或删除。
-// 两个入口只在四处不同,由调用方传入:操作人怎么显示与筛选、对象类型清单、学校筛选(只有平台端)、任务与下载页的路径。
+// 平台与校管共用的审计查询、导出和只读详情。
 
 import { useMemo, useState, type ReactNode } from 'react'
 import { Download, FileText } from 'lucide-react'
@@ -37,7 +33,11 @@ import {
   auditActionLabel,
   auditActorRoleLabel,
   auditTargetTypeLabel,
+  alertStatusLabel,
 } from '../../../utils/labels/admin'
+import { accountStatusLabel, tenantStatusLabel } from '../../../utils/labels/identity'
+import { courseStatusLabel } from '../../../utils/labels/teaching'
+import { contestStatusLabel } from '../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
 import { auditDetailRows, auditObjectHint, type AuditDetailLookups } from '../auditDetail'
 import { auditActionFilter, auditActorFilter, auditDayRange } from '../auditFilters'
@@ -55,6 +55,15 @@ const AUDIT_QUERY = {
   from: { defaultValue: '' },
   to: { defaultValue: '' },
 } as const
+
+// 同一状态数字在不同领域含义不同，必须按被审计对象解释。
+const STATUS_LABELS = new Map<string, (value: number) => string | undefined>([
+  ['identity.account', accountStatusLabel],
+  ['identity.tenant', tenantStatusLabel],
+  ['alert_event', alertStatusLabel],
+  ['teaching.course', courseStatusLabel],
+  ['contest', contestStatusLabel],
+])
 
 /** 一个对象类型筛选项:值是 target_type,文字取自标签表 */
 export interface AuditTargetOption {
@@ -303,7 +312,7 @@ export function AuditLogPage({
             variant="ghost"
             size="sm"
             onClick={() =>
-              setQuery({ target: AUDIT_ALL, action: AUDIT_ALL, actor: '', from: '', to: '' })
+              setQuery({ target: AUDIT_ALL, action: AUDIT_ALL, actor: '', school: '', from: '', to: '' })
             }
           >
             清空筛选
@@ -380,10 +389,7 @@ interface AuditDetailDrawerProps {
   onClose: () => void
 }
 
-/**
- * AuditDetailDrawer 一条审计记录的完整字段:时间、操作人与身份、动作、对象、来源地址、追踪编号,
- * 以及 detail 里登记过的附加项(如题目编码、版本、导入条数)。只读,没有修改和删除。
- */
+/** 展示审计元信息与已登记的领域详情，不暴露未知字段。 */
 function AuditDetailDrawer({
   entry,
   actorText,
@@ -398,7 +404,11 @@ function AuditDetailDrawer({
     { term: '操作人身份', description: auditActorRoleLabel(entry.actor_role) },
     { term: '动作', description: auditActionLabel(entry.action) },
     { term: '对象类型', description: auditTargetTypeLabel(entry.target_type) },
-    ...auditDetailRows(entry.detail, detailLookups).map((row) => ({
+    ...auditDetailRows(entry.detail, {
+      ...detailLookups,
+      status: (value) =>
+        typeof value === 'number' ? STATUS_LABELS.get(entry.target_type)?.(value) : undefined,
+    }).map((row) => ({
       term: row.term,
       description: row.value,
       mono: row.mono,

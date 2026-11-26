@@ -6,10 +6,12 @@ import (
 	"strconv"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/modules/teaching/internal/sqlcgen"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
+	"fmt"
 )
 
 // formatNumber 把浮点配置写入 numeric 字段时转为十进制字符串,避免二进制浮点格式污染 SQL。
@@ -37,6 +39,15 @@ func (s *txStore) GetCourse(ctx context.Context, tenantID, id int64) (Course, er
 		return Course{}, err
 	}
 	return courseFromGetRow(row)
+}
+
+// GetCourseForUpdate 锁定课程行，串行提交基础信息和封面替换。
+func (s *txStore) GetCourseForUpdate(ctx context.Context, tenantID, id int64) (Course, error) {
+	row, err := s.q.GetCourseForUpdate(ctx, sqlcgen.GetCourseForUpdateParams{TenantID: tenantID, ID: id})
+	if err != nil {
+		return Course{}, err
+	}
+	return courseFromGetRow(sqlcgen.GetCourseByIDRow(row))
 }
 
 // BatchGetCourses 按编号一次读取本租户未删除课程;不存在或已删除的不在结果里。
@@ -248,38 +259,30 @@ func (s *txStore) CountCourseLessons(ctx context.Context, tenantID, courseID int
 	return s.q.CountCourseLessons(ctx, sqlcgen.CountCourseLessonsParams{TenantID: tenantID, CourseID: courseID})
 }
 
-// ListCoursesDueToRun 查询已到开始时间但尚未进入进行中的课程。
-func (s *txStore) ListCoursesDueToRun(ctx context.Context, now time.Time) ([]Course, error) {
-	rows, err := s.q.ListCoursesDueToRun(ctx, timex.Timestamptz(now))
-	if err != nil {
-		return nil, err
-	}
-	out := make([]Course, 0, len(rows))
-	for _, row := range rows {
-		course, err := courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverRef, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, course)
-	}
-	return out, nil
+// AdvanceCourseStatuses 在有界锁定批次中推进到期状态并保留结课回收意图。
+func (s *txStore) AdvanceCourseStatuses(ctx context.Context, now time.Time, limit int32) error {
+	return s.q.AdvanceCourseStatuses(ctx, sqlcgen.AdvanceCourseStatusesParams{ObservedAt: timex.RequiredTimestamptz(now), BatchSize: limit})
 }
 
-// ListCoursesDueToEnd 查询已到结束时间但尚未结束的课程。
-func (s *txStore) ListCoursesDueToEnd(ctx context.Context, now time.Time) ([]Course, error) {
-	rows, err := s.q.ListCoursesDueToEnd(ctx, timex.Timestamptz(now))
+// ClaimNextCourseEndedEvent 持有课程行锁直至发布确认和待发位清除一并提交。
+func (s *txStore) ClaimNextCourseEndedEvent(ctx context.Context) (contracts.TeachingCourseEndedEvent, error) {
+	row, err := s.q.ClaimNextCourseEndedEvent(ctx)
 	if err != nil {
-		return nil, err
+		return contracts.TeachingCourseEndedEvent{}, err
 	}
-	out := make([]Course, 0, len(rows))
-	for _, row := range rows {
-		course, err := courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverRef, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, course)
+	return contracts.TeachingCourseEndedEvent{TenantID: row.TenantID, CourseID: row.CourseID, Status: row.Status, EndedAt: timex.FromTimestamptz(row.EndedEventPendingAt)}, nil
+}
+
+// MarkCourseEndedEventPublished 清除当前锁定课程的待发位，保留课程编辑时间。
+func (s *txStore) MarkCourseEndedEventPublished(ctx context.Context, tenantID, courseID int64) error {
+	rows, err := s.q.MarkCourseEndedEventPublished(ctx, sqlcgen.MarkCourseEndedEventPublishedParams{TenantID: tenantID, ID: courseID})
+	if err != nil {
+		return err
 	}
-	return out, nil
+	if rows != 1 {
+		return fmt.Errorf("课程回收事件待发位已变化: tenant_id=%d course_id=%d", tenantID, courseID)
+	}
+	return nil
 }
 
 // CreateChapter 创建章节。
@@ -347,6 +350,14 @@ func (s *txStore) CreateLesson(ctx context.Context, lesson Lesson) (Lesson, erro
 // GetLesson 读取课时。
 func (s *txStore) GetLesson(ctx context.Context, tenantID, id int64) (Lesson, error) {
 	row, err := s.q.GetLesson(ctx, sqlcgen.GetLessonParams{TenantID: tenantID, ID: id})
+	if err != nil {
+		return Lesson{}, err
+	}
+	return lessonFromRow(row)
+}
+
+func (s *txStore) GetLessonForUpdate(ctx context.Context, tenantID, id int64) (Lesson, error) {
+	row, err := s.q.GetLessonForUpdate(ctx, sqlcgen.GetLessonForUpdateParams{TenantID: tenantID, ID: id})
 	if err != nil {
 		return Lesson{}, err
 	}

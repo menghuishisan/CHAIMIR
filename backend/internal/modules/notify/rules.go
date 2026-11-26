@@ -1,25 +1,39 @@
-// notify rules 文件集中实现 M10 输入校验、模板渲染和实时主题授权。
+// 校验通知输入、模板和实时主题。
 package notify
 
 import (
 	"regexp"
 	"strings"
+	"time"
 
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
 
 var (
 	tenantTopicPrefixPattern = regexp.MustCompile(`^tenant:([1-9][0-9]*):`)
-	businessTopicPattern     = regexp.MustCompile(`^tenant:([1-9][0-9]*):(contest|sandbox|sim|experiment|course|judge):[1-9][0-9]*:[a-z][a-z0-9_-]*$`)
+	businessTopicPattern     = regexp.MustCompile(`^tenant:([1-9][0-9]*):(contest|sandbox|sim|experiment|course|judge):([1-9][0-9]*):([a-z][a-z0-9_-]*)$`)
 	notifyTopicPattern       = regexp.MustCompile(`^tenant:([1-9][0-9]*):notify:([1-9][0-9]*)$`)
 	templateVarPattern       = regexp.MustCompile(`\{\{[a-zA-Z0-9_.-]+\}\}`)
 	linkPattern              = regexp.MustCompile(`^/[A-Za-z0-9/_?&=.#:%+-]*$`)
 )
 
-// AuthorizeTopic 校验实时 topic 语法和 M10 可独立判断的租户/个人边界。
-func AuthorizeTopic(tenantID, accountID int64, topic string) error {
+// parseOptionalTime 解析可选过期时间。
+func parseOptionalTime(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	if t, err := timex.ParseRFC3339(raw); err == nil {
+		return t, nil
+	}
+	return timex.ParseDate(raw)
+}
+
+// authorizeTenantTopic 校验 M10 可独立判断的租户/个人边界。
+func authorizeTenantTopic(tenantID, accountID int64, topic string) error {
 	topic = strings.TrimSpace(topic)
 	if tenantID <= 0 || accountID <= 0 || topic == "" {
 		return apperr.ErrNotifySubscribeInvalid
@@ -102,7 +116,7 @@ func topicTenantID(topic string) int64 {
 // businessTopicTenantID 解析统一业务实时 topic 中的租户前缀,不命中时返回 0。
 func businessTopicTenantID(topic string) int64 {
 	matches := businessTopicPattern.FindStringSubmatch(strings.TrimSpace(topic))
-	if len(matches) != 3 {
+	if len(matches) != 5 {
 		return 0
 	}
 	tenantID, ok := ids.Parse(matches[1])
@@ -155,11 +169,20 @@ func validateAnnouncementRequest(req AnnouncementRequest, isPlatform bool, valid
 		if !isPlatform {
 			return apperr.ErrForbidden
 		}
+		if len(req.TargetRoles) != 0 {
+			return apperr.ErrNotifyAnnouncementInvalid
+		}
 	case AnnouncementScopeTenant:
+		if isPlatform {
+			return apperr.ErrForbidden
+		}
 		if len(req.TargetRoles) != 0 {
 			return apperr.ErrNotifyAnnouncementInvalid
 		}
 	case AnnouncementScopeRoles:
+		if isPlatform {
+			return apperr.ErrForbidden
+		}
 		if len(req.TargetRoles) == 0 {
 			return apperr.ErrNotifyAnnouncementInvalid
 		}

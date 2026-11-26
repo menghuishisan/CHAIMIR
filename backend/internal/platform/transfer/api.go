@@ -1,4 +1,3 @@
-// transfer api 文件负责注册统一导入导出中心 HTTP 路由和访问边界。
 package transfer
 
 import (
@@ -29,7 +28,6 @@ type transferAPI struct {
 	roles contracts.IdentityService
 }
 
-// listTasks 查询当前账号的导入导出任务。
 func (a transferAPI) listTasks(c *gin.Context) {
 	id, ok := currentTenantIdentity(c)
 	if !ok {
@@ -43,7 +41,6 @@ func (a transferAPI) listTasks(c *gin.Context) {
 	httpx.WritePageWithFacets(c, TasksToDTO(tasks), total, p, s, facets.Map(), err)
 }
 
-// getTask 读取当前账号可见的单个导入导出任务。
 func (a transferAPI) getTask(c *gin.Context) {
 	id, ok := currentTenantIdentity(c)
 	if !ok {
@@ -66,7 +63,6 @@ func (a transferAPI) getTask(c *gin.Context) {
 	httpx.Write(c, TaskToDTO(task), err)
 }
 
-// downloadGrant 为已完成任务签发短时下载授权。
 func (a transferAPI) downloadGrant(c *gin.Context) {
 	id, ok := currentTenantIdentity(c)
 	if !ok {
@@ -89,7 +85,7 @@ func (a transferAPI) downloadGrant(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// currentTenantIdentity 读取已鉴权身份,平台身份只允许访问 tenant_id=0 的平台任务。
+// 平台身份在导入导出中心只访问租户编号为 0 的任务。
 func currentTenantIdentity(c *gin.Context) (tenant.Identity, bool) {
 	id, ok := tenant.FromContext(c.Request.Context())
 	if !ok || id.AccountID <= 0 {
@@ -107,7 +103,6 @@ func currentTenantIdentity(c *gin.Context) (tenant.Identity, bool) {
 	return id, true
 }
 
-// isSchoolAdmin 判断当前账号是否可读取同租户内其他账号任务,角色查询失败必须显式返回。
 func (a transferAPI) isSchoolAdmin(c *gin.Context, accountID int64) (bool, error) {
 	if a.roles == nil {
 		return false, apperr.ErrHTTPServiceMissing

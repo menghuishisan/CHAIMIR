@@ -4,7 +4,7 @@
 // 列表卡片的时间提示:报名中「报名还剩 2 天」,进行中「距结束 3 小时」,已结束显示日期。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { contestCountdown, contestTimeHint, contestTimeline, type TimelineContest } from './contestTimeline.ts'
+import { contestCountdown, contestSignupState, contestTimeHint, contestTimeline, type TimelineContest } from './contestTimeline.ts'
 
 const SIGNUP = 2
 const RUNNING = 3
@@ -56,6 +56,36 @@ test('报名中但已过报名截止时刻:当前阶段停在报名截止(等待
   const now = new Date('2026-11-13T10:00:00+08:00')
   const current = contestTimeline(base, now).find((node) => node.state === 'current')?.key
   assert.equal(current, 'signup_end')
+})
+
+test('已发布但报名尚未开始时,所有赛程节点仍未到达', () => {
+  const nodes = contestTimeline(base, new Date('2026-10-30T08:00:00+08:00'))
+  assert.ok(nodes.every((node) => node.state === 'upcoming'))
+})
+
+test('报名尚未开始时,列表提示距报名开始的时长', () => {
+  assert.equal(contestTimeHint(base, new Date('2026-10-30T08:00:00+08:00')), '2 天后开始报名')
+})
+
+test('报名起止时刻均可报名,截止后一毫秒改为等待开赛', () => {
+  for (const at of [base.signup_start, base.signup_end]) {
+    assert.equal(contestTimeline(base, new Date(at)).find((node) => node.state === 'current')?.key, 'signup_start')
+    assert.match(contestTimeHint(base, new Date(at)) ?? '', /^报名还剩 /)
+  }
+  assert.equal(contestTimeline(base, new Date(Date.parse(base.signup_end) + 1)).find((node) => node.state === 'current')?.key, 'signup_end')
+  assert.match(contestTimeHint(base, new Date(Date.parse(base.signup_end) + 1)) ?? '', /^报名已截止/)
+})
+
+test('报名窗口拒绝其它赛态及非法时间,并精确处理边界', () => {
+  const start = Date.parse(base.signup_start), end = Date.parse(base.signup_end)
+  assert.equal(contestSignupState(base, start - 1), 'upcoming')
+  for (const now of [start, start + 1, end]) assert.equal(contestSignupState(base, now), 'open')
+  assert.equal(contestSignupState(base, end + 1), 'closed')
+  for (const status of [1, RUNNING, FROZEN, ENDED, ARCHIVED]) assert.equal(contestSignupState({ ...base, status }, start), 'closed')
+  assert.equal(contestSignupState({ ...base, signup_start: 'bad' }, start), 'closed')
+  assert.equal(contestSignupState({ ...base, signup_end: 'bad' }, start), 'closed')
+  assert.equal(contestSignupState({ ...base, signup_start: base.signup_end, signup_end: base.signup_start }, start), 'closed')
+  assert.equal(contestSignupState(base, Number.NaN), 'closed')
 })
 
 test('卡片时间提示:报名还剩几天、距开赛、距结束几小时、已结束写日期', () => {

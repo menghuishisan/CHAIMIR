@@ -82,7 +82,7 @@ selftest:
       command:
         - python
         - -c
-        - import json,subprocess;payload=json.dumps(dict(receipts=[dict(gasUsed=21000),dict(gasUsed=45000)]));out=subprocess.check_output(["gas-profiler"],input=payload,text=True);assert json.loads(out)["total"]==66000
+        - import json,subprocess;payload=json.dumps(dict(receipts=[dict(gasUsed="0x5208"),dict(gasUsed="0xafc8")]));out=subprocess.check_output(["gas-profiler"],input=payload,text=True);assert json.loads(out)["total"]==66000
 supply_chain:
   sbom: true
   trivy_required: true

@@ -1,6 +1,3 @@
-// Experiment API：实验编排
-// 对应后端 M7 模块
-
 import { ApiClient, encodePathSegment } from '../client'
 import type {
   ExperimentInstanceStatus,
@@ -27,18 +24,9 @@ import type {
   GradeReportRequest,
 } from '../types/experiment'
 
-/**
- * ExperimentApi 封装后端 M7 实验编排、实例、报告和协作小组接口。
- */
 export class ExperimentApi {
-  /**
-   * constructor 注入统一 API 客户端，保持实验接口的路径和错误处理一致。
-   */
   constructor(private client: ApiClient) {}
 
-  /**
-   * 获取实验列表
-   */
   async getExperiments(params?: {
     course_id?: string
     status?: ExperimentStatus
@@ -49,19 +37,12 @@ export class ExperimentApi {
     return this.client.get('/experiment/experiments', params)
   }
 
-  /**
-   * getExperiment 读取单个实验的教师视图(完整定义,含环境与判题配置)。
-   * 只有作者与本校管理员可读,边界在服务端 GetExperimentForTeacher 判定。
-   * 详情页与编排向导用它做深链首屏读取 —— 不再拉全量列表在浏览器里筛单条。
-   */
+  /** 返回教师视图。服务端校验作者或本校管理员身份。 */
   async getExperiment(experimentId: string): Promise<Experiment> {
     return this.client.get(`/experiment/experiments/${encodePathSegment(experimentId)}`)
   }
 
-  /**
-   * listInstances 列出教师可见的实验环境实例(教师按实验作者过滤、校管按租户)。
-   * 实时监控页据此看真实的活跃环境,不再按实验清单反推。
-   */
+  /** 教师只看自己实验的实例，校管可看全校。 */
   async listInstances(params?: {
     status?: ExperimentInstanceStatus
     page?: number
@@ -70,7 +51,6 @@ export class ExperimentApi {
     return this.client.get('/experiment/instances', params)
   }
 
-  /** getPublishedExperiments 查询学生可进入的已发布实验。 */
   async getPublishedExperiments(params?: {
     course_id?: string
     keyword?: string
@@ -80,52 +60,32 @@ export class ExperimentApi {
     return this.client.get('/experiment/student/experiments', params)
   }
 
-  /**
-   * 读取单个已发布实验的学生视图（与列表同一投影，不含环境初始化与判题内部配置）。
-   * 实验详情页深链、刷新以及退出沉浸式工作台后的回落都用这条。
-   */
+  /** 学生视图省略初始化与判题内部配置。 */
   async getPublishedExperiment(experimentId: string): Promise<StudentExperiment> {
     return this.client.get(`/experiment/student/experiments/${encodePathSegment(experimentId)}`)
   }
 
-  /**
-   * 创建实验（教师）
-   */
   async createExperiment(data: ExperimentRequest): Promise<Experiment> {
     return this.client.post('/experiment/experiments', data)
   }
 
-  /**
-   * 更新实验
-   */
   async updateExperiment(experimentId: string, data: ExperimentRequest): Promise<Experiment> {
     return this.client.patch(`/experiment/experiments/${encodePathSegment(experimentId)}`, data)
   }
 
-  /**
-   * 发布前校验
-   */
   async validateExperiment(experimentId: string): Promise<ValidationResult> {
     return this.client.post(`/experiment/experiments/${encodePathSegment(experimentId)}/validate`)
   }
 
-  /**
-   * 发布实验
-   */
   async publishExperiment(experimentId: string): Promise<Experiment> {
     return this.client.post(`/experiment/experiments/${encodePathSegment(experimentId)}/publish`)
   }
 
-  /**
-   * 下架实验
-   */
   async unpublishExperiment(experimentId: string): Promise<Experiment> {
     return this.client.post(`/experiment/experiments/${encodePathSegment(experimentId)}/unpublish`)
   }
 
-  /**
-   * 查询实验报告列表。状态筛选由服务端执行,total 与筛选同口径。
-   */
+  /** 返回的总数遵循状态筛选。 */
   async listReports(
     experimentId: string,
     params?: {
@@ -147,16 +107,10 @@ export class ExperimentApi {
     return this.client.post(`/experiment/reports/${encodePathSegment(reportId)}/access`)
   }
 
-  /**
-   * 教师批改实验报告。
-   */
   async gradeReport(reportId: string, data: GradeReportRequest): Promise<ReportDTO> {
     return this.client.post(`/experiment/reports/${encodePathSegment(reportId)}/grade`, data)
   }
 
-  /**
-   * 创建实验协作小组。
-   */
   async createGroup(experimentId: string, data: ExperimentGroupRequest): Promise<ExperimentGroup> {
     return this.client.post(
       `/experiment/experiments/${encodePathSegment(experimentId)}/groups`,
@@ -164,17 +118,11 @@ export class ExperimentApi {
     )
   }
 
-  /**
-   * 查询本实验全部协作小组(教师编组视角)。
-   * 与 getGroup 的差别:这里按实验列全部分组、不含共享实例;getGroup 按组读单组并附带实例。
-   */
+  /** 列表省略共享实例。单组详情可返回当前实例。 */
   async listGroups(experimentId: string): Promise<ExperimentGroup[]> {
     return this.client.get(`/experiment/experiments/${encodePathSegment(experimentId)}/groups`)
   }
 
-  /**
-   * 加入或调整协作小组成员角色。
-   */
   async upsertGroupMember(
     groupId: string,
     data: ExperimentGroupMemberRequest
@@ -182,18 +130,13 @@ export class ExperimentApi {
     return this.client.post(`/experiment/groups/${encodePathSegment(groupId)}/members`, data)
   }
 
-  /**
-   * 移除协作小组成员,由服务端先收回活跃资源权限再提交成员删除。
-   */
+  /** 服务端先收回活跃资源权限，再删除成员。 */
   async removeGroupMember(groupId: string, studentId: string): Promise<ExperimentGroup> {
     return this.client.delete(
       `/experiment/groups/${encodePathSegment(groupId)}/members/${encodePathSegment(studentId)}`
     )
   }
 
-  /**
-   * 创建实验实例（学生发起）
-   */
   async createInstance(
     experimentId: string,
     data: CreateInstanceRequest
@@ -204,16 +147,10 @@ export class ExperimentApi {
     )
   }
 
-  /**
-   * 获取实验实例详情
-   */
   async getInstance(instanceId: string): Promise<ExperimentInstance> {
     return this.client.get(`/experiment/instances/${encodePathSegment(instanceId)}`)
   }
 
-  /**
-   * 触发检查点判分
-   */
   async judgeCheckpoint(
     instanceId: string,
     checkpointId: string,
@@ -225,9 +162,6 @@ export class ExperimentApi {
     )
   }
 
-  /**
-   * 上传并提交实验报告。
-   */
   async submitReport(
     instanceId: string,
     file: File,
@@ -245,46 +179,28 @@ export class ExperimentApi {
     return this.client.get(`/experiment/instances/${encodePathSegment(instanceId)}/report`)
   }
 
-  /**
-   * 获取实验进度订阅信息
-   */
   async getProgress(instanceId: string): Promise<ProgressDTO> {
     return this.client.get(`/experiment/instances/${encodePathSegment(instanceId)}/progress`)
   }
 
-  /**
-   * 读取协作小组详情。
-   */
   async getGroup(groupId: string): Promise<ExperimentGroup> {
     return this.client.get(`/experiment/groups/${encodePathSegment(groupId)}`)
   }
 
-  /**
-   * 暂停实验实例
-   */
   async pauseInstance(instanceId: string): Promise<ExperimentInstance> {
     return this.client.post(`/experiment/instances/${encodePathSegment(instanceId)}/pause`)
   }
 
-  /**
-   * 恢复实验实例
-   */
   async resumeInstance(instanceId: string): Promise<ExperimentInstance> {
     return this.client.post(`/experiment/instances/${encodePathSegment(instanceId)}/resume`)
   }
 
-  /**
-   * 激活已解锁阶段
-   */
   async activateStage(instanceId: string, stage: number): Promise<ExperimentInstance> {
     return this.client.post(
       `/experiment/instances/${encodePathSegment(instanceId)}/stages/${encodePathSegment(String(stage))}/activate`
     )
   }
 
-  /**
-   * 完成实验实例
-   */
   async finishInstance(instanceId: string): Promise<ExperimentInstance> {
     return this.client.post(`/experiment/instances/${encodePathSegment(instanceId)}/finish`)
   }

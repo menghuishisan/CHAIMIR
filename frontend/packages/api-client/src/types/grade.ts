@@ -1,5 +1,3 @@
-// ===== M11 Grade 模块 =====
-
 import type {
   GradeAppealStatus,
   GradeReviewStatus,
@@ -58,11 +56,11 @@ export interface GradeReview {
   id: SnowflakeID
   tenant_id: SnowflakeID
   course_id: SnowflakeID
-  /** 课程名;列表里由服务端批量解析,课程已删除时省略 */
+  /** 仅列表返回，课程已删除时省略。 */
   course_name?: string
   semester_id?: SnowflakeID
   submitter_id: SnowflakeID
-  /** 报送教师姓名;列表里由服务端批量解析,账号已移除时省略 */
+  /** 仅列表返回，账号已移除时省略。 */
   submitter_name?: string
   reviewer_id?: SnowflakeID
   status: GradeReviewStatus
@@ -94,15 +92,14 @@ export interface CourseGrade {
 
 export interface GradeSummary {
   student_id: SnowflakeID
-  semester_id?: SnowflakeID
+  semester_id: SnowflakeID
   total_credits: number
   gpa: number
   cumulative_gpa: number
-  course_grades: CourseGrade[]
   computed_at: string
 }
 
-/** StudentGradePage 是学生成绩页的分页课程明细和同范围 GPA 汇总。 */
+/** 仅含已审核且锁定课程；GPA 按所选范围，累计 GPA 按当前全部已发布课程。 */
 export interface StudentGradePage {
   student_id: SnowflakeID
   semester_id?: SnowflakeID
@@ -120,11 +117,11 @@ export interface GradeAppeal {
   id: SnowflakeID
   tenant_id: SnowflakeID
   student_id: SnowflakeID
-  /** 学生姓名与学号;列表里由服务端批量解析,账号已移除时省略 */
+  /** 姓名和学号仅在列表返回，账号已移除时省略。 */
   student_name?: string
   student_no?: string
   course_id: SnowflakeID
-  /** 课程名;列表里由服务端批量解析,课程已删除时省略 */
+  /** 仅列表返回，课程已删除时省略。 */
   course_name?: string
   reason: string
   status: GradeAppealStatus
@@ -143,7 +140,7 @@ export interface GradeWarning {
   id: SnowflakeID
   tenant_id: SnowflakeID
   student_id: SnowflakeID
-  /** 学生姓名与学号;列表里由服务端批量解析,账号已移除时省略 */
+  /** 姓名和学号仅在列表返回，账号已移除时省略。 */
   student_name?: string
   student_no?: string
   semester_id: SnowflakeID

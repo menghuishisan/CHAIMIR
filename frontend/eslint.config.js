@@ -13,6 +13,7 @@ module.exports = [
       '**/dist/**',
       '**/build/**',
       '**/node_modules/**',
+      'packages/sim-sdk/src/protocol.generated.ts',
       '**/*.config.js',
       '**/*.config.ts',
     ],
@@ -61,6 +62,8 @@ module.exports = [
       'react/prop-types': 'off',
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'warn',
+      // React 19.2:派生状态不得在 Effect 中同步写回，强制把数据流收敛到事件处理或渲染计算。
+      'react-hooks/set-state-in-effect': 'error',
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
 

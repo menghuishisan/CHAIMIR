@@ -4,7 +4,7 @@
     tags: [content]
     summary: 内容检索
     operationId: contentListItems
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters:
       - { name: type, in: query, schema: { type: string } }
@@ -14,7 +14,7 @@
       - { name: kp, in: query, schema: { type: string } }
       - { $ref: "#/components/parameters/KeywordQuery" }
       - { name: visibility, in: query, schema: { type: string } }
-      - { name: author, in: query, schema: { type: string } }
+      - { name: author, in: query, description: 作者账号 ID, schema: { type: string } }
       - { $ref: "#/components/parameters/PageQuery" }
       - { $ref: "#/components/parameters/SizeQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -22,7 +22,7 @@
     tags: [content]
     summary: 创建内容草稿
     operationId: contentCreateItem
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -51,7 +51,7 @@
     tags: [content]
     summary: 编辑内容草稿
     operationId: contentUpdateItem
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/ItemPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
@@ -60,7 +60,7 @@
     tags: [content]
     summary: 软删内容
     operationId: contentDeleteItem
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/ItemPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -69,7 +69,7 @@
     tags: [content]
     summary: 发布内容版本
     operationId: contentPublishItem
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/ItemPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -78,16 +78,16 @@
     tags: [content]
     summary: 弃用内容版本
     operationId: contentDeprecateItem
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/ItemPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/content/items/{item}/versions:
   get:
     tags: [content]
-    summary: 内容版本列表
+    summary: 本校内容版本列表
     operationId: contentListVersions
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/ItemPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -96,7 +96,7 @@
     tags: [content]
     summary: 基于现有版本创建新版本草稿
     operationId: contentNewVersion
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/ItemPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
@@ -106,7 +106,7 @@
     tags: [content]
     summary: 设为共享库内容
     operationId: contentShareItem
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/ItemPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -115,16 +115,16 @@
     tags: [content]
     summary: 取消共享库内容
     operationId: contentUnshareItem
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/ItemPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/content/items/{item}/{version}:
   get:
     tags: [content]
-    summary: 获取内容题面
+    summary: 获取本校内容题面
     operationId: contentGetFace
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/ItemPath" }, { $ref: "#/components/parameters/VersionPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -137,15 +137,24 @@
     security: [{ bearerAuth: [] }, { serviceAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/ItemPath" }, { $ref: "#/components/parameters/VersionPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
-/api/v1/content/items/{item}/{version}/clone:
+/api/v1/content/items/{item}/clone:
   post:
     tags: [content]
-    summary: 克隆内容为独立草稿
+    summary: 按内容ID克隆为独立草稿
     operationId: contentCloneItem
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/ItemPath" }, { $ref: "#/components/parameters/VersionPath" }]
+    parameters: [{ name: item, in: path, required: true, description: 所选内容的全局ID, schema: { $ref: "#/components/schemas/SnowflakeID" } }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/content/shared/{id}:
+  get:
+    tags: [content]
+    summary: 按内容ID预览已发布共享题面
+    operationId: contentGetSharedFace
+    x-chaimir-audience: teacher-or-school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/content/attachments:
   post:
@@ -153,7 +162,7 @@
     summary: 上传题库附件
     description: 文件校验拒绝返回51013，文件读取或扫描/存储服务不可用返回51012；响应仅包含用户提示与trace_id，底层原因只记日志。
     operationId: contentUploadAttachment
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/MultipartBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -162,7 +171,7 @@
     tags: [content]
     summary: 签发题库附件下载授权
     operationId: contentAttachmentDownloadGrant
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -172,7 +181,7 @@
     summary: 浏览跨校共享库
     description: facets.type：共享题目题型分段计数，套用关键词、不套用题型筛选。
     operationId: contentListShared
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters:
       - { name: type, in: query, schema: { type: string } }
@@ -183,14 +192,15 @@
     tags: [content]
     summary: 分类列表
     operationId: contentListCategories
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [content]
     summary: 创建分类
+    description: 支持多级；父分类须为本租户未删除节点。
     operationId: contentCreateCategory
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -198,8 +208,9 @@
   patch:
     tags: [content]
     summary: 更新分类
+    description: 父分类须为本租户未删除节点，不允许自身或后代成为父分类。
     operationId: contentUpdateCategory
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
@@ -207,8 +218,9 @@
   delete:
     tags: [content]
     summary: 删除分类
+    description: 仅删除无活动子分类、无未删除题目引用的空分类；受阻时返回51014，不改动题目或子树；分类不存在或已删除时返回51008，存储故障返回通用服务错误。
     operationId: contentDeleteCategory
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -217,14 +229,14 @@
     tags: [content]
     summary: 试卷列表
     operationId: contentListPapers
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [content]
     summary: 创建试卷
     operationId: contentCreatePaper
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -233,7 +245,7 @@
     tags: [content]
     summary: 试卷详情
     operationId: contentGetPaper
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -242,7 +254,7 @@
     tags: [content]
     summary: 按条件重新抽题
     operationId: contentRegeneratePaper
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }

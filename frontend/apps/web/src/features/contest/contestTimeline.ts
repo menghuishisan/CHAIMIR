@@ -1,16 +1,4 @@
-// contestTimeline.ts 计算赛程条与卡片时间提示(设计 §7.2 竞赛列表 / 竞赛详情 / 教师赛事详情)。
-// 赛程节点:报名开始 → 报名截止 → 开赛 → 封榜(结束前 freeze_minutes;不封榜时没有)→ 结束。
-// 当前阶段以赛事状态为准:状态由服务端定时或教师手动推进,不一定与时刻表对齐;
-// 只在「报名中」状态下用时刻区分「还在报名」与「报名已截止、等待开赛」。
-// 纯函数,供 node:test 直接运行:不得使用 enum,也不得在运行时导入 @chaimir/*。
-
-/** 赛事状态取值,与 @chaimir/api-client 的 ContestStatus 一致 */
-const STATUS_DRAFT = 1
-const STATUS_SIGNUP = 2
-const STATUS_RUNNING = 3
-const STATUS_FROZEN = 4
-const STATUS_ENDED = 5
-const STATUS_ARCHIVED = 6
+import { ContestStatus } from '@chaimir/api-client'
 
 /** 计算赛程用到的赛事字段 */
 export interface TimelineContest {
@@ -41,26 +29,38 @@ const NODE_LABELS: Record<TimelineNodeKey, string> = {
   end: '结束',
 }
 
-/** currentKey 按状态(报名中再看时刻)给出当前所在节点;草稿等未公开状态没有当前节点 */
+/** 报名窗口与服务端一致，包含起止时刻；其它赛事状态不可报名。 */
+export function contestSignupState(
+  contest: Pick<TimelineContest, 'status' | 'signup_start' | 'signup_end'>,
+  now: number,
+): 'upcoming' | 'open' | 'closed' {
+  if (contest.status !== ContestStatus.SIGNUP) return 'closed'
+  const start = Date.parse(contest.signup_start)
+  const end = Date.parse(contest.signup_end)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || !Number.isFinite(now)) return 'closed'
+  return now < start ? 'upcoming' : now <= end ? 'open' : 'closed'
+}
+
+// 阶段以服务端状态为准；报名阶段再按窗口区分未开始、开放与截止。
 function currentKey(contest: TimelineContest, now: Date, hasFreeze: boolean): TimelineNodeKey | undefined {
   switch (contest.status) {
-    case STATUS_SIGNUP: {
-      const signupEnd = new Date(contest.signup_end).getTime()
-      return Number.isFinite(signupEnd) && now.getTime() > signupEnd ? 'signup_end' : 'signup_start'
+    case ContestStatus.SIGNUP: {
+      const signup = contestSignupState(contest, now.getTime())
+      return signup === 'upcoming' ? undefined : signup === 'open' ? 'signup_start' : 'signup_end'
     }
-    case STATUS_RUNNING:
+    case ContestStatus.RUNNING:
       return 'start'
-    case STATUS_FROZEN:
+    case ContestStatus.FROZEN:
       return hasFreeze ? 'freeze' : 'start'
-    case STATUS_ENDED:
-    case STATUS_ARCHIVED:
+    case ContestStatus.ENDED:
+    case ContestStatus.ARCHIVED:
       return 'end'
     default:
       return undefined
   }
 }
 
-/** contestTimeline 给出赛程节点及各自状态;now 只为测试注入 */
+/** contestTimeline 给出赛程节点及各自状态。 */
 export function contestTimeline(contest: TimelineContest, now: Date = new Date()): TimelineNode[] {
   const hasFreeze = contest.freeze_minutes > 0
   const keys: TimelineNodeKey[] = hasFreeze
@@ -119,27 +119,28 @@ export function contestTimeHint(contest: TimelineContest, now: Date = new Date()
     return Number.isFinite(parsed) ? parsed : undefined
   }
   switch (contest.status) {
-    case STATUS_DRAFT: {
+    case ContestStatus.DRAFT: {
       const signupEnd = ms(contest.signup_end)
       if (signupEnd === undefined) return undefined
       return nowMs <= signupEnd ? `${durationText(now, new Date(signupEnd))}内须发布` : '报名截止时间已过'
     }
-    case STATUS_SIGNUP: {
+    case ContestStatus.SIGNUP: {
       const signupEnd = ms(contest.signup_end)
       if (signupEnd === undefined) return undefined
+      if (contestSignupState(contest, nowMs) === 'upcoming') return `${durationText(now, new Date(contest.signup_start))}后开始报名`
       if (nowMs <= signupEnd) return `报名还剩 ${durationText(now, new Date(signupEnd))}`
       const start = ms(contest.start_at)
       if (start === undefined) return '报名已截止'
       return nowMs < start ? `报名已截止,${durationText(now, new Date(start))}后开赛` : '报名已截止,等待开赛'
     }
-    case STATUS_RUNNING:
-    case STATUS_FROZEN: {
+    case ContestStatus.RUNNING:
+    case ContestStatus.FROZEN: {
       const end = ms(contest.end_at)
       if (end === undefined) return undefined
       return nowMs < end ? `距结束 ${durationText(now, new Date(end))}` : '即将结束'
     }
-    case STATUS_ENDED:
-    case STATUS_ARCHIVED: {
+    case ContestStatus.ENDED:
+    case ContestStatus.ARCHIVED: {
       const end = ms(contest.end_at)
       return end === undefined ? undefined : `${dotDate(new Date(end))} 结束`
     }

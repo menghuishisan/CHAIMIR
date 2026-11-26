@@ -1,7 +1,7 @@
 /**
  * Popover:轻量浮层面板(@radix-ui/react-popover 封装)。
  * 承载筛选器、快捷设置等小块交互内容;必读信息与复杂流程用 Modal/Drawer。
- * 组合导出:Popover(Root)/ PopoverTrigger / PopoverContent / PopoverClose。
+ * 组合导出:Popover(Root)/ PopoverTrigger / PopoverContent。
  * 动效:pop-in / pop-out,transform-origin 对齐触发点(Radix 变量)。
  * transform 所有权(§4.3):定位 transform 由 Radix popper wrapper 独占,
  * 动画 transform 只写在 Content 本体。
@@ -12,7 +12,6 @@ import { cn } from '../../lib/cn'
 
 export const Popover = PopoverPrimitive.Root
 export const PopoverTrigger = PopoverPrimitive.Trigger
-export const PopoverClose = PopoverPrimitive.Close
 
 export type PopoverContentProps = ComponentPropsWithoutRef<typeof PopoverPrimitive.Content>
 

@@ -32,8 +32,17 @@ deploy/**/*.local.yaml
 *.out
 *.prof
 coverage.*
-# 后端测试文件只保留本地验证，不上传公共仓库。
+# 独立回归与性能门禁随源码版本化，其余历史测试保留为本地审查材料。
 backend/**/*_test.go
+!backend/internal/modules/sandbox/service_terminal_recheck_test.go
+!backend/internal/modules/sandbox/service_volume_contract_test.go
+!backend/internal/modules/sandbox/service_lifecycle_test.go
+!backend/internal/modules/sandbox/service_runtime_selftest_test.go
+!backend/internal/modules/sandbox/repo_recycle_test.go
+!backend/internal/modules/sim/service_shared_accounts_test.go
+!backend/internal/modules/sim/service_execution_test.go
+!backend/internal/platform/redis/lease_test.go
+!backend/internal/modules/contest/service_sandbox_terminal_test.go
 # 性能回归门禁使用的稳定热点基准属于 CI 契约,必须随源码版本化。
 !backend/pkg/chainassert/chainassert_benchmark_test.go
 !backend/pkg/crypto/hash_benchmark_test.go

@@ -1,13 +1,4 @@
-// 防作弊审查(赛事详情页内区块)。
-//
-// 两件事:按赛题查 M3 查重线索、对确认违规的队伍下处理记录。
-// 查重线索需要一个"待比对的提交"作为输入 —— 后端 FindSimilarity 以 code_storage_key
-// 为基准生成特征向量,故本页按 code_hash 或来源标识指定基准,不臆造扫描全表的能力。
-//
-// 处理动作有三种后果不同的档位(警告 / 扣分 / 取消资格),扣分与取消资格会改动榜单,
-// 故各自明确说明后果,不做成一个笼统的"处理"按钮。
-
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { Search, ShieldAlert, Trophy } from 'lucide-react'
 import {
   CheatAction,
@@ -53,7 +44,7 @@ import {
 import { api } from '../../../../app/api'
 import { collectAllPages } from '../../../../utils/allPages'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { useAsyncResource, usePagedResource, type AsyncResourceState } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatDateTime, formatScore } from '../../../../utils/formatters'
 import { cheatActionLabel, cheatTypeLabel } from '../../../../utils/labels/contest'
@@ -76,13 +67,11 @@ const ACTION_HINTS: Record<CheatAction, string> = {
 
 export interface ContestCheatProps {
   contest: Contest
+  problems: AsyncResourceState<ContestProblem[]>
   readOnly?: boolean
 }
 
-/**
- * ContestCheat 承载查重线索与违规处理。
- */
-export function ContestCheat({ contest, readOnly = false }: ContestCheatProps) {
+export function ContestCheat({ contest, problems, readOnly = false }: ContestCheatProps) {
   const [recordTarget, setRecordTarget] = useState<{ sourceRef?: string } | undefined>()
   const isDraft = contest.status === ContestStatus.DRAFT
   const actionsReadOnly = readOnly || isDraft
@@ -144,7 +133,9 @@ export function ContestCheat({ contest, readOnly = false }: ContestCheatProps) {
     <PageBody
       rail={
         <SuspectsCard
+          key={`${contest.id}:${contest.status}:${actionsReadOnly}`}
           contest={contest}
+          problems={problems}
           readOnly={actionsReadOnly}
           onHandle={(sourceRef) => setRecordTarget({ sourceRef })}
         />
@@ -174,7 +165,6 @@ export function ContestCheat({ contest, readOnly = false }: ContestCheatProps) {
             草稿阶段没有参赛数据,查重和违规处理会在赛事开放报名后提供。
           </Callout>
         ) : null}
-        {/* 列表型页内子视图走 DataPanel 片段(§6.5.5 B):数据表与分页同处一块抬起片 */}
         <DataPanel
           label="违规处理记录"
           footer={
@@ -201,7 +191,6 @@ export function ContestCheat({ contest, readOnly = false }: ContestCheatProps) {
                 data={page.list}
                 rowKey={(item) => item.id}
                 elevated={false}
-                // <md 换行卡(§6.4.1 规则 3):处理时间一行、违规类型与依据一行,处理方式在右
                 mobileCard={(item) => ({
                   title: formatDateTime(item.created_at),
                   meta: `${cheatTypeLabel(item.type)} · ${readString(item.evidence, EVIDENCE_NOTE) || '未填写说明'}`,
@@ -234,21 +223,19 @@ export function ContestCheat({ contest, readOnly = false }: ContestCheatProps) {
 
 interface SuspectsCardProps {
   contest: Contest
+  problems: AsyncResourceState<ContestProblem[]>
   readOnly: boolean
   onHandle: (sourceRef: string) => void
 }
 
-/**
- * SuspectsCard 按赛题查询代码相似线索。
- * 查重以某一份提交为基准比对同题其他提交,故需要先给出基准提交的代码指纹。
- */
-function SuspectsCard({ contest, readOnly, onHandle }: SuspectsCardProps) {
+function SuspectsCard({ contest, problems, readOnly, onHandle }: SuspectsCardProps) {
   const [problemId, setProblemId] = useState<string>('')
   const [codeHash, setCodeHash] = useState('')
   const [threshold, setThreshold] = useState('0.8')
   const [suspects, setSuspects] = useState<CheatSuspect[]>()
   const [searchError, setSearchError] = useState<string>()
   const [searching, setSearching] = useState(false)
+  const searchSequence = useRef(0)
   const thresholdValue = Number(threshold)
   const { errors, validate } = useFormValidation(() => ({
     problemId: !problemId ? '请选择要查重的赛题' : null,
@@ -256,12 +243,6 @@ function SuspectsCard({ contest, readOnly, onHandle }: SuspectsCardProps) {
       ? '相似度阈值需要在 0 与 1 之间,例如 0.8'
       : null,
   }))
-
-  const problems = useAsyncResource(
-    () => api.contest.getProblems(contest.id),
-    [contest.id],
-    (value) => value.length === 0
-  )
 
   const problemOptions = useMemo(
     () =>
@@ -272,11 +253,20 @@ function SuspectsCard({ contest, readOnly, onHandle }: SuspectsCardProps) {
     [problems.data]
   )
 
+  const clearSearch = () => {
+    searchSequence.current++
+    setSuspects(undefined)
+    setSearchError(undefined)
+    setSearching(false)
+  }
+
   const search = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
       if (readOnly) return
       if (!validate()) return
+      const sequence = ++searchSequence.current
+      setSuspects(undefined)
       setSearchError(undefined)
       setSearching(true)
       try {
@@ -285,11 +275,13 @@ function SuspectsCard({ contest, readOnly, onHandle }: SuspectsCardProps) {
           code_hash: codeHash.trim() || undefined,
           threshold: thresholdValue,
         })
-        setSuspects(result)
+        if (sequence === searchSequence.current) setSuspects(result)
       } catch (error) {
-        setSearchError(userFacingErrorMessage(error, '查重没有完成,请稍后重试。'))
+        if (sequence === searchSequence.current) {
+          setSearchError(userFacingErrorMessage(error, '查重没有完成,请稍后重试。'))
+        }
       } finally {
-        setSearching(false)
+        if (sequence === searchSequence.current) setSearching(false)
       }
     },
     [codeHash, contest.id, problemId, readOnly, thresholdValue, validate]
@@ -325,7 +317,10 @@ function SuspectsCard({ contest, readOnly, onHandle }: SuspectsCardProps) {
                   placeholder="选择赛题"
                   disabled={readOnly}
                   invalid={Boolean(errors.problemId)}
-                  onValueChange={setProblemId}
+                  onValueChange={(value) => {
+                    clearSearch()
+                    setProblemId(value)
+                  }}
                   onBlur={() => validate(['problemId'])}
                 />
               </FormField>
@@ -341,7 +336,10 @@ function SuspectsCard({ contest, readOnly, onHandle }: SuspectsCardProps) {
                   autoComplete="off"
                   placeholder="提交详情里的代码指纹"
                   disabled={readOnly}
-                  onChange={(event) => setCodeHash(event.target.value)}
+                  onChange={(event) => {
+                    clearSearch()
+                    setCodeHash(event.target.value)
+                  }}
                 />
               </FormField>
 
@@ -361,7 +359,10 @@ function SuspectsCard({ contest, readOnly, onHandle }: SuspectsCardProps) {
                   value={threshold}
                   disabled={readOnly}
                   invalid={Boolean(errors.threshold)}
-                  onChange={(event) => setThreshold(event.target.value)}
+                  onChange={(event) => {
+                    clearSearch()
+                    setThreshold(event.target.value)
+                  }}
                   onBlur={() => validate(['threshold'])}
                 />
               </FormField>
@@ -615,5 +616,3 @@ function CheatRecordModal({ contest, sourceRef, onClose, onSaved }: CheatRecordM
     </Modal>
   )
 }
-
-/** readNumber 从证据对象里读数字字段;非数字回 0(不把对象塞进界面)。 */

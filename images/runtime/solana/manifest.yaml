@@ -90,6 +90,10 @@ selftest:
       command:
         - solana
         - --version
+    - name: tar-version
+      command:
+        - tar
+        - --version
 supply_chain:
   sbom: true
   trivy_required: true

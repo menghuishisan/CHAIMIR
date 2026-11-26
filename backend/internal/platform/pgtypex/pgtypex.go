@@ -1,4 +1,4 @@
-// pgtypex 统一提供后端模块复用的 PostgreSQL 可空类型辅助函数。
+// Package pgtypex 在业务值与 PostgreSQL 可空类型之间转换。
 package pgtypex
 
 import (
@@ -125,6 +125,9 @@ func NumericValue(v pgtype.Numeric) (float64, error) {
 	}
 	if !f.Valid {
 		return 0, fmt.Errorf("必填 numeric 为空")
+	}
+	if math.IsNaN(f.Float64) || math.IsInf(f.Float64, 0) {
+		return 0, fmt.Errorf("numeric 不是有限数字: %v", f.Float64)
 	}
 	return f.Float64, nil
 }

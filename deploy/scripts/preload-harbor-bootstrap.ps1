@@ -36,60 +36,11 @@ function Assert-Sha256 {
     }
 }
 
-# ConvertTo-ProcessArgument 将参数安全编码为 Windows 原生进程参数。
-function ConvertTo-ProcessArgument([string]$Value) {
-    if ($null -eq $Value -or $Value.Length -eq 0) { return '""' }
-    if ($Value -notmatch '[\s"]') { return $Value }
-    $builder = [Text.StringBuilder]::new()
-    [void]$builder.Append('"')
-    $slashes = 0
-    foreach ($character in $Value.ToCharArray()) {
-        if ($character -eq '\') { $slashes++; continue }
-        if ($character -eq '"') {
-            if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
-            [void]$builder.Append('\').Append('"')
-            $slashes = 0
-            continue
-        }
-        if ($slashes -gt 0) { [void]$builder.Append(('\' * $slashes) -join '') }
-        [void]$builder.Append($character)
-        $slashes = 0
-    }
-    if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
-    [void]$builder.Append('"')
-    return $builder.ToString()
-}
-
-# Invoke-DockerBounded 对节点导入和校验设置明确时限，避免 Docker Desktop 异常时无限等待。
 function Invoke-DockerBounded {
     param([string[]]$Arguments, [int]$TimeoutSeconds)
-    $process = [Diagnostics.Process]::new()
-    $process.StartInfo = [Diagnostics.ProcessStartInfo]::new()
-    $process.StartInfo.FileName = "docker.exe"
-    $process.StartInfo.UseShellExecute = $false
-    $process.StartInfo.CreateNoWindow = $true
-    $process.StartInfo.RedirectStandardOutput = $true
-    $process.StartInfo.RedirectStandardError = $true
-    $process.StartInfo.Arguments = (($Arguments | ForEach-Object { ConvertTo-ProcessArgument ([string]$_) }) -join " ")
-    try {
-        if (-not $process.Start()) { throw "Docker CLI 启动失败" }
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            try { $process.Kill($true) } catch { }
-            throw "Docker CLI 超时（$TimeoutSeconds 秒）: $($Arguments -join ' ')"
-        }
-        $stdout = $stdoutTask.GetAwaiter().GetResult()
-        $stderr = $stderrTask.GetAwaiter().GetResult()
-        $text = (@($stdout, $stderr) | Where-Object { $_ }) -join "`n"
-        if ($process.ExitCode -ne 0) {
-            throw "Docker CLI 失败（exit=$($process.ExitCode)）: $($Arguments -join ' '); $text"
-        }
-        return $text.Trim()
-    }
-    finally {
-        $process.Dispose()
-    }
+    $result = Invoke-ChaimirDocker -Arguments $Arguments -TimeoutSeconds $TimeoutSeconds
+    if ($result.Code -ne 0) { throw "Docker CLI 失败（exit=$($result.Code)）: $($result.Text)" }
+    return $result.Text
 }
 
 # Restart-ContainerdAndAssertCanonicalIdentity 刷新 CRI 对 OCI 导入记录的缓存，拒绝旧 import 别名作为运行时身份。

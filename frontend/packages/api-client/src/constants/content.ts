@@ -1,5 +1,3 @@
-// 内容契约常量：维护前端需要与后端 content 模块枚举编号对齐的值。
-
 export enum ContentType {
   EXPERIMENT_TEMPLATE = 1,
   CONTEST_PROBLEM = 2,

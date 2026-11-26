@@ -1,5 +1,3 @@
-// Contest API：对齐后端 M8 竞赛模块唯一 HTTP 契约。
-
 import { ApiClient, encodePathSegment } from '../client'
 import { API_BASE_PATH } from '../constants'
 import type { IdentityApi } from './identity'
@@ -9,7 +7,6 @@ import type {
   BattleEntryRequest,
   BattleEntry,
   BattleMatch,
-  BattleReplayRef,
   BattleReplayDownloadGrant,
   BattleReplayWindow,
   CheatRecord,
@@ -40,10 +37,10 @@ import type {
   SignupRequest,
   ContestTeam,
   VulnProblem,
-  VulnProblemImportRequest,
+  VulnProblemRequest,
+  VulnProblemUpdateRequest,
   VulnSource,
   VulnSourceRequest,
-  VulnPrevalidateRequest,
 } from '../types/contest'
 
 /**
@@ -81,8 +78,7 @@ export class ContestApi {
   }
 
   /**
-   * getStudentContests 查询学生可发现的非草稿竞赛。
-   * status 筛选由服务端执行(草稿态仍不可见),total 与筛选同口径。
+   * getStudentContests 查询本校及本人已入队的跨校正式赛事，筛选与总数使用同一可见范围。
    */
   async getStudentContests(params?: {
     status?: ContestStatus
@@ -93,10 +89,7 @@ export class ContestApi {
     return this.client.get('/contest/student/contests', params)
   }
 
-  /**
-   * 读取单个学生可发现的竞赛（门槛与列表一致：草稿态不可见）。
-   * 竞赛详情页深链、刷新以及退出竞赛答题/对局回放后的回落都用这条。
-   */
+  /** getStudentContest 读取同一可见范围内的赛事详情，不以曾打开列表作为授权。 */
   async getStudentContest(contestId: string): Promise<Contest> {
     return this.client.get(`/contest/student/contests/${encodePathSegment(contestId)}`)
   }
@@ -173,11 +166,10 @@ export class ContestApi {
 
   /**
    * 添加或更新竞赛题目。
-   * 题目引用时服务端会同步编译并冻结组合快照,其耗时由服务端 HTTP 写超时约束;
-   * 不能使用普通页面请求的 30 秒客户端超时截断合法编译。
+   * 服务端在本次请求内编译并冻结组合快照。
    */
   async addProblem(contestId: string, data: ContestProblemRequest): Promise<ContestProblem> {
-    return this.client.postLongRunning(
+    return this.client.postWithoutClientTimeout(
       `/contest/contests/${encodePathSegment(contestId)}/problems`,
       data
     )
@@ -403,13 +395,6 @@ export class ContestApi {
     )
   }
 
-  /**
-   * 获取对局回放引用。
-   */
-  async getBattleReplay(matchId: string): Promise<BattleReplayRef> {
-    return this.client.get(`/contest/matches/${encodePathSegment(matchId)}/replay`)
-  }
-
   /** 为已授权的对局回放签发统一文件服务取件授权。 */
   async issueBattleReplayDownloadGrant(matchId: string): Promise<BattleReplayDownloadGrant> {
     return this.client.post(`/contest/matches/${encodePathSegment(matchId)}/replay/download-grant`)
@@ -423,13 +408,6 @@ export class ContestApi {
     params?: { page?: number; size?: number }
   ): Promise<PaginatedResponse<LadderRank>> {
     return this.client.get(`/contest/contests/${encodePathSegment(contestId)}/ladder`, params)
-  }
-
-  /**
-   * 订阅排行榜实时更新 topic。
-   */
-  getLeaderboardTopic(tenantId: string, contestId: string): string {
-    return `tenant:${tenantId}:contest:${contestId}:leaderboard`
   }
 
   /**
@@ -524,25 +502,27 @@ export class ContestApi {
     return this.client.get('/contest/vuln-problems', params)
   }
 
-  /**
-   * 导入漏洞题草稿。
-   * 手工录入与按来源案例录入是同一条路径:请求体的可选 source_id 表达来源归属
-   * (对齐清单 §6.17 已收敛掉同义的 /vuln-sources/import)。
-   */
-  async importVulnProblem(data: VulnProblemImportRequest): Promise<VulnProblem> {
+  /** 新建漏洞题草稿；重复案例不覆盖已有内容。 */
+  async createVulnProblem(data: VulnProblemRequest): Promise<VulnProblem> {
     return this.client.post('/contest/vuln-problems', data)
+  }
+
+  /** 读取服务端草稿和并发修改标记。 */
+  async getVulnProblem(problemId: string): Promise<VulnProblem> {
+    return this.client.get(`/contest/vuln-problems/${encodePathSegment(problemId)}`)
+  }
+
+  /** 保存指定版本草稿；冲突时由编辑者读取最新版本后处理。 */
+  async updateVulnProblem(problemId: string, data: VulnProblemUpdateRequest): Promise<VulnProblem> {
+    return this.client.put(`/contest/vuln-problems/${encodePathSegment(problemId)}`, data)
   }
 
   /**
    * 执行漏洞题预验证,等待服务端完成沙箱准备和正反向执行后返回最终结果。
    */
-  async prevalidateVulnProblem(
-    problemId: string,
-    data: VulnPrevalidateRequest
-  ): Promise<VulnProblem> {
-    return this.client.postLongRunning(
-      `/contest/vuln-problems/${encodePathSegment(problemId)}/prevalidate`,
-      data
+  async prevalidateVulnProblem(problemId: string): Promise<VulnProblem> {
+    return this.client.postWithoutClientTimeout(
+      `/contest/vuln-problems/${encodePathSegment(problemId)}/prevalidate`
     )
   }
 

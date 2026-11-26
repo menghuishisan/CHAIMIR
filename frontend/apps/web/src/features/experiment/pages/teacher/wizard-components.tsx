@@ -325,6 +325,7 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
       resource_profile: spec.resource_profile,
       network_profile: spec.network_profile,
       init_assets: spec.init_assets,
+      init_chain_steps: spec.init_chain_steps,
       init_code_ref: spec.init_code_ref,
       init_script_ref: spec.init_script_ref,
       keep_alive: keepAlive,

@@ -22,8 +22,6 @@ const (
 	CodeTeachingDiscussionInvalid = "61009"
 	// CodeTeachingMemberClassEmpty 表示所选班级没有可加入课程的在校学生。
 	CodeTeachingMemberClassEmpty = "61010"
-	// CodeTeachingCourseEndedEventPublishFailed 表示课程结束事件发布失败,课内实验实例暂未级联回收。
-	CodeTeachingCourseEndedEventPublishFailed = "61011"
 	// CodeTeachingCourseCoverInvalid 表示课程封面文件类型或内容不是受支持的图片。
 	CodeTeachingCourseCoverInvalid = "61012"
 	// CodeTeachingCourseCoverTooLarge 表示课程封面文件超过上传大小上限。
@@ -94,8 +92,6 @@ var (
 	ErrTeachingDiscussionInvalid = New(CodeTeachingDiscussionInvalid, "课程互动信息不正确")
 	// ErrTeachingMemberClassEmpty 表示所选班级没有可加入课程的在校学生。
 	ErrTeachingMemberClassEmpty = New(CodeTeachingMemberClassEmpty, "这个班级暂时没有可加入课程的在校学生")
-	// ErrTeachingCourseEndedEventPublishFailed 表示课程状态已更新但级联回收通知未发出。
-	ErrTeachingCourseEndedEventPublishFailed = New(CodeTeachingCourseEndedEventPublishFailed, "课程状态已更新,但课内实验环境的回收通知暂时没能发出,请稍后重试")
 	// ErrTeachingCourseCoverInvalid 表示封面不是受支持的图片格式。
 	ErrTeachingCourseCoverInvalid = New(CodeTeachingCourseCoverInvalid, "封面请用 JPG、PNG 或 WEBP 图片")
 	// ErrTeachingCourseCoverTooLarge 表示封面文件超过上传上限。

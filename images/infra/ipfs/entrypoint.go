@@ -2,15 +2,16 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 )
 
 const ipfsBin = "/usr/local/bin/ipfs"
 const configInitBin = "/usr/local/bin/chaimir-ipfs-config-init"
-const initConfigPath = "/runtime-state/ipfs-init-config.json"
 
 // main 在启动 daemon 前确保 Kubo repo 已初始化并关闭默认遥测。
 func main() {
@@ -33,7 +34,7 @@ func main() {
 }
 
 // prepareRepo 初始化 Kubo repo,并把 API/Gateway 监听地址与 telemetry 配置收敛到平台要求。
-func prepareRepo() error {
+func prepareRepo() (prepareErr error) {
 	if err := os.Setenv("IPFS_PATH", "/runtime-state/ipfs"); err != nil {
 		return fmt.Errorf("set IPFS_PATH: %w", err)
 	}
@@ -42,14 +43,21 @@ func prepareRepo() error {
 	}
 
 	if _, err := os.Stat(os.Getenv("IPFS_PATH") + "/config"); os.IsNotExist(err) {
+		directory, err := os.MkdirTemp("/runtime-state", "ipfs-init-*")
+		if err != nil {
+			return fmt.Errorf("create temporary init directory: %w", err)
+		}
+		defer func() {
+			if err := os.RemoveAll(directory); err != nil {
+				prepareErr = errors.Join(prepareErr, fmt.Errorf("remove temporary init directory: %w", err))
+			}
+		}()
+		initConfigPath := filepath.Join(directory, "config.json")
 		if err := runCommand(configInitBin, initConfigPath); err != nil {
 			return err
 		}
-		if err := runIPFS("init", "--profile=server", initConfigPath); err != nil {
+		if err := runCommand(ipfsBin, "init", "--profile=server", initConfigPath); err != nil {
 			return err
-		}
-		if err := os.Remove(initConfigPath); err != nil {
-			return fmt.Errorf("remove temporary init config: %w", err)
 		}
 	} else if err != nil {
 		return fmt.Errorf("stat repo config: %w", err)
@@ -66,7 +74,7 @@ func prepareRepo() error {
 		{"config", "Plugins.Plugins.telemetry.Config.Mode", "off"},
 	}
 	for _, setting := range settings {
-		if err := runIPFS(setting...); err != nil {
+		if err := runCommand(ipfsBin, setting...); err != nil {
 			return err
 		}
 	}
@@ -81,18 +89,6 @@ func runCommand(binary string, args ...string) error {
 	cmd.Env = os.Environ()
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("run %s %v: %w", binary, args, err)
-	}
-	return nil
-}
-
-// runIPFS 执行一次受控 ipfs 子命令,失败时保留原始错误链用于定位。
-func runIPFS(args ...string) error {
-	cmd := exec.Command(ipfsBin, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Env = os.Environ()
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("ipfs %v: %w", args, err)
 	}
 	return nil
 }

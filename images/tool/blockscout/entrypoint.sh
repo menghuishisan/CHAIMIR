@@ -19,6 +19,11 @@ set -eu
 : "${BLOCKSCOUT_DEPENDENCY_TIMEOUT_SECONDS:?BLOCKSCOUT_DEPENDENCY_TIMEOUT_SECONDS is required}"
 : "${BLOCKSCOUT_DEPENDENCY_POLL_SECONDS:?BLOCKSCOUT_DEPENDENCY_POLL_SECONDS is required}"
 
+if [ "$ECTO_SSL_MODE" != "require" ]; then
+  echo "ECTO_SSL_MODE must be require" >&2
+  exit 2
+fi
+
 case "$PORT" in
   ''|*[!0-9]*) echo "PORT must be a valid TCP port" >&2; exit 2 ;;
 esac
@@ -45,8 +50,8 @@ database_name="${CHAIMIR_BLOCKSCOUT_DATABASE_NAME}"
 database_user="${CHAIMIR_BLOCKSCOUT_DATABASE_USER}"
 case "${database_name}" in *[!A-Za-z0-9_.-]*|'') echo "CHAIMIR_BLOCKSCOUT_DATABASE_NAME is invalid" >&2; exit 2;; esac
 case "${database_user}" in *[!A-Za-z0-9_.-]*|'') echo "CHAIMIR_BLOCKSCOUT_DATABASE_USER is invalid" >&2; exit 2;; esac
-case "${POSTGRES_PASSWORD}" in *[!A-Za-z0-9_.~-]*|'') echo "POSTGRES_PASSWORD is invalid" >&2; exit 2;; esac
-export DATABASE_URL="postgresql://${database_user}:${POSTGRES_PASSWORD}@${CHAIMIR_BLOCKSCOUT_DATABASE_ADDRESS}/${database_name}"
+encoded_password="$(printf '%s' "$POSTGRES_PASSWORD" | jq -sRr @uri)"
+export DATABASE_URL="postgresql://${database_user}:${encoded_password}@${CHAIMIR_BLOCKSCOUT_DATABASE_ADDRESS}/${database_name}?sslmode=require"
 
 export PORT="${PORT}"
 export ECTO_SSL_MODE="${ECTO_SSL_MODE}"

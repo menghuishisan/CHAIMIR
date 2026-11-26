@@ -1,15 +1,13 @@
-// Sim API：仿真引擎
-// 对应后端 M4 模块
+// 仿真包管理、回放与隔离执行客户端。
 
 import { ApiClient, encodePathSegment } from '../client'
 import type { SimPackageStatus, SimReviewResult } from '../constants/sim'
 import type { PaginatedResponse } from '../types/common'
 import type {
   SimPackageMeta,
-  SimPackagePreview,
+  SimPackageReviewDetail,
   SimPackageReview,
   SimPackageSubmissionResult,
-  SimReviewDecision,
   SimActionLog,
   SimPackageSubmit,
   SimReplay,
@@ -24,12 +22,7 @@ import type {
  * 扩展包的归档只经受控 k8s exec 投入隔离容器,从不下发浏览器。
  */
 export class SimApi {
-  /**
-   * constructor 注入统一 API 客户端，复用 multipart、鉴权和 WebSocket URL 规则。
-   */
   constructor(private client: ApiClient) {}
-
-  // ===== 仿真包管理 =====
 
   /**
    * 获取仿真包列表。
@@ -47,46 +40,32 @@ export class SimApi {
     return this.client.get('/sim/packages', params)
   }
 
-  /**
-   * 获取指定仿真包的所有版本
-   */
   async getPackageVersions(code: string): Promise<SimPackageMeta[]> {
     return this.client.get(`/sim/packages/${encodePathSegment(code)}/versions`)
   }
 
-  /**
-   * 提交仿真包，字段名与后端 multipart 绑定保持一致
-   */
   async submitPackage(
     data: SimPackageSubmit,
     onProgress?: (progress: number) => void
   ): Promise<SimPackageSubmissionResult> {
-    return this.client.postFormData('/sim/packages', packageFormData(data), onProgress)
+    return this.client.sendFormData('POST', '/sim/packages', packageFormData(data), onProgress)
   }
 
-  /**
-   * 更新草稿或退回后的仿真包
-   */
   async updatePackage(
     packageId: string,
     data: SimPackageSubmit,
     onProgress?: (progress: number) => void
   ): Promise<SimPackageSubmissionResult> {
-    return this.client.patchFormData(`/sim/packages/${encodePathSegment(packageId)}`, packageFormData(data), onProgress)
+    return this.client.sendFormData('PATCH', `/sim/packages/${encodePathSegment(packageId)}`, packageFormData(data), onProgress)
   }
 
   /**
    * 获取审核前预览报告(仅包作者本人可读)。
    */
-  async previewPackage(packageId: string): Promise<SimPackagePreview> {
+  async previewPackage(packageId: string): Promise<SimPackageReviewDetail> {
     return this.client.get(`/sim/packages/${encodePathSegment(packageId)}/preview`)
   }
 
-  // ===== 仿真包审核 =====
-
-  /**
-   * 获取审核列表（审核员）
-   */
   async getReviews(params?: {
     result?: SimReviewResult
     page?: number
@@ -95,60 +74,34 @@ export class SimApi {
     return this.client.get('/sim/reviews', params)
   }
 
-  /**
-   * 审核通过
-   */
-  async approveReview(reviewId: string): Promise<SimReviewDecision> {
+  async approveReview(reviewId: string): Promise<SimPackageReviewDetail> {
     return this.client.post(`/sim/reviews/${encodePathSegment(reviewId)}/approve`)
   }
 
-  /**
-   * 审核退回
-   */
-  async rejectReview(reviewId: string, comment: string): Promise<SimReviewDecision> {
+  async rejectReview(reviewId: string, comment: string): Promise<SimPackageReviewDetail> {
     return this.client.post(`/sim/reviews/${encodePathSegment(reviewId)}/reject`, { comment })
   }
 
-  /**
-   * 下架已发布仿真包
-   */
   async archivePackage(packageId: string): Promise<SimPackageMeta> {
     return this.client.post(`/sim/packages/${encodePathSegment(packageId)}/archive`)
   }
 
-  /**
-   * 重新上架已下架仿真包
-   */
   async republishPackage(packageId: string): Promise<SimPackageMeta> {
     return this.client.post(`/sim/packages/${encodePathSegment(packageId)}/republish`)
   }
 
-  // ===== 仿真会话 =====
-
-  /**
-   * 上报用户操作序列
-   */
   async reportAction(sessionId: string, action: SimActionLog): Promise<SimActionLog> {
     return this.client.post(`/sim/sessions/${encodePathSegment(sessionId)}/actions`, action)
   }
 
-  /**
-   * 获取可复现回放数据
-   */
   async getReplay(sessionId: string): Promise<SimReplay> {
     return this.client.get(`/sim/sessions/${encodePathSegment(sessionId)}/replay`)
   }
 
-  /**
-   * 创建公开分享码
-   */
   async shareSession(sessionId: string, data: SimShareCreate = {}): Promise<SimShareResult> {
     return this.client.post(`/sim/sessions/${encodePathSegment(sessionId)}/share`, data)
   }
 
-  /**
-   * 读取公开分享剧本
-   */
   async getSharedReplay(code: string): Promise<SimReplay> {
     return this.client.get(`/sim/shared/${encodePathSegment(code)}`)
   }
@@ -162,10 +115,6 @@ export class SimApi {
   }
 }
 
-/**
- * 构造后端 M4 multipart 上传所需字段。
- * 不含 compute 与运行能力:服务端按作者类型派生,多传会被 multipart 字段白名单拒绝。
- */
 function packageFormData(data: SimPackageSubmit): FormData {
   const formData = new FormData()
   formData.append('bundle', data.bundle)
@@ -173,6 +122,6 @@ function packageFormData(data: SimPackageSubmit): FormData {
   formData.append('version', data.version)
   formData.append('name', data.name)
   formData.append('category', data.category)
-  formData.append('scale_limit', JSON.stringify(data.scale_limit ?? {}))
+  formData.append('scale_limit', JSON.stringify(data.scale_limit))
   return formData
 }

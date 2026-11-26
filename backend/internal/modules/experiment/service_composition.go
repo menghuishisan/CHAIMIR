@@ -30,6 +30,7 @@ func (s *Service) compileEnvironmentComponents(ctx context.Context, tenantID int
 			ResourceProfile:          env.ResourceProfile,
 			NetworkProfile:           env.NetworkProfile,
 			InitAssets:               env.InitAssets,
+			InitChainSteps:           env.InitChainSteps,
 		})
 		if err != nil {
 			return ComponentConfig{}, apperr.ErrExperimentSandboxUnavailable.WithCause(err)

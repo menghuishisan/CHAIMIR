@@ -12,7 +12,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ShieldCheck, Swords, TriangleAlert } from 'lucide-react'
 import { BattleRole, type BattleReplayArchive, type BattleReplayAction } from '@chaimir/api-client'
 import { Badge, Button, cn, useReducedMotion } from '@chaimir/ui'
-import { battleChainOpLabel, battleRoleLabel } from '../../../utils/labels/contest'
+import { vulnChainOpLabel, battleRoleLabel } from '../../../utils/labels/contest'
 
 /** 拓扑画布的逻辑坐标系:等比缩放到容器宽度,不写死像素。 */
 const CANVAS = { width: 520, height: 160 } as const
@@ -77,7 +77,7 @@ export function AttackDefenseTopology({ archive, mySide, step }: AttackDefenseTo
             textAnchor="middle"
             className="fill-on-dark text-xs"
           >
-            {battleChainOpLabel(lastOp)}
+            {vulnChainOpLabel(lastOp)}
           </text>
         ) : null}
 
@@ -161,7 +161,11 @@ export interface ChainLogStreamProps {
  * ChainLogStream 渲染链上日志流:按执行顺序逐条列出动作,跟随游标滚到最新一条。
  * 无界序列只在这一栏出现(规范 §7.1 状态与事件分流),舞台不再重复一份。
  */
-export function ChainLogStream({
+export function ChainLogStream(props: ChainLogStreamProps) {
+  return <ChainLogStreamSession key={props.archive?.match_id ?? 'empty'} {...props} />
+}
+
+function ChainLogStreamSession({
   archive,
   step,
   onLoad,
@@ -177,10 +181,6 @@ export function ChainLogStream({
     [archive, step],
   )
 
-  // 换到另一局时恢复跟随最新,避免把上一局手动浏览的位置带进新轨迹。
-  useEffect(() => {
-    setFollowLatest(true)
-  }, [archive])
 
   // 跟随最新:只有用户仍停在底部时才随游标移动,手动上翻日志不会被新帧抢回底部。
   useEffect(() => {
@@ -260,11 +260,12 @@ function ChainLogRow({ action }: { action: BattleReplayAction }) {
   const output = readableEntries(action.output)
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono text-xs tabular-nums text-on-dark-faint">
           第 {action.seq} 步
         </span>
-        <span className="text-sm text-on-dark">{battleChainOpLabel(action.op)}</span>
+        <span className="text-sm text-on-dark">{vulnChainOpLabel(action.op)}</span>
+        <span className="break-all text-xs text-on-dark-sub">目标链：{action.runtime_instance}</span>
       </div>
       {payload.length > 0 ? <KeyValueLine label="入参" entries={payload} /> : null}
       {output.length > 0 ? <KeyValueLine label="结果" entries={output} /> : null}

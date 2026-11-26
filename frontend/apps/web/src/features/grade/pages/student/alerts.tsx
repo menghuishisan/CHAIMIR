@@ -1,11 +1,4 @@
-// 学业预警页(学生侧栏,/student/alerts)。设计 §7.2:
-// 待确认的预警排在最前,每条一张白卡(学期、预警类型与说明、建议下一步、「我已知悉」);
-// 已确认的折叠在下方「已确认(n)」。「收到预警怎么办」三步说明放在有待确认预警时的卡片内,
-// 给「打开成绩中心」。没有预警时用积极的话:「目前没有学业预警」。分页只在超过一页时出现。
-//
-// GET /grade-center/warnings 的 student_id 缺省即本人(后端在缺省时填会话账号,并校验学生只能读自己),
-// 前端不传该参数。预警明细 detail 是后端按类型写入的开放对象:只呈现已登记的键,未登记键不猜语义。
-// 一个学生的预警通常 0–3 条:待确认与已确认分两次按状态读取,各自分页。
+// 学生分别读取待确认与已知悉预警；明细只呈现已登记含义的字段。
 
 import { useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router'
@@ -78,6 +71,14 @@ export default function StudentAlertsPage() {
           <Callout tone="danger" className="mb-4">
             {actionError}
           </Callout>
+        ) : null}
+
+        {acknowledged.status === 'error' ? (
+          <ResourceError
+            message={acknowledged.error?.message ?? '已确认的预警暂时读取不到'}
+            traceId={acknowledged.error?.traceId}
+            onRetry={acknowledged.reload}
+          />
         ) : null}
 
         {pending.status === 'error' ? (

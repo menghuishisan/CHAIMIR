@@ -21,11 +21,11 @@ type BundleInput struct {
 
 // validateBundleManifestMatchesRequest 确认上传表单与包内自描述元信息一致,防止审核摘要和入库元数据分裂。
 // 不比对 compute:表单与 manifest 都不含它,执行位置由服务端按 author_type 派生。
-func validateBundleManifestMatchesRequest(manifest bundleManifest, req SubmitPackageRequest) error {
+func validateBundleManifestMatchesRequest(manifest bundleManifest, req SubmitPackageRequest, scale map[string]any) error {
 	if strings.TrimSpace(manifest.Meta.Code) != req.Code || strings.TrimSpace(manifest.Meta.Version) != req.Version || strings.TrimSpace(manifest.Meta.Name) != req.Name || strings.TrimSpace(manifest.Meta.Category) != req.Category {
 		return apperr.ErrSimPackageValidationFailed
 	}
-	if !scaleLimitMatchesRequest(manifest.Meta.ScaleLimit, req.ScaleLimit) {
+	if !jsonx.Equal(manifest.Meta.ScaleLimit, scale) {
 		return apperr.ErrSimPackageValidationFailed
 	}
 	if len(manifest.InteractionSchema.Events) == 0 {
@@ -36,11 +36,7 @@ func validateBundleManifestMatchesRequest(manifest bundleManifest, req SubmitPac
 
 // dangerousBundlePatterns 是提交时扫描的危险调用模式。
 //
-// 它是**给审核人的信号,不是隔离边界**:正则拦不住 `globalThis['fe'+'tch']` 这类拼接,
-// 动态语言下的能力访问无法靠模式匹配穷尽。真正的边界是隔离容器 —— 扩展包在 deny-all 网络、
-// 只读根、无凭据的 Pod 内执行,`fetch` 在那里本就无处可达(见 docs/04-仿真可视化引擎/07-安全设计.md §3、§5)。
-// 故扫描命中会写进审核报告提请人工重点查看,而不再作为准入的唯一硬门禁。
-
+// 命中仅提示人工重点审核；执行安全由隔离容器约束，见 06-安全设计.md §3、§5。
 var dangerousBundlePatterns = []struct {
 	name string
 	re   *regexp.Regexp
@@ -75,6 +71,7 @@ var allowedRenderPatternRoles = map[string]struct{}{"primary": {}, "evidence": {
 // SimPackage(ESM 语义)。允许 .js 会让"能不能装配"取决于归档里有没有 type:module ——
 // 同一份代码在不同打包方式下表现不同,收敛成单一扩展名消掉这类不确定性。
 var entryPathPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\.mjs$`)
+var checkpointIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}$`)
 
 // bundleManifest 保存后端可审核的自描述协议摘要,不承载可执行函数正文。
 type bundleManifest struct {
@@ -183,34 +180,33 @@ func analyzeBundle(input BundleInput, limits upload.ArchiveLimits) (string, Stat
 	if strings.TrimSpace(input.FileName) == "" || len(input.Data) == 0 {
 		return "", StaticScanReport{}, bundleManifest{}, apperr.ErrSimBundleUnreadable
 	}
-	if len(input.Data) > 0 {
-		hash := crypto.SHA256Hex(input.Data)
-		findings, manifest, err := scanBundleEntries(input.FileName, input.Data, limits)
-		if err != nil {
-			return "", StaticScanReport{}, bundleManifest{}, apperr.ErrSimBundleUnreadable.WithCause(err)
-		}
-		if len(findings) > 0 {
-			return hash, StaticScanReport{Status: validationFailed, Findings: findings}, bundleManifest{}, nil
-		}
-		return hash, StaticScanReport{Status: validationPassed}, manifest, nil
+	findings, manifest, err := scanBundleEntries(input.FileName, input.Data, limits)
+	if err != nil {
+		return "", StaticScanReport{}, bundleManifest{}, apperr.ErrSimBundleUnreadable.WithCause(err)
 	}
-	return "", StaticScanReport{}, bundleManifest{}, apperr.ErrSimBundleUnreadable
+	status := validationPassed
+	if hasBlockingFindings(findings) {
+		status = validationFailed
+	} else if len(findings) > 0 {
+		status = validationWarning
+	}
+	return crypto.SHA256Hex(input.Data), StaticScanReport{Status: status, Findings: findings}, manifest, nil
 }
 
 // scanBundleEntries 遍历 ZIP/TAR 普通文件,对代码和 JSON 契约文件执行保守静态扫描,
 // 并确认 manifest 声明的入口模块在归档内真实存在。
 func scanBundleEntries(name string, data []byte, limits upload.ArchiveLimits) ([]string, bundleManifest, error) {
 	findings := []string{}
-	var manifestRaw []byte
+	manifests := map[string][]byte{}
 	members := map[string]struct{}{}
 	err := upload.WalkArchiveFiles(name, data, limits, func(file upload.ArchiveFile) error {
 		content, err := upload.ReadArchiveFileContent(file, limits.MaxUnpackedBytes)
 		if err != nil {
 			return err
 		}
-		members[cleanMemberName(file.Name)] = struct{}{}
-		if cleanManifestName(file.Name) == simPackageManifestName {
-			manifestRaw = append([]byte(nil), content...)
+		members[file.Name] = struct{}{}
+		if file.Name == simPackageManifestName || (strings.Count(file.Name, "/") == 1 && strings.HasSuffix(file.Name, "/"+simPackageManifestName)) {
+			manifests[file.Name] = content
 		}
 		if !scanCandidate(file.Name) {
 			return nil
@@ -221,9 +217,24 @@ func scanBundleEntries(name string, data []byte, limits upload.ArchiveLimits) ([
 	if err != nil {
 		return nil, bundleManifest{}, err
 	}
-	if len(manifestRaw) == 0 {
-		findings = append(findings, "manifest:missing")
-		return findings, bundleManifest{}, nil
+	// 根清单优先；无根清单时全部文件必须位于唯一的一层包目录内。
+	prefix := ""
+	manifestRaw, direct := manifests[simPackageManifestName]
+	if !direct {
+		if len(manifests) == 0 {
+			return append(findings, "manifest:missing"), bundleManifest{}, nil
+		}
+		if len(manifests) != 1 {
+			return append(findings, "manifest:ambiguous-root"), bundleManifest{}, nil
+		}
+		for name, content := range manifests {
+			prefix, manifestRaw = strings.TrimSuffix(name, simPackageManifestName), content
+		}
+		for name := range members {
+			if !strings.HasPrefix(name, prefix) {
+				return append(findings, "manifest:ambiguous-root"), bundleManifest{}, nil
+			}
+		}
 	}
 	manifest, manifestFindings := parseBundleManifest(manifestRaw)
 	if len(manifestFindings) > 0 {
@@ -232,22 +243,11 @@ func scanBundleEntries(name string, data []byte, limits upload.ArchiveLimits) ([
 	// 入口模块声明合法不代表它真的在包里:容器装配时找不到入口只能报运行失败,
 	// 而那已经是学生打开场景之后了。在上传边界就确认存在性,把缺陷挡在审核之前。
 	if entry := strings.TrimSpace(manifest.Meta.Entry); entry != "" {
-		if _, exists := members[entry]; !exists {
+		if _, exists := members[prefix+entry]; !exists {
 			findings = append(findings, "manifest:entry-not-in-archive")
 		}
 	}
 	return findings, manifest, nil
-}
-
-// cleanMemberName 归一化归档成员名,剥掉归档工具自动包的唯一顶层目录,
-// 使成员名与 manifest 里的相对路径处于同一坐标系。
-func cleanMemberName(name string) string {
-	value := strings.TrimPrefix(strings.ReplaceAll(strings.TrimSpace(name), "\\", "/"), "./")
-	parts := strings.Split(value, "/")
-	if len(parts) > 1 && strings.Contains(strings.Join(parts[1:], "/"), simPackageManifestName) {
-		return strings.Join(parts[1:], "/")
-	}
-	return value
 }
 
 // scanCandidate 仅扫描可执行/契约文本文件,避免对图片等资产误报。
@@ -270,19 +270,6 @@ func scanContent(name string, content []byte) []string {
 		}
 	}
 	return findings
-}
-
-// cleanManifestName 允许 manifest 位于归档根或单个顶层目录下,其他同名文件不作为协议入口。
-func cleanManifestName(name string) string {
-	name = strings.Trim(strings.ReplaceAll(name, "\\", "/"), "/")
-	if name == simPackageManifestName {
-		return simPackageManifestName
-	}
-	parts := strings.Split(name, "/")
-	if len(parts) == 2 && parts[1] == simPackageManifestName {
-		return simPackageManifestName
-	}
-	return name
 }
 
 // parseBundleManifest 强校验自描述协议,并提取后端运行时需要的最小白名单。
@@ -488,7 +475,7 @@ func codeTraceAuditFromManifest(in *simCodeTraceManifest) (CodeTraceAudit, []str
 	return CodeTraceAudit{Enabled: true, Language: strings.TrimSpace(in.Language), LineCount: lineCount, MappingCount: len(in.LineMapping), VariableCount: len(in.VariableWatch)}, nil
 }
 
-// checkpointFindingsFromManifest 校验检查点声明,确保后续检查点上报有受控锚点。
+// checkpointFindingsFromManifest 校验包内教学步骤声明。
 func checkpointFindingsFromManifest(in []simCheckpointDef) []string {
 	if len(in) == 0 || len(in) > 64 {
 		return []string{"manifest:checkpoint-invalid"}
@@ -509,23 +496,20 @@ func checkpointFindingsFromManifest(in []simCheckpointDef) []string {
 
 // validManifestScaleLimit 校验 manifest 中的规模上限字段,与前端 Worker 强制项保持一致。
 func validManifestScaleLimit(value map[string]any) bool {
+	if len(value) != 3 {
+		return false
+	}
 	nodes, nodesOK := positiveJSONInt(value["nodes"])
 	maxTick, tickOK := positiveJSONInt(value["max_tick"])
 	maxEvents, eventsOK := positiveJSONInt(value["max_events"])
 	return nodesOK && tickOK && eventsOK && nodes <= 10000 && maxTick <= 100000 && maxEvents <= 100000
 }
 
-// scaleLimitMatchesRequest 确认 manifest 与上传表单中的规模上限同源。
-func scaleLimitMatchesRequest(manifest map[string]any, raw []byte) bool {
-	request, err := jsonx.ObjectMapStrict(raw)
-	if err != nil {
-		return false
-	}
-	return jsonx.Equal(manifest, request)
-}
-
 // positiveJSONInt 从 JSON 数字或数字字符串读取正整数。
 func positiveJSONInt(value any) (int, bool) {
+	if _, stringValue := value.(string); stringValue {
+		return 0, false
+	}
 	out := jsonx.IntFromAny(value)
 	return out, out > 0
 }

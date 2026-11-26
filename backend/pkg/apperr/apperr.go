@@ -112,14 +112,17 @@ func (e *Error) WithCause(cause error) *Error {
 	return &Error{code: e.code, message: e.message, cause: cause}
 }
 
-// AsAppError 将任意错误归一为应用错误,未知错误统一收敛成内部错误。
+// AsAppError 沿用应用错误的公开信息，保留外层操作说明与并列原因。
 func AsAppError(err error) *Error {
 	if err == nil {
 		return nil
 	}
+	if ae, ok := err.(*Error); ok {
+		return ae
+	}
 	var ae *Error
 	if errors.As(err, &ae) {
-		return ae
+		return ae.WithCause(err)
 	}
 	return ErrInternal.WithCause(err)
 }

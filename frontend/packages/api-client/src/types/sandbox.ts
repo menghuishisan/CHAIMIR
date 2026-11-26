@@ -36,7 +36,7 @@ export interface SandboxCapabilities {
   file_workspace: boolean
   terminal: boolean
   command_tools: boolean
-  chain_operations: SandboxChainOperation[]
+  chain_operations: Record<string, SandboxChainOperation[]>
 }
 
 export interface SandboxToolAccess {
@@ -161,6 +161,7 @@ export interface SandboxToolRequest {
 }
 
 export interface SandboxToolResourceSpec {
+  volume_source?: 'self' | 'workspace' | `binding:${string}` | `runtime:${string}`
   /** disabled_reason 是服务端给出的用户向不可用原因,只读展示,不由前端编造 */
   disabled_reason?: string
   builtin_endpoint?: string
@@ -173,23 +174,27 @@ export interface SandboxToolResourceSpec {
     default_timeout_seconds: number
     max_timeout_seconds: number
   }
-  prepull_command?: string[]
   bindings?: SandboxComponentBinding[]
   capabilities?: SandboxComponentCapabilities
 }
 
 /** SandboxComponentBinding 描述组件按能力和端点声明的连接角色。 */
-export interface SandboxComponentBinding {
+interface SandboxComponentBinding {
   name: string
+  title?: string
+  optional?: boolean
   capability: string
+  source_component: string
+  source_endpoint?: string
   endpoint: string
   protocol: 'TCP' | 'HTTP' | 'HTTPS' | 'WS' | 'WSS' | 'GRPC'
   required_at_start: boolean
   config_binding: `env:${string}`
+  multiple?: boolean
 }
 
 /** SandboxComponentCapabilities 是组件能力声明,供服务端编译器校验组合;前端只读展示。 */
-export interface SandboxComponentCapabilities {
+interface SandboxComponentCapabilities {
   provides?: string[] | null
   requires?: string[] | null
   conflicts?: string[] | null
@@ -206,14 +211,8 @@ export interface SandboxToolDefinition extends SandboxToolRequest {
 }
 
 /**
- * SandboxOrchestrationCatalog 是编排目录响应:业务模块选运行时与组件只需这些字段。
- * 它刻意不是 SandboxRuntime / SandboxToolDefinition 的子集别名 —— 适配器清单、镜像地址、
- * 完整 argv 白名单与自检详情属平台运维面,后端也不下发,故编排面按独立类型对接。
- *
- * 目录只出真正可调度的项:运行时必须 status=available 且自检通过,被引用的镜像必须内置创世,
- * 且已发布组合的完整镜像闭包必须有成功的组合预拉取证明。服务端在 SQL 层过滤这些条件,
- * 故前端不再按状态二次筛(避免两边口径不一致)。
- * 基础设施单独成组,不能混进学生工具入口(§7.2)。
+ * SandboxOrchestrationCatalog 提供已自检且可用的运行时、可用镜像版本与组件摘要。
+ * 不包含工作负载、镜像地址或命令；组合兼容性和准确快照的预拉取证明由服务端另行校验。
  */
 export interface SandboxOrchestrationCatalog {
   runtimes: SandboxCatalogRuntime[]
@@ -221,7 +220,7 @@ export interface SandboxOrchestrationCatalog {
   tools: SandboxCatalogTool[]
 }
 
-export interface SandboxCatalogRuntime {
+interface SandboxCatalogRuntime {
   code: string
   name: string
   eco: string
@@ -229,7 +228,7 @@ export interface SandboxCatalogRuntime {
   capabilities: SandboxComponentCapabilities
 }
 
-export interface SandboxCatalogRuntimeImage {
+interface SandboxCatalogRuntimeImage {
   version: string
 }
 
@@ -272,7 +271,7 @@ export interface SandboxRuntimeSelftestStatus {
  * SandboxRuntimeSelftestDetail 是可展示的自检摘要,不含命名空间或编排明细。
  * reason 由服务端给出,可能是用户向说明也可能是稳定原因码,前端按码表转成用户向文案。
  */
-export interface SandboxRuntimeSelftestDetail {
+interface SandboxRuntimeSelftestDetail {
   result?: string
   stage?: string
   reason?: string

@@ -2,7 +2,9 @@
 package sandbox
 
 import (
+	"chaimir/internal/contracts"
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 
 // Store 定义 service 所需的 sandbox 持久化能力,不暴露 sqlc 行类型。
 type Store interface {
+	CloneTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
 	PlatformTx(ctx context.Context, fn func(context.Context, TxStore) error) error
 	TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
 	PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error
@@ -26,12 +29,14 @@ type Store interface {
 
 // TxStore 定义单个事务内可调用的 sandbox 数据访问能力。
 type TxStore interface {
+	ReadAlertMetrics(context.Context, contracts.AlertMetricQuery) (map[string]float64, error)
 	GetRuntimeByCode(ctx context.Context, code string) (Runtime, error)
 	GetRuntimeByID(ctx context.Context, id int64) (Runtime, error)
 	GetRuntimeByIDForUpdate(ctx context.Context, id int64) (Runtime, error)
 	ListRuntimes(ctx context.Context) ([]Runtime, error)
 	CountAvailableRuntimeImages(ctx context.Context) (map[int64]int64, error)
-	UpsertRuntime(ctx context.Context, id int64, req RuntimeRequest, spec AdapterSpec, selftestStatus int16, selftestDetail []byte) (Runtime, error)
+	GetOrCreateRuntimeForUpdate(ctx context.Context, id int64, req RuntimeRequest, spec AdapterSpec) (Runtime, error)
+	UpdateRuntime(ctx context.Context, id int64, req RuntimeRequest, spec AdapterSpec, selftestStatus int16, selftestDetail []byte) (Runtime, error)
 	StartRuntimeSelftest(ctx context.Context, runtimeID int64, detail []byte) (Runtime, error)
 	FinishRuntimeSelftest(ctx context.Context, runtimeID int64, attemptID string, status, runtimeStatus int16, detail []byte) (Runtime, error)
 	GetRuntimeImageByID(ctx context.Context, runtimeID, imageID int64) (RuntimeImage, error)
@@ -40,9 +45,9 @@ type TxStore interface {
 	GetRuntimeImageByVersionForShare(ctx context.Context, runtimeID int64, version string) (RuntimeImage, error)
 	ListRuntimeImages(ctx context.Context, runtimeID int64) ([]RuntimeImage, error)
 	CreateRuntimeImage(ctx context.Context, id, runtimeID int64, req RuntimeImageRequest) (RuntimeImage, error)
-	GetPublishedCompositionSnapshot(ctx context.Context, compositionDigest string) ([]byte, error)
-	UpsertPublishedCompositionSnapshot(ctx context.Context, compositionDigest string, snapshot []byte) error
-	DeletePublishedCompositionSnapshot(ctx context.Context, compositionDigest string) error
+	GetCompositionSnapshot(ctx context.Context, compositionDigest string) ([]byte, error)
+	UpsertCompositionSnapshot(ctx context.Context, compositionDigest string, snapshot []byte) error
+	DeleteCompositionSnapshot(ctx context.Context, compositionDigest string) error
 	GetCompositionPrepullForUpdate(ctx context.Context, runtimeImageID int64, compositionDigest string) (CompositionPrepull, error)
 	StartCompositionPrepull(ctx context.Context, id, runtimeImageID int64, compositionDigest, attemptID string, imageClosure, detail []byte) (CompositionPrepull, error)
 	FinishCompositionPrepull(ctx context.Context, runtimeImageID int64, compositionDigest, attemptID string, status int16, daemonsetName string, desiredNodes, readyNodes int32, detail []byte) (CompositionPrepull, error)
@@ -53,7 +58,8 @@ type TxStore interface {
 	ListTools(ctx context.Context) ([]Tool, error)
 	ListCatalogRuntimes(ctx context.Context) ([]CatalogRuntime, error)
 	ListCatalogTools(ctx context.Context) ([]CatalogTool, error)
-	UpsertTool(ctx context.Context, id int64, req ToolRequest, spec ToolResourceSpec) (Tool, error)
+	GetOrCreateToolForUpdate(ctx context.Context, id int64, req ToolRequest, spec ToolResourceSpec) (Tool, error)
+	UpdateTool(ctx context.Context, id int64, req ToolRequest, spec ToolResourceSpec) (Tool, error)
 	GetTenantQuota(ctx context.Context, tenantID int64) (TenantQuota, error)
 	EnsureTenantQuota(ctx context.Context, quota TenantQuota) (TenantQuota, error)
 	GetTenantQuotaForUpdate(ctx context.Context, tenantID int64) (TenantQuota, error)
@@ -68,16 +74,23 @@ type TxStore interface {
 	GetSavedSandboxBySourceRef(ctx context.Context, tenantID int64, sourceRef string) (Sandbox, error)
 	ListSandboxesByScopeRef(ctx context.Context, tenantID int64, scopeRef string) ([]Sandbox, error)
 	ListRecycleCandidates(ctx context.Context, readyDeadline time.Time, limit int32) ([]Sandbox, error)
+	ListPendingSandboxStarts(ctx context.Context, deadline time.Time, limit int32) ([]Sandbox, error)
+	ClaimSandboxResources(ctx context.Context, tenantID, sandboxID int64, expectedStatus int16, leaseDuration time.Duration) (Sandbox, bool, error)
+	ClaimSandboxRecycle(ctx context.Context, tenantID, sandboxID int64, expectedStatus int16, leaseDuration time.Duration) (Sandbox, bool, error)
+	ClaimExpiredSandboxSnapshotCleanup(ctx context.Context, tenantID, sandboxID int64, leaseDuration time.Duration) (Sandbox, bool, error)
+	RenewSandboxResourceLease(ctx context.Context, tenantID, sandboxID int64, leaseToken string, leaseDuration time.Duration) (bool, error)
+	ReleaseSandboxResourceLease(ctx context.Context, tenantID, sandboxID int64, leaseToken string) (bool, error)
+	CompleteSandboxRecycle(ctx context.Context, tenantID, sandboxID int64, leaseToken string) (bool, error)
+	CompleteExpiredSandboxSnapshotCleanup(ctx context.Context, tenantID, sandboxID int64, leaseToken string) (bool, error)
+	StartRetainedSandbox(ctx context.Context, tenantID, sandboxID int64) (bool, error)
+	QueueSandboxRecycle(ctx context.Context, tenantID, sandboxID int64, expectedStatus int16) (bool, error)
 	MarkIdleSandboxes(ctx context.Context) ([]Sandbox, error)
 	ListSnapshotCleanupCandidates(ctx context.Context, limit int32) ([]Sandbox, error)
 	UpdateSandboxPhaseStatus(ctx context.Context, tenantID, sandboxID int64, phase, status int16) (Sandbox, error)
 	MarkSandboxActive(ctx context.Context, tenantID, sandboxID int64) (Sandbox, error)
 	UpdateSandboxCode(ctx context.Context, tenantID, sandboxID int64, key, hash string) (Sandbox, error)
 	UpdateSandboxAuthorizedAccounts(ctx context.Context, tenantID, sandboxID int64, accountIDs []int64) (Sandbox, error)
-	UpdateSandboxSnapshot(ctx context.Context, tenantID, sandboxID int64, ref string, domains []string, createdAt, expireAt time.Time) (Sandbox, error)
-	CreateSandboxTool(ctx context.Context, id int64, tenantID int64, sandboxID int64, tool Tool, endpoint string, status int16) (SandboxTool, error)
-	ListSandboxTools(ctx context.Context, tenantID, sandboxID int64) ([]SandboxTool, error)
-	UpdateSandboxToolStatus(ctx context.Context, tenantID, sandboxID int64, tool Tool, endpoint string, status int16) (SandboxTool, error)
+	UpdateSandboxSnapshot(ctx context.Context, tenantID, sandboxID int64, leaseToken, ref string, domains []string, createdAt, expireAt time.Time) (Sandbox, error)
 	CreateSandboxEvent(ctx context.Context, id, tenantID, sandboxID int64, typ string, detail []byte) error
 	CreateSandboxRecycleOutbox(context.Context, int64, Sandbox, string, string, time.Time) (SandboxRecycleOutbox, error)
 	ClaimPendingSandboxRecycleOutbox(context.Context, int32, int32, time.Time, time.Time) ([]SandboxRecycleOutbox, error)
@@ -125,6 +138,17 @@ type txStore struct {
 // NewStore 创建 sandbox 模块持久化入口,仅装配层应调用。
 func NewStore(database *db.DB) Store {
 	return &store{database: database}
+}
+
+// CloneTx 让新快照与目标课程原子提交，不接受平台或来源事务。
+func (s *store) CloneTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error {
+	joined, err := s.database.WithTenantTxIfPresent(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
+	})
+	if err == nil && !joined {
+		return fmt.Errorf("组合复制缺少目标租户事务")
+	}
+	return err
 }
 
 // PlatformTx 在应用连接中访问运行时、镜像和工具等平台级表。
@@ -214,15 +238,33 @@ func (s *txStore) ListRuntimes(ctx context.Context) ([]Runtime, error) {
 	return out, nil
 }
 
-// UpsertRuntime 新建或更新运行时声明。
-func (s *txStore) UpsertRuntime(ctx context.Context, id int64, req RuntimeRequest, spec AdapterSpec, selftestStatus int16, selftestDetail []byte) (Runtime, error) {
+// GetOrCreateRuntimeForUpdate 以唯一约束等待并发登记后，锁行读取最新状态。
+func (s *txStore) GetOrCreateRuntimeForUpdate(ctx context.Context, id int64, req RuntimeRequest, spec AdapterSpec) (Runtime, error) {
 	rawSpec, err := jsonBytes(spec)
 	if err != nil {
 		return Runtime{}, err
 	}
-	row, err := s.q.UpsertRuntime(ctx, sqlcgen.UpsertRuntimeParams{
+	if err := s.q.EnsureRuntime(ctx, sqlcgen.EnsureRuntimeParams{
+		ID: id, Code: req.Code, Name: req.Name, Eco: req.Eco, AdapterLevel: req.AdapterLevel,
+		AdapterSpec: rawSpec, CapabilityImpl: pgtypex.Text(req.CapabilityImpl), PluginRef: pgtypex.Text(req.PluginRef), Status: req.Status,
+	}); err != nil {
+		return Runtime{}, err
+	}
+	row, err := s.q.GetRuntimeByCodeForUpdate(ctx, req.Code)
+	if err != nil {
+		return Runtime{}, err
+	}
+	return runtimeFromRow(row)
+}
+
+// UpdateRuntime 仅更新已锁定的运行时，不在编辑路径隐式创建记录。
+func (s *txStore) UpdateRuntime(ctx context.Context, id int64, req RuntimeRequest, spec AdapterSpec, selftestStatus int16, selftestDetail []byte) (Runtime, error) {
+	rawSpec, err := jsonBytes(spec)
+	if err != nil {
+		return Runtime{}, err
+	}
+	row, err := s.q.UpdateRuntime(ctx, sqlcgen.UpdateRuntimeParams{
 		ID:             id,
-		Code:           req.Code,
 		Name:           req.Name,
 		Eco:            req.Eco,
 		AdapterLevel:   req.AdapterLevel,
@@ -330,26 +372,26 @@ func (s *txStore) CreateRuntimeImage(ctx context.Context, id, runtimeID int64, r
 	return runtimeImageFromRow(row), nil
 }
 
-// GetPublishedCompositionSnapshot 按摘要读取已发布且不可变的组合快照。
-func (s *txStore) GetPublishedCompositionSnapshot(ctx context.Context, compositionDigest string) ([]byte, error) {
-	row, err := s.q.GetPublishedCompositionSnapshot(ctx, compositionDigest)
+// GetCompositionSnapshot 按摘要读取冻结的组合快照。
+func (s *txStore) GetCompositionSnapshot(ctx context.Context, compositionDigest string) ([]byte, error) {
+	row, err := s.q.GetCompositionSnapshot(ctx, compositionDigest)
 	if err != nil {
 		return nil, err
 	}
 	return append([]byte(nil), row.Snapshot...), nil
 }
 
-// UpsertPublishedCompositionSnapshot 登记编译后的组合快照,供预拉取和启动阶段复用同一事实来源。
-func (s *txStore) UpsertPublishedCompositionSnapshot(ctx context.Context, compositionDigest string, snapshot []byte) error {
-	return s.q.UpsertPublishedCompositionSnapshot(ctx, sqlcgen.UpsertPublishedCompositionSnapshotParams{
+// UpsertCompositionSnapshot 登记编译后的组合快照,供预拉取和启动阶段复用同一事实来源。
+func (s *txStore) UpsertCompositionSnapshot(ctx context.Context, compositionDigest string, snapshot []byte) error {
+	return s.q.UpsertCompositionSnapshot(ctx, sqlcgen.UpsertCompositionSnapshotParams{
 		CompositionDigest: compositionDigest,
 		Snapshot:          snapshot,
 	})
 }
 
-// DeletePublishedCompositionSnapshot 删除被最终快照替代的已发布组合摘要。
-func (s *txStore) DeletePublishedCompositionSnapshot(ctx context.Context, compositionDigest string) error {
-	return s.q.DeletePublishedCompositionSnapshot(ctx, compositionDigest)
+// DeleteCompositionSnapshot 删除被最终快照替代的组合摘要。
+func (s *txStore) DeleteCompositionSnapshot(ctx context.Context, compositionDigest string) error {
+	return s.q.DeleteCompositionSnapshot(ctx, compositionDigest)
 }
 
 // GetCompositionPrepullForUpdate 锁定某个组合摘要的预拉取证明。
@@ -477,15 +519,32 @@ func (s *txStore) ListCatalogTools(ctx context.Context) ([]CatalogTool, error) {
 	return out, nil
 }
 
-// UpsertTool 新建或更新工具定义。
-func (s *txStore) UpsertTool(ctx context.Context, id int64, req ToolRequest, spec ToolResourceSpec) (Tool, error) {
+// GetOrCreateToolForUpdate 等待并发登记后锁行，确保变更比较使用最新声明。
+func (s *txStore) GetOrCreateToolForUpdate(ctx context.Context, id int64, req ToolRequest, spec ToolResourceSpec) (Tool, error) {
 	rawSpec, err := jsonBytes(spec)
 	if err != nil {
 		return Tool{}, err
 	}
-	row, err := s.q.UpsertTool(ctx, sqlcgen.UpsertToolParams{
+	if err := s.q.EnsureTool(ctx, sqlcgen.EnsureToolParams{
+		ID: id, Code: req.Code, Name: req.Name, Kind: req.Kind, EcoTags: stringsJoin(req.EcoTags), ResourceSpec: rawSpec, Status: req.Status,
+	}); err != nil {
+		return Tool{}, err
+	}
+	row, err := s.q.GetToolByCodeForUpdate(ctx, req.Code)
+	if err != nil {
+		return Tool{}, err
+	}
+	return toolFromRow(row)
+}
+
+// UpdateTool 更新已锁定的工具定义。
+func (s *txStore) UpdateTool(ctx context.Context, id int64, req ToolRequest, spec ToolResourceSpec) (Tool, error) {
+	rawSpec, err := jsonBytes(spec)
+	if err != nil {
+		return Tool{}, err
+	}
+	row, err := s.q.UpdateTool(ctx, sqlcgen.UpdateToolParams{
 		ID:           id,
-		Code:         req.Code,
 		Name:         req.Name,
 		Kind:         req.Kind,
 		EcoTags:      stringsJoin(req.EcoTags),
@@ -598,6 +657,9 @@ func (s *txStore) CreateSandbox(ctx context.Context, input CreateSandboxInput) (
 		KeepAliveUntil:      timex.Timestamptz(input.KeepAliveUntil),
 		ExpireAt:            timex.RequiredTimestamptz(input.ExpireAt),
 	})
+	if db.IsUniqueViolation(err) {
+		return Sandbox{}, apperr.ErrConflict.WithCause(err)
+	}
 	if err != nil {
 		return Sandbox{}, err
 	}
@@ -620,8 +682,11 @@ func (s *txStore) GetSandbox(ctx context.Context, tenantID, sandboxID int64) (Sa
 // ClaimSandboxWorkspaceRevision 原子比较并前进工作区 revision,阻止并发学生覆盖彼此修改。
 func (s *txStore) ClaimSandboxWorkspaceRevision(ctx context.Context, tenantID, sandboxID, expectedRevision int64) (int64, error) {
 	row, err := s.q.ClaimSandboxWorkspaceRevision(ctx, sqlcgen.ClaimSandboxWorkspaceRevisionParams{TenantID: tenantID, ID: sandboxID, ExpectedRevision: expectedRevision})
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, apperr.ErrConflict.WithCause(err)
+	}
+	if err != nil {
+		return 0, apperr.ErrSandboxStatePersistFailed.WithCause(err)
 	}
 	return row, nil
 }
@@ -690,6 +755,128 @@ func (s *txStore) ListRecycleCandidates(ctx context.Context, readyDeadline time.
 	return sandboxRows(rows)
 }
 
+func (s *txStore) ListPendingSandboxStarts(ctx context.Context, deadline time.Time, limit int32) ([]Sandbox, error) {
+	rows, err := s.q.ListPendingSandboxStarts(ctx, sqlcgen.ListPendingSandboxStartsParams{
+		UpdatedAt: timex.RequiredTimestamptz(deadline), Limit: limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return sandboxRows(rows)
+}
+
+// ClaimSandboxRecycle 原子领取候选沙箱并生成唯一租约令牌。
+func (s *txStore) ClaimSandboxRecycle(ctx context.Context, tenantID, sandboxID int64, expectedStatus int16, leaseDuration time.Duration) (Sandbox, bool, error) {
+	leaseToken, err := pkgcrypto.RandomToken(48)
+	if err != nil {
+		return Sandbox{}, false, err
+	}
+	row, err := s.q.ClaimSandboxRecycle(ctx, sqlcgen.ClaimSandboxRecycleParams{
+		TenantID:       tenantID,
+		ID:             sandboxID,
+		ExpectedStatus: expectedStatus,
+		LeaseToken:     leaseToken,
+		LeaseSeconds:   int64(leaseDuration.Seconds()),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Sandbox{}, false, nil
+	}
+	if err != nil {
+		return Sandbox{}, false, err
+	}
+	item, err := sandboxFromRow(row)
+	return item, err == nil, err
+}
+
+// ClaimExpiredSandboxSnapshotCleanup 原子领取已过期快照的清理任务。
+func (s *txStore) ClaimExpiredSandboxSnapshotCleanup(ctx context.Context, tenantID, sandboxID int64, leaseDuration time.Duration) (Sandbox, bool, error) {
+	leaseToken, err := pkgcrypto.RandomToken(48)
+	if err != nil {
+		return Sandbox{}, false, err
+	}
+	row, err := s.q.ClaimExpiredSandboxSnapshotCleanup(ctx, sqlcgen.ClaimExpiredSandboxSnapshotCleanupParams{
+		TenantID: tenantID, ID: sandboxID, LeaseToken: leaseToken, LeaseSeconds: int64(leaseDuration.Seconds()),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Sandbox{}, false, nil
+	}
+	if err != nil {
+		return Sandbox{}, false, err
+	}
+	item, err := sandboxFromRow(row)
+	return item, err == nil, err
+}
+
+// RenewSandboxResourceLease 仅延长仍有效且令牌匹配的资源执行租约。
+func (s *txStore) RenewSandboxResourceLease(ctx context.Context, tenantID, sandboxID int64, leaseToken string, leaseDuration time.Duration) (bool, error) {
+	rows, err := s.q.RenewSandboxResourceLease(ctx, sqlcgen.RenewSandboxResourceLeaseParams{
+		TenantID:     tenantID,
+		ID:           sandboxID,
+		LeaseToken:   leaseToken,
+		LeaseSeconds: int64(leaseDuration.Seconds()),
+	})
+	return rows > 0, err
+}
+
+// ReleaseSandboxResourceLease 通过令牌释放失败任务的租约。
+func (s *txStore) ReleaseSandboxResourceLease(ctx context.Context, tenantID, sandboxID int64, leaseToken string) (bool, error) {
+	rows, err := s.q.ReleaseSandboxResourceLease(ctx, sqlcgen.ReleaseSandboxResourceLeaseParams{
+		TenantID: tenantID, ID: sandboxID, LeaseToken: leaseToken,
+	})
+	return rows > 0, err
+}
+
+// CompleteSandboxRecycle 仅允许当前未过期租约持有者提交回收终态。
+func (s *txStore) CompleteSandboxRecycle(ctx context.Context, tenantID, sandboxID int64, leaseToken string) (bool, error) {
+	rows, err := s.q.CompleteSandboxRecycle(ctx, sqlcgen.CompleteSandboxRecycleParams{
+		TenantID: tenantID, ID: sandboxID, LeaseToken: leaseToken,
+	})
+	return rows > 0, err
+}
+
+// CompleteExpiredSandboxSnapshotCleanup 清空已删除快照的引用并释放当前租约。
+func (s *txStore) CompleteExpiredSandboxSnapshotCleanup(ctx context.Context, tenantID, sandboxID int64, leaseToken string) (bool, error) {
+	rows, err := s.q.CompleteExpiredSandboxSnapshotCleanup(ctx, sqlcgen.CompleteExpiredSandboxSnapshotCleanupParams{
+		TenantID: tenantID, ID: sandboxID, LeaseToken: leaseToken,
+	})
+	return rows > 0, err
+}
+
+// StartRetainedSandbox 原子领取暂停恢复或未过期快照恢复，保留原有初始化阶段。
+func (s *txStore) StartRetainedSandbox(ctx context.Context, tenantID, sandboxID int64) (bool, error) {
+	rows, err := s.q.StartRetainedSandbox(ctx, sqlcgen.StartRetainedSandboxParams{
+		TenantID: tenantID, ID: sandboxID,
+	})
+	return rows > 0, err
+}
+
+// ClaimSandboxResources 与回收共用资源租约，防止跨副本并发创建和删除。
+func (s *txStore) ClaimSandboxResources(ctx context.Context, tenantID, sandboxID int64, expectedStatus int16, leaseDuration time.Duration) (Sandbox, bool, error) {
+	token, err := pkgcrypto.RandomToken(48)
+	if err != nil {
+		return Sandbox{}, false, err
+	}
+	row, err := s.q.ClaimSandboxResources(ctx, sqlcgen.ClaimSandboxResourcesParams{
+		TenantID: tenantID, ID: sandboxID, LeaseToken: token, LeaseSeconds: int64(leaseDuration.Seconds()), ExpectedStatus: expectedStatus,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Sandbox{}, false, nil
+	}
+	if err != nil {
+		return Sandbox{}, false, err
+	}
+	item, err := sandboxFromRow(row)
+	return item, err == nil, err
+}
+
+// QueueSandboxRecycle 将来源级联任务持久化为可重试回收状态。
+func (s *txStore) QueueSandboxRecycle(ctx context.Context, tenantID, sandboxID int64, expectedStatus int16) (bool, error) {
+	rows, err := s.q.QueueSandboxRecycle(ctx, sqlcgen.QueueSandboxRecycleParams{
+		TenantID: tenantID, ID: sandboxID, ExpectedStatus: expectedStatus,
+	})
+	return rows > 0, err
+}
+
 // MarkIdleSandboxes 将超时的运行中沙箱标记为空闲。
 func (s *txStore) MarkIdleSandboxes(ctx context.Context) ([]Sandbox, error) {
 	rows, err := s.q.MarkIdleSandboxes(ctx)
@@ -745,7 +932,7 @@ func (s *txStore) UpdateSandboxAuthorizedAccounts(ctx context.Context, tenantID,
 }
 
 // UpdateSandboxSnapshot 更新沙箱快照引用和真实覆盖卷域。
-func (s *txStore) UpdateSandboxSnapshot(ctx context.Context, tenantID, sandboxID int64, ref string, domains []string, createdAt, expireAt time.Time) (Sandbox, error) {
+func (s *txStore) UpdateSandboxSnapshot(ctx context.Context, tenantID, sandboxID int64, leaseToken, ref string, domains []string, createdAt, expireAt time.Time) (Sandbox, error) {
 	snapshotDomains, err := jsonStringArray(domains)
 	if err != nil {
 		return Sandbox{}, fmt.Errorf("编码沙箱快照域失败: %w", err)
@@ -753,6 +940,7 @@ func (s *txStore) UpdateSandboxSnapshot(ctx context.Context, tenantID, sandboxID
 	row, err := s.q.UpdateSandboxSnapshot(ctx, sqlcgen.UpdateSandboxSnapshotParams{
 		TenantID:          tenantID,
 		ID:                sandboxID,
+		LeaseToken:        leaseToken,
 		SnapshotRef:       pgtypex.Text(ref),
 		SnapshotDomains:   snapshotDomains,
 		SnapshotCreatedAt: timex.Timestamptz(createdAt),
@@ -764,47 +952,6 @@ func (s *txStore) UpdateSandboxSnapshot(ctx context.Context, tenantID, sandboxID
 	return sandboxFromRow(row)
 }
 
-// CreateSandboxTool 创建沙箱工具挂载记录。
-func (s *txStore) CreateSandboxTool(ctx context.Context, id int64, tenantID int64, sandboxID int64, tool Tool, endpoint string, status int16) (SandboxTool, error) {
-	row, err := s.q.CreateSandboxTool(ctx, sqlcgen.CreateSandboxToolParams{ID: id, TenantID: tenantID, SandboxID: sandboxID, ToolID: tool.ID, AccessEndpoint: endpoint, Status: status})
-	if err != nil {
-		return SandboxTool{}, err
-	}
-	return SandboxTool{ID: row.ID, TenantID: row.TenantID, SandboxID: row.SandboxID, ToolID: row.ToolID, ToolCode: tool.Code, Kind: tool.Kind, AccessEndpoint: row.AccessEndpoint, Status: row.Status}, nil
-}
-
-// ListSandboxTools 查询沙箱工具接入信息。
-func (s *txStore) ListSandboxTools(ctx context.Context, tenantID, sandboxID int64) ([]SandboxTool, error) {
-	rows, err := s.q.ListSandboxTools(ctx, sqlcgen.ListSandboxToolsParams{TenantID: tenantID, SandboxID: sandboxID})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]SandboxTool, 0, len(rows))
-	for _, row := range rows {
-		item, err := sandboxToolFromRow(row)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	return out, nil
-}
-
-// UpdateSandboxToolStatus 更新沙箱内工具健康状态和访问端点。
-func (s *txStore) UpdateSandboxToolStatus(ctx context.Context, tenantID, sandboxID int64, tool Tool, endpoint string, status int16) (SandboxTool, error) {
-	row, err := s.q.UpdateSandboxToolStatus(ctx, sqlcgen.UpdateSandboxToolStatusParams{
-		TenantID:       tenantID,
-		SandboxID:      sandboxID,
-		ToolID:         tool.ID,
-		Status:         status,
-		AccessEndpoint: endpoint,
-	})
-	if err != nil {
-		return SandboxTool{}, err
-	}
-	return sandboxToolFromStatusRow(row, tool), nil
-}
-
 // CreateSandboxEvent 写入沙箱技术事件。
 func (s *txStore) CreateSandboxEvent(ctx context.Context, id, tenantID, sandboxID int64, typ string, detail []byte) error {
 	_, err := s.q.CreateSandboxEvent(ctx, sqlcgen.CreateSandboxEventParams{ID: id, TenantID: tenantID, SandboxID: sandboxID, EventType: typ, Detail: detail})
@@ -813,7 +960,7 @@ func (s *txStore) CreateSandboxEvent(ctx context.Context, id, tenantID, sandboxI
 
 // CreateSandboxRecycleOutbox 在回收终态事务内保存回收事件。
 func (s *txStore) CreateSandboxRecycleOutbox(ctx context.Context, id int64, sb Sandbox, reason, traceID string, recycledAt time.Time) (SandboxRecycleOutbox, error) {
-	row, err := s.q.CreateSandboxRecycleOutbox(ctx, sqlcgen.CreateSandboxRecycleOutboxParams{ID: id, TenantID: sb.TenantID, SandboxID: sb.ID, SourceRef: sb.SourceRef, OwnerAccountID: sb.OwnerAccountID, Reason: reason, TraceID: traceID, RecycledAt: timex.RequiredTimestamptz(recycledAt)})
+	row, err := s.q.CreateSandboxRecycleOutbox(ctx, sqlcgen.CreateSandboxRecycleOutboxParams{ID: id, TenantID: sb.TenantID, SandboxID: sb.ID, SourceRef: sb.SourceRef, ScopeRef: sb.ScopeRef, Reason: reason, TraceID: traceID, RecycledAt: timex.RequiredTimestamptz(recycledAt)})
 	if err != nil {
 		return SandboxRecycleOutbox{}, err
 	}

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @chaimir/ui 总出口(墨玉体系设计系统)。
  * 分层:lib(工具)/ hooks / components(§5.1 清单)/ brand(§1.3 品牌资产)/
  * charts(§8 数据可视化)/ biz(§7.1 教学帧舞台,由仿真协议驱动)。
@@ -24,10 +24,8 @@ export * from "./components/DataPanel";
 export * from "./components/DescriptionList";
 export * from "./components/Drawer";
 export * from "./components/Empty";
-export * from "./components/EventTimeline";
 export * from "./components/FilterBar";
 export * from "./components/FormField";
-export * from "./components/GuidePanel";
 export * from "./components/IconButton";
 export * from "./components/Input";
 export * from "./components/ListRow";
@@ -45,7 +43,6 @@ export * from "./components/ReadingLayout";
 export * from "./components/SegmentedControl";
 export * from "./components/Select";
 export * from "./components/Skeleton";
-export * from "./components/Stat";
 export * from "./components/StatusIndicator";
 export * from "./components/Steps";
 export * from "./components/StickySaveBar";

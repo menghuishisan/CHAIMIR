@@ -1,9 +1,11 @@
-// teaching service_material 文件实现课时材料上传和统一文件服务授权。
 package teaching
 
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 
@@ -27,10 +29,8 @@ func (s *Service) UploadLessonMaterial(ctx context.Context, lessonID int64, req 
 		return LessonDTO{}, apperr.ErrTeachingLessonInvalid
 	}
 
-	var current Lesson
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		current, err = tx.GetLesson(ctx, id.TenantID, lessonID)
+		current, err := tx.GetLesson(ctx, id.TenantID, lessonID)
 		if err != nil {
 			return err
 		}
@@ -53,56 +53,77 @@ func (s *Service) UploadLessonMaterial(ctx context.Context, lessonID int64, req 
 		lessonType = LessonContentVideo
 	}
 	plan, err := s.files.PlanUpload(ctx, storage.PlanUploadRequest{
-		TenantID:        id.TenantID,
-		AccountID:       id.AccountID,
-		Module:          teachingModuleName,
-		ResourceType:    lessonMaterialResourceType,
-		ResourceID:      ids.Format(lessonID),
-		FileName:        req.FileName,
-		ContentType:     contentType,
-		Size:            int64(len(req.Content)),
-		MaxBytes:        s.materialMaxBytes,
-		ExpectedBucket:  s.storage.BucketAttach(),
-		AllowedFileName: true,
-		Content:         req.Content,
-		KindValidator:   upload.CourseMaterialKindValid,
-		ScanPolicy:      s.materialScanPolicy,
+		TenantID:          id.TenantID,
+		AccountID:         id.AccountID,
+		Module:            teachingModuleName,
+		ResourceType:      lessonMaterialResourceType,
+		ResourceID:        ids.Format(lessonID),
+		NestedResourceIDs: []string{ids.Format(s.ids.Generate())},
+		FileName:          req.FileName,
+		ContentType:       contentType,
+		Size:              int64(len(req.Content)),
+		MaxBytes:          s.materialMaxBytes,
+		ExpectedBucket:    s.storage.BucketAttach(),
+		AllowedFileName:   true,
+		Content:           req.Content,
+		KindValidator:     upload.CourseMaterialKindValid,
+		ScanPolicy:        s.materialScanPolicy,
 	})
 	if err != nil {
 		return LessonDTO{}, apperr.ErrTeachingLessonInvalid.WithCause(err)
 	}
 	if err := s.storage.Put(ctx, plan.Bucket, plan.Key, bytes.NewReader(req.Content), plan.Size, plan.ContentType); err != nil {
-		return LessonDTO{}, apperr.ErrTeachingLessonInvalid.WithCause(err)
+		return LessonDTO{}, apperr.ErrTeachingLessonInvalid.WithCause(errors.Join(err, s.discardMaterialObjects(ctx, storage.ObjectRef{Bucket: plan.Bucket, Key: plan.Key})))
 	}
 
-	updated := current
-	updated.ContentType = lessonType
-	updated.ContentRef = map[string]any{
-		"object_ref":   plan.ObjectRef,
-		"file_name":    plan.FileName,
-		"size":         plan.Size,
-		"content_type": contentType,
-	}
+	var out LessonDTO
 	var previousObjectRef string
+	commitAttempted := false
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		latest, err := tx.GetLesson(ctx, id.TenantID, lessonID)
+		latest, err := tx.GetLessonForUpdate(ctx, id.TenantID, lessonID)
 		if err != nil {
 			return err
 		}
-		previousObjectRef = strings.TrimSpace(jsonx.StringFromAny(latest.ContentRef["object_ref"]))
-		latest.ContentType = updated.ContentType
-		latest.ContentRef = updated.ContentRef
-		updated, err = tx.UpdateLesson(ctx, latest)
-		return err
-	}); err != nil {
-		if cleanupErr := s.storage.Delete(ctx, plan.Bucket, plan.Key); cleanupErr != nil {
-			logging.ErrorContext(ctx, "清理未关联课时材料失败", cleanupErr.Error())
+		chapter, err := tx.GetChapter(ctx, id.TenantID, latest.ChapterID)
+		if err != nil {
+			return err
 		}
-		return LessonDTO{}, apperr.ErrTeachingLessonInvalid.WithCause(err)
+		course, err := tx.GetCourse(ctx, id.TenantID, chapter.CourseID)
+		if err != nil {
+			return err
+		}
+		if err := ensureTeacherOwned(course, id.AccountID); err != nil {
+			return err
+		}
+		previousObjectRef = strings.TrimSpace(jsonx.StringFromAny(latest.ContentRef["object_ref"]))
+		latest.ContentType = lessonType
+		latest.ContentRef = map[string]any{
+			"object_ref":   plan.ObjectRef,
+			"file_name":    plan.FileName,
+			"size":         plan.Size,
+			"content_type": contentType,
+		}
+		updated, err := tx.UpdateLesson(ctx, latest)
+		if err != nil {
+			return err
+		}
+		out, err = lessonDTO(updated)
+		if err != nil {
+			return err
+		}
+		if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "teaching.lesson.material.upload", auditTargetLesson, lessonID, map[string]any{"file_name": plan.FileName, "content_type": contentType}); err != nil {
+			return err
+		}
+		commitAttempted = true
+		return nil
+	}); err != nil {
+		err = storage.CompensateUpload(ctx, s.cleanupTimeout, err, commitAttempted, func(ctx context.Context) error {
+			return s.discardMaterialObjects(ctx, storage.ObjectRef{Bucket: plan.Bucket, Key: plan.Key})
+		})
+		return LessonDTO{}, mapCourseError(err)
 	}
-	oldObjectRef := previousObjectRef
-	if oldObjectRef != "" && oldObjectRef != plan.ObjectRef {
-		oldRef, parseErr := storage.ParseObjectRef(oldObjectRef)
+	if previousObjectRef != "" && previousObjectRef != plan.ObjectRef {
+		oldRef, parseErr := storage.ParseObjectRef(previousObjectRef)
 		if parseErr != nil {
 			logging.ErrorContext(ctx, "替换课时材料时旧对象引用无效", parseErr.Error())
 		} else {
@@ -111,15 +132,12 @@ func (s *Service) UploadLessonMaterial(ctx context.Context, lessonID int64, req 
 				logging.ErrorContext(ctx, "替换课时材料时无法生成受控材料路径", prefixErr.Error())
 			} else if oldRef.Bucket != s.storage.BucketAttach() || !strings.HasPrefix(oldRef.Key, prefix+"/") {
 				logging.ErrorContext(ctx, "替换课时材料时旧对象不在受控材料路径", "bucket 或 key 不符合当前课时材料边界")
-			} else if deleteErr := s.storage.Delete(ctx, oldRef.Bucket, oldRef.Key); deleteErr != nil {
+			} else if deleteErr := s.discardMaterialObjects(ctx, oldRef); deleteErr != nil {
 				logging.ErrorContext(ctx, "清理已替换课时材料失败", deleteErr.Error())
 			}
 		}
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "teaching.lesson.material.upload", auditTargetLesson, lessonID, map[string]any{"file_name": plan.FileName, "content_type": contentType}); err != nil {
-		return LessonDTO{}, err
-	}
-	return lessonDTO(updated)
+	return out, nil
 }
 
 // IssueLessonMaterialAccess 校验课程可读权限并签发视频流式或附件一次性授权。
@@ -179,7 +197,61 @@ func (s *Service) IssueLessonMaterialAccess(ctx context.Context, lessonID int64)
 	return LessonMaterialAccessDTO{Token: token, Mode: grant.Mode, FileName: fileName, Size: size, ContentType: contentType, ExpiresAt: timex.RFC3339OrEmpty(grant.ExpiresAt)}, nil
 }
 
-// normalizedContentType 去掉上传 MIME 的参数,保证 lesson.content_ref 只有一个可比较的类型值。
 func normalizedContentType(value string) string {
 	return strings.ToLower(strings.TrimSpace(strings.Split(value, ";")[0]))
+}
+
+// copyLessonMaterial 在源课时锁内复制，目标对象只属于新课时。
+func (s *Service) copyLessonMaterial(ctx context.Context, source Lesson, target *Lesson) (storage.ObjectRef, error) {
+	if source.ContentType != LessonContentVideo && source.ContentType != LessonContentAttachment {
+		return storage.ObjectRef{}, nil
+	}
+	raw := jsonx.StringFromAny(source.ContentRef["object_ref"])
+	if raw == "" {
+		return storage.ObjectRef{}, nil
+	}
+	ref, err := storage.ParseObjectRef(raw)
+	if err != nil {
+		return storage.ObjectRef{}, apperr.ErrTeachingLessonInvalid.WithCause(err)
+	}
+	prefix, err := storage.ObjectKey(source.TenantID, teachingModuleName, lessonMaterialResourceType, ids.Format(source.ID))
+	if err != nil {
+		return storage.ObjectRef{}, apperr.ErrTeachingLessonInvalid.WithCause(err)
+	}
+	fileName := jsonx.StringFromAny(source.ContentRef["file_name"])
+	size := jsonx.Int64FromAny(source.ContentRef["size"], 0)
+	if ref.Bucket != s.storage.BucketAttach() || !strings.HasPrefix(ref.Key, prefix+"/") || fileName == "" || filepath.Base(fileName) != fileName || size <= 0 || normalizedContentType(jsonx.StringFromAny(source.ContentRef["content_type"])) == "" {
+		return storage.ObjectRef{}, apperr.ErrTeachingLessonInvalid
+	}
+	key, err := storage.ObjectKey(target.TenantID, teachingModuleName, lessonMaterialResourceType, ids.Format(target.ID), ids.Format(s.ids.Generate()), fileName)
+	if err != nil {
+		return storage.ObjectRef{}, apperr.ErrTeachingLessonInvalid.WithCause(err)
+	}
+	objectRef, err := storage.ObjectRefString(s.storage.BucketAttach(), key)
+	if err != nil {
+		return storage.ObjectRef{}, apperr.ErrTeachingLessonInvalid.WithCause(err)
+	}
+	copied := storage.ObjectRef{Bucket: s.storage.BucketAttach(), Key: key}
+	copiedSize, err := s.storage.CopyObject(ctx, ref.Bucket, ref.Key, copied.Bucket, copied.Key)
+	if err != nil {
+		return copied, apperr.ErrTeachingLessonInvalid.WithCause(err)
+	}
+	if copiedSize != size {
+		return copied, apperr.ErrTeachingLessonInvalid.WithCause(fmt.Errorf("克隆材料大小与课时元数据不符: actual=%d expected=%d", copiedSize, size))
+	}
+	target.ContentRef["object_ref"] = objectRef
+	return copied, nil
+}
+
+func (s *Service) discardMaterialObjects(ctx context.Context, refs ...storage.ObjectRef) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.cleanupTimeout)
+	defer cancel()
+	var failures []error
+	for _, ref := range refs {
+		if err := s.storage.Delete(ctx, ref.Bucket, ref.Key); err != nil {
+			logging.ErrorContext(ctx, "清理教学材料失败", err.Error(), slog.String("bucket", ref.Bucket), slog.String("key", ref.Key))
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
 }

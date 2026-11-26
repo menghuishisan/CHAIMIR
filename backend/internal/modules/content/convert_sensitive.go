@@ -21,7 +21,11 @@ var defaultSensitivePaths = []string{
 	"hidden_testcases",
 	"flag",
 	"flags",
-	// 漏洞题的复现步骤、利用步骤与判定断言:判题所需内容已写进 judge_config.expectation,题面一律不带
+	// 题面不暴露初始化材料、官方攻击或正式判定依据。
+	"init_chain_steps",
+	"init_assets",
+	"init_code_ref",
+	"init_script_ref",
 	"init_steps",
 	"positive_steps",
 	"assertions",

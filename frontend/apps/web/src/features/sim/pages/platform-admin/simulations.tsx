@@ -1,15 +1,7 @@
-// 仿真治理(平台侧栏,/platform-admin/simulations)。设计 §7.6:
-// 审核教师提交的仿真场景包,上架或退回;管理已上架的场景。
-// 队列 + 详情:顶部可点的计数分段「待审核 / 已通过 / 已退回」(写进地址);队列行显示场景名、版本、分类、提交时间
-// 与提交教师(审核列表随记录给出姓名);详情上方是四项自动校验(包元数据 / 静态扫描 / 结果可复现 /
-// 渲染预览)的通过状态与失败原因,下方是渲染预览帧,底部「退回作者」「通过并上架」(四项没全过时通过不可用并写原因);
-// 已上架的给「下架」,已下架的给「重新上架」。处理完自动进入下一条待审核;退回必须写原因(作者可见)。
-//
-// 审核记录接口自带校验报告与包信息;包列表接口属教师端,平台身份读不到,所以审核记录就是平台侧的包窗口。
-// 后端对四个动作有互斥前提(只有待审记录能通过或退回,只有已上架能下架,只有已下架能重新上架),
-// 所以按记录当前状态只给那一个可执行动作。
+// 平台仿真包审核与上下架；审核记录提供包摘要，平台不调用教师包列表。
+// 扫描风险保留给人工判断，运行门禁和生命周期准入由后端复核。
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Archive, ArchiveRestore, ChevronLeft, CircleCheck, CircleX, Shield } from 'lucide-react'
 import {
   SIM_PACKAGE_STATUS,
@@ -69,7 +61,7 @@ const RESULT_SEGMENTS = [
   { value: 'rejected', label: '已退回', result: SIM_REVIEW_RESULT.REJECTED },
 ] as const
 
-/** 四项自动校验:通过审核要求四项全过(后端 validateApprovalReport) */
+/** 扫描提示供人工判断，其他项必须通过；缺失结论不能上架。 */
 const VALIDATION_STEPS = [
   { key: 'metadata_validation' as const, label: '包元数据' },
   { key: 'static_scan' as const, label: '静态扫描' },
@@ -127,7 +119,7 @@ export default function PlatformSimulationsPage() {
   const facets = reviews.status === 'success' || reviews.status === 'empty' ? reviews.data?.facets : undefined
   const counts = segmentCounts(facets, 'result', RESULT_SEGMENTS, (item) => item.result)
 
-  const list = useMemo(() => reviews.data?.list ?? [], [reviews.data])
+  const list = reviews.data?.list ?? []
   const selected = list.find((item) => item.id === selectedId) ?? list[0]
   const selectedIndex = selected ? list.findIndex((item) => item.id === selected.id) : -1
   const queue = useReviewQueue({
@@ -329,10 +321,10 @@ function ReviewDetail({ review }: { review: SimPackageReview }) {
             <li key={item.label} className="rounded-md bg-surface-hover px-3 py-2">
               <StatusIndicator
                 appearance="text"
-                tone={item.passed ? 'success' : 'danger'}
-                label={`${item.label}${item.passed ? '通过' : '未通过'}`}
+                tone={item.warning ? 'warning' : item.passed ? 'success' : 'danger'}
+                label={`${item.label}：${item.warning ? '需人工确认' : item.passed ? '通过' : '未通过'}`}
               />
-              {!item.passed && item.detail ? (
+              {item.detail ? (
                 <p className="mt-1 text-xs text-ink-sub">{item.detail}</p>
               ) : null}
             </li>
@@ -363,7 +355,7 @@ function ReviewDetail({ review }: { review: SimPackageReview }) {
   )
 }
 
-/** ReviewActions 当前记录唯一可执行的动作:待审核给退回与通过(四项没全过时通过不可用),已上架给下架,已下架给重新上架 */
+/** ReviewActions 按审核与包状态提供操作，运行门禁未通过时禁止上架。 */
 function ReviewActions({
   review,
   onAct,
@@ -535,23 +527,26 @@ function GovernanceModal({ review, action, onClose, onDone }: GovernanceModalPro
 interface ValidationView {
   label: string
   passed: boolean
+  warning: boolean
   detail: string
 }
 
 /**
- * readValidations 从校验报告里读四项结论。
- * 报告字段是可选的:缺失即视为未通过 —— 没有结论就不该放行。
- * 后端 validateApprovalReport 也是按「四项都必须是 passed」判定的。
+ * readValidations 对齐后端上架门禁；扫描风险必须展示，不能伪装成通过或阻断。
  */
 function readValidations(report: SimValidationReport): ValidationView[] {
   return VALIDATION_STEPS.map((step) => {
     const item = report[step.key]
     if (step.key === 'static_scan') {
       const scan = report.static_scan
+      const findings = scan?.findings ?? []
+      const blocking = findings.some((finding) => finding.startsWith('manifest:'))
+      const warning = scan?.status === SIM_VALIDATION_STATUS.WARNING && findings.length > 0 && !blocking
       return {
         label: step.label,
-        passed: scan?.status === SIM_VALIDATION_STATUS.PASSED,
-        detail: (scan?.findings ?? []).join('、'),
+        passed: !blocking && (scan?.status === SIM_VALIDATION_STATUS.PASSED || warning),
+        warning,
+        detail: findings.join('、'),
       }
     }
     const status = item && 'status' in item ? item.status : undefined
@@ -559,6 +554,7 @@ function readValidations(report: SimValidationReport): ValidationView[] {
     return {
       label: step.label,
       passed: status === SIM_VALIDATION_STATUS.PASSED,
+      warning: false,
       detail: message ?? '',
     }
   })

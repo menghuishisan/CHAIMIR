@@ -1,4 +1,4 @@
-// 本文件负责在无 shell 的最小 glibc 运行层中启动 Solana test-validator。
+// 本文件校验账本及运行目录，再把信号直接交给 Solana 验证器进程。
 package main
 
 import (

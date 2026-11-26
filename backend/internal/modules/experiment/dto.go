@@ -1,4 +1,3 @@
-// experiment dto 文件定义 M7 HTTP 请求和响应结构,不承载业务逻辑。
 package experiment
 
 import (
@@ -51,21 +50,8 @@ type TeacherComponentConfigDTO struct {
 
 // TeacherEnvComponentDTO 展示声明和服务端生成的摘要,摘要不能由客户端提交或修改。
 type TeacherEnvComponentDTO struct {
-	ID                       string                              `json:"id"`
-	Runtimes                 []contracts.CompositionRuntimeRef   `json:"runtimes"`
-	WorkspaceRuntimeInstance string                              `json:"workspace_runtime_instance"`
-	Infra                    []contracts.CompositionComponentRef `json:"infra"`
-	Tools                    []contracts.CompositionComponentRef `json:"tools"`
-	Links                    []contracts.CompositionLink         `json:"links"`
-	AccessProfile            contracts.SandboxAccessProfile      `json:"access_profile"`
-	InitAssets               []contracts.CompositionInitAsset    `json:"init_assets,omitempty"`
-	CompositionDigest        string                              `json:"composition_digest"`
-	InitCodeRef              string                              `json:"init_code_ref"`
-	InitScriptRef            string                              `json:"init_script_ref"`
-	KeepAlive                bool                                `json:"keep_alive"`
-	SnapshotEnabled          bool                                `json:"snapshot_enabled"`
-	KeepAliveMinutes         int32                               `json:"keep_alive_minutes"`
-	SnapshotRetentionMinutes int32                               `json:"snapshot_retention_minutes"`
+	EnvComponentRequest
+	CompositionDigest string `json:"composition_digest"`
 }
 
 // StudentExperimentDTO 是学生可发现实验视图，不包含初始化脚本、答案和判题配置。
@@ -169,7 +155,7 @@ type InstanceDTO struct {
 	Status         int16           `json:"status"`
 	Score          float64         `json:"score"`
 	StartedAt      time.Time       `json:"started_at"`
-	FinishedAt     time.Time       `json:"finished_at,omitempty"`
+	FinishedAt     time.Time       `json:"finished_at,omitzero"`
 	LastActiveAt   time.Time       `json:"last_active_at"`
 	Checkpoints    []CheckpointDTO `json:"checkpoints,omitempty"`
 	Stages         []StageDTO      `json:"stages,omitempty"`
@@ -187,13 +173,14 @@ type SandboxToolDTO struct {
 type CheckpointDTO struct {
 	ID            string         `json:"id"`
 	JudgeTaskRef  string         `json:"judge_task_ref,omitempty"`
+	JudgeStatus   int16          `json:"judge_status"`
 	Passed        bool           `json:"passed"`
 	Score         float64        `json:"score"`
 	DetailRef     string         `json:"detail_ref,omitempty"`
 	BindingOutput map[string]any `json:"binding_output,omitempty"`
 }
 
-// StageDTO 是工作台展示阶段解锁、激活和完成状态的输出。
+// StageDTO 返回工作台阶段的锁定、可激活或已激活状态。
 type StageDTO struct {
 	Stage           int32            `json:"stage"`
 	Title           string           `json:"title"`
@@ -226,19 +213,19 @@ type ReportUploadRequest struct {
 
 // GradeReportRequest 是教师批改实验报告的请求。
 type GradeReportRequest struct {
-	ManualScore *float64 `json:"manual_score"`
-	Comment     string   `json:"comment"`
+	ManualScore *float64  `json:"manual_score"`
+	Comment     string    `json:"comment"`
+	SubmittedAt time.Time `json:"submitted_at" binding:"required"`
 }
 
-// ReportDTO 是实验报告输出。
+// ReportDTO 返回报告元数据。文件通过一次性授权读取。
 type ReportDTO struct {
 	ID          ids.ID    `json:"id"`
 	InstanceID  ids.ID    `json:"instance_id"`
 	StudentID   ids.ID    `json:"student_id"`
 	StudentName string    `json:"student_name"`
 	StudentNo   string    `json:"student_no,omitempty"`
-	ContentRef  string    `json:"content_ref"`
-	ManualScore float64   `json:"manual_score"`
+	ManualScore *float64  `json:"manual_score,omitempty"`
 	Comment     string    `json:"comment,omitempty"`
 	Status      int16     `json:"status"`
 	SubmittedAt time.Time `json:"submitted_at"`
@@ -248,7 +235,7 @@ type ReportDTO struct {
 type StudentReportDTO struct {
 	ID          ids.ID    `json:"id"`
 	InstanceID  ids.ID    `json:"instance_id"`
-	ManualScore float64   `json:"manual_score"`
+	ManualScore *float64  `json:"manual_score,omitempty"`
 	Comment     string    `json:"comment,omitempty"`
 	Status      int16     `json:"status"`
 	SubmittedAt time.Time `json:"submitted_at"`
@@ -282,8 +269,7 @@ type GroupDTO struct {
 }
 
 // GroupMemberDTO 是协作小组成员输出。
-// 姓名与学号经 M1 账号契约批量解析后随成员一并下发:成员表只存 student_id,
-// 而编组界面必须显示人名 —— 让调用方自己再拉一份账号目录既越权也会 N+1。
+// 姓名与学号由服务端批量解析，页面无需查询账号目录。
 type GroupMemberDTO struct {
 	ID          ids.ID    `json:"id"`
 	GroupID     ids.ID    `json:"group_id"`

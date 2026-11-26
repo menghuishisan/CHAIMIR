@@ -2,9 +2,7 @@
 // 两种执行位置只负责状态推进和底栏控制,舞台、说明、交互区、消息流与分享入口只有一套。
 
 import type { ReactNode } from 'react'
-import { Share2 } from 'lucide-react'
 import {
-  Button,
   ChainProgress,
   TeachingFrameStage,
   TeachingFrameStream,
@@ -16,26 +14,24 @@ import {
 import type {
   InteractionDescriptor,
   JsonObject,
-  RuntimeSnapshot,
+  RuntimeFrame,
   SimPackageDescriptor,
 } from '@chaimir/sim-sdk'
 import { narrativeProgress } from '../playback'
 import { SimWorkbenchAside } from './SimWorkbenchAside'
 import { InteractionPanel } from './WorkbenchPanels'
 
-type RuntimeViewSnapshot = Omit<RuntimeSnapshot, 'events'>
-
 interface SimRuntimeWorkbenchProps {
   title: string
   version: string
   descriptor: SimPackageDescriptor
-  snapshot: RuntimeViewSnapshot
+  snapshot: RuntimeFrame
   onExit: () => void
-  onShare?: () => void
+  action?: ReactNode
   /** 场景名旁的小控件:本机推演的「换一组条件」与版本切换 */
   titleExtra?: ReactNode
-  onSelectElement: (elementId: string) => void
-  onInteract: (interaction: InteractionDescriptor, payload: JsonObject, target?: string) => void
+  onSelectElement?: (elementId: string) => void
+  onInteract?: (interaction: InteractionDescriptor, payload: JsonObject, target?: string) => void
   footer: ReactNode
 }
 
@@ -46,7 +42,7 @@ export function SimRuntimeWorkbench({
   descriptor,
   snapshot,
   onExit,
-  onShare,
+  action,
   titleExtra,
   onSelectElement,
   onInteract,
@@ -74,13 +70,7 @@ export function SimRuntimeWorkbench({
               done={narrativeProgress(descriptor, snapshot)}
             />
           }
-          cta={
-            onShare ? (
-              <Button variant="primary" size="sm" leftIcon={Share2} onClick={onShare}>
-                分享推演
-              </Button>
-            ) : undefined
-          }
+          cta={action}
         />
       }
       left={
@@ -92,17 +82,17 @@ export function SimRuntimeWorkbench({
           trace={snapshot.state._trace}
           selectedElementId={snapshot.state.selectedElementId}
           onSelectElement={onSelectElement}
-          actions={
+          actions={onInteract ? (
             <InteractionPanel
               interactions={descriptor.interactions}
               availability={snapshot.interactionAvailability}
               selectedElementId={snapshot.state.selectedElementId}
               onInteract={onInteract}
             />
-          }
+          ) : undefined}
         />
       }
-      leftLabel="说明与操作"
+      leftLabel={onInteract ? '说明与操作' : '说明'}
       stage={
         <TeachingFrameStage
           frame={frame}

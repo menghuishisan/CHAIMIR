@@ -12,7 +12,7 @@ type Querier interface {
 	CountContentItems(ctx context.Context, arg CountContentItemsParams) (int64, error)
 	CountPapers(ctx context.Context, tenantID int64) (int64, error)
 	CountPapersByGenMode(ctx context.Context, tenantID int64) ([]CountPapersByGenModeRow, error)
-	// 共享资源库「按题型」分段计数:只数其他学校已发布且共享的题目,套用关键词,不套用题型筛选。
+	// 共享库按题型计数:仅已发布共享内容,沿用关键词,不套用题型筛选。
 	CountSharedContentItemsByType(ctx context.Context, keyword string) ([]CountSharedContentItemsByTypeRow, error)
 	CreateContentBody(ctx context.Context, arg CreateContentBodyParams) (ContentBody, error)
 	CreateContentCategory(ctx context.Context, arg CreateContentCategoryParams) (ContentCategory, error)
@@ -24,18 +24,20 @@ type Querier interface {
 	DeleteContentUsageRefsBySource(ctx context.Context, arg DeleteContentUsageRefsBySourceParams) error
 	DeletePaperItems(ctx context.Context, arg DeletePaperItemsParams) error
 	DeprecateContentItem(ctx context.Context, arg DeprecateContentItemParams) (ContentItem, error)
+	GetActiveContentCategory(ctx context.Context, arg GetActiveContentCategoryParams) (int64, error)
 	GetContentItemByID(ctx context.Context, arg GetContentItemByIDParams) (ContentItem, error)
-	GetContentItemByRef(ctx context.Context, arg GetContentItemByRefParams) (ContentItem, error)
 	GetContentItemWithBodyByID(ctx context.Context, arg GetContentItemWithBodyByIDParams) (GetContentItemWithBodyByIDRow, error)
 	GetContentItemWithBodyByRef(ctx context.Context, arg GetContentItemWithBodyByRefParams) (GetContentItemWithBodyByRefRow, error)
 	GetPaper(ctx context.Context, arg GetPaperParams) (Paper, error)
 	GetPublishedContentItemForUsage(ctx context.Context, arg GetPublishedContentItemForUsageParams) (ContentItem, error)
+	GetVisibleContentItemWithBodyByID(ctx context.Context, arg GetVisibleContentItemWithBodyByIDParams) (GetVisibleContentItemWithBodyByIDRow, error)
 	ListContentCategories(ctx context.Context, tenantID int64) ([]ContentCategory, error)
 	ListContentItems(ctx context.Context, arg ListContentItemsParams) ([]ContentItem, error)
 	ListContentUsageItemIDsBySource(ctx context.Context, arg ListContentUsageItemIDsBySourceParams) ([]int64, error)
 	ListContentVersions(ctx context.Context, arg ListContentVersionsParams) ([]ContentItem, error)
 	ListPaperItems(ctx context.Context, arg ListPaperItemsParams) ([]PaperItem, error)
 	ListPapers(ctx context.Context, arg ListPapersParams) ([]Paper, error)
+	LockContentCategoryScope(ctx context.Context, dollar_1 int64) error
 	PublishContentItem(ctx context.Context, arg PublishContentItemParams) (ContentItem, error)
 	RandomPickContentItems(ctx context.Context, arg RandomPickContentItemsParams) ([]ContentItem, error)
 	RefreshContentUsageCount(ctx context.Context, arg RefreshContentUsageCountParams) (ContentItem, error)

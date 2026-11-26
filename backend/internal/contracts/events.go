@@ -29,6 +29,12 @@ const (
 	SubjectGradeReviewLockChanged = "grade.review.lock_changed"
 	// SubjectIdentitySessionRevoked 表示账号会话被吊销,由 M1 发布供 M10 踢线联动。
 	SubjectIdentitySessionRevoked = "identity.session.revoked"
+	// SubjectContestSandboxSessionsRevoked 表示竞赛授权被撤销,供所有在线后端副本关闭本地会话。
+	SubjectContestSandboxSessionsRevoked = "contest.sandbox.sessions.revoked"
+	// SubjectSandboxSessionsRevoked 表示沙箱成员授权被撤销,供所有在线后端副本关闭本地会话。
+	SubjectSandboxSessionsRevoked = "sandbox.sessions.revoked"
+	// SubjectSimSessionChanged 通知在线副本按当前授权和状态清理仿真流。
+	SubjectSimSessionChanged = "sim.sessions.changed"
 	// SubjectTenantProvisioned 表示 M1 已完成新租户事务,供各下游模块初始化自有租户资源。
 	SubjectTenantProvisioned = "identity.tenant.provisioned"
 	// SubjectNotifySendRequested 表示异步站内信投递请求,由业务模块发布并由 M10 消费。
@@ -72,6 +78,7 @@ type SandboxRecycledEvent struct {
 	TraceID    string    `json:"trace_id"`
 	SandboxID  int64     `json:"sandbox_id"`
 	SourceRef  string    `json:"source_ref"`
+	ScopeRef   string    `json:"scope_ref"`
 	Reason     string    `json:"reason"`
 	RecycledAt time.Time `json:"recycled_at"`
 }
@@ -178,6 +185,41 @@ type IdentitySessionRevokedEvent struct {
 	Reason     string    `json:"reason"`
 	RevokedAt  time.Time `json:"revoked_at"`
 	IsPlatform bool      `json:"is_platform"`
+}
+
+// ContestSandboxSessionsRevokedEvent 描述竞赛授权变更后需要关闭的本地会话。
+type ContestSandboxSessionsRevokedEvent struct {
+	TenantID int64                      `json:"tenant_id"`
+	TraceID  string                     `json:"trace_id"`
+	Sessions []ContestSandboxSessionRef `json:"sessions"`
+}
+
+// ContestSandboxSessionRef 标识一组绑定到授权的终端和进度连接。
+type ContestSandboxSessionRef struct {
+	GrantID         int64 `json:"grant_id"`
+	SandboxID       int64 `json:"sandbox_id"`
+	MemberTenantID  int64 `json:"member_tenant_id"`
+	MemberAccountID int64 `json:"member_account_id"`
+}
+
+// SandboxSessionsRevokedEvent 描述共享成员授权变更后需要关闭的沙箱会话。
+type SandboxSessionsRevokedEvent struct {
+	TenantID int64               `json:"tenant_id"`
+	TraceID  string              `json:"trace_id"`
+	Sessions []SandboxSessionRef `json:"sessions"`
+}
+
+// SandboxSessionRef 标识沙箱共享成员的终端和进度连接。
+type SandboxSessionRef struct {
+	SandboxID int64 `json:"sandbox_id"`
+	AccountID int64 `json:"account_id"`
+}
+
+// SimSessionChangedEvent 只定位需复核的会话，授权以接收时的数据库状态为准。
+type SimSessionChangedEvent struct {
+	TenantID  int64  `json:"tenant_id"`
+	SessionID int64  `json:"session_id"`
+	TraceID   string `json:"trace_id"`
 }
 
 // TenantProvisionedEvent 是新租户创建完成后发布的跨模块初始化事件。

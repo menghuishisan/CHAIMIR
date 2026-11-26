@@ -1,10 +1,8 @@
-// pagex facets 组装列表接口的分段计数(接口总览「分段计数」):
-// 外层键与该分段的筛选参数同名,内层键是取值的字符串形式(数字十进制、布尔 true/false),值是条数。
 package pagex
 
 import "fmt"
 
-// FacetGroup 是一组分段:取值到条数。
+// FacetGroup 以筛选值的字符串形式为键，记录该值的条数。
 type FacetGroup map[string]int64
 
 // Add 把一个取值的条数累加进分组;取值按接口约定转成字符串。

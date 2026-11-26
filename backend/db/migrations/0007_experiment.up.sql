@@ -89,10 +89,12 @@ CREATE TABLE IF NOT EXISTS experiment_report (
     instance_id BIGINT NOT NULL,
     student_id BIGINT NOT NULL,
     content_ref VARCHAR(255) NOT NULL,
-    manual_score NUMERIC(5,2),
+    manual_score NUMERIC(5,2) CHECK (manual_score BETWEEN 0 AND 100),
     comment TEXT,
     status SMALLINT NOT NULL CHECK (status IN (1, 2)),
     submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK ((status = 1 AND manual_score IS NULL AND comment IS NULL)
+        OR (status = 2 AND manual_score IS NOT NULL)),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, instance_id, student_id),
     FOREIGN KEY (tenant_id, instance_id) REFERENCES experiment_instance(tenant_id, id),

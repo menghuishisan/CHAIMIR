@@ -1,5 +1,3 @@
-﻿// API DTO 类型统一出口。类型正文按后端公开 API 模块归属拆分，避免恢复单文件大杂烩。
-
 export type * from './common'
 export type * from './identity'
 export type * from './content'

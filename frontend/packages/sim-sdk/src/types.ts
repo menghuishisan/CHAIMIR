@@ -1,4 +1,4 @@
-// 本文件定义仿真包、确定性状态机、交互协议、可视化模式与教学叙事契约。
+// 仿真包与执行输出的权威类型；schema 注解同步生成两端结构校验器。
 
 export type SimCategory =
   | 'consensus'
@@ -10,9 +10,7 @@ export type SimCategory =
   | 'cross-chain-system'
 
 export type InteractionKind = 'button' | 'slider' | 'hold' | 'select-element' | 'drag' | 'form'
-// InteractionTag 是操作的教学类别,决定工作台按钮的配色语义(规范 §7.2 B):
-// normal 普通推进、recover 修复/防护、perturb 扰动、attack 攻击。
-// 修复与攻击必须分开:把防护动作画成攻击色是反向教学暗示。
+// 攻击与恢复分别表达破坏和防护，控件不得共用攻击色。
 export type InteractionTag = 'normal' | 'recover' | 'perturb' | 'attack'
 export type PatternMode = 'graph' | 'chain' | 'tree' | 'matrix' | 'pipeline' | 'lane' | 'chart'
 export type FrameIntent =
@@ -35,23 +33,27 @@ export interface SimPackage<TState extends SimState = SimState> {
   checkpoints: CheckpointDef[]
 }
 
-// SimMeta 是仿真包的自描述元信息。
-//
-// 刻意不含 compute:执行位置由后端按 author_type 派生(内置=浏览器 Worker、
-// 教师/第三方=隔离容器,见 docs/04-仿真可视化引擎/02-架构设计.md §8),不是作者可选项。
-// 让作者声明它只会产生"声明了一个平台无法运行的执行位置"这类无效状态。
+// 执行位置由后端按代码来源派生，作者只声明包的能力和教学内容。
 export interface SimMeta {
+  /** @pattern \S */
   code: string
+  /** @pattern \S */
   name: string
   category: SimCategory
+  /** @pattern \S */
   version: string
   /** entry 是归档内入口模块相对路径,供隔离容器装配;内置包由 registry 按 code 装配故省略。 */
   entry?: string
+  /** @pattern \S */
   summary: string
+  /** @minItems 1 */
   learningObjectives: string[]
   scaleLimit: {
+    /** @asType integer @minimum 1 @maximum 10000 */
     nodes: number
+    /** @asType integer @minimum 1 @maximum 100000 */
     maxTick: number
+    /** @asType integer @minimum 1 @maximum 100000 */
     maxEvents: number
   }
 }
@@ -61,6 +63,7 @@ export interface SimInitParams {
 }
 
 export interface SimState {
+  /** @asType integer @minimum 0 */
   tick: number
   phase: string
   /** 阶段型内置仿真用此索引声明有限流程的终态;非阶段模型可省略。 */
@@ -107,21 +110,25 @@ export interface DeterministicRandom {
   pick<T>(items: readonly T[]): T
 }
 
-export interface InteractionDef {
+export interface InteractionDescriptor {
+  /** @pattern \S */
   id: string
   kind: InteractionKind
+  /** @pattern \S */
   label: string
   description: string
+  /** @pattern \S */
   emits: string
   params?: FieldDef[]
   target?: 'global' | 'element'
   elementFilter?: string
-  availableWhen?: (state: SimState) => boolean
   labelTag?: InteractionTag
   cooldownMs?: number
 }
 
-export type InteractionDescriptor = Omit<InteractionDef, 'availableWhen'>
+export interface InteractionDef extends InteractionDescriptor {
+  availableWhen?: (state: SimState) => boolean
+}
 
 export interface FieldDef {
   name: string
@@ -136,20 +143,23 @@ export interface FieldDef {
 }
 
 export interface TeachingFrame {
+  /** @minLength 1 */
   summary: string
   phase: FramePhase
   focus: FrameFocus
   layout: FrameLayout
+  /** @minItems 1 @maxItems 3 */
   patterns: PatternBinding[]
   annotations?: FrameAnnotation[]
 }
 
 export interface FramePhase {
+  /** @minLength 1 */
   id: string
+  /** @minLength 1 */
   title: string
   intent: FrameIntent
-  // 阶段释义只有两段(规范 §7.2 B):做了什么 / 为什么重要。
-  // 不设「看哪里」—— focus 已经用舞台高亮指出该看哪个元素,再复述一遍状态摘要只是重复。
+  // 观察目标由 focus 表达，这里只解释动作与意义。
   explanation: {
     what: string
     why: string
@@ -157,12 +167,14 @@ export interface FramePhase {
 }
 
 export interface FrameFocus {
+  /** @minItems 1 */
   primary: string[]
   secondary?: string[]
   muted?: string[]
 }
 
 export interface FrameLayout {
+  /** @minLength 1 */
   primary: string
   evidence?: string[]
   timeline?: string
@@ -188,6 +200,7 @@ export type PatternBinding =
   | ChartPattern
 
 export interface PatternBase<TMode extends PatternMode, TData> {
+  /** @minLength 1 */
   id: string
   mode: TMode
   title: string
@@ -303,8 +316,7 @@ export interface ProcessSpan {
   startedAt: number
   endedAt: number
   progress: number
-  // label 是过程短名(如「传播」「候选」),只在它能补充「正在做什么」时才写:
-  // 与元素名、状态词或 detail 重复就不要写 —— 那会让同一行出现两遍同一句话。
+  // 可选过程名只补充元素名、状态和 detail 未表达的信息。
   label?: string
 }
 
@@ -328,17 +340,20 @@ export interface ChartSeries {
   points: Array<{ x: number; y: number }>
 }
 
-export interface NarrativeStep {
+export interface NarrativeStepDescriptor {
+  /** @pattern \S */
   id: string
+  /** @pattern \S */
   title: string
-  trigger: (state: SimState, event?: SimEvent) => boolean
   highlight: string[]
   explain: string
   question?: QuestionCheckpoint
   defaultDurationMs: number
 }
 
-export type NarrativeStepDescriptor = Omit<NarrativeStep, 'trigger'>
+export interface NarrativeStep extends NarrativeStepDescriptor {
+  trigger: (state: SimState, event?: SimEvent) => boolean
+}
 
 export interface QuestionCheckpoint {
   prompt: string
@@ -360,20 +375,26 @@ export interface CheckpointResult {
 }
 
 export interface CheckpointDescriptor {
+  /** @pattern \S */
   id: string
+  /** @pattern \S */
   label: string
 }
 
 export interface SimPackageDescriptor {
   meta: SimMeta
+  /** @minItems 1 @maxItems 64 */
   interactions: InteractionDescriptor[]
+  /** @minItems 1 @maxItems 64 */
   narrative: NarrativeStepDescriptor[]
   codeTrace?: CodeTraceDef
+  /** @minItems 1 @maxItems 64 */
   checkpoints: CheckpointDescriptor[]
 }
 
 export interface RuntimeSnapshot {
   state: SimState
+  /** @asType integer @minimum 0 */
   tick: number
   events: SimEvent[]
   view: TeachingFrame
@@ -381,6 +402,9 @@ export interface RuntimeSnapshot {
   interactionAvailability: Record<string, boolean>
   checkpointResults: Record<string, CheckpointResult>
 }
+
+/** 执行宿主共享的画面数据；事件历史由各宿主独立持有。 */
+export type RuntimeFrame = Omit<RuntimeSnapshot, 'events'>
 
 export interface StageConfig {
   stage: number
@@ -417,8 +441,10 @@ export interface StageInjectedParam {
 }
 
 export interface CodeTraceDef {
+  /** @minLength 1 */
   sourceCode: string
   language: 'solidity' | 'rust' | 'go' | 'javascript' | 'pseudocode'
+  /** @minItems 1 */
   lineMapping: LineMapping[]
   variableWatch?: VariableWatchDef[]
 }

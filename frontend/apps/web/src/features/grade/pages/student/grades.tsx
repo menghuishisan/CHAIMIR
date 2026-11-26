@@ -1,14 +1,4 @@
-// 成绩中心页(学生侧栏,/student/grades)。设计 §7.2:
-// 页头右侧「生成并下载成绩单」(secondary,打开范围选择弹窗)。上方一行:累计绩点、已修学分两个数字 +
-// 各学期绩点柱状图(至少两个学期时才画,可切换数据表);下方学期筛选 + 成绩表(课程、学分、总评、
-// 等级、绩点),每行末尾「申诉」小按钮,打开右侧抽屉,课程已预先选好,只需填理由。学期筛选写进地址。
-//
-// 学生编号取自服务端会话(useSession 的 /me),不接受任何客户端传参。
-// 课程名:成绩汇总只回 course_id,与学生自己的课程列表做一次映射(一次请求,不逐行取大纲)。
-// 等级与绩点:成绩接口只回总评,按学校默认等级配置换算(与后端绩点计算同一口径,见 gradeLevel.ts)。
-// 申诉:每门课显示本人最近一次申诉的处理状态(申诉列表按身份分视角,学生只读本人);
-// 还在处理中的课不能再申诉(服务端同样只允许一门课一条进行中的申诉),按钮换成状态。
-// 成绩单由后端同步生成,生成后换一次性授权经统一文件服务下载,用户点一次即可。
+// 本人成绩、学期绩点图表、申诉与成绩单；当前范围学分以服务端汇总为准。
 
 import { useCallback, useMemo, useState } from 'react'
 import { Download, GraduationCap, MessageSquareWarning } from 'lucide-react'
@@ -175,7 +165,13 @@ export default function StudentGradesPage() {
         }
       />
 
-      <OverviewRow summary={summary?.cumulative_gpa} credits={history.data} semesters={semesters.data ?? []} loading={history.status === 'loading'} />
+      <OverviewRow
+        summary={summary?.cumulative_gpa}
+        totalCredits={summary?.total_credits}
+        history={history.data}
+        semesters={semesters.data ?? []}
+        loading={grades.status === 'loading' && !summary}
+      />
 
       <section aria-labelledby="course-grades-title" className="mt-8">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -251,24 +247,22 @@ export default function StudentGradesPage() {
   )
 }
 
-/**
- * OverviewRow 上方一行:累计绩点、已修学分 + 各学期绩点柱状图(至少两个学期才画)。
- * 已修学分取各学期结算学分之和;学期名从学期清单换取,不显示内部编号。
- */
+/** OverviewRow 展示当前范围汇总，历史聚合仅用于学期图表。 */
 function OverviewRow({
   summary,
-  credits,
+  totalCredits,
+  history,
   semesters,
   loading,
 }: {
   summary: number | undefined
-  credits: GradeSummary[] | null
+  totalCredits: number | undefined
+  history: GradeSummary[] | null
   semesters: Semester[]
   loading: boolean
 }) {
   const semesterName = useMemo(() => new Map(semesters.map((semester) => [semester.id, semester.name])), [semesters])
-  const perSemester = (credits ?? []).filter((item) => item.semester_id)
-  const totalCredits = perSemester.reduce((sum, item) => sum + item.total_credits, 0)
+  const perSemester = (history ?? []).filter((item) => item.semester_id)
   const rows = perSemester.map((item) => ({
     semester: semesterName.get(item.semester_id ?? '') ?? '未登记学期',
     gpa: Number(item.gpa.toFixed(2)),
@@ -292,8 +286,9 @@ function OverviewRow({
           <dd className="mt-1 text-stat font-bold tabular-nums text-ink">{summary !== undefined ? formatGpa(summary) : '—'}</dd>
         </div>
         <div>
-          <dt className="text-sm text-ink-sub">已修学分</dt>
-          <dd className="mt-1 text-stat font-bold tabular-nums text-ink">{perSemester.length > 0 ? totalCredits : '—'}</dd>
+          <dt className="text-sm text-ink-sub">本范围学分</dt>
+          <dd className="mt-1 text-stat font-bold tabular-nums text-ink">{totalCredits ?? '—'}</dd>
+          <p className="mt-1 text-xs text-ink-sub">用于绩点加权，含未通过课程</p>
         </div>
       </dl>
       {rows.length >= 2 ? (
@@ -344,7 +339,7 @@ function TranscriptModal({
         scope: Number(scope) as TranscriptScope,
         semester_id: needsSemester ? semesterId : undefined,
       })
-      const grant = await api.grade.downloadTranscript(transcript.id)
+      const grant = await api.grade.transcriptDownloadGrant(transcript.id)
       downloadAttachment(await api.storage.consumeGrant(grant.token))
       toast.success('成绩单已生成,正在下载')
       onOpenChange(false)

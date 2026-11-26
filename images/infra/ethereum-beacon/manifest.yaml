@@ -44,23 +44,28 @@ capabilities:
       testnet_dir:
         title: 信标网络配置目录
         type: string
+        pattern: '^/runtime-state(?:/[A-Za-z0-9_-][A-Za-z0-9_.-]*)+$'
         x-chaimir-env: infra/BEACON_TESTNET_DIR
       data_dir:
         title: 信标数据目录
         type: string
+        pattern: '^/runtime-state(?:/[A-Za-z0-9_-][A-Za-z0-9_.-]*)+$'
         x-chaimir-env: infra/BEACON_DATA_DIR
       checkpoint_state_path:
         title: 检查点状态文件路径
         type: string
+        pattern: '^/runtime-state(?:/[A-Za-z0-9_-][A-Za-z0-9_.-]*)+$'
         x-chaimir-env: infra/BEACON_CHECKPOINT_STATE_PATH
       checkpoint_block_path:
         title: 检查点区块文件路径
         type: string
+        pattern: '^/runtime-state(?:/[A-Za-z0-9_-][A-Za-z0-9_.-]*)+$'
         x-chaimir-env: infra/BEACON_CHECKPOINT_BLOCK_PATH
   student_access: private
 infra:
   eco_tags: [evm]
   resource_spec:
+    volume_source: binding:execution_chain
     components:
       - name: infra
         image_url: "@self"

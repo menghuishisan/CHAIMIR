@@ -26,8 +26,8 @@ M4 扩展仿真包通用运行器镜像。教师(`teacher_<id>__`)与第三方(`
 | --- | --- | --- |
 | `init` | 装配包并产出 tick=0 首帧 | `{ok,descriptor,snapshot}` |
 | `apply` | 从 seed + 已有事件重放到当前位置,再执行下一条事件 | `{ok,descriptor,snapshot}` |
-| `restore` | 从已持久化快照恢复会话并继续执行 | `{ok,descriptor,snapshot}` |
-| `verify` | 上架前隔离预览:同 seed 双跑逐帧比对 + 回传样例帧 | `{ok,determinism,frames}` |
+| `restore` | 重放指定事件序列 | `{ok,descriptor,snapshot}` |
+| `verify` | 同一 seed 双跑，比对包描述和样例帧 | `{ok,descriptor,determinism,frames}` |
 
 **容器不常驻会话状态**:状态由后端在每条命令里带回,容器每次从 `seed + events` 重放。代价是重放开销(受包声明 `max_events` 约束),换来的是容器崩溃、Pod 重建、后端重启都不影响过程可复现,容器侧也无需维护会话生命周期。
 

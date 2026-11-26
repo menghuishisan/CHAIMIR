@@ -1,16 +1,14 @@
-// contestOrder.test.ts 验证学生竞赛列表的分段与排序(设计 §7.2 竞赛参赛):
-// 分段「报名中 / 进行中(含封榜)/ 已结束(含归档)/ 全部」;我已报名且进行中的排在最前,
-// 其后是报名中(已报名的在前、按报名截止先后)、其余进行中、已结束(最近结束的在前)。
+// 竞赛列表复用正式状态选项；排序仍优先学生已参赛赛事和教师待办。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  contestSegmentOf,
   sortStudentContests,
   sortTeacherContests,
-  teacherContestSegmentOf,
   type OrderContest,
   type TeacherOrderContest,
 } from './contestOrder.ts'
+import { ContestStatus } from '@chaimir/api-client'
+import { CONTEST_STATUS_OPTIONS, contestStatusLabel } from '../../utils/labels/contest.ts'
 
 const DRAFT = 1
 const SIGNUP = 2
@@ -24,12 +22,11 @@ function contest(id: string, status: number, signupEnd: string, endAt: string): 
   return { id, status, signup_end: signupEnd, end_at: endAt }
 }
 
-test('分段:封榜算进行中,归档算已结束', () => {
-  assert.equal(contestSegmentOf(SIGNUP), 'signup')
-  assert.equal(contestSegmentOf(RUNNING), 'running')
-  assert.equal(contestSegmentOf(FROZEN), 'running')
-  assert.equal(contestSegmentOf(ENDED), 'ended')
-  assert.equal(contestSegmentOf(ARCHIVED), 'ended')
+test('正式状态选项覆盖SDK枚举且不合并封榜和归档', () => {
+  const statuses = Object.values(ContestStatus).filter((status): status is ContestStatus => typeof status === 'number')
+  assert.deepEqual(CONTEST_STATUS_OPTIONS, statuses.map((status) => ({ value: String(status), label: contestStatusLabel(status) })))
+  assert.equal(CONTEST_STATUS_OPTIONS.find((option) => option.value === String(ContestStatus.FROZEN))?.label, '封榜中')
+  assert.equal(CONTEST_STATUS_OPTIONS.find((option) => option.value === String(ContestStatus.ARCHIVED))?.label, '已归档')
 })
 
 test('我已报名且进行中的排最前,然后报名中、其余进行中、已结束', () => {
@@ -59,13 +56,6 @@ test('不改变传入的数组', () => {
 function teacherContest(id: string, status: number, signupEnd: string, startAt: string, endAt: string): TeacherOrderContest {
   return { id, status, signup_end: signupEnd, start_at: startAt, end_at: endAt }
 }
-
-test('教师分段:草稿单独一段,其余与学生端相同', () => {
-  assert.equal(teacherContestSegmentOf(DRAFT), 'draft')
-  assert.equal(teacherContestSegmentOf(SIGNUP), 'signup')
-  assert.equal(teacherContestSegmentOf(FROZEN), 'running')
-  assert.equal(teacherContestSegmentOf(ARCHIVED), 'ended')
-})
 
 test('教师排序:进行中(先结束的在前)→ 报名中(先开赛的在前)→ 草稿(发布期限近的在前)→ 已结束 → 已归档', () => {
   const list = [

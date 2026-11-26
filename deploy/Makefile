@@ -17,8 +17,8 @@ CILIUM_CLUSTER_SCRIPT := scripts/cilium-cluster.ps1
 DOCKER_RUNTIME_SCRIPT := scripts/docker-runtime.ps1
 DOCKER_RUNTIME_WATCHER_SCRIPT := scripts/docker-runtime-watcher.ps1
 IMAGE_DIGEST_LOCK := ../images/image-digests.lock
-INGRESS_NGINX_DIGEST := $(shell powershell -NoProfile -Command "((Select-String -Path '$(IMAGE_DIGEST_LOCK)' -Pattern '^ingress/ingress-nginx ').Line -split '\\s+')[1]")
-INGRESS_WEBHOOK_CERTGEN_DIGEST := $(shell powershell -NoProfile -Command "((Select-String -Path '$(IMAGE_DIGEST_LOCK)' -Pattern '^ingress/kube-webhook-certgen ').Line -split '\\s+')[1]")
+INGRESS_NGINX_DIGEST := $(shell powershell -NoProfile -Command "((Select-String -Path '$(IMAGE_DIGEST_LOCK)' -Pattern '^infra/ingress-nginx ').Line -split '\\s+')[1]")
+INGRESS_WEBHOOK_CERTGEN_DIGEST := $(shell powershell -NoProfile -Command "((Select-String -Path '$(IMAGE_DIGEST_LOCK)' -Pattern '^infra/kube-webhook-certgen ').Line -split '\\s+')[1]")
 GVISOR_CHECK_DIGEST := $(shell powershell -NoProfile -Command "((Select-String -Path '$(IMAGE_DIGEST_LOCK)' -Pattern '^base/chain-tools ').Line -split '\\s+')[1]")
 GVISOR_CHECK_IMAGE := registry.chaimir.io/base/chain-tools@$(GVISOR_CHECK_DIGEST)
 TLS_DIR := config/chaimir-tls
@@ -214,8 +214,8 @@ registry-pull-secret-sync: registry-runtime-dns harbor-projects-ensure apply-acc
 # ---- ingress-nginx ----
 .PHONY: ingress-up
 ingress-up: ## 安装 ingress-nginx 并打 namespace 标签(供 NetworkPolicy 识别)
-	@test -n "$(INGRESS_NGINX_DIGEST)" || { echo "$(IMAGE_DIGEST_LOCK) 缺少 ingress/ingress-nginx digest"; exit 1; }
-	@test -n "$(INGRESS_WEBHOOK_CERTGEN_DIGEST)" || { echo "$(IMAGE_DIGEST_LOCK) 缺少 ingress/kube-webhook-certgen digest"; exit 1; }
+	@test -n "$(INGRESS_NGINX_DIGEST)" || { echo "$(IMAGE_DIGEST_LOCK) 缺少 infra/ingress-nginx digest"; exit 1; }
+	@test -n "$(INGRESS_WEBHOOK_CERTGEN_DIGEST)" || { echo "$(IMAGE_DIGEST_LOCK) 缺少 infra/kube-webhook-certgen digest"; exit 1; }
 	@auth_dir="$$(sed -n 's/^SUPPLY_CHAIN_DOCKER_CONFIG_HOST_DIR=//p' "$(SUPPLY_CHAIN_CONFIG)")"; \
 	auth_file="$$auth_dir/config.json"; \
 	test -f "$$auth_file" || { echo "缺少 $$auth_file;请先完成 Harbor robot 凭据校验"; exit 1; }; \
@@ -242,7 +242,7 @@ ingress-up: ## 安装 ingress-nginx 并打 namespace 标签(供 NetworkPolicy �
 			--set-string controller.image.tag=v1.15.1 \
 			--set-string controller.image.digest="$$INGRESS_NGINX_DIGEST" \
 			--set-string controller.admissionWebhooks.patch.image.registry=registry.chaimir.io \
-			--set-string controller.admissionWebhooks.patch.image.image=ingress/kube-webhook-certgen \
+			--set-string controller.admissionWebhooks.patch.image.image=infra/kube-webhook-certgen \
 			--set-string controller.admissionWebhooks.patch.image.tag=v1.6.9 \
 			--set-string controller.admissionWebhooks.patch.image.digest="$$INGRESS_WEBHOOK_CERTGEN_DIGEST" \
 			--rollback-on-failure --wait --timeout 5m'

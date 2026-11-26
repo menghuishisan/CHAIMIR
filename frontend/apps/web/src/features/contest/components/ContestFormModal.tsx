@@ -1,12 +1,6 @@
-// 竞赛配置表单(赛事组织页与赛事详情页共用)。设计 §7.4:字段分组且超过一屏,用右侧大抽屉
-// (宽 880px、整高、底部固定操作条),保留背后列表的上下文;字段、校验与保存逻辑不变。
-// 创建与编辑共用同一表单:后端 ContestRequest 两者字段一致。
-//
-// 赛制规则(rules)是 JSONB 开放对象。这里按赛制渲染结构化字段
-// (解题赛:是否允许重复提交、失败冷却;对抗赛:匹配方式、每轮时长),
-// 不把它作为裸 JSON 文本域交给用户。
+// 赛事创建与编辑共用表单，发布后锁定赛制和参赛形式。
 
-import { useCallback, useId, useMemo, useState } from 'react'
+import { useId, useState } from 'react'
 import { ContestMode, ContestStatus, MatchMode, TeamMode, type Contest, type ContestRequest } from '@chaimir/api-client'
 import {
   Button,
@@ -31,10 +25,10 @@ import { toDateTimeInputValue } from '../../../utils/dateInput'
 import { contestModeLabel, matchModeLabel, teamModeLabel } from '../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
 
-/** 赛制规则在 rules 里的键:与后端约定的结构化形状对应。 */
-const RULE_ALLOW_RESUBMIT = 'allow_resubmit'
-const RULE_FAILED_COOLDOWN = 'failed_cooldown_seconds'
-const RULE_ROUND_MINUTES = 'round_minutes'
+const matchModeOptions = [
+  { value: String(MatchMode.ELO), label: matchModeLabel(MatchMode.ELO) },
+  { value: String(MatchMode.ROUND_ROBIN), label: matchModeLabel(MatchMode.ROUND_ROBIN) },
+]
 
 export interface ContestFormModalProps {
   /** 传入即为编辑模式;缺省为新建 */
@@ -44,9 +38,7 @@ export interface ContestFormModalProps {
   onSaved: (contest: Contest) => void
 }
 
-/**
- * ContestFormModal 承载赛事创建与编辑。
- */
+/** ContestFormModal 承载赛事创建与编辑。 */
 export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModalProps) {
   const fieldId = useId()
   const editing = contest !== undefined
@@ -62,21 +54,16 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
   const [startAt, setStartAt] = useState(toDateTimeInputValue(contest?.start_at))
   const [endAt, setEndAt] = useState(toDateTimeInputValue(contest?.end_at))
   const [freezeMinutes, setFreezeMinutes] = useState(String(contest?.freeze_minutes ?? 30))
-  const [allowResubmit, setAllowResubmit] = useState(readBoolean(contest, RULE_ALLOW_RESUBMIT, true))
-  const [failedCooldown, setFailedCooldown] = useState(
-    String(readNumber(contest, RULE_FAILED_COOLDOWN, 60)),
-  )
-  const [roundMinutes, setRoundMinutes] = useState(String(readNumber(contest, RULE_ROUND_MINUTES, 10)))
 
   const [formError, setFormError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
 
   const isBattle = Number(mode) === ContestMode.BATTLE
 
-  /** validate 校验时间顺序:报名要早于比赛,结束要晚于开始。 */
-  const { errors, validate } = useFormValidation(useCallback(() => {
-    const next: Record<string, string | null> = {
-      name: name.trim() === '' ? '请输入赛事名称' : null,
+  const { errors, validate } = useFormValidation(() => {
+    const minutes = Number(freezeMinutes)
+    return {
+      name: name.trim() === '' ? '请输入赛事名称' : [...name.trim()].length > 255 ? '赛事名称不能超过 255 个字' : null,
       signupStart: signupStart === '' ? '请选择报名开始时间' : null,
       signupEnd:
         signupEnd === ''
@@ -96,77 +83,45 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
           : startAt !== '' && endAt <= startAt
             ? '比赛结束要晚于比赛开始'
             : null,
+      freezeMinutes:
+        freezeMinutes.trim() === '' || !Number.isInteger(minutes) || minutes < 0 || minutes > 2147483647
+          ? '请填写有效的整数分钟数，0 表示不封榜'
+          : null,
     }
-    return next
-  }, [endAt, name, signupEnd, signupStart, startAt]))
+  })
 
-  const submit = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      if (!validate()) return
+  // submit 保存当前输入，失败时保留表单并恢复操作状态。
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!validate()) return
 
-      setSubmitting(true)
-      setFormError(undefined)
-      const payload: ContestRequest = {
-        name: name.trim(),
-        mode: Number(mode) as ContestMode,
-        match_mode: isBattle ? (Number(matchMode) as MatchMode) : undefined,
-        team_mode: Number(teamMode) as TeamMode,
-        signup_start: new Date(signupStart).toISOString(),
-        signup_end: new Date(signupEnd).toISOString(),
-        start_at: new Date(startAt).toISOString(),
-        end_at: new Date(endAt).toISOString(),
-        freeze_minutes: Number(freezeMinutes) || 0,
-        // 规则按结构化字段组装,不接受用户手写 JSON
-        rules: isBattle
-          ? { [RULE_ROUND_MINUTES]: Number(roundMinutes) || 10 }
-          : {
-              [RULE_ALLOW_RESUBMIT]: allowResubmit,
-              [RULE_FAILED_COOLDOWN]: Number(failedCooldown) || 0,
-            },
-      }
-      try {
-        const saved = editing
-          ? await api.contest.updateContest(contest.id, payload)
-          : await api.contest.createContest(payload)
-        toast.success(editing ? '赛事已更新' : '赛事已创建为草稿')
-        onSaved(saved)
-      } catch (error) {
-        setFormError(
-          userFacingErrorMessage(error, editing ? '赛事更新失败,请稍后重试。' : '赛事创建失败,请稍后重试。'),
-        )
-      } finally {
-        setSubmitting(false)
-      }
-    },
-    [
-      allowResubmit,
-      contest?.id,
-      editing,
-      endAt,
-      failedCooldown,
-      freezeMinutes,
-      isBattle,
-      matchMode,
-      mode,
-      name,
-      onSaved,
-      roundMinutes,
-      signupEnd,
-      signupStart,
-      startAt,
-      teamMode,
-      validate,
-    ],
-  )
-
-  const matchModeOptions = useMemo(
-    () => [
-      { value: String(MatchMode.ELO), label: matchModeLabel(MatchMode.ELO) },
-      { value: String(MatchMode.ROUND_ROBIN), label: matchModeLabel(MatchMode.ROUND_ROBIN) },
-    ],
-    [],
-  )
+    setSubmitting(true)
+    setFormError(undefined)
+    const payload: ContestRequest = {
+      name: name.trim(),
+      mode: Number(mode) as ContestMode,
+      match_mode: isBattle ? (Number(matchMode) as MatchMode) : undefined,
+      team_mode: Number(teamMode) as TeamMode,
+      signup_start: new Date(signupStart).toISOString(),
+      signup_end: new Date(signupEnd).toISOString(),
+      start_at: new Date(startAt).toISOString(),
+      end_at: new Date(endAt).toISOString(),
+      freeze_minutes: Number(freezeMinutes),
+    }
+    try {
+      const saved = editing
+        ? await api.contest.updateContest(contest.id, payload)
+        : await api.contest.createContest(payload)
+      toast.success(editing ? '赛事已更新' : '赛事已创建为草稿')
+      onSaved(saved)
+    } catch (error) {
+      setFormError(
+        userFacingErrorMessage(error, editing ? '赛事更新失败,请稍后重试。' : '赛事创建失败,请稍后重试。'),
+      )
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   return (
     <Drawer open onOpenChange={(open) => !open && onClose()}>
@@ -197,7 +152,7 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
               helper={
                 structureLocked
                   ? '赛事已发布,赛制不能再改'
-                  : '解题赛按题目通过数与用时排名;对抗赛按对局胜负积分'
+                  : '解题赛按得分排名；对抗赛按对局结果计算积分'
               }
             >
               <SegmentedControl
@@ -228,6 +183,17 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
                 disabled={structureLocked}
               />
             </FormField>
+
+            {isBattle ? (
+              <FormField label="对局匹配方式" htmlFor={`${fieldId}-match`} required>
+                <Select
+                  id={`${fieldId}-match`}
+                  options={matchModeOptions}
+                  value={matchMode}
+                  onValueChange={setMatchMode}
+                />
+              </FormField>
+            ) : null}
 
             <FormSectionTitle className="mt-2">时间安排</FormSectionTitle>
             <div className="grid gap-4 sm:grid-cols-2">
@@ -287,70 +253,18 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
               htmlFor={`${fieldId}-freeze`}
               required
               helper="比赛结束前这段时间内榜单对学生停止更新,填 0 表示不封榜"
+              error={errors.freezeMinutes}
             >
               <Input
                 id={`${fieldId}-freeze`}
                 type="number"
                 min="0"
+                step="1"
                 value={freezeMinutes}
+                invalid={Boolean(errors.freezeMinutes)}
                 onChange={(event) => setFreezeMinutes(event.target.value)}
               />
             </FormField>
-
-            <FormSectionTitle className="mt-2">赛制规则</FormSectionTitle>
-            {isBattle ? (
-              <div className="grid gap-4 rounded-md bg-surface-hover p-4 sm:grid-cols-2">
-                <FormField label="对局匹配方式" htmlFor={`${fieldId}-match`} required>
-                  <Select
-                    id={`${fieldId}-match`}
-                    options={matchModeOptions}
-                    value={matchMode}
-                    onValueChange={setMatchMode}
-                  />
-                </FormField>
-                <FormField
-                  label="每轮对局时长(分钟)"
-                  htmlFor={`${fieldId}-round`}
-                  helper="单场对局的最长执行时间"
-                >
-                  <Input
-                    id={`${fieldId}-round`}
-                    type="number"
-                    min="1"
-                    value={roundMinutes}
-                    onChange={(event) => setRoundMinutes(event.target.value)}
-                  />
-                </FormField>
-              </div>
-            ) : (
-              <div className="grid gap-4 rounded-md bg-surface-hover p-4 sm:grid-cols-2">
-                <FormField label="允许重复提交" required>
-                  <SegmentedControl
-                    aria-label="是否允许重复提交"
-                    size="sm"
-                    options={[
-                      { value: 'true', label: '允许' },
-                      { value: 'false', label: '不允许' },
-                    ]}
-                    value={String(allowResubmit)}
-                    onValueChange={(value) => setAllowResubmit(value === 'true')}
-                  />
-                </FormField>
-                <FormField
-                  label="判错冷却(秒)"
-                  htmlFor={`${fieldId}-cooldown`}
-                  helper="提交未通过后需要等待的时间,防止暴力试错"
-                >
-                  <Input
-                    id={`${fieldId}-cooldown`}
-                    type="number"
-                    min="0"
-                    value={failedCooldown}
-                    onChange={(event) => setFailedCooldown(event.target.value)}
-                  />
-                </FormField>
-              </div>
-            )}
 
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
           </DrawerBody>
@@ -368,19 +282,7 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
   )
 }
 
-/** FormSectionTitle 抽屉表单里一组字段的小标题;后续分组由调用方加上边距与上一组拉开 */
+/** FormSectionTitle 标记赛事配置分组。 */
 function FormSectionTitle({ children, className }: { children: string; className?: string }) {
   return <h3 className={cn('text-sm font-semibold text-ink', className)}>{children}</h3>
-}
-
-/** readBoolean 从赛制规则里读布尔字段;非布尔回默认值(不把对象塞进控件)。 */
-function readBoolean(contest: Contest | undefined, key: string, fallback: boolean): boolean {
-  const value = contest?.rules?.[key]
-  return typeof value === 'boolean' ? value : fallback
-}
-
-/** readNumber 从赛制规则里读数字字段;非数字回默认值。 */
-function readNumber(contest: Contest | undefined, key: string, fallback: number): number {
-  const value = contest?.rules?.[key]
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }

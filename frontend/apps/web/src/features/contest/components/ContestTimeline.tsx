@@ -10,8 +10,8 @@ import { contestTimeline } from '../contestTimeline'
 const STATE_TEXT = { done: '已过', current: '当前阶段', upcoming: '未到' } as const
 
 /** ContestTimeline 渲染一场赛事的赛程条 */
-export function ContestTimeline({ contest, className }: { contest: Contest; className?: string }) {
-  const nodes = contestTimeline(contest)
+export function ContestTimeline({ contest, className, now }: { contest: Contest; className?: string; now?: Date }) {
+  const nodes = contestTimeline(contest, now)
   return (
     <ol
       aria-label="赛程"

@@ -4,6 +4,7 @@ package judge
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -42,6 +43,7 @@ type SourceOwnership struct {
 type objectStorage interface {
 	Get(ctx context.Context, bucket, key string) (io.ReadCloser, error)
 	Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error
+	Delete(ctx context.Context, bucket, key string) error
 	BucketCode() string
 }
 
@@ -143,9 +145,7 @@ func (s *Service) ListJudgers(ctx context.Context) ([]JudgerDTO, error) {
 	return out, nil
 }
 
-// ListCatalogJudgers 返回业务模块编排检查点所需的可用判题方式目录。
-// 只出可编排字段:资源清单与执行引用属判题私密面,由 §2 的平台管理接口承载,
-// 不经本目录外泄(见 docs/03-评测引擎/04-接口设计.md §2.1)。
+// ListCatalogJudgers 返回可编排的判题方式，不含私有资源和执行引用。
 func (s *Service) ListCatalogJudgers(ctx context.Context) ([]CatalogJudger, error) {
 	var items []CatalogJudger
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
@@ -187,11 +187,8 @@ func (s *Service) CreateJudger(ctx context.Context, req JudgerRequest) (JudgerDT
 		if err != nil {
 			return apperr.ErrJudgerPersistFailed.WithCause(err)
 		}
-		return nil
+		return s.writeAuditFromContext(ctx, 0, "judge.judger.upsert", "judger", out.ID, map[string]any{"code": out.Code})
 	}); err != nil {
-		return JudgerDTO{}, err
-	}
-	if err := s.writeAuditFromContext(ctx, 0, "judge.judger.upsert", "judger", out.ID, map[string]any{"code": out.Code}); err != nil {
 		return JudgerDTO{}, err
 	}
 	return judgerDTOFromModel(out)
@@ -225,11 +222,8 @@ func (s *Service) UpdateJudger(ctx context.Context, id int64, req JudgerRequest)
 		if err != nil {
 			return apperr.ErrJudgerPersistFailed.WithCause(err)
 		}
-		return nil
+		return s.writeAuditFromContext(ctx, 0, "judge.judger.update", "judger", out.ID, map[string]any{"code": out.Code})
 	}); err != nil {
-		return JudgerDTO{}, err
-	}
-	if err := s.writeAuditFromContext(ctx, 0, "judge.judger.update", "judger", out.ID, map[string]any{"code": out.Code}); err != nil {
 		return JudgerDTO{}, err
 	}
 	return judgerDTOFromModel(out)
@@ -261,7 +255,7 @@ func (s *Service) RunJudgerSelftest(ctx context.Context, id int64) (JudgerDTO, e
 			snapshot, executionErr = s.compileJudgerSnapshot(ctx, composition, j.ResourceSpec)
 			if executionErr == nil {
 				j.ResourceSpec.CompositionSnapshot = snapshot
-				executionErr = s.sandbox.PrepullPlatformComposition(ctx, snapshot.Digest)
+				executionErr = s.sandbox.PrepareCompositions(ctx, []string{snapshot.Digest})
 			}
 		}
 	}
@@ -276,7 +270,9 @@ func (s *Service) RunJudgerSelftest(ctx context.Context, id int64) (JudgerDTO, e
 		judgerStatus = JudgerStatusDisabled
 		j.ResourceSpec.DisabledReason = "判题器平台自检未通过"
 	}
-	out, updated, err := s.persistJudgerExecutionState(ctx, original, j.ResourceSpec, status, judgerStatus)
+	out, updated, err := s.persistJudgerExecutionState(ctx, original, j.ResourceSpec, status, judgerStatus, func(ctx context.Context, updated Judger) error {
+		return s.writeAuditFromContext(ctx, 0, "judge.judger.selftest", "judger", updated.ID, map[string]any{"selftest_status": status, "status": judgerStatus})
+	})
 	if err != nil {
 		return JudgerDTO{}, err
 	}
@@ -284,9 +280,6 @@ func (s *Service) RunJudgerSelftest(ctx context.Context, id int64) (JudgerDTO, e
 		return JudgerDTO{}, apperr.ErrJudgerPersistFailed.WithCause(fmt.Errorf("自检期间判题器配置已变化,拒绝写回旧结果"))
 	}
 	j = out
-	if err := s.writeAuditFromContext(ctx, 0, "judge.judger.selftest", "judger", id, map[string]any{"selftest_status": status, "status": judgerStatus}); err != nil {
-		return JudgerDTO{}, err
-	}
 	if status == JudgerSelftestFailed {
 		out, err := judgerDTOFromModel(j)
 		if err != nil {
@@ -308,7 +301,9 @@ func (s *Service) prepareSubmittedCode(ctx context.Context, req contracts.JudgeS
 	if strings.TrimSpace(req.CodeStorageKey) == "" || !pkgcrypto.ValidSHA256Hex(req.CodeHash) {
 		return "", nil, nil, apperr.ErrJudgeSubmitInvalid
 	}
-	codeName, codeData, err := s.readObjectRef(ctx, req.CodeStorageKey)
+	readCtx, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.InputTimeoutSeconds)*time.Second)
+	defer cancel()
+	codeName, codeData, err := s.readObjectRef(readCtx, req.CodeStorageKey)
 	if err != nil {
 		return "", nil, nil, apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
 	}
@@ -349,8 +344,8 @@ func (s *Service) findExistingTaskBySourceRef(ctx context.Context, tenantID int6
 	return JudgeTask{}, false, apperr.ErrJudgeTaskEnqueueFailed.WithCause(err)
 }
 
-// ExactFingerprints 查询完全相同提交。
-func (s *Service) ExactFingerprints(ctx context.Context, tenantID int64, problemRef, codeHash string) ([]contracts.FingerprintMatch, error) {
+// FindExactMatch 查询完全相同提交。
+func (s *Service) FindExactMatch(ctx context.Context, tenantID int64, problemRef, codeHash string) ([]contracts.FingerprintMatch, error) {
 	if tenantID <= 0 || strings.TrimSpace(problemRef) == "" || !pkgcrypto.ValidSHA256Hex(codeHash) {
 		return nil, apperr.ErrFingerprintRequestInvalid
 	}
@@ -372,23 +367,29 @@ func (s *Service) ExactFingerprints(ctx context.Context, tenantID int64, problem
 	return out, nil
 }
 
-// Similarity 使用已落库的提交指纹计算相似命中。
-// 查重页面只需要提交代码哈希,基准向量由服务端从同题指纹中解析,避免把对象存储引用暴露给浏览器。
+// Similarity 在已授权来源范围内选择基准并计算相似命中。
 func (s *Service) Similarity(ctx context.Context, tenantID int64, req FingerprintSimilarityRequest) ([]contracts.FingerprintMatch, error) {
 	if tenantID <= 0 || strings.TrimSpace(req.ProblemRef) == "" {
 		return nil, apperr.ErrFingerprintRequestInvalid
 	}
 	threshold := req.Threshold
-	if threshold <= 0 {
+	if threshold == 0 {
 		threshold = s.cfg.SimilarityDefaultThreshold
 	}
-	if threshold <= 0 || threshold >= 1 {
+	if !(threshold > 0 && threshold < 1) {
 		return nil, apperr.ErrFingerprintRequestInvalid
+	}
+	hash := strings.TrimSpace(req.CodeHash)
+	if hash != "" && !pkgcrypto.ValidSHA256Hex(hash) {
+		return nil, apperr.ErrFingerprintRequestInvalid
+	}
+	if len(req.SourceRefs) == 0 {
+		return []contracts.FingerprintMatch{}, nil
 	}
 	var items []SubmissionFingerprint
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, err = tx.ListFingerprintsForProblem(ctx, tenantID, strings.TrimSpace(req.ProblemRef), strings.TrimSpace(req.ExcludeSourceRef))
+		items, err = tx.ListFingerprintsForProblem(ctx, tenantID, strings.TrimSpace(req.ProblemRef), strings.TrimSpace(req.ExcludeSourceRef), req.SourceRefs)
 		if err != nil {
 			return apperr.ErrFingerprintSimilarityFailed.WithCause(err)
 		}
@@ -397,13 +398,13 @@ func (s *Service) Similarity(ctx context.Context, tenantID int64, req Fingerprin
 		return nil, err
 	}
 	if len(items) == 0 {
+		if hash != "" {
+			return nil, apperr.ErrFingerprintNotFound
+		}
 		return []contracts.FingerprintMatch{}, nil
 	}
 	vector := items[0].SimVector
-	if hash := strings.TrimSpace(req.CodeHash); hash != "" {
-		if !pkgcrypto.ValidSHA256Hex(hash) {
-			return nil, apperr.ErrFingerprintRequestInvalid
-		}
+	if hash != "" {
 		found := false
 		for _, item := range items {
 			if strings.EqualFold(item.CodeHash, hash) {
@@ -448,12 +449,12 @@ func (s *Service) loadAvailableJudger(ctx context.Context, code string) (Judger,
 	return j, nil
 }
 
-// buildInputSnapshot 从 M5 判题配置和判题器定义构造脱敏快照。
+// buildInputSnapshot 冻结 M5 判题依据、执行环境和提交输入；答案仅供 M3 内部使用。
 func (s *Service) buildInputSnapshot(j Judger, spec contracts.ContentJudgeSpec, extra map[string]any) (JudgeInputSnapshot, error) {
 	if spec.JudgerCode != "" && spec.JudgerCode != j.Code {
 		return JudgeInputSnapshot{}, apperr.ErrJudgeSpecUnavailable
 	}
-	expectation, err := s.snapshotExpectationForJudger(j.Type, spec.Expectation, extra)
+	expectation, err := snapshotExpectationForJudger(j.Type, spec.Expectation)
 	if err != nil {
 		return JudgeInputSnapshot{}, err
 	}
@@ -480,7 +481,6 @@ func (s *Service) buildInputSnapshot(j Judger, spec contracts.ContentJudgeSpec, 
 		ExecTarget:          strings.TrimSpace(j.ResourceSpec.ExecTarget),
 		ExecutionSidecars:   append([]workload.ComponentSpec(nil), j.ResourceSpec.ExecutionSidecars...),
 		TimeoutSec:          timeoutForSnapshot(j),
-		MaxRetries:          maxRetriesForJudger(j, s.cfg.DefaultMaxRetries),
 		MaxScore:            spec.MaxScore,
 		Expectation:         expectation,
 		ExtraInput:          safeExtra,
@@ -534,7 +534,7 @@ func validateJudgerResourceSpecForUse(j Judger) error {
 	return nil
 }
 
-// validateJudgerSandboxMode 约束 reuse 只能用于链上断言只读现场状态,其他判题必须使用 fresh judge 沙箱。
+// validateJudgerSandboxMode 约束 reuse 仅用于链上判定，具体权限再按 M2 环境身份校验。
 func validateJudgerSandboxMode(typ int16, mode int16, targetRef string) error {
 	if err := validateJudgerSupportsSandboxMode(typ, mode); err != nil {
 		return err
@@ -600,15 +600,6 @@ func (s *Service) snapshotExtraInputForJudger(typ int16, expectation map[string]
 	return out, nil
 }
 
-// buildSubmissionVector 读取对象存储提交包并计算查重特征。
-func (s *Service) buildSubmissionVector(ctx context.Context, objectRef string) (map[string]float64, error) {
-	name, data, err := s.readObjectRef(ctx, objectRef)
-	if err != nil {
-		return nil, apperr.ErrFingerprintSimilarityFailed.WithCause(err)
-	}
-	return fingerprintVectorFromArchive(name, data, upload.ArchiveLimits{MaxFiles: s.cfg.InputArchiveMaxFiles, MaxUnpackedBytes: s.cfg.InputArchiveMaxUnpackedBytes})
-}
-
 // sourceOwnershipFromRequest 从跨模块契约读取来源归属证明。
 func sourceOwnershipFromRequest(req contracts.JudgeSubmitRequest) SourceOwnership {
 	return SourceOwnership{
@@ -627,14 +618,35 @@ func (s *Service) storeSanitizedCodeArchive(ctx context.Context, tenantID, taskI
 	if err != nil {
 		return "", apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
 	}
-	if err := s.objectStorage.Put(ctx, s.objectStorage.BucketCode(), key, bytes.NewReader(data), int64(len(data)), "application/x-tar"); err != nil {
-		return "", apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
-	}
-	ref, err := storage.ObjectRefString(s.objectStorage.BucketCode(), key)
+	bucket := s.objectStorage.BucketCode()
+	ref, err := storage.ObjectRefString(bucket, key)
 	if err != nil {
 		return "", apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
 	}
+	putCtx, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.InputTimeoutSeconds)*time.Second)
+	err = s.objectStorage.Put(putCtx, bucket, key, bytes.NewReader(data), int64(len(data)), "application/x-tar")
+	cancel()
+	if err != nil {
+		s.discardStoredCodeArchive(ctx, tenantID, taskID, ref, err)
+		return "", apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
+	}
 	return ref, nil
+}
+
+// discardStoredCodeArchive 清理未被任务事务引用的提交归档。
+func (s *Service) discardStoredCodeArchive(ctx context.Context, tenantID, taskID int64, objectRef string, cause error) {
+	if strings.TrimSpace(objectRef) == "" {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(s.cfg.InputTimeoutSeconds)*time.Second)
+	defer cancel()
+	ref, err := storage.ParseObjectRef(objectRef)
+	if err == nil {
+		err = s.objectStorage.Delete(cleanupCtx, ref.Bucket, ref.Key)
+	}
+	if err != nil {
+		logging.ErrorContext(cleanupCtx, "judge submission archive cleanup failed", apperr.ErrInternal.WithCause(errors.Join(cause, err)).LogString(), slog.Int64("tenant_id", tenantID), slog.Int64("task_id", taskID))
+	}
 }
 
 // validateSourceOwnership 强制来源归属快照采用唯一字段口径,教学来源必须携带课程快照。
@@ -704,33 +716,24 @@ func (s *Service) checkSubmitRate(ctx context.Context, task JudgeTask) error {
 	return nil
 }
 
-// getTaskInfo 查询任务并转换 no rows 为 M3 错误码。
 func (s *Service) getTaskInfo(ctx context.Context, tenantID, taskID int64) (JudgeTaskInfo, error) {
-	var info JudgeTaskInfo
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		info, err = tx.GetJudgeTaskInfo(ctx, tenantID, taskID)
-		if err != nil {
-			return apperr.ErrJudgeTaskNotFound.WithCause(err)
-		}
-		return nil
-	}); err != nil {
-		return JudgeTaskInfo{}, err
+	info, err := s.store.GetJudgeTaskInfo(ctx, tenantID, taskID)
+	if err != nil {
+		return JudgeTaskInfo{}, apperr.ErrJudgeTaskNotFound.WithCause(err)
 	}
 	return info, nil
 }
 
-// publishProgress 向任务进度 topic 广播用户向状态。
-// publishProgress 经事件总线请求 M10 统一推送判题进度,由 notify 在边界做 topic 租户校验与信封封装。
+// publishProgress 经事件总线请求 M10 推送用户向进度，由 M10 校验主题租户。
 func (s *Service) publishProgress(ctx context.Context, tenantID, taskID int64, status int16, stage, message string) {
 	payload, err := jsonx.AnyBytes(ProgressMessage{TaskID: ids.ID(taskID), Status: statusText(status), Stage: stage, Message: message}, apperr.ErrInternal)
 	if err != nil {
-		logging.ErrorContext(ctx, "judge progress serialization failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("task_id", taskID), slog.String("stage", stage))
+		logging.ErrorContext(ctx, "judge progress serialization failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", tenantID), slog.Int64("task_id", taskID), slog.String("stage", stage))
 		return
 	}
 	evt := contracts.NotifyPushRequestedEvent{TenantID: tenantID, TraceID: response.TraceFromContext(ctx), Topic: judgeProgressTopic(tenantID, taskID), Payload: payload}
 	if err := s.bus.Publish(ctx, contracts.SubjectNotifyPushRequested, evt); err != nil {
-		logging.ErrorContext(ctx, "judge progress publish failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("task_id", taskID), slog.String("stage", stage))
+		logging.ErrorContext(ctx, "judge progress publish failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", tenantID), slog.Int64("task_id", taskID), slog.String("stage", stage))
 	}
 }
 

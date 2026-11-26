@@ -213,6 +213,7 @@
   post:
     tags: [experiment]
     summary: 批改实验报告
+    description: 请求包含 manual_score、comment 和报告响应原样返回的 submitted_at。实例锁内核对最新提交，已重交时返回 11006，刷新并重新审阅后再批改。
     operationId: experimentGradeReport
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]

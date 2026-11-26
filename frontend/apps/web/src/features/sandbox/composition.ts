@@ -1,8 +1,4 @@
-// features/sandbox/composition 提供组合声明的读写换算,实验、竞赛、题库与判题器共用一套。
-//
-// 「教师声明什么」与「服务端编译出什么」是两组字段:声明只有命名运行时实例、组件与连接,
-// 编译结果里的镜像地址、digest、启动命令与安全上下文由服务端产出,前端只读
-// (docs/对齐-后端待补齐清单-2026-08-23.md §6.3 / §7.5)。
+// 编排表单共用声明换算；执行配置由服务端编译，不能作为声明回传。
 
 import {
   COMPOSITION_SELECTION,
@@ -13,6 +9,7 @@ import {
   type SandboxCompositionSpec,
   type ScenarioNeutralCompositionSpec,
 } from '@chaimir/api-client'
+import type { CompositionConnectionCheck } from './compositionCheck'
 
 /**
  * CompositionDeclaration 是编排表单里的可编辑部分。
@@ -27,23 +24,42 @@ export interface CompositionDeclaration {
 	links: CompositionLink[]
 	componentParams?: Record<string, Record<string, unknown>>
 	/** 仅存在于表单内存;绑定本次选择和连接,不进入保存请求。 */
-	connectionCheck?: { key: string; complete: boolean }
+	connectionCheck?: CompositionConnectionCheck
 }
 
 /** RuntimeDeclaration 是一个可被连接图引用的运行时实例,别名在组合内必须唯一。 */
 export interface RuntimeDeclaration {
+	clientId: string
 	instanceCode: string
 	runtimeCode: string
 	imageVersion: string
 	params?: Record<string, unknown>
 	/** 仅供编辑时迁移材料引用,不提交为执行配置。 */
 	originalInstanceCode?: string
-	initAssetBound?: boolean
+	/** 空名或重名期间保留引用名，名称有效且唯一后移除。 */
+	pendingInstanceCode?: string
+	initializationBound?: boolean
+}
+
+/** 空名或重名保留原引用；有效后按实例身份给出一次性名称映射。 */
+export function reconcileRuntimeNames(previous: RuntimeDeclaration[], next: RuntimeDeclaration[]) {
+  const renames = new Map<string, string>()
+  const names = next.map((runtime) => runtime.instanceCode.trim())
+  const complete = names.every(Boolean) && new Set(names).size === names.length
+  const runtimes = next.map((runtime) => {
+    const before = previous.find((item) => item.clientId === runtime.clientId)
+    const from = before?.pendingInstanceCode || before?.instanceCode.trim() || before?.originalInstanceCode
+    const to = runtime.instanceCode.trim()
+    if (!complete) return { ...runtime, pendingInstanceCode: from }
+    if (from && to && from !== to) renames.set(from, to)
+    return { ...runtime, pendingInstanceCode: undefined }
+  })
+  return { runtimes, renames }
 }
 
 /** emptyCompositionDeclaration 给出新建时的空声明。 */
 export function emptyCompositionDeclaration(): CompositionDeclaration {
-	return { runtimes: [{ instanceCode: 'chain-1', runtimeCode: '', imageVersion: '' }], workspaceRuntimeInstance: 'chain-1', toolCodes: [], infraCodes: [], links: [] }
+	return { runtimes: [{ clientId: crypto.randomUUID(), instanceCode: 'chain-1', runtimeCode: '', imageVersion: '' }], workspaceRuntimeInstance: 'chain-1', toolCodes: [], infraCodes: [], links: [] }
 }
 
 /** isExplicitComponent 判断组件引用是否为教师显式声明(而非编译器按依赖补齐)。 */
@@ -61,17 +77,19 @@ export function explicitComponentRef(code: string): CompositionComponentRef {
  * 编译器自动补齐的基础设施不进勾选框 —— 它不是教师的选择,重新保存时会再算一遍。
  */
 export function declarationFromSpec(
-	spec: Pick<SandboxCompositionSpec, 'runtimes' | 'workspace_runtime_instance' | 'tools' | 'infra' | 'links' | 'init_assets'> | undefined,
+	spec: Pick<SandboxCompositionSpec, 'runtimes' | 'workspace_runtime_instance' | 'tools' | 'infra' | 'links' | 'init_assets' | 'init_chain_steps'> | undefined,
 ): CompositionDeclaration {
 	if (spec === undefined) return emptyCompositionDeclaration()
 	return {
 		runtimes: (spec.runtimes ?? []).map((item) => ({
+		clientId: crypto.randomUUID(),
 		instanceCode: item.instance_code,
 		runtimeCode: item.runtime_code,
 		imageVersion: item.image_version,
 		params: item.params,
 		originalInstanceCode: item.instance_code,
-		initAssetBound: spec.init_assets?.some((asset) => asset.target_runtime_instance === item.instance_code),
+		initializationBound: spec.init_assets?.some((asset) => asset.target_runtime_instance === item.instance_code)
+      || spec.init_chain_steps?.some((step) => step.runtime_instance === item.instance_code),
 	})),
 		workspaceRuntimeInstance: spec.workspace_runtime_instance,
     toolCodes: (spec.tools ?? []).filter(isExplicitComponent).map((item) => item.code),
@@ -113,6 +131,9 @@ function compositionSettings(base: Partial<ScenarioNeutralCompositionSpec> | und
     init_assets: base?.init_assets?.map((asset) => ({ ...asset,
       target_runtime_instance: declaration.runtimes.find((runtime) => runtime.originalInstanceCode === asset.target_runtime_instance)?.instanceCode ?? asset.target_runtime_instance,
     })),
+    init_chain_steps: base?.init_chain_steps?.map((step) => ({ ...step,
+      runtime_instance: declaration.runtimes.find((runtime) => runtime.originalInstanceCode === step.runtime_instance)?.instanceCode ?? step.runtime_instance,
+    })),
     init_code_ref: base?.init_code_ref,
     init_script_ref: base?.init_script_ref,
   }
@@ -125,8 +146,6 @@ export interface CompositionSpecInput {
   accessProfile: SandboxAccessProfile
   /** 保留未编辑的初始化、资源与网络配置,选择字段始终由本次声明覆盖。 */
   base?: Partial<ScenarioNeutralCompositionSpec>
-  initCodeRef?: string
-  initScriptRef?: string
 }
 
 /**
@@ -138,18 +157,12 @@ export function compositionSpecFromDeclaration({
   declaration,
   accessProfile,
   base,
-  initCodeRef,
-  initScriptRef,
 }: CompositionSpecInput): SandboxCompositionSpec {
 	return {
     ...compositionSettings(base, declaration),
     ...compositionPreviewRequest(declaration),
 		id,
     access_profile: accessProfile,
-    ...(initCodeRef !== undefined && initCodeRef !== '' ? { init_code_ref: initCodeRef } : {}),
-    ...(initScriptRef !== undefined && initScriptRef !== ''
-      ? { init_script_ref: initScriptRef }
-      : {}),
   }
 }
 

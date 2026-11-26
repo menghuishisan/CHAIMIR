@@ -1,4 +1,4 @@
-// contest service_battle 文件实现对抗赛参战物、撮合、执行、结算和回放读取。
+// 对抗赛参战物提交、撮合执行、结算和回放授权。
 package contest
 
 import (
@@ -40,16 +40,15 @@ func (s *Service) SubmitBattleEntry(ctx context.Context, contestID int64, req Ba
 	if err != nil {
 		return BattleEntryDTO{}, err
 	}
-	saved, _, err := s.saveContestSubmissionWorkspace(ctx, contest, problem, team, req.SandboxID.Int64(), id.TenantID, id.AccountID)
+	saved, err := s.saveContestSubmissionWorkspace(ctx, contest, problem, team, req.SandboxID.Int64(), id.TenantID, id.AccountID)
 	if err != nil {
 		return BattleEntryDTO{}, err
 	}
-	artifactRef := saved.CodeStorageKey
 	var entry BattleEntry
-	var opponents []BattleEntry
 	problemID := req.ProblemID.Int64()
 	if err := s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
-		currentContest, err := tx.GetContest(ctx, organizerTenantID, contestID)
+		// 与赛事状态变更共用父行锁，串行分配版本并创建对应对局。
+		currentContest, err := tx.GetContestForUpdate(ctx, organizerTenantID, contestID)
 		if err != nil {
 			return err
 		}
@@ -87,11 +86,11 @@ func (s *Service) SubmitBattleEntry(ctx context.Context, contestID int64, req Ba
 		if err := tx.DeactivateBattleEntries(ctx, organizerTenantID, contestID, problemID, currentTeam.ID, req.Role); err != nil {
 			return err
 		}
-		entry, err = tx.CreateBattleEntry(ctx, BattleEntry{ID: s.ids.Generate(), TenantID: organizerTenantID, ContestID: contestID, ProblemID: problemID, TeamID: currentTeam.ID, Role: req.Role, ArtifactRef: artifactRef, ArtifactHash: saved.CodeHash, VersionNo: version})
+		entry, err = tx.CreateBattleEntry(ctx, BattleEntry{ID: s.ids.Generate(), TenantID: organizerTenantID, ContestID: contestID, ProblemID: problemID, TeamID: currentTeam.ID, Role: req.Role, ArtifactRef: saved.CodeStorageKey, ArtifactHash: saved.CodeHash, VersionNo: version})
 		if err != nil {
 			return err
 		}
-		opponents, err = tx.ListActiveBattleOpponents(ctx, organizerTenantID, contestID, problemID, entry.ID, currentTeam.ID, currentContest.MatchMode, s.cfg.MatchmakerBatchSize, s.cfg.BattleELOInitialScore)
+		opponents, err := tx.ListActiveBattleOpponents(ctx, organizerTenantID, contestID, problemID, entry.ID, currentTeam.ID, currentContest.MatchMode, s.cfg.MatchmakerBatchSize, s.cfg.BattleELOInitialScore)
 		if err != nil {
 			return err
 		}
@@ -104,11 +103,8 @@ func (s *Service) SubmitBattleEntry(ctx context.Context, contestID int64, req Ba
 				return err
 			}
 		}
-		return nil
+		return s.writeStudentAudit(ctx, organizerTenantID, id, "contest.battle.entry.submit", auditTargetBattleEntry, entry.ID, map[string]any{"contest_id": contestID, "problem_id": req.ProblemID})
 	}); err != nil {
-		return BattleEntryDTO{}, err
-	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "contest.battle.entry.submit", auditTargetBattleEntry, entry.ID, map[string]any{"contest_id": contestID, "problem_id": req.ProblemID}); err != nil {
 		return BattleEntryDTO{}, err
 	}
 	return battleEntryDTOFromModel(entry), nil
@@ -177,11 +173,8 @@ func (s *Service) ListBattleEntries(ctx context.Context, contestID int64, page, 
 	return out, total, page, size, nil
 }
 
-// ListBattleMatches 查询对局历史分页,按身份分视角。
-// 学生只见本队对局(时空回溯器要的就是本队记录);赛事组织者与学校管理员见本赛事全部对局
-// (实时监控要看的是「哪一局卡住了」)。同一路由同一查询,只是过滤条件不同 ——
-// 为教师另开一条对局列表会让同一张表存在两份分页查询与两套 DTO。
-// status 按对局状态筛选(0 为全部);facets.status 按状态计数,视角相同、不套用状态筛选。
+// ListBattleMatches 返回对局分页：主办学校的组织教师或校管可查整场，其他成员仅查本队。
+// 状态计数使用相同权限范围，不套用 status 筛选。
 func (s *Service) ListBattleMatches(ctx context.Context, contestID int64, status int16, page, size int) ([]BattleMatchDTO, int64, int, int, pagex.Facets, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
@@ -200,14 +193,12 @@ func (s *Service) ListBattleMatches(ctx context.Context, contestID int64, status
 		if err != nil {
 			return err
 		}
-		// 组织者视角:teamID=0 即不按队伍过滤。非组织者退回本队视角,
-		// 且必须确实属于某支队伍 —— 未报名者读不到任何对局。
 		teamID := int64(0)
 		isSchoolAdmin, err := s.isSchoolAdmin(ctx, id.AccountID)
 		if err != nil {
 			return err
 		}
-		if canManageContest(id.AccountID, isSchoolAdmin, contest) != nil {
+		if id.TenantID != organizerTenantID || canManageContest(id.AccountID, isSchoolAdmin, contest) != nil {
 			team, err := s.currentAccountTeam(ctx, tx, organizerTenantID, id.TenantID, contestID, id.AccountID)
 			if err != nil {
 				return err
@@ -278,33 +269,12 @@ func (s *Service) GetBattleReplayWindow(ctx context.Context, contestID int64, pa
 		Checkpoint: BattleReplayCheckpointDTO(checkpoint),
 	}
 	for _, row := range rows {
-		item := BattleReplayWindowItemDTO{Match: battleMatchDTOFromModel(row.Match), Sequence: row.SequenceNo, MySide: row.MySide}
-		if row.ActiveEntryID > 0 {
-			item.ActiveEntry = &BattleReplayActiveEntryDTO{ID: ids.ID(row.ActiveEntryID), Role: row.ActiveEntryRole, VersionNo: row.ActiveEntryVersion, SubmittedAt: row.ActiveEntryAt}
-		}
-		out.List = append(out.List, item)
+		out.List = append(out.List, BattleReplayWindowItemDTO{
+			Match: battleMatchDTOFromModel(row.Match), Sequence: row.SequenceNo, MySide: row.MySide,
+			Entry: BattleReplayEntryDTO{ID: ids.ID(row.EntryID), Role: row.EntryRole, VersionNo: row.EntryVersion, SubmittedAt: row.EntryAt},
+		})
 	}
 	return out, nil
-}
-
-// GetBattleReplay 读取对局回放引用,只向参赛队伍成员开放。
-func (s *Service) GetBattleReplay(ctx context.Context, matchID int64) (BattleReplayRefDTO, error) {
-	id, err := currentIdentity(ctx)
-	if err != nil {
-		return BattleReplayRefDTO{}, err
-	}
-	organizerTenantID, err := s.resolveBattleMatchTenant(ctx, matchID)
-	if err != nil {
-		return BattleReplayRefDTO{}, err
-	}
-	match, err := s.authorizedBattleReplay(ctx, organizerTenantID, id.TenantID, id.AccountID, matchID)
-	if err != nil {
-		return BattleReplayRefDTO{}, err
-	}
-	if match.ReplayRef == "" {
-		return BattleReplayRefDTO{}, apperr.ErrContestReplayUnavailable
-	}
-	return BattleReplayRefDTO{MatchID: ids.ID(match.ID), Available: true}, nil
 }
 
 // IssueBattleReplayDownloadGrant 为已授权队伍成员签发回放归档的一次性取件授权。
@@ -493,15 +463,23 @@ func (s *Service) reconcileBattleMatch(ctx context.Context, match BattleMatch) e
 // executeBattleMatch 在整个启动阶段续租,失去租约后取消外部调用且不触碰新 worker 的资源。
 func (s *Service) executeBattleMatch(ctx context.Context, match BattleMatch) error {
 	leaseDuration := time.Duration(s.cfg.MatchmakerLeaseDurationMs) * time.Millisecond
-	if leaseDuration <= 0 {
+	if leaseDuration < 3*time.Second {
 		return apperr.ErrContestBattleMatchFailed
+	}
+	renewed, err := s.renewBattleMatchStartLease(ctx, match, leaseDuration)
+	if err != nil {
+		return apperr.ErrContestBattleMatchFailed.WithCause(err)
+	}
+	if !renewed {
+		slog.Default().LogAttrs(ctx, slog.LevelWarn, "battle match start lease lost before execution", logging.AttrsFromContext(ctx, slog.Int64("tenant_id", match.TenantID), slog.Int64("match_id", match.ID))...)
+		return nil
 	}
 	executionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	done := make(chan struct{})
 	lost := make(chan struct{}, 1)
 	go s.renewBattleMatchStartLeaseUntilDone(executionCtx, match, leaseDuration, done, lost, cancel)
-	err := s.executeBattleMatchWithLease(executionCtx, match)
+	err = s.executeBattleMatchWithLease(executionCtx, match)
 	close(done)
 	select {
 	case <-lost:
@@ -511,7 +489,7 @@ func (s *Service) executeBattleMatch(ctx context.Context, match BattleMatch) err
 	}
 }
 
-// renewBattleMatchStartLeaseUntilDone 以小于租约的周期续租,防止沙箱准备期重复认领。
+// renewBattleMatchStartLeaseUntilDone 按租约三分之一且最长 30 秒的周期续租。
 func (s *Service) renewBattleMatchStartLeaseUntilDone(ctx context.Context, match BattleMatch, leaseDuration time.Duration, done <-chan struct{}, lost chan<- struct{}, cancel context.CancelFunc) {
 	interval := leaseDuration / 3
 	if interval > 30*time.Second {
@@ -529,13 +507,7 @@ func (s *Service) renewBattleMatchStartLeaseUntilDone(ctx context.Context, match
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			leaseUntil := timex.Now().Add(leaseDuration)
-			var renewed bool
-			err := s.store.TenantTx(ctx, match.TenantID, func(ctx context.Context, tx TxStore) error {
-				var err error
-				renewed, err = tx.RenewBattleMatchStartLease(ctx, match.TenantID, match.ID, match.LeaseToken, leaseUntil)
-				return err
-			})
+			renewed, err := s.renewBattleMatchStartLease(ctx, match, leaseDuration)
 			if err == nil && renewed {
 				continue
 			}
@@ -554,14 +526,29 @@ func (s *Service) renewBattleMatchStartLeaseUntilDone(ctx context.Context, match
 	}
 }
 
+// renewBattleMatchStartLease 仅允许当前持有者延长仍有效的对局启动租约。
+func (s *Service) renewBattleMatchStartLease(ctx context.Context, match BattleMatch, leaseDuration time.Duration) (bool, error) {
+	var renewed bool
+	err := s.store.TenantTx(ctx, match.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		renewed, err = tx.RenewBattleMatchStartLease(ctx, match.TenantID, match.ID, match.LeaseToken, timex.Now().Add(leaseDuration))
+		return err
+	})
+	return renewed, err
+}
+
 // executeBattleMatchWithLease 创建对局沙箱并提交 M3 判题任务,调用方必须持有启动租约。
 func (s *Service) executeBattleMatchWithLease(ctx context.Context, match BattleMatch) error {
+	var contest Contest
 	var problem ContestProblem
 	var entryA BattleEntry
 	var entryB BattleEntry
-	var ownerID int64
 	if err := s.store.TenantTx(ctx, match.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
+		contest, err = tx.GetContest(ctx, match.TenantID, match.ContestID)
+		if err != nil {
+			return err
+		}
 		problem, err = tx.GetContestProblem(ctx, match.TenantID, match.ProblemID)
 		if err != nil {
 			return err
@@ -571,15 +558,11 @@ func (s *Service) executeBattleMatchWithLease(ctx context.Context, match BattleM
 			return err
 		}
 		entryB, err = tx.GetBattleEntry(ctx, match.TenantID, match.EntryBID)
-		if err != nil {
-			return err
-		}
-		ownerID, err = teamLeaderID(ctx, tx, match.TenantID, entryA.TeamID)
 		return err
 	}); err != nil {
 		return err
 	}
-	snapshot, err := s.battleRuntimeSpecFromProblem(ctx, match.TenantID, problem)
+	snapshot, err := compositionFromProblem(problem, contracts.SandboxAccessContestBattle)
 	if err != nil {
 		if marked, failErr := s.markBattleFailed(ctx, match); failErr != nil {
 			return apperr.ErrContestBattleMatchFailed.WithCause(fmt.Errorf("对局配置无效: %w; 标记对局失败也失败: %w", err, failErr))
@@ -588,7 +571,7 @@ func (s *Service) executeBattleMatchWithLease(ctx context.Context, match BattleM
 		}
 		return err
 	}
-	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: match.TenantID, CompositionSnapshot: snapshot, InitCodeRef: snapshot.Spec.InitCodeRef, InitScriptRef: snapshot.Spec.InitScriptRef, OwnerAccountID: ownerID, SourceRef: match.SourceRef, ScopeRef: match.ScopeRef, KeepAlive: false, SnapshotEnabled: false})
+	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: match.TenantID, CompositionSnapshot: snapshot, InitCodeRef: snapshot.Spec.InitCodeRef, InitScriptRef: snapshot.Spec.InitScriptRef, OwnerAccountID: contest.OrganizerID, SourceRef: match.SourceRef, ScopeRef: match.ScopeRef, KeepAlive: false, SnapshotEnabled: false})
 	if err != nil {
 		if marked, failErr := s.markBattleFailed(ctx, match); failErr != nil {
 			return apperr.ErrContestBattleMatchFailed.WithCause(fmt.Errorf("创建对局沙箱失败: %w; 标记对局失败也失败: %w", err, failErr))
@@ -610,7 +593,13 @@ func (s *Service) executeBattleMatchWithLease(ctx context.Context, match BattleM
 		}
 		return apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
-	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: match.TenantID, ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion, SubmitterTenantID: match.TenantID, SubmitterID: ownerID, SourceRef: match.SourceRef, SourceOwnerID: ownerID, SourceCourseID: 0, SourceScope: "contest", SandboxMode: contracts.JudgeSandboxModeReuse, TargetSandboxRef: ids.Format(info.SandboxID), SandboxSourceRef: info.SourceRef, ExtraInput: map[string]any{"entry_a": entryA.ArtifactRef, "entry_b": entryB.ArtifactRef, "entry_a_hash": entryA.ArtifactHash, "entry_b_hash": entryB.ArtifactHash, "role_a": entryA.Role, "role_b": entryB.Role}, Priority: 9})
+	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{
+		TenantID: match.TenantID, ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion,
+		SubmitterTenantID: match.TenantID, SubmitterID: contest.OrganizerID,
+		SourceRef: match.SourceRef, SourceOwnerID: contest.OrganizerID, SourceScope: "contest",
+		SandboxMode: contracts.JudgeSandboxModeReuse, TargetSandboxRef: ids.Format(info.SandboxID),
+		SandboxSourceRef: match.SourceRef, SandboxCompositionDigest: snapshot.Digest, RequiresOutcome: problem.BattleRule == BattleRuleGame, Priority: 9,
+	})
 	if err != nil {
 		marked, failErr := s.markBattleFailed(ctx, match)
 		if failErr != nil {
@@ -690,7 +679,7 @@ func (s *Service) HandleBattleJudgeCompleted(ctx context.Context, event contract
 		return err
 	}
 	var match BattleMatch
-	committed := false
+	replayCommitAttempted := false
 	if err := s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
 		current, err := tx.LockBattleMatchByJudgeTask(ctx, event.TenantID, ids.Format(event.TaskID))
 		if err != nil {
@@ -747,18 +736,23 @@ func (s *Service) HandleBattleJudgeCompleted(ctx context.Context, event contract
 		if err := s.applyBattleRankDelta(ctx, tx, event.TenantID, current.ContestID, b.TeamID, deltaB); err != nil {
 			return err
 		}
-		committed = true
-		return tx.RefreshContestRanks(ctx, event.TenantID, current.ContestID)
+		if err := tx.RefreshContestRanks(ctx, event.TenantID, current.ContestID); err != nil {
+			return err
+		}
+		replayCommitAttempted = true
+		return nil
 	}); err != nil {
 		if !alreadyFinished {
-			if cleanupErr := s.deleteBattleReplay(ctx, replayRef); cleanupErr != nil {
-				return fmt.Errorf("结算对局失败: %w; 清理回放对象失败: %w", err, cleanupErr)
-			}
+			err = storage.CompensateUpload(ctx, s.cleanupTimeout, err, replayCommitAttempted, func(ctx context.Context) error {
+				return s.deleteBattleReplay(ctx, replayRef)
+			})
 		}
 		return err
 	}
-	if !committed && !alreadyFinished {
-		if err := s.deleteBattleReplay(ctx, replayRef); err != nil {
+	if !replayCommitAttempted && !alreadyFinished {
+		if err := storage.CompensateUpload(ctx, s.cleanupTimeout, nil, false, func(ctx context.Context) error {
+			return s.deleteBattleReplay(ctx, replayRef)
+		}); err != nil {
 			return fmt.Errorf("重复结算清理回放对象失败: %w", err)
 		}
 	}
@@ -839,17 +833,6 @@ func (s *Service) markBattleFailed(ctx context.Context, match BattleMatch) (bool
 	return marked, err
 }
 
-// battleRuntimeSpecFromProblem 从 M5 锁定题目版本读取对抗组合,竞赛配置只决定对局参数。
-func (s *Service) battleRuntimeSpecFromProblem(ctx context.Context, tenantID int64, problem ContestProblem) (contracts.SandboxCompositionSnapshot, error) {
-	if problem.BattleConfig == nil {
-		return contracts.SandboxCompositionSnapshot{}, apperr.ErrContestProblemInvalid
-	}
-	if err := problem.BattleConfig.Validate(); err != nil {
-		return contracts.SandboxCompositionSnapshot{}, err
-	}
-	return s.compositionFromProblem(ctx, tenantID, problem, contracts.SandboxAccessContestBattle)
-}
-
 // battleRolesCompatible 判断两份参战物是否可组成对局。
 func battleRolesCompatible(rule, a, b int16) bool {
 	if rule == BattleRuleGame {
@@ -858,26 +841,14 @@ func battleRolesCompatible(rule, a, b int16) bool {
 	return (a == BattleRoleAttack && b == BattleRoleDefense) || (a == BattleRoleDefense && b == BattleRoleAttack)
 }
 
-// teamLeaderID 读取队伍负责人账号,后台创建对局沙箱时作为归属账号。
-func teamLeaderID(ctx context.Context, tx TxStore, tenantID, teamID int64) (int64, error) {
-	team, err := tx.GetTeam(ctx, tenantID, teamID)
-	if err != nil {
-		return 0, err
-	}
-	for _, member := range team.Members {
-		if member.IsLeader {
-			return member.AccountID, nil
-		}
-	}
-	if len(team.Members) == 0 {
-		return 0, apperr.ErrContestTeamInvalid
-	}
-	return team.Members[0].AccountID, nil
-}
-
 // battleResultFromTask 从判题结果和对抗规则提取胜负,攻防型按断言是否攻破映射到攻击/防守角色。
 func battleResultFromTask(result contracts.JudgeTaskResult, rule, roleA, roleB int16) (int16, error) {
 	if rule == BattleRuleAttackDefense {
+		for _, detail := range result.Details {
+			if detail.Outcome != "" {
+				return 0, apperr.ErrContestBattleMatchFailed
+			}
+		}
 		if roleA == BattleRoleAttack && roleB == BattleRoleDefense {
 			if result.Passed {
 				return BattleResultAWin, nil
@@ -892,17 +863,26 @@ func battleResultFromTask(result contracts.JudgeTaskResult, rule, roleA, roleB i
 		}
 		return 0, apperr.ErrContestBattleMatchFailed
 	}
-	if rule == BattleRuleGame && roleA == BattleRoleStrategy && roleB == BattleRoleStrategy {
+	if rule == BattleRuleGame && roleA == BattleRoleStrategy && roleB == BattleRoleStrategy && result.Passed {
+		var outcome contracts.JudgeOutcome
 		for _, detail := range result.Details {
-			value := strings.ToLower(strings.TrimSpace(detail.Actual))
-			switch value {
-			case "a_win", "a":
-				return BattleResultAWin, nil
-			case "b_win", "b":
-				return BattleResultBWin, nil
-			case "draw", "tie":
-				return BattleResultDraw, nil
+			if !detail.Passed {
+				return 0, apperr.ErrContestBattleMatchFailed
 			}
+			if detail.Outcome != "" {
+				if outcome != "" || !detail.Outcome.Valid() {
+					return 0, apperr.ErrContestBattleMatchFailed
+				}
+				outcome = detail.Outcome
+			}
+		}
+		switch outcome {
+		case contracts.JudgeOutcomeAWin:
+			return BattleResultAWin, nil
+		case contracts.JudgeOutcomeBWin:
+			return BattleResultBWin, nil
+		case contracts.JudgeOutcomeDraw:
+			return BattleResultDraw, nil
 		}
 	}
 	return 0, apperr.ErrContestBattleMatchFailed

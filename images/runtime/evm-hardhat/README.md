@@ -1,72 +1,11 @@
 # runtime/evm-hardhat
 
-## 镜像职责
+提供 Hardhat Solidity 开发工具和 Anvil EVM 链。固定工具与编译器版本、端口、启动参数和供应链约束以 manifest 与 Dockerfile 为准，不在运行时下载编译器。
 
-Hardhat EVM 教学运行时镜像。
+原生适配器接受一份 JSON 对象：`deploy` 发送字节码；`tx` 接受目标、调用数据、可选金额和节点解锁账户，未指定账户时读取节点首个可用账户；无账户则失败。`query` 支持链编号、最新区块、账户余额和合约字节码，其他目标拒绝。
 
-## 能力边界
+教学钱包签名使用独立载荷 `{"raw_transaction":"0x..."}`，须为非空完整十六进制字节且不混入其他字段。适配器原样广播、不重新签名；复用 `cast publish` 与系统 `timeout`。普通发送使用 Cast 的超时，两者时限均来自正整数 `FOUNDRY_TRANSACTION_TIMEOUT`。
 
-- 支持 capability：chain-runtime, evm-json-rpc, solidity-dev, fork-capable
-- 明确不支持：manifest 未声明的能力、协议动作和跨镜像联动；入口和编排必须严格失败，不使用 generic fallback。
-- conflicts：无；cardinality：one；placement：sandbox。
+交易须取得成功回执与合法交易哈希，部署还须有非零合约地址后才更新最近部署引用。错误输入在执行前拒绝，失败不会改用平台账户重发。工作区可在组合内共享，账本由 M2 按链独立管理；主容器不开放学生 shell。
 
-## 合法 runtime / provider
-
-- 生态或适配范围：evm
-- 必需 provider 能力：无。
-- provider 只能通过 manifest 能力和显式 CompositionSpec link 选择；多个候选必须显式指定，不能按名称猜测。
-
-## bindings 与 links
-
-- 必需 bindings：无。
-- 必需 links：无；本镜像不声明跨组件 link。
-- binding 的 endpoint、协议、配置键和启动前置以 manifest 为准；缺失、重复、错误能力或错误 provider 均拒绝编排。
-
-## 端口与服务
-
-- rpc：8545/TCP，暴露边界 proxy，用途：EVM JSON-RPC。
-- 组件：无 resource_spec 组件。
-
-## command / args 语义
-
-- 镜像默认 ENTRYPOINT：["/usr/local/bin/chaimir-hardhat-entrypoint"]；manifest 未覆盖组件 command/args，使用该入口语义。
-- runtime 原生动作：helper=/usr/local/bin/chaimir-hardhat-adapter；profile=evm-json-rpc；actions={"deploy":["/usr/local/bin/chaimir-hardhat-adapter","deploy"],"tx":["/usr/local/bin/chaimir-hardhat-adapter","tx"],"query":["/usr/local/bin/chaimir-hardhat-adapter","query"]}。
-
-## 初始化材料与运行时注入
-
-- 镜像层不内置租户、链、协议或私有材料；声明的 init_assets：无。
-- genesis、rollup、checkpoint、Hyperlane、Chainlink、合约或 subgraph 材料必须由平台受控对象存储、初始化资产和 CompositionSpec 注入并校验来源及 SHA-256；缺失时严格失败。
-- 数据卷声明：无顶层 data_volumes 声明。
-
-## Secret / KMS
-
-- Secret 环境键：CHAIMIR_EVM_DEPLOYER_MNEMONIC。
-- 必需材料映射：[{"component":"runtime","env":"CHAIMIR_EVM_DEPLOYER_MNEMONIC","secret_key":"CHAIMIR_EVM_DEPLOYER_MNEMONIC","source":"deploy/config/chaimir.env","runtime_value":"secret-or-kms"}]。
-- Secret 只来自平台 Secret/KMS 运行时注入，不能写入 Dockerfile、manifest、README、镜像层或测试输出。
-
-## 持久化与隔离边界
-
-- 持久化目录：由组件 mount_domains 决定；未声明持久化数据时不得自行落盘。
-- 组件挂载与文件系统：无
-## 安全边界
-
-- 安全声明：{"run_as_non_root":true,"read_only_root_filesystem":true,"allow_privilege_escalation":false,"privileged":false,"host_network":false,"automount_service_account_token":false,"drop_capabilities":["ALL"],"network_policy":"deny-all"}
-- student_access：{"enabled":false,"shell":"none","allowed_mounts":[]}。
-- 网络只允许 manifest binding/link 所需目标，默认拒绝；禁止宿主机路径、hostNetwork、ServiceAccount token 和越权写入。
-
-## readiness / health
-
-- 未声明组件 readiness probe；容器运行不等于就绪或业务成功。
-- 镜像自检 hardhat-and-anvil：["sh","-lc","hardhat --version && anvil --version"]。
-- 镜像自检 solidity-compilers：["sh","-lc","set -eu; for version in 0.8.20 0.8.24 0.8.26; do case \"$(/usr/local/bin/solc-${version} --version)\" in *\"Version: ${version}\"*) ;; *) exit 1 ;; esac; done"]。
-
-## 清理
-
-- 验收后按 CompositionSpec 所属租户/实例和项目 owner 标签删除容器、Pod、Service、NetworkPolicy、临时卷、Secret 投影和临时材料；保留平台长期资源。
-- 不使用 broad prune，不删除 kind-chaimir-cilium 节点、正式锁引用或其他项目资源。
-
-## 验收条件
-
-- 先按 digest lock 启动合法 CompositionSpec，核对 command/args、bindings、links、材料和 Secret 投影，再执行 manifest selftest。
-- selftest 只证明镜像布局和声明入口正确；协议、链、存储、索引、签名或跨镜像能力必须追加真实 provider 联动、正向业务、错误输入拒绝、重启/持久化（若声明）和清理证据。
-- 未执行或只完成探活的项目不得标记为业务通过。
+验收先执行 manifest 中的工具、广播入口、限时工具与编译器自检，再验证实际部署、调用、钱包广播、错误回执、查询、持久化和清理。版本自检与本地进程替身不能代替真实链和组合验收。

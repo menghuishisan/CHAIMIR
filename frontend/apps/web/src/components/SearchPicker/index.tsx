@@ -1,9 +1,3 @@
-// SearchPicker 在大集合里挑一项:触发器外观与下拉框一致,点开是「搜索框 + 至多 20 条结果」,
-// 输入停顿后由服务端按关键词查找,不把整个集合一次取回(账号目录、题库、仿真场景都可能有成百上千条)。
-// 可选的第一项用于清除选择(筛选里的「不限」);当前选中项的文字由调用方给出 —— 它可能不在当前结果里。
-// 浮层与下拉框一样在弹窗之上,表单弹窗里也能用;浮层不窄于触发器,整宽字段展开后与输入框对齐。
-// 无障碍语义与下拉框一致:触发器是组合框,读屏会读出当前选择;搜索框里用上下键在结果间移动、回车选中。
-
 import {
   useEffect,
   useId,
@@ -25,9 +19,7 @@ import {
 } from '@chaimir/ui'
 import { useAsyncResource } from '../../hooks'
 
-/** 一次最多列出的条数:更多时提示继续输入 */
 const RESULT_LIMIT = 20
-/** 输入停顿多久后再查找(毫秒):逐字查找会让每次按键都发一次请求 */
 const SEARCH_DELAY_MS = 300
 /** 清除选择那一项的键;查到的条目一律带 item: 前缀,不会与它撞上 */
 const CLEAR_KEY = 'clear'
@@ -115,14 +107,15 @@ export function SearchPicker<T>({
     () => false
   )
 
-  /** close 收起并清空关键词,下次打开从空搜索、第一项开始 */
   const close = () => {
     setOpen(false)
     setKeyword('')
+    setQuery('')
     setActiveKey(undefined)
   }
 
-  const ready = results.status !== 'loading' && results.status !== 'error'
+  const pending = keyword.trim() !== query || results.status === 'loading'
+  const ready = !pending && results.status !== 'error'
   const list = ready ? (results.data?.list ?? []) : []
   const more = ready && results.data ? Math.max(0, results.data.total - list.length) : 0
 
@@ -155,7 +148,6 @@ export function SearchPicker<T>({
   )
   const optionId = (index: number) => `${listId}-${index}`
 
-  /** moveActive 上下键在结果间移动一格,并把移到的一项滚进可见范围 */
   const moveActive = (step: number) => {
     if (options.length === 0) return
     const next = Math.min(options.length - 1, Math.max(0, activeIndex + step))
@@ -163,8 +155,8 @@ export function SearchPicker<T>({
     document.getElementById(optionId(next))?.scrollIntoView({ block: 'nearest' })
   }
 
-  /** handleSearchKeyDown 搜索框里的键盘操作:上下键移动、回车选中;Esc 由浮层负责收起 */
   const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing) return
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
       moveActive(event.key === 'ArrowDown' ? 1 : -1)
@@ -233,12 +225,12 @@ export function SearchPicker<T>({
               </li>
             ))}
           </ul>
-          {results.status === 'loading' ? (
+          {pending ? (
             <div className="p-2">
               <Skeleton variant="line" lines={4} />
             </div>
           ) : null}
-          {results.status === 'error' ? (
+          {!pending && results.status === 'error' ? (
             <p className="px-2 py-3 text-sm text-ink-sub">暂时读不到,请稍后重试。</p>
           ) : null}
           {ready && list.length === 0 ? (

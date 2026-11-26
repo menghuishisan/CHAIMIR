@@ -1,11 +1,4 @@
-// CompositionDeclarationFields 统一编排页里的组合声明表单:命名 runtime 实例、镜像版本、学生工具与基础设施。
-//
-// 四个编排入口(实验环境、题库实操题、漏洞题预验证、判题私有环境)共用本组件,
-// 不各写一遍取数、下拉与勾选逻辑。
-//
-// 目录只回真正可调度的项(运行时已通过平台自检、镜像已预拉取成功且内置创世),
-// 状态门禁在服务端做,故这里不按状态二次过滤,也不在前端算运行时与工具的兼容性 ——
-// 兼容性由服务端编译器判定并在保存时回报(对齐清单 §6.3)。
+// 编排表单复用目录和连接预览；保存时仍须通过 M2 完整组合编译。
 
 import { Plus, Server, Trash2 } from 'lucide-react'
 import { Button, Callout, Checkbox, FormField, Input, Select, Skeleton } from '@chaimir/ui'
@@ -14,10 +7,13 @@ import { ResourceState } from '../../../components/ResourceState'
 import { sandboxToolKindLabel } from '../../../utils/labels/sandbox'
 import { useOrchestrationCatalog } from '../useOrchestrationCatalog'
 import {
+  compositionConnectionKey,
   compositionSelectionError,
   compositionSelectionKey,
+  reconcileRuntimeNames,
   type CompositionDeclaration,
 } from '../composition'
+import { currentConnectionCheck } from '../compositionCheck'
 import { CompositionConnectionsFields } from './CompositionConnectionsFields'
 import { CompositionParameterFields } from './CompositionParameterFields'
 
@@ -31,8 +27,8 @@ export interface CompositionDeclarationFieldsProps {
 }
 
 /**
- * CompositionDeclarationFields 渲染选择和连接配置。
- * 换运行时清空旧镜像与参数,组件兼容性和连接由M2重新检查。
+ * CompositionDeclarationFields 渲染运行时、组件和连接配置。
+ * 运行时变化会清空依赖它的镜像与参数,最终兼容性由 M2 编译器确认。
  */
 export function CompositionDeclarationFields({
   idPrefix,
@@ -41,8 +37,21 @@ export function CompositionDeclarationFields({
   toolsHelper,
 }: CompositionDeclarationFieldsProps) {
   const catalog = useOrchestrationCatalog()
-  // 任何选择变化立即撤销预览证明;保留仍存在的连接,由M2重算依赖和候选。
-  const onChange = (next: CompositionDeclaration) => commit({ ...next, connectionCheck: undefined })
+  // 选择变化后只保留仍匹配当前声明的预览证明。
+  const onChange = (next: CompositionDeclaration) => {
+    const { runtimes, renames } = reconcileRuntimeNames(value.runtimes, next.runtimes)
+    next = { ...next, runtimes,
+      workspaceRuntimeInstance: renames.get(next.workspaceRuntimeInstance) ?? next.workspaceRuntimeInstance,
+      links: next.links.map((link) => ({ ...link,
+        source_component: renames.get(link.source_component) ?? link.source_component,
+        target_component: renames.get(link.target_component) ?? link.target_component,
+      })),
+    }
+    commit({
+      ...next,
+      connectionCheck: currentConnectionCheck(next.connectionCheck, compositionConnectionKey(next)),
+    })
+  }
   const selectionError = compositionSelectionError(value)
 
   return (
@@ -50,7 +59,7 @@ export function CompositionDeclarationFields({
       resource={catalog.resource}
       emptyIcon={Server}
       emptyTitle="平台还没有可用运行时"
-      emptyDescription="运行时要先通过平台自检、镜像预拉取成功才会出现在这里。请联系平台管理员。"
+      emptyDescription="请联系平台管理员完成运行时检查并开放使用。"
       skeleton={<Skeleton variant="line" lines={2} />}
     >
       {() => (
@@ -65,7 +74,7 @@ export function CompositionDeclarationFields({
                 const imageOptions = catalog.imageOptions(runtime.runtimeCode)
                 return (
                   <div
-                    key={`${idPrefix}-runtime-${index}`}
+                    key={runtime.clientId}
                     className="grid gap-3 rounded-md bg-surface-hover p-3 sm:grid-cols-4 sm:items-end"
                   >
                     <FormField
@@ -85,21 +94,6 @@ export function CompositionDeclarationFields({
                                 ? { ...item, instanceCode: event.target.value }
                                 : item
                             ),
-                            workspaceRuntimeInstance:
-                              runtime.instanceCode === value.workspaceRuntimeInstance
-                                ? event.target.value
-                                : value.workspaceRuntimeInstance,
-                            links: value.links.map((link) => ({
-                              ...link,
-                              source_component:
-                                link.source_component === runtime.instanceCode
-                                  ? event.target.value
-                                  : link.source_component,
-                              target_component:
-                                link.target_component === runtime.instanceCode
-                                  ? event.target.value
-                                  : link.target_component,
-                            })),
                           })
                         }
                       />
@@ -159,7 +153,7 @@ export function CompositionDeclarationFields({
                       size="sm"
                       aria-label={`移除运行时实例 ${runtime.instanceCode || index + 1}`}
                       title="移除运行时实例"
-                      disabled={value.runtimes.length <= 1 || runtime.initAssetBound === true}
+                      disabled={value.runtimes.length <= 1 || runtime.initializationBound === true}
                       onClick={() => {
                         const runtimes = value.runtimes.filter(
                           (_, itemIndex) => itemIndex !== index
@@ -181,9 +175,9 @@ export function CompositionDeclarationFields({
                     >
                       <Trash2 size={16} aria-hidden="true" />
                     </Button>
-                    {runtime.initAssetBound ? (
+                    {runtime.initializationBound ? (
                       <p className="text-xs text-ink-sub sm:col-span-4">
-                        初始化材料仍关联此实例,调整材料关联后才能移除;更名会同步保留关联。
+                        初始化仍关联此实例，调整关联后才能移除；更名会同步保留关联。
                       </p>
                     ) : null}
                     <div className="sm:col-span-4">
@@ -223,7 +217,7 @@ export function CompositionDeclarationFields({
                     ...value,
                     runtimes: [
                       ...value.runtimes,
-                      { instanceCode: `chain-${number}`, runtimeCode: '', imageVersion: '' },
+                      { clientId: crypto.randomUUID(), instanceCode: `chain-${number}`, runtimeCode: '', imageVersion: '' },
                     ],
                   })
                 }}

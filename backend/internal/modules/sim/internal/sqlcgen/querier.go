@@ -13,16 +13,13 @@ type Querier interface {
 	// 内置包被删掉版本时不能物理删除:已有实验定义与仿真会话按 (code, version) 引用它,
 	// 删了会让历史实验取不到场景。改为 status=4(已下架),既让新建选不到、也保住旧引用可解释。
 	ArchiveRetiredBuiltinSimPackages(ctx context.Context, liveKeys []string) ([]SimPackage, error)
+	ArchiveSimSession(ctx context.Context, arg ArchiveSimSessionParams) (SimSession, error)
 	ArchiveSimSessionsByScopeRef(ctx context.Context, arg ArchiveSimSessionsByScopeRefParams) ([]SimSession, error)
 	// 认领待隔离预览的包:审核中、且报告里两项动态校验都还没有结论。
-	// 四项审核门禁中 determinism_check 与 worker_preview 只能由隔离预览产出,
-	// 没有这个认领查询就没有生产者,教师提交的包会永久停在待审(见 docs/04-仿真可视化引擎/06-业务流程与状态机.md §4)。
+	// determinism_check 与 worker_preview 仅由隔离预览产出，空报告不能上架。
 	// FOR UPDATE SKIP LOCKED:多副本部署时各副本认领互不重复,也不互相阻塞。
 	ClaimSimPackagesForPreview(ctx context.Context, arg ClaimSimPackagesForPreviewParams) ([]ClaimSimPackagesForPreviewRow, error)
 	CompleteSimReview(ctx context.Context, arg CompleteSimReviewParams) (CompleteSimReviewRow, error)
-	// 统计本租户当前占用集群资源的隔离执行会话数,供并发闸门
-	// SIM_BACKEND_MAX_CONCURRENT_SESSIONS_PER_TENANT 使用。
-	// 一个隔离会话一个 Pod,没有这道闸门循环建会话可耗尽节点;浏览器执行的会话不占集群资源故不计入。
 	CountActiveIsolatedSimSessions(ctx context.Context, tenantID int64) (int64, error)
 	CountSimPackages(ctx context.Context, arg CountSimPackagesParams) (int64, error)
 	// 分类分段计数:套用状态、关键词与作者范围,不套用分类筛选(接口总览「分段计数」);按场景去重。
@@ -44,6 +41,7 @@ type Querier interface {
 	GetSimActionBySeq(ctx context.Context, arg GetSimActionBySeqParams) (SimActionLog, error)
 	GetSimPackageByCodeVersion(ctx context.Context, arg GetSimPackageByCodeVersionParams) (SimPackage, error)
 	GetSimPackageByID(ctx context.Context, id int64) (SimPackage, error)
+	GetSimPackageForUpdate(ctx context.Context, id int64) (SimPackage, error)
 	GetSimReviewByID(ctx context.Context, id int64) (GetSimReviewByIDRow, error)
 	GetSimSession(ctx context.Context, arg GetSimSessionParams) (SimSession, error)
 	GetSimSessionWithPackage(ctx context.Context, arg GetSimSessionWithPackageParams) (GetSimSessionWithPackageRow, error)
@@ -54,22 +52,23 @@ type Querier interface {
 	ListSimPackageVersions(ctx context.Context, code string) ([]SimPackage, error)
 	ListSimPackages(ctx context.Context, arg ListSimPackagesParams) ([]SimPackage, error)
 	ListSimReviews(ctx context.Context, arg ListSimReviewsParams) ([]ListSimReviewsRow, error)
+	LockIsolatedSimSessionCreation(ctx context.Context, tenantID int64) error
+	LockSimSessionActionSequence(ctx context.Context, arg LockSimSessionActionSequenceParams) (int64, error)
 	MergeSimValidationReport(ctx context.Context, arg MergeSimValidationReportParams) (MergeSimValidationReportRow, error)
 	// 基础设施异常不等同于包校验失败:释放仍由本 worker 持有的租约,交给下一轮重试。
 	ReleaseSimPreviewLease(ctx context.Context, arg ReleaseSimPreviewLeaseParams) (int64, error)
+	RenewSimPreviewLease(ctx context.Context, arg RenewSimPreviewLeaseParams) (int64, error)
 	// 更新草稿或被退回的包。compute、backend_adapter 与 author_type 不在可更新列中:
 	// 它们由服务端按作者类型派生,更新一个包不改变它的作者,也就不该改变执行位置与运行能力。
 	UpdateSimPackageDraft(ctx context.Context, arg UpdateSimPackageDraftParams) (SimPackage, error)
 	UpdateSimPackageStatus(ctx context.Context, arg UpdateSimPackageStatusParams) (SimPackage, error)
 	UpdateSimSessionAuthorizedAccounts(ctx context.Context, arg UpdateSimSessionAuthorizedAccountsParams) (SimSession, error)
-	UpdateSimSessionStatus(ctx context.Context, arg UpdateSimSessionStatusParams) (SimSession, error)
 	// 平台内置仿真包按 (code, version) 幂等入库。
 	// 内置包不来自教师上传,而是平台随版本交付的标准库(见 docs/04-仿真可视化引擎/09-内置仿真包标准库.md),
 	// 故直接落 author_type=1、compute=1(浏览器执行)、status=3(已上架):它不经审核流程,
 	// 审核针对的是外部提交的包;entry/backend_adapter 恒为 NULL —— 内置包由 sim-sdk registry 按 code 装配。
 	// 重跑部署 seed 时按 code+version 覆盖协议字段,不新建行、不改 created_at。
 	UpsertBuiltinSimPackage(ctx context.Context, arg UpsertBuiltinSimPackageParams) (SimPackage, error)
-	UpsertSimCheckpoint(ctx context.Context, arg UpsertSimCheckpointParams) (SimCheckpoint, error)
 }
 
 var _ Querier = (*Queries)(nil)

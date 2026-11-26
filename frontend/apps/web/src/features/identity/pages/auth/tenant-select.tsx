@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router'
 import { ArrowLeft, ChevronRight, LoaderCircle } from 'lucide-react'
 import { Button, Icon, TenantCrest } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { loginEntryPath, persistLoginTokens } from '../../../../utils/authSession'
+import { completeLogin } from '../../../../utils/authSession'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { AuthFormBrand, AuthFormError, AuthHeading, AuthPanel, AuthQuietAction } from '../../components/AuthUI'
 import { clearPendingTenantLogin, getPendingTenantLogin } from './pendingLogin'
@@ -49,8 +49,7 @@ export default function TenantSelectPage() {
                 remember: pending.remember,
               })
         clearPendingTenantLogin()
-        persistLoginTokens(response)
-        navigate(loginEntryPath(response, pending.returnPath), { replace: true })
+        navigate(completeLogin(response), { replace: true })
       } catch (selectError) {
         setError(userFacingErrorMessage(selectError, '无法进入所选学校,请稍后重试。'))
       } finally {

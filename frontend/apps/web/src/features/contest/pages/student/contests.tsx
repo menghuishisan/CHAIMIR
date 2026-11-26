@@ -1,18 +1,9 @@
-// 竞赛参赛页(学生侧栏,/student/contests)。设计 §7.2:
-// 页头 + 分段「报名中 / 进行中 / 已结束 / 全部」+ 搜索;卡片网格,卡片显示赛事名、赛制(解题 / 对抗)、
-// 个人或组队、状态与时间提示(「报名还剩 2 天」「距结束 3 小时」、已结束写日期)、「我已报名」;
-// 整卡链向赛事详情。我已报名且进行中的赛事排在最前。分段与搜索写进地址。
-//
-// 列表走学生专用路由 GET /contest/student/contests(后端只回非草稿赛事)。一个学生能看到的赛事
-// 通常不到二十场,而「进行中」「已结束」各包含两个状态(接口的状态筛选只接受单个状态),
-// 又要把「我已报名且进行中」排在最前 —— 故按每页最大条数取完(只带搜索词),在前端分段、
-// 排序、分页。「我是否已报名」由 GET /contest/my/contest-records 判定(学生侧唯一能取到本人
-// 队伍的接口,对齐清单 §3.1)。
+// 学生赛事按参赛状态跨页排序；赛事与本人参赛记录必须一起读完，不能把读取失败当作未报名。
 
 import { useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { Swords, Users } from 'lucide-react'
-import { PAGINATION_MAX_SIZE, TeamMode, type Contest } from '@chaimir/api-client'
+import { ContestStatus, PAGINATION_MAX_SIZE, TeamMode, type Contest } from '@chaimir/api-client'
 import {
   Badge,
   Button,
@@ -31,24 +22,22 @@ import { SearchBox } from '../../../../components/SearchBox'
 import { useAsyncResource, useUrlState } from '../../../../hooks'
 import { collectAllPages } from '../../../../utils/allPages'
 import { readPage } from '../../../../utils/urlQuery'
-import { contestModeLabel, contestStatusLabel, teamModeLabel } from '../../../../utils/labels/contest'
-import { contestSegmentOf, sortStudentContests, type ContestSegment } from '../../contestOrder'
+import { CONTEST_STATUS_OPTIONS, contestModeLabel, contestStatusLabel, teamModeLabel } from '../../../../utils/labels/contest'
+import { sortStudentContests } from '../../contestOrder'
 import { contestTimeHint } from '../../contestTimeline'
 import { contestStatusTone } from '../../statusPresentation'
 
 /** 前端分页的每页卡片数 */
 const PAGE_SIZE = 12
 
-const SEGMENTS: { value: 'all' | ContestSegment; label: string }[] = [
-  { value: 'signup', label: '报名中' },
-  { value: 'running', label: '进行中' },
-  { value: 'ended', label: '已结束' },
+const STATUS_OPTIONS = [
+  ...CONTEST_STATUS_OPTIONS.filter((option) => option.value !== String(ContestStatus.DRAFT)),
   { value: 'all', label: '全部' },
 ]
 
 /** 地址参数:status 是分段,q 是搜索词 */
 const CONTESTS_QUERY = {
-  status: { defaultValue: 'all', allowed: ['signup', 'running', 'ended', 'all'] },
+  status: { defaultValue: 'all', allowed: STATUS_OPTIONS.map((option) => option.value) },
   q: { defaultValue: '' },
 } as const
 
@@ -60,39 +49,40 @@ export default function StudentContestsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const page = readPage(searchParams, 'page')
 
-  const contests = useAsyncResource(
-    () =>
-      collectAllPages(
-        (params) => api.contest.getStudentContests({ ...params, keyword: query.q || undefined }),
-        PAGINATION_MAX_SIZE,
-      ),
+  const view = useAsyncResource(
+    async () => {
+      const [contests, records] = await Promise.all([
+        collectAllPages(
+          (params) => api.contest.getStudentContests({ ...params, keyword: query.q || undefined }),
+          PAGINATION_MAX_SIZE,
+        ),
+        api.contest.getMyContestRecords(),
+      ])
+      return { contests, joined: new Set(records.map((record) => record.contest_id)) }
+    },
     [query.q],
     () => false,
   )
-  const records = useAsyncResource(() => api.contest.getMyContestRecords(), [], () => false)
-  const joined = useMemo(
-    () => new Set((records.data ?? []).map((record) => record.contest_id)),
-    [records.data],
-  )
+  const joined = view.data?.joined
 
   const counts = useMemo(() => {
-    const result = { signup: 0, running: 0, ended: 0, all: 0 }
-    for (const contest of contests.data ?? []) {
-      const segment = contestSegmentOf(contest.status)
-      if (!segment) continue
-      result[segment] += 1
+    const result: Record<string, number> = { all: 0 }
+    for (const contest of view.data?.contests ?? []) {
+      result[contest.status] = (result[contest.status] ?? 0) + 1
       result.all += 1
     }
     return result
-  }, [contests.data])
+  }, [view.data])
 
   const visible = useMemo(() => {
-    const list = (contests.data ?? []).filter(
-      (contest) => query.status === 'all' || contestSegmentOf(contest.status) === query.status,
+    if (!view.data) return []
+    const list = view.data.contests.filter(
+      (contest) => query.status === 'all' || String(contest.status) === query.status,
     )
-    return sortStudentContests(list, joined)
-  }, [contests.data, joined, query.status])
-  const pageItems = visible.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+    return sortStudentContests(list, view.data.joined)
+  }, [view.data, query.status])
+  const currentPage = Math.min(page, Math.max(1, Math.ceil(visible.length / PAGE_SIZE)))
+  const pageItems = visible.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
   /** setPage 把页码写进地址(替换历史记录,第 1 页不写) */
   const setPage = (next: number) =>
@@ -106,35 +96,35 @@ export default function StudentContestsPage() {
       { replace: true },
     )
 
-  const loaded = contests.status === 'success' || contests.status === 'empty'
+  const loaded = view.status === 'success' || view.status === 'empty'
   const filtered = query.status !== 'all' || query.q !== ''
 
   return (
     <PageScaffold>
       <PageHeader
         title="竞赛参赛"
-        meta={records.status === 'success' && joined.size > 0 ? [{ label: '我已报名', value: `${joined.size} 场` }] : undefined}
+        meta={loaded && joined && joined.size > 0 ? [{ label: '我已报名', value: `${joined.size} 场` }] : undefined}
       />
 
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <SegmentedControl
           aria-label="按赛事状态筛选"
-          options={SEGMENTS.map((segment) => ({
-            value: segment.value,
-            label: segment.label,
-            count: loaded ? counts[segment.value] : undefined,
+          options={STATUS_OPTIONS.map((option) => ({
+            ...option,
+            count: loaded ? counts[option.value] ?? 0 : undefined,
           }))}
           value={query.status}
           onValueChange={(value) => setQuery({ status: value })}
+          className="max-w-full overflow-x-auto"
         />
         <SearchBox label="搜索赛事" placeholder="搜索赛事名称" value={query.q} onSearch={(value) => setQuery({ q: value })} />
       </div>
 
-      {contests.status === 'error' ? (
+      {view.status === 'error' ? (
         <ResourceError
-          message={contests.error?.message ?? '赛事暂时读取不到'}
-          traceId={contests.error?.traceId}
-          onRetry={contests.reload}
+          message={view.error?.message ?? '赛事暂时读取不到'}
+          traceId={view.error?.traceId}
+          onRetry={view.reload}
         />
       ) : !loaded ? (
         <ul className="card-grid gap-4" aria-busy="true" aria-label="正在读取赛事">
@@ -160,15 +150,15 @@ export default function StudentContestsPage() {
         </div>
       ) : (
         <>
-          <ul className="card-grid gap-4" aria-busy={contests.status === 'loading' || undefined}>
+          <ul className="card-grid gap-4">
             {pageItems.map((contest) => (
               <li key={contest.id}>
-                <ContestCard contest={contest} joined={joined.has(contest.id)} />
+                <ContestCard contest={contest} joined={joined?.has(contest.id) ?? false} />
               </li>
             ))}
           </ul>
           <div className="mt-6">
-            <Pagination page={page} pageSize={PAGE_SIZE} total={visible.length} onPageChange={setPage} />
+            <Pagination page={currentPage} pageSize={PAGE_SIZE} total={visible.length} onPageChange={setPage} />
           </div>
         </>
       )}

@@ -293,7 +293,7 @@ func (q *Queries) DeleteNotification(ctx context.Context, arg DeleteNotification
 }
 
 const getNotificationTemplate = `-- name: GetNotificationTemplate :one
-SELECT id, type, title_tpl, content_tpl, channels, force, created_at, updated_at
+SELECT id, type, title_tpl, content_tpl, force, created_at, updated_at
 FROM notification_template
 WHERE type = $1
 `
@@ -306,7 +306,6 @@ func (q *Queries) GetNotificationTemplate(ctx context.Context, type_ string) (No
 		&i.Type,
 		&i.TitleTpl,
 		&i.ContentTpl,
-		&i.Channels,
 		&i.Force,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -427,41 +426,6 @@ func (q *Queries) ListAnnouncements(ctx context.Context, arg ListAnnouncementsPa
 			&i.PublishedAt,
 			&i.ExpireAt,
 			&i.IsRead,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listNotificationTemplates = `-- name: ListNotificationTemplates :many
-SELECT id, type, title_tpl, content_tpl, channels, force, created_at, updated_at
-FROM notification_template
-ORDER BY type
-`
-
-func (q *Queries) ListNotificationTemplates(ctx context.Context) ([]NotificationTemplate, error) {
-	rows, err := q.db.Query(ctx, listNotificationTemplates)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []NotificationTemplate{}
-	for rows.Next() {
-		var i NotificationTemplate
-		if err := rows.Scan(
-			&i.ID,
-			&i.Type,
-			&i.TitleTpl,
-			&i.ContentTpl,
-			&i.Channels,
-			&i.Force,
-			&i.CreatedAt,
-			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

@@ -11,6 +11,67 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimAlertNotifications = `-- name: ClaimAlertNotifications :many
+WITH due AS (
+ SELECT id FROM alert_event
+ WHERE notify_published_at IS NULL AND notify_next_at <= now()
+   AND notify_attempts < $3::integer AND tenant_id > 0
+ ORDER BY notify_next_at, id LIMIT $4::integer FOR UPDATE SKIP LOCKED
+)
+UPDATE alert_event e
+SET notify_attempts=notify_attempts+1, notify_lease_token=$1::bigint,
+    notify_next_at=$2::timestamptz
+FROM due WHERE e.id=due.id RETURNING e.id, e.rule_id, e.tenant_id, e.level, e.message, e.status, e.handler_id, e.triggered_at, e.handled_at, e.notify_trace_id, e.notify_attempts, e.notify_lease_token, e.notify_next_at, e.notify_published_at, e.notify_last_error
+`
+
+type ClaimAlertNotificationsParams struct {
+	LeaseToken  int64              `json:"lease_token"`
+	LeaseUntil  pgtype.Timestamptz `json:"lease_until"`
+	MaxAttempts int32              `json:"max_attempts"`
+	BatchSize   int32              `json:"batch_size"`
+}
+
+func (q *Queries) ClaimAlertNotifications(ctx context.Context, arg ClaimAlertNotificationsParams) ([]AlertEvent, error) {
+	rows, err := q.db.Query(ctx, claimAlertNotifications,
+		arg.LeaseToken,
+		arg.LeaseUntil,
+		arg.MaxAttempts,
+		arg.BatchSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AlertEvent{}
+	for rows.Next() {
+		var i AlertEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.RuleID,
+			&i.TenantID,
+			&i.Level,
+			&i.Message,
+			&i.Status,
+			&i.HandlerID,
+			&i.TriggeredAt,
+			&i.HandledAt,
+			&i.NotifyTraceID,
+			&i.NotifyAttempts,
+			&i.NotifyLeaseToken,
+			&i.NotifyNextAt,
+			&i.NotifyPublishedAt,
+			&i.NotifyLastError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countAlertEvents = `-- name: CountAlertEvents :one
 SELECT count(*)::bigint
 FROM alert_event
@@ -95,7 +156,7 @@ type CountBackupRecordsByStatusRow struct {
 	Count  int64 `json:"count"`
 }
 
-// 备份巡检的状态分段计数(进行中 / 已成功 / 已失败)。
+// 备份成功/失败结果的分段计数。
 func (q *Queries) CountBackupRecordsByStatus(ctx context.Context) ([]CountBackupRecordsByStatusRow, error) {
 	rows, err := q.db.Query(ctx, countBackupRecordsByStatus)
 	if err != nil {
@@ -116,23 +177,10 @@ func (q *Queries) CountBackupRecordsByStatus(ctx context.Context) ([]CountBackup
 	return items, nil
 }
 
-const countConfigChangeLogs = `-- name: CountConfigChangeLogs :one
-SELECT count(*)::bigint
-FROM config_change_log
-WHERE config_id = $1
-`
-
-func (q *Queries) CountConfigChangeLogs(ctx context.Context, configID int64) (int64, error) {
-	row := q.db.QueryRow(ctx, countConfigChangeLogs, configID)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
 const createAlertEvent = `-- name: CreateAlertEvent :one
 INSERT INTO alert_event (id, rule_id, tenant_id, level, message, status, triggered_at)
 VALUES ($1, $2, $3, $4, $5, 1, now())
-RETURNING id, rule_id, tenant_id, level, message, status, handler_id, triggered_at, handled_at
+RETURNING id, rule_id, tenant_id, level, message, status, handler_id, triggered_at, handled_at, notify_trace_id, notify_attempts, notify_lease_token, notify_next_at, notify_published_at, notify_last_error
 `
 
 type CreateAlertEventParams struct {
@@ -162,6 +210,12 @@ func (q *Queries) CreateAlertEvent(ctx context.Context, arg CreateAlertEventPara
 		&i.HandlerID,
 		&i.TriggeredAt,
 		&i.HandledAt,
+		&i.NotifyTraceID,
+		&i.NotifyAttempts,
+		&i.NotifyLeaseToken,
+		&i.NotifyNextAt,
+		&i.NotifyPublishedAt,
+		&i.NotifyLastError,
 	)
 	return i, err
 }
@@ -169,7 +223,7 @@ func (q *Queries) CreateAlertEvent(ctx context.Context, arg CreateAlertEventPara
 const createAlertRule = `-- name: CreateAlertRule :one
 INSERT INTO alert_rule (id, scope, tenant_id, name, metric, condition, level, enabled, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), now())
-RETURNING id, scope, tenant_id, name, metric, condition, level, enabled, created_at, updated_at
+RETURNING id, scope, tenant_id, name, metric, condition, level, enabled, revision, created_at, updated_at
 `
 
 type CreateAlertRuleParams struct {
@@ -204,6 +258,7 @@ func (q *Queries) CreateAlertRule(ctx context.Context, arg CreateAlertRuleParams
 		&i.Condition,
 		&i.Level,
 		&i.Enabled,
+		&i.Revision,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -245,7 +300,7 @@ func (q *Queries) CreateAuditExportRequest(ctx context.Context, arg CreateAuditE
 
 const createBackupRecord = `-- name: CreateBackupRecord :one
 INSERT INTO backup_record (id, type, storage_ref, size_bytes, status, started_at, finished_at)
-VALUES ($1, $2, $3, $4, $5, now(), $6)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING id, type, storage_ref, size_bytes, status, started_at, finished_at
 `
 
@@ -255,6 +310,7 @@ type CreateBackupRecordParams struct {
 	StorageRef string             `json:"storage_ref"`
 	SizeBytes  int64              `json:"size_bytes"`
 	Status     int16              `json:"status"`
+	StartedAt  pgtype.Timestamptz `json:"started_at"`
 	FinishedAt pgtype.Timestamptz `json:"finished_at"`
 }
 
@@ -265,6 +321,7 @@ func (q *Queries) CreateBackupRecord(ctx context.Context, arg CreateBackupRecord
 		arg.StorageRef,
 		arg.SizeBytes,
 		arg.Status,
+		arg.StartedAt,
 		arg.FinishedAt,
 	)
 	var i BackupRecord
@@ -276,81 +333,6 @@ func (q *Queries) CreateBackupRecord(ctx context.Context, arg CreateBackupRecord
 		&i.Status,
 		&i.StartedAt,
 		&i.FinishedAt,
-	)
-	return i, err
-}
-
-const createConfigChangeLog = `-- name: CreateConfigChangeLog :one
-INSERT INTO config_change_log (id, config_id, tenant_id, old_value, new_value, operator_id, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, now())
-RETURNING id, config_id, tenant_id, old_value, new_value, operator_id, created_at
-`
-
-type CreateConfigChangeLogParams struct {
-	ID         int64       `json:"id"`
-	ConfigID   int64       `json:"config_id"`
-	TenantID   pgtype.Int8 `json:"tenant_id"`
-	OldValue   []byte      `json:"old_value"`
-	NewValue   []byte      `json:"new_value"`
-	OperatorID int64       `json:"operator_id"`
-}
-
-func (q *Queries) CreateConfigChangeLog(ctx context.Context, arg CreateConfigChangeLogParams) (ConfigChangeLog, error) {
-	row := q.db.QueryRow(ctx, createConfigChangeLog,
-		arg.ID,
-		arg.ConfigID,
-		arg.TenantID,
-		arg.OldValue,
-		arg.NewValue,
-		arg.OperatorID,
-	)
-	var i ConfigChangeLog
-	err := row.Scan(
-		&i.ID,
-		&i.ConfigID,
-		&i.TenantID,
-		&i.OldValue,
-		&i.NewValue,
-		&i.OperatorID,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const createSystemConfig = `-- name: CreateSystemConfig :one
-INSERT INTO system_config (id, scope, tenant_id, key, value, version, updated_by, updated_at)
-VALUES ($1, $2, $3, $4, $5, 1, $6, now())
-RETURNING id, scope, tenant_id, key, value, version, updated_by, updated_at
-`
-
-type CreateSystemConfigParams struct {
-	ID        int64       `json:"id"`
-	Scope     int16       `json:"scope"`
-	TenantID  pgtype.Int8 `json:"tenant_id"`
-	Key       string      `json:"key"`
-	Value     []byte      `json:"value"`
-	UpdatedBy int64       `json:"updated_by"`
-}
-
-func (q *Queries) CreateSystemConfig(ctx context.Context, arg CreateSystemConfigParams) (SystemConfig, error) {
-	row := q.db.QueryRow(ctx, createSystemConfig,
-		arg.ID,
-		arg.Scope,
-		arg.TenantID,
-		arg.Key,
-		arg.Value,
-		arg.UpdatedBy,
-	)
-	var i SystemConfig
-	err := row.Scan(
-		&i.ID,
-		&i.Scope,
-		&i.TenantID,
-		&i.Key,
-		&i.Value,
-		&i.Version,
-		&i.UpdatedBy,
-		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -370,84 +352,45 @@ func (q *Queries) DeleteAuditExportRequest(ctx context.Context, arg DeleteAuditE
 	return err
 }
 
-const getAlertRule = `-- name: GetAlertRule :one
-SELECT id, scope, tenant_id, name, metric, condition, level, enabled, created_at, updated_at
-FROM alert_rule
-WHERE id = $1
+const ensureAlertEvaluation = `-- name: EnsureAlertEvaluation :exec
+INSERT INTO alert_evaluation (rule_id, tenant_id, revision, observed_at)
+VALUES ($1, $2, 0, '-infinity') ON CONFLICT DO NOTHING
 `
 
-func (q *Queries) GetAlertRule(ctx context.Context, id int64) (AlertRule, error) {
-	row := q.db.QueryRow(ctx, getAlertRule, id)
-	var i AlertRule
-	err := row.Scan(
-		&i.ID,
-		&i.Scope,
-		&i.TenantID,
-		&i.Name,
-		&i.Metric,
-		&i.Condition,
-		&i.Level,
-		&i.Enabled,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+type EnsureAlertEvaluationParams struct {
+	RuleID   int64 `json:"rule_id"`
+	TenantID int64 `json:"tenant_id"`
 }
 
-const getConfigChangeLog = `-- name: GetConfigChangeLog :one
-SELECT id, config_id, tenant_id, old_value, new_value, operator_id, created_at
-FROM config_change_log
-WHERE id = $1 AND config_id = $2
+func (q *Queries) EnsureAlertEvaluation(ctx context.Context, arg EnsureAlertEvaluationParams) error {
+	_, err := q.db.Exec(ctx, ensureAlertEvaluation, arg.RuleID, arg.TenantID)
+	return err
+}
+
+const finishAlertNotification = `-- name: FinishAlertNotification :execrows
+UPDATE alert_event SET notify_published_at=CASE WHEN $1::boolean THEN now() ELSE NULL END,
+ notify_last_error=$2::text, notify_lease_token=0
+WHERE id=$3::bigint AND notify_lease_token=$4::bigint AND notify_published_at IS NULL
 `
 
-type GetConfigChangeLogParams struct {
-	ID       int64 `json:"id"`
-	ConfigID int64 `json:"config_id"`
+type FinishAlertNotificationParams struct {
+	Success    bool   `json:"success"`
+	LastError  string `json:"last_error"`
+	ID         int64  `json:"id"`
+	LeaseToken int64  `json:"lease_token"`
 }
 
-func (q *Queries) GetConfigChangeLog(ctx context.Context, arg GetConfigChangeLogParams) (ConfigChangeLog, error) {
-	row := q.db.QueryRow(ctx, getConfigChangeLog, arg.ID, arg.ConfigID)
-	var i ConfigChangeLog
-	err := row.Scan(
-		&i.ID,
-		&i.ConfigID,
-		&i.TenantID,
-		&i.OldValue,
-		&i.NewValue,
-		&i.OperatorID,
-		&i.CreatedAt,
+func (q *Queries) FinishAlertNotification(ctx context.Context, arg FinishAlertNotificationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, finishAlertNotification,
+		arg.Success,
+		arg.LastError,
+		arg.ID,
+		arg.LeaseToken,
 	)
-	return i, err
-}
-
-const getSystemConfig = `-- name: GetSystemConfig :one
-SELECT id, scope, tenant_id, key, value, version, updated_by, updated_at
-FROM system_config
-WHERE scope = $1::smallint
-  AND ((tenant_id IS NULL AND $2::bigint IS NULL) OR tenant_id = $2::bigint)
-  AND key = $3::text
-`
-
-type GetSystemConfigParams struct {
-	Scope    int16       `json:"scope"`
-	TenantID pgtype.Int8 `json:"tenant_id"`
-	Key      string      `json:"key"`
-}
-
-func (q *Queries) GetSystemConfig(ctx context.Context, arg GetSystemConfigParams) (SystemConfig, error) {
-	row := q.db.QueryRow(ctx, getSystemConfig, arg.Scope, arg.TenantID, arg.Key)
-	var i SystemConfig
-	err := row.Scan(
-		&i.ID,
-		&i.Scope,
-		&i.TenantID,
-		&i.Key,
-		&i.Value,
-		&i.Version,
-		&i.UpdatedBy,
-		&i.UpdatedAt,
-	)
-	return i, err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const handleAlertEvent = `-- name: HandleAlertEvent :one
@@ -455,7 +398,7 @@ UPDATE alert_event
 SET status = $2, handler_id = $3, handled_at = now()
 WHERE id = $1 AND status = 1
   AND (($4::bigint IS NULL) OR tenant_id = $4::bigint)
-RETURNING id, rule_id, tenant_id, level, message, status, handler_id, triggered_at, handled_at
+RETURNING id, rule_id, tenant_id, level, message, status, handler_id, triggered_at, handled_at, notify_trace_id, notify_attempts, notify_lease_token, notify_next_at, notify_published_at, notify_last_error
 `
 
 type HandleAlertEventParams struct {
@@ -483,12 +426,18 @@ func (q *Queries) HandleAlertEvent(ctx context.Context, arg HandleAlertEventPara
 		&i.HandlerID,
 		&i.TriggeredAt,
 		&i.HandledAt,
+		&i.NotifyTraceID,
+		&i.NotifyAttempts,
+		&i.NotifyLeaseToken,
+		&i.NotifyNextAt,
+		&i.NotifyPublishedAt,
+		&i.NotifyLastError,
 	)
 	return i, err
 }
 
 const listAlertEvents = `-- name: ListAlertEvents :many
-SELECT id, rule_id, tenant_id, level, message, status, handler_id, triggered_at, handled_at
+SELECT alert_event.id, alert_event.rule_id, alert_event.tenant_id, alert_event.level, alert_event.message, alert_event.status, alert_event.handler_id, alert_event.triggered_at, alert_event.handled_at, alert_event.notify_trace_id, alert_event.notify_attempts, alert_event.notify_lease_token, alert_event.notify_next_at, alert_event.notify_published_at, alert_event.notify_last_error, (SELECT name FROM alert_rule WHERE id=alert_event.rule_id)::text AS rule_name
 FROM alert_event
 WHERE ($1::smallint = 0 OR status = $1::smallint)
   AND ($2::smallint = 0 OR level = $2::smallint)
@@ -505,7 +454,12 @@ type ListAlertEventsParams struct {
 	PageLimit  int32       `json:"page_limit"`
 }
 
-func (q *Queries) ListAlertEvents(ctx context.Context, arg ListAlertEventsParams) ([]AlertEvent, error) {
+type ListAlertEventsRow struct {
+	AlertEvent AlertEvent `json:"alert_event"`
+	RuleName   string     `json:"rule_name"`
+}
+
+func (q *Queries) ListAlertEvents(ctx context.Context, arg ListAlertEventsParams) ([]ListAlertEventsRow, error) {
 	rows, err := q.db.Query(ctx, listAlertEvents,
 		arg.Status,
 		arg.Level,
@@ -517,19 +471,26 @@ func (q *Queries) ListAlertEvents(ctx context.Context, arg ListAlertEventsParams
 		return nil, err
 	}
 	defer rows.Close()
-	items := []AlertEvent{}
+	items := []ListAlertEventsRow{}
 	for rows.Next() {
-		var i AlertEvent
+		var i ListAlertEventsRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.RuleID,
-			&i.TenantID,
-			&i.Level,
-			&i.Message,
-			&i.Status,
-			&i.HandlerID,
-			&i.TriggeredAt,
-			&i.HandledAt,
+			&i.AlertEvent.ID,
+			&i.AlertEvent.RuleID,
+			&i.AlertEvent.TenantID,
+			&i.AlertEvent.Level,
+			&i.AlertEvent.Message,
+			&i.AlertEvent.Status,
+			&i.AlertEvent.HandlerID,
+			&i.AlertEvent.TriggeredAt,
+			&i.AlertEvent.HandledAt,
+			&i.AlertEvent.NotifyTraceID,
+			&i.AlertEvent.NotifyAttempts,
+			&i.AlertEvent.NotifyLeaseToken,
+			&i.AlertEvent.NotifyNextAt,
+			&i.AlertEvent.NotifyPublishedAt,
+			&i.AlertEvent.NotifyLastError,
+			&i.RuleName,
 		); err != nil {
 			return nil, err
 		}
@@ -542,7 +503,7 @@ func (q *Queries) ListAlertEvents(ctx context.Context, arg ListAlertEventsParams
 }
 
 const listAlertRules = `-- name: ListAlertRules :many
-SELECT id, scope, tenant_id, name, metric, condition, level, enabled, created_at, updated_at
+SELECT id, scope, tenant_id, name, metric, condition, level, enabled, revision, created_at, updated_at
 FROM alert_rule
 WHERE ($1::smallint = 0 OR scope = $1::smallint)
   AND (($2::bigint IS NULL AND tenant_id IS NULL) OR tenant_id = $2::bigint)
@@ -572,6 +533,7 @@ func (q *Queries) ListAlertRules(ctx context.Context, arg ListAlertRulesParams) 
 			&i.Condition,
 			&i.Level,
 			&i.Enabled,
+			&i.Revision,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -599,7 +561,7 @@ type ListBackupRecordsParams struct {
 	PageLimit  int32 `json:"page_limit"`
 }
 
-// status 传 0 不按结果过滤;传具体结果供备份巡检按「已成功/已失败/进行中」取数与计数。
+// status 传 0 不筛选，其余按成功/失败结果查询。
 func (q *Queries) ListBackupRecords(ctx context.Context, arg ListBackupRecordsParams) ([]BackupRecord, error) {
 	rows, err := q.db.Query(ctx, listBackupRecords, arg.Status, arg.PageOffset, arg.PageLimit)
 	if err != nil {
@@ -617,48 +579,6 @@ func (q *Queries) ListBackupRecords(ctx context.Context, arg ListBackupRecordsPa
 			&i.Status,
 			&i.StartedAt,
 			&i.FinishedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listConfigChangeLogs = `-- name: ListConfigChangeLogs :many
-SELECT id, config_id, tenant_id, old_value, new_value, operator_id, created_at
-FROM config_change_log
-WHERE config_id = $1
-ORDER BY created_at DESC
-LIMIT $2 OFFSET $3
-`
-
-type ListConfigChangeLogsParams struct {
-	ConfigID int64 `json:"config_id"`
-	Limit    int32 `json:"limit"`
-	Offset   int32 `json:"offset"`
-}
-
-func (q *Queries) ListConfigChangeLogs(ctx context.Context, arg ListConfigChangeLogsParams) ([]ConfigChangeLog, error) {
-	rows, err := q.db.Query(ctx, listConfigChangeLogs, arg.ConfigID, arg.Limit, arg.Offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ConfigChangeLog{}
-	for rows.Next() {
-		var i ConfigChangeLog
-		if err := rows.Scan(
-			&i.ID,
-			&i.ConfigID,
-			&i.TenantID,
-			&i.OldValue,
-			&i.NewValue,
-			&i.OperatorID,
-			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -698,6 +618,42 @@ func (q *Queries) ListDueAuditExportRequests(ctx context.Context, arg ListDueAud
 			&i.AccountID,
 			&i.QuerySnapshot,
 			&i.NextCheckAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEvaluationRules = `-- name: ListEvaluationRules :many
+SELECT id, scope, tenant_id, name, metric, condition, level, enabled, revision, created_at, updated_at FROM alert_rule WHERE enabled ORDER BY id
+`
+
+func (q *Queries) ListEvaluationRules(ctx context.Context) ([]AlertRule, error) {
+	rows, err := q.db.Query(ctx, listEvaluationRules)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AlertRule{}
+	for rows.Next() {
+		var i AlertRule
+		if err := rows.Scan(
+			&i.ID,
+			&i.Scope,
+			&i.TenantID,
+			&i.Name,
+			&i.Metric,
+			&i.Condition,
+			&i.Level,
+			&i.Enabled,
+			&i.Revision,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -759,46 +715,90 @@ func (q *Queries) ListPlatformStatistics(ctx context.Context, arg ListPlatformSt
 	return items, nil
 }
 
-const listSystemConfigs = `-- name: ListSystemConfigs :many
-SELECT id, scope, tenant_id, key, value, version, updated_by, updated_at
-FROM system_config
-WHERE ($1::smallint = 0 OR scope = $1::smallint)
-  AND (($2::bigint IS NULL AND tenant_id IS NULL) OR tenant_id = $2::bigint)
-ORDER BY key
+const lockAlertEvaluation = `-- name: LockAlertEvaluation :one
+SELECT rule_id, tenant_id, revision, observed_at, breach_since, fired FROM alert_evaluation WHERE rule_id = $1 AND tenant_id = $2 FOR UPDATE
 `
 
-type ListSystemConfigsParams struct {
-	Scope    int16       `json:"scope"`
-	TenantID pgtype.Int8 `json:"tenant_id"`
+type LockAlertEvaluationParams struct {
+	RuleID   int64 `json:"rule_id"`
+	TenantID int64 `json:"tenant_id"`
 }
 
-func (q *Queries) ListSystemConfigs(ctx context.Context, arg ListSystemConfigsParams) ([]SystemConfig, error) {
-	rows, err := q.db.Query(ctx, listSystemConfigs, arg.Scope, arg.TenantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []SystemConfig{}
-	for rows.Next() {
-		var i SystemConfig
-		if err := rows.Scan(
-			&i.ID,
-			&i.Scope,
-			&i.TenantID,
-			&i.Key,
-			&i.Value,
-			&i.Version,
-			&i.UpdatedBy,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+func (q *Queries) LockAlertEvaluation(ctx context.Context, arg LockAlertEvaluationParams) (AlertEvaluation, error) {
+	row := q.db.QueryRow(ctx, lockAlertEvaluation, arg.RuleID, arg.TenantID)
+	var i AlertEvaluation
+	err := row.Scan(
+		&i.RuleID,
+		&i.TenantID,
+		&i.Revision,
+		&i.ObservedAt,
+		&i.BreachSince,
+		&i.Fired,
+	)
+	return i, err
+}
+
+const lockEvaluationRule = `-- name: LockEvaluationRule :one
+SELECT id, scope, tenant_id, name, metric, condition, level, enabled, revision, created_at, updated_at FROM alert_rule WHERE id = $1 FOR SHARE
+`
+
+func (q *Queries) LockEvaluationRule(ctx context.Context, id int64) (AlertRule, error) {
+	row := q.db.QueryRow(ctx, lockEvaluationRule, id)
+	var i AlertRule
+	err := row.Scan(
+		&i.ID,
+		&i.Scope,
+		&i.TenantID,
+		&i.Name,
+		&i.Metric,
+		&i.Condition,
+		&i.Level,
+		&i.Enabled,
+		&i.Revision,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const saveAlertEvaluation = `-- name: SaveAlertEvaluation :exec
+UPDATE alert_evaluation SET revision=$3, observed_at=$4, breach_since=$5, fired=$6
+WHERE rule_id=$1 AND tenant_id=$2
+`
+
+type SaveAlertEvaluationParams struct {
+	RuleID      int64              `json:"rule_id"`
+	TenantID    int64              `json:"tenant_id"`
+	Revision    int64              `json:"revision"`
+	ObservedAt  pgtype.Timestamptz `json:"observed_at"`
+	BreachSince pgtype.Timestamptz `json:"breach_since"`
+	Fired       bool               `json:"fired"`
+}
+
+func (q *Queries) SaveAlertEvaluation(ctx context.Context, arg SaveAlertEvaluationParams) error {
+	_, err := q.db.Exec(ctx, saveAlertEvaluation,
+		arg.RuleID,
+		arg.TenantID,
+		arg.Revision,
+		arg.ObservedAt,
+		arg.BreachSince,
+		arg.Fired,
+	)
+	return err
+}
+
+const setAlertNotificationTrace = `-- name: SetAlertNotificationTrace :exec
+UPDATE alert_event SET notify_trace_id=$2 WHERE id=$1
+`
+
+type SetAlertNotificationTraceParams struct {
+	ID            int64  `json:"id"`
+	NotifyTraceID string `json:"notify_trace_id"`
+}
+
+func (q *Queries) SetAlertNotificationTrace(ctx context.Context, arg SetAlertNotificationTraceParams) error {
+	_, err := q.db.Exec(ctx, setAlertNotificationTrace, arg.ID, arg.NotifyTraceID)
+	return err
 }
 
 const setAuditExportRequestNextCheck = `-- name: SetAuditExportRequestNextCheck :one
@@ -831,11 +831,11 @@ func (q *Queries) SetAuditExportRequestNextCheck(ctx context.Context, arg SetAud
 
 const updateAlertRule = `-- name: UpdateAlertRule :one
 UPDATE alert_rule
-SET name = $2, metric = $3, condition = $4, level = $5, enabled = $6, updated_at = now()
+SET name = $2, metric = $3, condition = $4, level = $5, enabled = $6, revision = revision + 1, updated_at = now()
 WHERE id = $1
   AND scope = $7::smallint
   AND ((tenant_id IS NULL AND $8::bigint IS NULL) OR tenant_id = $8::bigint)
-RETURNING id, scope, tenant_id, name, metric, condition, level, enabled, created_at, updated_at
+RETURNING id, scope, tenant_id, name, metric, condition, level, enabled, revision, created_at, updated_at
 `
 
 type UpdateAlertRuleParams struct {
@@ -870,49 +870,8 @@ func (q *Queries) UpdateAlertRule(ctx context.Context, arg UpdateAlertRuleParams
 		&i.Condition,
 		&i.Level,
 		&i.Enabled,
+		&i.Revision,
 		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const updateSystemConfig = `-- name: UpdateSystemConfig :one
-UPDATE system_config
-SET value = $1, version = version + 1, updated_by = $2::bigint, updated_at = now()
-WHERE scope = $3::smallint
-  AND ((tenant_id IS NULL AND $4::bigint IS NULL) OR tenant_id = $4::bigint)
-  AND key = $5::text
-  AND version = $6::int
-RETURNING id, scope, tenant_id, key, value, version, updated_by, updated_at
-`
-
-type UpdateSystemConfigParams struct {
-	Value     []byte      `json:"value"`
-	UpdatedBy int64       `json:"updated_by"`
-	Scope     int16       `json:"scope"`
-	TenantID  pgtype.Int8 `json:"tenant_id"`
-	Key       string      `json:"key"`
-	Version   int32       `json:"version"`
-}
-
-func (q *Queries) UpdateSystemConfig(ctx context.Context, arg UpdateSystemConfigParams) (SystemConfig, error) {
-	row := q.db.QueryRow(ctx, updateSystemConfig,
-		arg.Value,
-		arg.UpdatedBy,
-		arg.Scope,
-		arg.TenantID,
-		arg.Key,
-		arg.Version,
-	)
-	var i SystemConfig
-	err := row.Scan(
-		&i.ID,
-		&i.Scope,
-		&i.TenantID,
-		&i.Key,
-		&i.Value,
-		&i.Version,
-		&i.UpdatedBy,
 		&i.UpdatedAt,
 	)
 	return i, err

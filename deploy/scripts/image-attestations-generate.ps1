@@ -18,6 +18,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 Import-Module (Join-Path $RepoRoot "images\lib\ImageMetadata.psm1") -Force
+Assert-ChaimirImageSelection -Images $Images
 
 if ($ToolMaxAttempts -lt 1) {
     throw "ToolMaxAttempts 必须大于等于 1"
@@ -29,10 +30,6 @@ if ($ToolTimeoutSeconds -lt 1) {
     throw "ToolTimeoutSeconds 必须大于等于 1"
 }
 
-# 统一拆分文档中的逗号镜像列表,保证选择性证明覆盖全部指定镜像。
-if ($Images.Count -eq 1 -and $Images[0] -match ',') {
-    $Images = @($Images[0].Split(',') | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-}
 
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     $ConfigPath = Join-Path $RepoRoot "deploy\config\chaimir.env"
@@ -213,78 +210,9 @@ function Get-TrivyHighCriticalCounts {
     return [pscustomobject]@{ High = $high; Critical = $critical }
 }
 
-# ConvertTo-ProcessArgument 将参数安全编码为 Windows 原生进程参数。
-function ConvertTo-ProcessArgument([string]$Value) {
-    if ($null -eq $Value -or $Value.Length -eq 0) { return '""' }
-    if ($Value -notmatch '[\s"]') { return $Value }
-    $builder = [Text.StringBuilder]::new()
-    [void]$builder.Append('"')
-    $slashes = 0
-    foreach ($character in $Value.ToCharArray()) {
-        if ($character -eq '\') { $slashes++; continue }
-        if ($character -eq '"') {
-            if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
-            [void]$builder.Append('\').Append('"')
-            $slashes = 0
-            continue
-        }
-        if ($slashes -gt 0) { [void]$builder.Append(('\' * $slashes) -join '') }
-        [void]$builder.Append($character)
-        $slashes = 0
-    }
-    if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
-    [void]$builder.Append('"')
-    return $builder.ToString()
-}
-
-# Invoke-DockerProcess 以明确上限执行 Compose,防止供应链证明无限等待。
 function Invoke-DockerProcess {
-    param(
-        [Parameter(Mandatory = $true)][string[]]$Arguments,
-        [Parameter(Mandatory = $true)][int]$TimeoutSeconds
-    )
-    $process = [Diagnostics.Process]::new()
-    $process.StartInfo = [Diagnostics.ProcessStartInfo]::new()
-    $process.StartInfo.FileName = "docker.exe"
-    $process.StartInfo.Arguments = (($Arguments | ForEach-Object { ConvertTo-ProcessArgument ([string]$_) }) -join " ")
-    $process.StartInfo.UseShellExecute = $false
-    $process.StartInfo.CreateNoWindow = $true
-    # Compose 参数使用 deploy/ 下的受控相对路径;原生子进程必须显式继承该工作目录。
-    $process.StartInfo.WorkingDirectory = (Join-Path $RepoRoot "deploy")
-    $process.StartInfo.RedirectStandardOutput = $true
-    $process.StartInfo.RedirectStandardError = $true
-    $process.StartInfo.StandardOutputEncoding = [Text.Encoding]::UTF8
-    $process.StartInfo.StandardErrorEncoding = [Text.Encoding]::UTF8
-    try {
-        if (-not $process.Start()) { throw "Docker CLI 启动失败" }
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            try {
-                & taskkill.exe /PID $process.Id /T /F | Out-Null
-            } catch {
-                Write-Warning ("Docker Compose 超时后的进程树终止失败: {0}" -f $_.Exception.Message)
-            }
-            try {
-                $process.Kill($true)
-            } catch {
-                Write-Warning ("Docker Compose 超时后的进程终止失败: {0}" -f $_.Exception.Message)
-            }
-            $stdout = $stdoutTask.GetAwaiter().GetResult()
-            $stderr = $stderrTask.GetAwaiter().GetResult()
-            $timeoutDetails = @(
-                ("Docker Compose 超时（{0} 秒）: {1}" -f $TimeoutSeconds, ($Arguments -join " ")),
-                $stdout,
-                $stderr
-            ) | Where-Object { $_ }
-            return [pscustomobject]@{ Code = 124; Text = ($timeoutDetails -join "`n").Trim() }
-        }
-        $stdout = $stdoutTask.GetAwaiter().GetResult()
-        $stderr = $stderrTask.GetAwaiter().GetResult()
-        return [pscustomobject]@{ Code = $process.ExitCode; Text = ((@($stdout, $stderr) | Where-Object { $_ }) -join "`n").Trim() }
-    } finally {
-        $process.Dispose()
-    }
+    param([string[]]$Arguments, [int]$TimeoutSeconds)
+    Invoke-ChaimirProcess -FilePath 'docker.exe' -Arguments $Arguments -TimeoutSeconds $TimeoutSeconds -WorkingDirectory (Join-Path $RepoRoot 'deploy')
 }
 
 # Invoke-ComposeTool 通过统一 Docker Compose 入口运行 Trivy/Cosign。

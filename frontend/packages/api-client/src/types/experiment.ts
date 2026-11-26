@@ -1,10 +1,14 @@
-// ===== M7 Experiment 模块 =====
-
 import type { SnowflakeID } from './common'
-import type { CompositionComponentRef, CompositionInitAsset, CompositionLink, CompositionRuntimeRef } from './composition'
+import type {
+  CompositionComponentRef,
+  CompositionInitAsset,
+  CompositionChainStep,
+  CompositionLink,
+  CompositionRuntimeRef,
+} from './composition'
 import type { ContentType } from '../constants/content'
 import type { SandboxAccessProfile } from '../constants/composition'
-import type { JudgeSandboxMode } from '../constants/judge'
+import type { JudgeSandboxMode, JudgeTaskStatusCode } from '../constants/judge'
 import type {
   ExperimentCollabMode,
   ExperimentInstanceStatus,
@@ -52,24 +56,21 @@ export interface StudentExperiment {
 }
 
 /** 本人在一个实验里最近一次实验的进度;小组实验看本人所在小组的实验 */
-export interface StudentExperimentProgress {
+interface StudentExperimentProgress {
   status: ExperimentInstanceStatus
   score: number
   passed_checkpoints: number
 }
 
-export interface StudentComponentConfig {
+interface StudentComponentConfig {
   envs: StudentEnvComponent[]
   sims: StudentSimComponent[]
   checkpoints: StudentCheckpointConfig[]
   stages: StudentStageConfig[]
 }
 
-/**
- * StudentEnvComponent 是学生可见的环境摘要:能看到用哪个运行时、挂了哪些工具与连接,
- * 但看不到镜像地址、适配器规格与启动命令 —— 那些只在服务端快照里。
- */
-export interface StudentEnvComponent {
+/** 学生仅可见工具、运行时与连接。执行快照留在服务端。 */
+interface StudentEnvComponent {
   id: string
   runtimes: CompositionRuntimeRef[]
   workspace_runtime_instance: string
@@ -80,7 +81,7 @@ export interface StudentEnvComponent {
   composition_digest: string
 }
 
-export interface StudentSimComponent {
+interface StudentSimComponent {
   id: string
   package_code: string
   version: string
@@ -103,12 +104,8 @@ export interface StudentStageConfig {
   unlock_condition?: UnlockCondition
 }
 
-/**
- * ComponentConfig 是教师读取实验定义时的安全投影。
- * 它与提交用的 ComponentConfigRequest 只差 envs 一项:读取多带一个服务端算出的
- * composition_digest,而那一项不能回填成提交字段(§6.3 高级视图只读)。
- */
-export interface ComponentConfig {
+/** 教师视图回显可编辑声明，并附上只读摘要。 */
+interface ComponentConfig {
   envs: TeacherEnvComponent[]
   sims: SimComponent[]
   checkpoints: CheckpointConfig[]
@@ -123,10 +120,7 @@ export interface ComponentConfigRequest {
   stages: StageConfig[]
 }
 
-/**
- * EnvComponentRequest 是教师声明的一个环境:命名 runtime 实例 + 组件 + 连接 + 访问边界 + 生命周期。
- * 镜像地址、digest、启动命令与安全上下文都由服务端编译产出,不在这里提交(§7.5)。
- */
+/** 教师提交环境声明。镜像与执行配置由服务端编译。 */
 export interface EnvComponentRequest {
   id: string
   runtimes: CompositionRuntimeRef[]
@@ -138,6 +132,7 @@ export interface EnvComponentRequest {
   resource_profile?: Record<string, string>
   network_profile?: Record<string, unknown>
   init_assets?: CompositionInitAsset[]
+  init_chain_steps?: CompositionChainStep[]
   init_code_ref?: string
   init_script_ref?: string
   keep_alive: boolean
@@ -147,8 +142,7 @@ export interface EnvComponentRequest {
 }
 
 /** TeacherEnvComponent 是读取时的环境投影:声明字段 + 服务端算出的组合摘要。 */
-export interface TeacherEnvComponent extends EnvComponentRequest {
-  /** composition_digest 是服务端编译后的不可变摘要,只读展示,不作为提交输入 */
+interface TeacherEnvComponent extends EnvComponentRequest {
   composition_digest: string
 }
 
@@ -162,7 +156,6 @@ export interface SimComponent {
 
 export interface CheckpointConfig {
   id: string
-  judger: string
   item_code: string
   item_version: string
   score: number
@@ -258,7 +251,7 @@ export interface SandboxRef {
   tools: SandboxTool[]
 }
 
-export interface SandboxTool {
+interface SandboxTool {
   code: string
   kind: SandboxToolKind
   endpoint: string
@@ -277,6 +270,7 @@ export interface SimSessionRef {
 export interface CheckpointResult {
   id: string
   judge_task_ref?: string
+  judge_status: JudgeTaskStatusCode
   passed: boolean
   score: number
   detail_ref?: string
@@ -310,8 +304,7 @@ export interface ReportDTO {
   student_id: SnowflakeID
   student_name: string
   student_no?: string
-  content_ref: string
-  manual_score: number
+  manual_score?: number
   comment?: string
   status: ExperimentReportStatus
   submitted_at: string
@@ -321,7 +314,7 @@ export interface ReportDTO {
 export interface StudentReportDTO {
   id: SnowflakeID
   instance_id: SnowflakeID
-  manual_score: number
+  manual_score?: number
   comment?: string
   status: ExperimentReportStatus
   submitted_at: string
@@ -335,6 +328,7 @@ export interface ReportAccessDTO {
 export interface GradeReportRequest {
   manual_score: number
   comment: string
+  submitted_at: string
 }
 
 export interface ExperimentGroupRequest {
@@ -355,7 +349,7 @@ export interface ExperimentGroup {
   created_at: string
 }
 
-export interface ExperimentGroupMember {
+interface ExperimentGroupMember {
   id: SnowflakeID
   group_id: SnowflakeID
   student_id: SnowflakeID

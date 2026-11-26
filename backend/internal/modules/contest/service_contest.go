@@ -62,8 +62,7 @@ func (s *Service) GetContestForTeacher(ctx context.Context, contestID int64) (Co
 	return contestDTOFromModel(item), nil
 }
 
-// ListStudentContests 查询学生可发现的报名中、进行中和已结束竞赛。
-// status 传 0 表示不按状态过滤;传具体状态时仍受「非草稿」可见区间约束。
+// ListStudentContests 返回本校及当前学生已入队的跨校正式赛事，status 为 0 时不过滤状态。
 func (s *Service) ListStudentContests(ctx context.Context, status int16, keyword string, page, size int) ([]ContestDTO, int64, int, int, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
@@ -73,9 +72,9 @@ func (s *Service) ListStudentContests(ctx context.Context, status int16, keyword
 	keyword = strings.TrimSpace(keyword)
 	var items []Contest
 	var total int64
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, total, err = tx.ListStudentContests(ctx, id.TenantID, status, keyword, page, size)
+		items, total, err = tx.ListStudentContests(ctx, id.TenantID, id.AccountID, status, keyword, page, size)
 		return err
 	}); err != nil {
 		return nil, 0, 0, 0, err
@@ -87,9 +86,7 @@ func (s *Service) ListStudentContests(ctx context.Context, status int16, keyword
 	return out, total, page, size, nil
 }
 
-// GetStudentContest 读取单个学生可发现的竞赛。
-// 门槛与 ListStudentContests 一致(非草稿态):学生竞赛详情页需支持深链与刷新,
-// 且竞赛答题与对局回放两条沉浸路由退出后都回落到该页,不能依赖列表态。
+// GetStudentContest 读取本校或当前成员获准访问的跨校正式赛事，不依赖列表访问记录。
 func (s *Service) GetStudentContest(ctx context.Context, contestID int64) (ContestDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
@@ -128,15 +125,15 @@ func (s *Service) CreateContest(ctx context.Context, req ContestRequest) (Contes
 	if err != nil {
 		return ContestDTO{}, err
 	}
-	item := Contest{ID: s.ids.Generate(), TenantID: id.TenantID, OrganizerID: id.AccountID, Name: req.Name, Mode: req.Mode, MatchMode: req.MatchMode, TeamMode: req.TeamMode, SignupStart: req.SignupStart, SignupEnd: req.SignupEnd, StartAt: req.StartAt, EndAt: req.EndAt, FreezeMinutes: req.FreezeMinutes, Rules: req.Rules}
+	item := Contest{ID: s.ids.Generate(), TenantID: id.TenantID, OrganizerID: id.AccountID, Name: req.Name, Mode: req.Mode, MatchMode: req.MatchMode, TeamMode: req.TeamMode, SignupStart: req.SignupStart, SignupEnd: req.SignupEnd, StartAt: req.StartAt, EndAt: req.EndAt, FreezeMinutes: req.FreezeMinutes}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		item, err = tx.CreateContest(ctx, item)
-		return err
+		if err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.create", auditTargetContest, item.ID, nil)
 	}); err != nil {
-		return ContestDTO{}, err
-	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.create", auditTargetContest, item.ID, nil); err != nil {
 		return ContestDTO{}, err
 	}
 	return contestDTOFromModel(item), nil
@@ -154,7 +151,7 @@ func (s *Service) UpdateContest(ctx context.Context, contestID int64, req Contes
 	}
 	var item Contest
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		current, err := s.loadContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID)
+		current, err := s.lockContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID)
 		if err != nil {
 			return err
 		}
@@ -170,13 +167,15 @@ func (s *Service) UpdateContest(ctx context.Context, contestID int64, req Contes
 		current.StartAt = req.StartAt
 		current.EndAt = req.EndAt
 		current.FreezeMinutes = req.FreezeMinutes
-		current.Rules = req.Rules
 		item, err = tx.UpdateContest(ctx, current)
-		return err
+		if err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.update", auditTargetContest, item.ID, nil)
 	}); err != nil {
 		return ContestDTO{}, err
 	}
-	return contestDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.update", auditTargetContest, item.ID, nil)
+	return contestDTOFromModel(item), nil
 }
 
 // contestStructureEditable 赛制与参赛形式只在草稿态可改:发布后赛题按赛制锁定、报名按参赛形式组队,
@@ -223,12 +222,12 @@ func (s *Service) AddProblem(ctx context.Context, contestID int64, req ProblemRe
 		return ProblemDTO{}, apperr.ErrContestProblemInvalid.WithCause(fmt.Errorf("内容类型与赛制不匹配 tenant_id=%d contest_id=%d mode=%d content_type=%d", id.TenantID, contestID, contest.Mode, full.Type))
 	}
 	var compositionSnapshot *contracts.SandboxCompositionSnapshot
-	if _, declared := full.Body["composition"]; declared {
+	if rawComposition, declared := full.Body["composition"]; declared {
 		profile, profileErr := sandboxProfileForContestMode(contest.Mode)
 		if profileErr != nil {
 			return ProblemDTO{}, profileErr
 		}
-		compiled, err := s.compileCompositionFromContent(ctx, id.TenantID, req.ItemCode, req.ItemVersion, profile)
+		compiled, err := s.compileComposition(ctx, id.TenantID, rawComposition, profile)
 		if err != nil {
 			return ProblemDTO{}, apperr.ErrContestProblemInvalid.WithCause(fmt.Errorf("编译赛题组合失败 tenant_id=%d contest_id=%d: %w", id.TenantID, contestID, err))
 		}
@@ -237,11 +236,11 @@ func (s *Service) AddProblem(ctx context.Context, contestID int64, req ProblemRe
 		return ProblemDTO{}, apperr.ErrContestProblemInvalid.WithCause(fmt.Errorf("对抗赛题缺少组合声明 tenant_id=%d contest_id=%d", id.TenantID, contestID))
 	}
 	if contest.Mode == ContestModeBattle {
-		if err := s.judge.ValidateJudgeMode(ctx, id.TenantID, req.ItemCode, req.ItemVersion, contracts.JudgeSandboxModeReuse); err != nil {
+		if _, err := s.judge.GetJudgeInputRequirements(ctx, id.TenantID, req.ItemCode, req.ItemVersion, contracts.JudgeInputContext{AccessProfile: contracts.SandboxAccessContestBattle, RequiresOutcome: req.BattleRule == BattleRuleGame}); err != nil {
 			return ProblemDTO{}, apperr.ErrContestProblemInvalid.WithCause(fmt.Errorf("校验赛题判题模式失败 tenant_id=%d contest_id=%d: %w", id.TenantID, contestID, err))
 		}
 	}
-	item := ContestProblem{ID: s.ids.Generate(), TenantID: id.TenantID, ContestID: contestID, ItemCode: req.ItemCode, ItemVersion: req.ItemVersion, Score: req.Score, DynamicScore: req.DynamicScore, BattleConfig: req.BattleConfig, BattleRule: req.BattleRule, Seq: req.Seq, CompositionSnapshot: compositionSnapshot}
+	item := ContestProblem{ID: s.ids.Generate(), TenantID: id.TenantID, ContestID: contestID, ItemCode: req.ItemCode, ItemVersion: req.ItemVersion, Score: req.Score, DynamicScore: req.DynamicScore, BattleRule: req.BattleRule, Seq: req.Seq, CompositionSnapshot: compositionSnapshot}
 	if compositionSnapshot != nil {
 		item.CompositionDigest = compositionSnapshot.Digest
 	}
@@ -254,21 +253,12 @@ func (s *Service) AddProblem(ctx context.Context, contestID int64, req ProblemRe
 		if current.Status != ContestStatusDraft || current.Mode != contest.Mode {
 			return apperr.ErrContestStateInvalid
 		}
-		existingProblems, err := tx.ListContestProblems(ctx, id.TenantID, contestID)
+		item, err = tx.UpsertContestProblem(ctx, item)
 		if err != nil {
 			return err
 		}
-		for _, existing := range existingProblems {
-			if existing.ItemCode == req.ItemCode && existing.ItemVersion == req.ItemVersion && existing.Seq != req.Seq {
-				return apperr.ErrContestProblemInvalid
-			}
-		}
-		item, err = tx.UpsertContestProblem(ctx, item)
-		return err
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.problem.upsert", auditTargetContest, contestID, map[string]any{"problem_id": item.ID})
 	}); err != nil {
-		return ProblemDTO{}, err
-	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.problem.upsert", auditTargetContest, contestID, map[string]any{"problem_id": item.ID}); err != nil {
 		return ProblemDTO{}, err
 	}
 	return problemDTOFromModel(item), nil
@@ -448,11 +438,8 @@ func (s *Service) ArchiveContest(ctx context.Context, contestID int64) (ResultSn
 	}); err != nil {
 		return ResultSnapshotDTO{}, err
 	}
-	snapshot, err := s.archiveContestSystem(ctx, claim, "contest_archive")
+	snapshot, err := s.archiveContest(ctx, claim, "contest_archive", id.AccountID)
 	if err != nil {
-		return ResultSnapshotDTO{}, err
-	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.archive", auditTargetContest, contestID, map[string]any{"snapshot_id": snapshot.ID}); err != nil {
 		return ResultSnapshotDTO{}, err
 	}
 	// 快照只存 team_id,返回前按同一快照一次读取队名
@@ -484,42 +471,59 @@ func (s *Service) RunAutoArchiveOnce(ctx context.Context) error {
 		return err
 	}
 	for _, item := range items {
-		if _, err := s.archiveContestSystem(ctx, item, "contest_auto_archive"); err != nil {
+		if _, err := s.archiveContest(ctx, item, "contest_auto_archive", 0); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-type contestLifecycleTransition struct {
-	item          Contest
-	nextStatus    int16
-	revokedGrants []ContestAccessGrant
-	snapshotID    int64
-}
-
 // AdvanceContestStatusesOnce 按赛事时间窗口推进报名、进行中、封榜和结束状态。
-// 所有状态变更都在 contest 特权事务中完成,结束后的连接回收和审计在事务提交后执行。
+// 各校状态与审计独立提交；一校失败不阻断其他学校，取消后停止启动后续事务。
 func (s *Service) AdvanceContestStatusesOnce(ctx context.Context, now time.Time) error {
 	if now.IsZero() {
 		now = timex.Now()
 	}
-	transitions := make([]contestLifecycleTransition, 0)
+	var tenantIDs []int64
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		tenantIDs, err = tx.ListContestLifecycleTenantIDs(ctx, now)
+		return err
+	}); err != nil {
+		return err
+	}
+	var failures []error
+	for _, tenantID := range tenantIDs {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(append(failures, err)...)
+		}
+		if err := s.advanceTenantContestStatuses(ctx, tenantID, now); err != nil {
+			failures = append(failures, fmt.Errorf("推进竞赛阶段失败 tenant_id=%d: %w", tenantID, err))
+		}
+	}
+	return errors.Join(failures...)
+}
+
+// 维护扫描只定位学校；租户事务重新锁定当前赛事，避免使用扫描时的陈旧状态。
+func (s *Service) advanceTenantContestStatuses(ctx context.Context, tenantID int64, now time.Time) error {
+	var revokedGrants []ContestAccessGrant
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		dueToEnd, err := tx.ListContestsDueToEnd(ctx, now)
 		if err != nil {
 			return err
 		}
 		for _, contest := range dueToEnd {
-			grants, err := s.revokeContestSandboxGrants(ctx, tx, contest.TenantID, contest.ID)
+			grants, err := s.revokeContestSandboxGrants(ctx, tx, tenantID, contest.ID)
 			if err != nil {
 				return err
 			}
-			updated, err := tx.SetContestStatus(ctx, contest.TenantID, contest.ID, ContestStatusEnded)
-			if err != nil {
+			if _, err := tx.SetContestStatus(ctx, tenantID, contest.ID, ContestStatusEnded); err != nil {
 				return err
 			}
-			transitions = append(transitions, contestLifecycleTransition{item: updated, nextStatus: ContestStatusEnded, revokedGrants: grants})
+			if err := s.writeAudit(ctx, tenantID, 0, audit.ActorRoleSystem, "contest.lifecycle", auditTargetContest, contest.ID, map[string]any{"status": ContestStatusEnded}); err != nil {
+				return err
+			}
+			revokedGrants = append(revokedGrants, grants...)
 		}
 
 		dueToRun, err := tx.ListContestsDueToRun(ctx, now)
@@ -527,14 +531,15 @@ func (s *Service) AdvanceContestStatusesOnce(ctx context.Context, now time.Time)
 			return err
 		}
 		for _, contest := range dueToRun {
-			if err := tx.LockContestTeams(ctx, contest.TenantID, contest.ID); err != nil {
+			if err := tx.LockContestTeams(ctx, tenantID, contest.ID); err != nil {
 				return err
 			}
-			updated, err := tx.SetContestStatus(ctx, contest.TenantID, contest.ID, ContestStatusRunning)
-			if err != nil {
+			if _, err := tx.SetContestStatus(ctx, tenantID, contest.ID, ContestStatusRunning); err != nil {
 				return err
 			}
-			transitions = append(transitions, contestLifecycleTransition{item: updated, nextStatus: ContestStatusRunning})
+			if err := s.writeAudit(ctx, tenantID, 0, audit.ActorRoleSystem, "contest.lifecycle", auditTargetContest, contest.ID, map[string]any{"status": ContestStatusRunning}); err != nil {
+				return err
+			}
 		}
 
 		dueToFreeze, err := tx.ListContestsDueToFreeze(ctx, now)
@@ -542,38 +547,28 @@ func (s *Service) AdvanceContestStatusesOnce(ctx context.Context, now time.Time)
 			return err
 		}
 		for _, contest := range dueToFreeze {
-			ranks, err := s.listAllContestLadder(ctx, tx, contest.TenantID, contest.ID)
+			ranks, err := s.listAllContestLadder(ctx, tx, tenantID, contest.ID)
 			if err != nil {
 				return err
 			}
-			snapshot, err := s.saveLadderSnapshot(ctx, tx, contest.TenantID, contest.ID, ContestStatusFrozen, ranks)
+			snapshot, err := s.saveLadderSnapshot(ctx, tx, tenantID, contest.ID, ContestStatusFrozen, ranks)
 			if err != nil {
 				return err
 			}
-			updated, err := tx.SetContestStatus(ctx, contest.TenantID, contest.ID, ContestStatusFrozen)
-			if err != nil {
+			if _, err := tx.SetContestStatus(ctx, tenantID, contest.ID, ContestStatusFrozen); err != nil {
 				return err
 			}
-			transitions = append(transitions, contestLifecycleTransition{item: updated, nextStatus: ContestStatusFrozen, snapshotID: snapshot.ID})
+			if err := s.writeAudit(ctx, tenantID, 0, audit.ActorRoleSystem, "contest.lifecycle", auditTargetContest, contest.ID, map[string]any{"status": ContestStatusFrozen, "snapshot_id": snapshot.ID}); err != nil {
+				return err
+			}
 		}
 		return nil
 	}); err != nil {
 		return err
 	}
 
-	for _, transition := range transitions {
-		if transition.nextStatus == ContestStatusEnded {
-			if err := s.closeRevokedContestSandboxSessions(transition.revokedGrants); err != nil {
-				return apperr.ErrContestSandboxUnavailable.WithCause(err)
-			}
-		}
-		detail := map[string]any{"status": transition.nextStatus}
-		if transition.snapshotID > 0 {
-			detail["snapshot_id"] = transition.snapshotID
-		}
-		if err := s.writeAudit(ctx, transition.item.TenantID, 0, audit.ActorRoleSystem, "contest.lifecycle", auditTargetContest, transition.item.ID, detail); err != nil {
-			return err
-		}
+	if err := s.closeRevokedContestSandboxSessions(ctx, tenantID, revokedGrants); err != nil {
+		return apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
 	return nil
 }
@@ -600,8 +595,8 @@ func (s *Service) listAllContestLadder(ctx context.Context, tx TxStore, tenantID
 	}
 }
 
-// archiveContestSystem 执行归档,复用人工与自动归档的快照、回收和租约屏障。
-func (s *Service) archiveContestSystem(ctx context.Context, item ContestArchiveClaim, reason string) (LadderSnapshot, error) {
+// archiveContest 共用归档收尾；actorID 为零时记录系统任务，否则记录实际教师。
+func (s *Service) archiveContest(ctx context.Context, item ContestArchiveClaim, reason string, actorID int64) (LadderSnapshot, error) {
 	var revokedGrants []ContestAccessGrant
 	if err := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
@@ -610,31 +605,17 @@ func (s *Service) archiveContestSystem(ctx context.Context, item ContestArchiveC
 	}); err != nil {
 		return LadderSnapshot{}, err
 	}
-	if err := s.closeRevokedContestSandboxSessions(revokedGrants); err != nil {
+	if err := s.closeRevokedContestSandboxSessions(ctx, item.TenantID, revokedGrants); err != nil {
 		return LadderSnapshot{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
-	if err := s.recycleContestSandboxes(ctx, item.TenantID, item.ID, item.CreatedAt, reason); err != nil {
+	if err := s.recycleContestSandboxes(ctx, item.TenantID, item.ID, reason); err != nil {
 		return LadderSnapshot{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
 	var snapshot LadderSnapshot
 	if err := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		pageSize := s.cfg.MatchmakerBatchSize
-		if pageSize <= 0 {
-			return apperr.ErrContestStateInvalid
-		}
-		page := 1
-		var ranks []LadderRank
-		for {
-			batch, total, err := tx.ListLadder(ctx, item.TenantID, item.ID, page, pageSize)
-			if err != nil {
-				return err
-			}
-			ranks = append(ranks, batch...)
-			if int64(len(ranks)) >= total {
-				break
-			}
-			page++
+		ranks, err := s.listAllContestLadder(ctx, tx, item.TenantID, item.ID)
+		if err != nil {
+			return err
 		}
 		snapshot, err = s.saveLadderSnapshot(ctx, tx, item.TenantID, item.ID, ContestStatusArchived, ranks)
 		if err != nil {
@@ -647,50 +628,36 @@ func (s *Service) archiveContestSystem(ctx context.Context, item ContestArchiveC
 		if affected != 1 {
 			return apperr.ErrContestStateInvalid
 		}
-		return nil
+		actorRole, action := audit.ActorRoleSystem, "contest.archive.auto"
+		if actorID > 0 {
+			actorRole, action = contracts.RoleNumTeacher, "contest.archive"
+		}
+		return s.writeAudit(ctx, item.TenantID, actorID, actorRole, action, auditTargetContest, item.ID, map[string]any{"snapshot_id": snapshot.ID})
 	}); err != nil {
-		return LadderSnapshot{}, err
-	}
-	if err := s.writeAudit(ctx, item.TenantID, 0, audit.ActorRoleSystem, "contest.archive.auto", auditTargetContest, item.ID, map[string]any{"snapshot_id": snapshot.ID}); err != nil {
 		return LadderSnapshot{}, err
 	}
 	return snapshot, nil
 }
 
-// recycleContestSandboxes 回收竞赛级解题环境和未终态对抗对局环境。
-func (s *Service) recycleContestSandboxes(ctx context.Context, tenantID, contestID int64, contestCreatedAt time.Time, reason string) error {
-	var battleRefs []string
+// recycleContestSandboxes 回收竞赛关联的全部解题与对局环境。
+func (s *Service) recycleContestSandboxes(ctx context.Context, tenantID, contestID int64, reason string) error {
+	var scopeRefs []string
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		battleRefs, err = tx.ListActiveBattleSourceRefsForArchive(ctx, tenantID, contestID)
+		scopeRefs, err = tx.ListContestSandboxScopeRefsForArchive(ctx, tenantID, contestID)
 		return err
 	}); err != nil {
 		return err
 	}
-	for _, sourceRef := range contestArchiveSourceRefs(contestID, contestCreatedAt, battleRefs) {
-		if err := s.sandbox.RecycleByScopeRef(ctx, contracts.SandboxRecycleRequest{TenantID: tenantID, ScopeRef: sourceRef, SourceRef: sourceRef, Reason: reason}); err != nil {
+	for _, scopeRef := range scopeRefs {
+		if err := s.sandbox.RecycleByScopeRef(ctx, contracts.SandboxRecycleRequest{TenantID: tenantID, ScopeRef: scopeRef, SourceRef: scopeRef, Reason: reason}); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// contestArchiveSourceRefs 汇总归档需要回收的来源引用,保持竞赛级来源优先便于审计。
-func contestArchiveSourceRefs(contestID int64, contestCreatedAt time.Time, battleRefs []string) []string {
-	refs := []string{contestSourceRef(contestID, contestCreatedAt)}
-	seen := map[string]bool{refs[0]: true}
-	for _, sourceRef := range battleRefs {
-		sourceRef = strings.TrimSpace(sourceRef)
-		if sourceRef == "" || seen[sourceRef] {
-			continue
-		}
-		seen[sourceRef] = true
-		refs = append(refs, sourceRef)
-	}
-	return refs
-}
-
-// GetSnapshot 读取归档最终榜单快照。
+// GetSnapshot 按赛事管理范围读取最终榜单快照。
 func (s *Service) GetSnapshot(ctx context.Context, contestID int64) (ResultSnapshotDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
@@ -701,7 +668,7 @@ func (s *Service) GetSnapshot(ctx context.Context, contestID int64) (ResultSnaps
 	var names map[int64]string
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		contest, err := tx.GetContest(ctx, id.TenantID, contestID)
+		contest, err := s.loadContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID)
 		if err != nil {
 			return err
 		}
@@ -761,6 +728,22 @@ func (s *Service) transitionContest(ctx context.Context, contestID int64, next i
 	}); err != nil {
 		return ContestDTO{}, err
 	}
+	if requireProblems {
+		digests := make([]string, 0, len(problems))
+		for _, problem := range problems {
+			if problem.CompositionSnapshot != nil {
+				digests = append(digests, problem.CompositionDigest)
+			}
+		}
+		if len(digests) > 0 {
+			if s.sandbox == nil {
+				return ContestDTO{}, apperr.ErrContestSandboxUnavailable
+			}
+			if err := s.sandbox.PrepareCompositions(ctx, digests); err != nil {
+				return ContestDTO{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
+			}
+		}
+	}
 	// M5 自有事务在 M8 事务外执行,避免持有应用池连接时再次等待同一连接池。
 	if requireProblems {
 		if err := s.refreshProblemUsageRefs(ctx, item, problems); err != nil {
@@ -807,16 +790,19 @@ func (s *Service) transitionContest(ctx context.Context, contestID int64, next i
 			}
 		}
 		item, err = tx.SetContestStatus(ctx, id.TenantID, contestID, next)
-		return err
+		if err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, action, auditTargetContest, item.ID, nil)
 	}); err != nil {
 		return ContestDTO{}, err
 	}
 	if next == ContestStatusEnded {
-		if err := s.closeRevokedContestSandboxSessions(revokedGrants); err != nil {
+		if err := s.closeRevokedContestSandboxSessions(ctx, id.TenantID, revokedGrants); err != nil {
 			return ContestDTO{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
 		}
 	}
-	return contestDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, action, auditTargetContest, item.ID, nil)
+	return contestDTOFromModel(item), nil
 }
 
 // saveLadderSnapshot 把当前榜单固化为封榜或归档阶段的单一权威快照。
@@ -833,14 +819,8 @@ func (s *Service) saveLadderSnapshot(ctx context.Context, tx TxStore, tenantID, 
 
 // refreshProblemUsageRefs 在发布时登记 M5 内容引用,用于删除保护和复用统计。
 func (s *Service) refreshProblemUsageRefs(ctx context.Context, contest Contest, problems []ContestProblem) error {
-	seen := map[string]bool{}
 	refs := make([]contracts.ContentItemRef, 0, len(problems))
 	for _, problem := range problems {
-		key := problem.ItemCode + ":" + problem.ItemVersion
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
 		refs = append(refs, contracts.ContentItemRef{ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion})
 	}
 	sourceRef := fmt.Sprintf("contest:%d:contest:%s", contest.CreatedAt.Year(), ids.Format(contest.ID))

@@ -109,6 +109,7 @@ func sandboxFromRow(row sqlcgen.Sandbox) (Sandbox, error) {
 		SnapshotEnabled:     row.SnapshotEnabled,
 		CodeStorageKey:      row.CodeStorageKey,
 		CodeHash:            pgtypex.TextValue(row.CodeHash),
+		recycleSaved:        row.RecycleSaved,
 		WorkspaceRevision:   row.WorkspaceRevision,
 		InitCodeRef:         pgtypex.TextValue(row.InitCodeRef),
 		InitScriptRef:       pgtypex.TextValue(row.InitScriptRef),
@@ -121,6 +122,8 @@ func sandboxFromRow(row sqlcgen.Sandbox) (Sandbox, error) {
 		ExpireAt:            timex.FromTimestamptz(row.ExpireAt),
 		CreatedAt:           timex.FromTimestamptz(row.CreatedAt),
 		UpdatedAt:           timex.FromTimestamptz(row.UpdatedAt),
+		resourceLeaseToken:  row.ResourceLeaseToken,
+		resourceLeaseUntil:  timex.FromTimestamptz(row.ResourceLeaseUntil),
 	}, nil
 }
 
@@ -140,41 +143,7 @@ func quotaFromRow(row sqlcgen.TenantQuotum) TenantQuota {
 
 // sandboxRecycleOutbox 把 sqlc 回收 outbox 行转换为内部模型。
 func sandboxRecycleOutbox(row sqlcgen.SandboxRecycleOutbox) SandboxRecycleOutbox {
-	return SandboxRecycleOutbox{ID: row.ID, TenantID: row.TenantID, SandboxID: row.SandboxID, SourceRef: row.SourceRef, OwnerAccountID: row.OwnerAccountID, Reason: row.Reason, TraceID: row.TraceID, RecycledAt: timex.FromTimestamptz(row.RecycledAt), Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt), LeaseToken: row.LeaseToken, LeaseUntil: timex.FromTimestamptz(row.LeaseUntil)}
-}
-
-// sandboxToolFromRow 把沙箱工具联查行转换为内部 SandboxTool 模型。
-func sandboxToolFromRow(row sqlcgen.ListSandboxToolsRow) (SandboxTool, error) {
-	spec, err := toolResourceSpecFromJSON(row.ResourceSpec)
-	if err != nil {
-		return SandboxTool{}, err
-	}
-	return SandboxTool{
-		ID:             row.ID,
-		TenantID:       row.TenantID,
-		SandboxID:      row.SandboxID,
-		ToolID:         row.ToolID,
-		ToolCode:       row.Code,
-		Kind:           row.Kind,
-		ResourceSpec:   spec,
-		AccessEndpoint: row.AccessEndpoint,
-		Status:         row.Status,
-	}, nil
-}
-
-// sandboxToolFromStatusRow 把 sqlc sandbox_tool 行和工具定义合成为内部工具挂载模型。
-func sandboxToolFromStatusRow(row sqlcgen.SandboxTool, tool Tool) SandboxTool {
-	return SandboxTool{
-		ID:             row.ID,
-		TenantID:       row.TenantID,
-		SandboxID:      row.SandboxID,
-		ToolID:         row.ToolID,
-		ToolCode:       tool.Code,
-		Kind:           tool.Kind,
-		ResourceSpec:   tool.ResourceSpec,
-		AccessEndpoint: row.AccessEndpoint,
-		Status:         row.Status,
-	}
+	return SandboxRecycleOutbox{ID: row.ID, TenantID: row.TenantID, SandboxID: row.SandboxID, SourceRef: row.SourceRef, ScopeRef: row.ScopeRef, Reason: row.Reason, TraceID: row.TraceID, RecycledAt: timex.FromTimestamptz(row.RecycledAt), Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt), LeaseToken: row.LeaseToken, LeaseUntil: timex.FromTimestamptz(row.LeaseUntil)}
 }
 
 // toolResourceSpecFromJSON 解析已入库工具 WorkloadSpec,失败时显式交给调用链处理。

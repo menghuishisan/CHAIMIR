@@ -78,18 +78,14 @@ func RegisterIdentityModule(deps IdentityModuleDeps) (*identity.Service, error) 
 	return svc, nil
 }
 
-// StartIdentityBackgroundTasks 在模块装配完成后启动M1 outbox,持久发布与消费确认统一由eventbus负责。
+// StartIdentityBackgroundTasks 在 M2 注册租户开通事件订阅后启动 outbox。
 func StartIdentityBackgroundTasks(ctx context.Context, cfg config.IdentityConfig, svc *identity.Service) error {
-	if ctx == nil || svc == nil {
-		return fmt.Errorf("identity background task 缺少 context 或 service")
+	if svc == nil {
+		return fmt.Errorf("identity 后台任务缺少 service")
 	}
-	if cfg.TenantProvisionOutboxPollMs <= 0 {
-		return fmt.Errorf("IDENTITY_TENANT_PROVISION_OUTBOX_POLL_INTERVAL_MS 必须大于 0")
-	}
-	go background.Run(ctx, background.Task{
+	return background.Start(ctx, background.Task{
 		Name:     "identity.tenant_provision_outbox",
 		Interval: time.Duration(cfg.TenantProvisionOutboxPollMs) * time.Millisecond,
 		Run:      svc.RunTenantProvisionOutboxOnce,
 	})
-	return nil
 }

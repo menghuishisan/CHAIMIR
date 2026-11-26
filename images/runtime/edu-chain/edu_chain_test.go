@@ -2,11 +2,11 @@
 package main
 
 import (
-	"encoding/json"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestAdapterQueryURLRestrictsSpecialTargets 验证查询目标只映射到教学链已声明的端点。
@@ -21,13 +21,25 @@ func TestAdapterQueryURLRestrictsSpecialTargets(t *testing.T) {
 	}
 }
 
-// TestAdapterJSONRequestRequiresJSONObject 验证适配器拒绝非对象响应,避免把错误页面当成链结果。
+type responseTransport func(*http.Request) (*http.Response, error)
+
+// RoundTrip 在内存中返回节点响应，不监听端口或访问网络。
+func (f responseTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+// TestAdapterJSONRequestRequiresJSONObject 验证非对象响应不能成为成功查询结果。
 func TestAdapterJSONRequestRequiresJSONObject(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode([]string{"not-an-object"})
-	}))
-	defer server.Close()
-	if _, err := adapterJSONRequest(http.MethodGet, server.URL, nil); err == nil {
-		t.Fatal("非对象响应未被拒绝")
+	original := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	for _, body := range []string{`["not-an-object"]`, "null", "{}{}"} {
+		t.Run(body, func(t *testing.T) {
+			http.DefaultTransport = responseTransport(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+			})
+			if _, err := adapterJSONRequest(http.MethodGet, "http://fixture.invalid", nil, time.Second); err == nil {
+				t.Fatal("非对象响应未被拒绝")
+			}
+		})
 	}
 }

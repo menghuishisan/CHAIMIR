@@ -1,6 +1,7 @@
 {
   "name": "@chaimir/api-client",
   "version": "0.1.0",
+  "type": "module",
   "description": "Chaimir 后端 API 客户端",
   "main": "./src/index.ts",
   "types": "./src/index.ts",

@@ -1,4 +1,4 @@
-// tenant 提供租户身份上下文注入与读取,供鉴权、RLS 与审计统一复用。
+// Package tenant 在上下文中保存经服务端验证的租户身份。
 package tenant
 
 import "context"

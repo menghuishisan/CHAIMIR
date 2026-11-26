@@ -16,7 +16,7 @@ const (
 	CodeContentBodyInvalid = "51006"
 	// CodeContentDeleteBlocked 表示内容已被引用,不可删除。
 	CodeContentDeleteBlocked = "51007"
-	// CodeContentCategoryInvalid 表示分类参数非法。
+	// CodeContentCategoryInvalid 表示分类参数非法或分类已不存在。
 	CodeContentCategoryInvalid = "51008"
 	// CodeContentSystemImportInvalid 表示系统导入来源或内容非法。
 	CodeContentSystemImportInvalid = "51009"
@@ -28,6 +28,8 @@ const (
 	CodeContentAttachmentInvalid = "51012"
 	// CodeContentAttachmentUploadInvalid 表示上传附件未通过文件名、大小、类型或安全校验。
 	CodeContentAttachmentUploadInvalid = "51013"
+	// CodeContentCategoryDeleteBlocked 表示分类仍有活动子分类或未删除题目引用。
+	CodeContentCategoryDeleteBlocked = "51014"
 )
 
 const (
@@ -82,6 +84,8 @@ var (
 	ErrContentDeleteBlocked = New(CodeContentDeleteBlocked, "内容已被引用,不能删除")
 	// ErrContentCategoryInvalid 表示分类信息不正确。
 	ErrContentCategoryInvalid = New(CodeContentCategoryInvalid, "分类信息不正确")
+	// ErrContentCategoryDeleteBlocked 提示先调整引用,不静默删除子树或改写题目。
+	ErrContentCategoryDeleteBlocked = New(CodeContentCategoryDeleteBlocked, "分类暂不能删除,请刷新列表并先调整子分类和题目归类")
 	// ErrContentSystemImportInvalid 表示系统导入内容不正确。
 	ErrContentSystemImportInvalid = New(CodeContentSystemImportInvalid, "系统导入内容不正确")
 	// ErrContentQueryInvalid 表示查询条件不正确。

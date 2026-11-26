@@ -1,15 +1,4 @@
-// 实验详情页(深页,/student/experiments/:experimentId)。设计 §7.2:
-// 页头为实验名 + 方式(个人 / 小组)+ 一行属性(所属课程 · 是否交报告 · 检查点总分),右侧主按钮「开始实验」;
-// 小组实验在页头下方放小组卡。主体单栏顺序阅读:实验说明 → 阶段(编号列表 + 链式进度)→
-// 检查点(名称、分值、判分方式、公开题面)→ 实验环境(代码环境、仿真场景)。
-// 小组实验还未分组时按钮不可用,旁边写「等待老师分组后才能开始」。
-//
-// 这也是实验工作台退出后的回落页(immersiveRoutes 的 exitPath),故必须支持深链与刷新:
-// 数据取自学生专用单读 GET /experiment/student/experiments/{id},与列表同一投影。
-// 阶段与检查点只呈现学生可见部分;判题器编号、题目引用、环境初始化脚本已由后端投影剔除,
-// 前端不做二次过滤(铁律 1)。阶段的实时状态属于实验环境(工作台内),这里只讲解锁规则。
-
-import { useCallback, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { Boxes, FlaskConical, Play, Radar, Users } from 'lucide-react'
 import {
@@ -38,9 +27,6 @@ import { experimentCollabModeLabel } from '../../../../utils/labels/experiment'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { ExperimentGroupCard } from './experiment-group'
 
-/**
- * StudentExperimentDetailPage 读取单个已发布实验的学生视图。
- */
 export default function StudentExperimentDetailPage() {
   const { experimentId = '' } = useParams<{ experimentId: string }>()
 
@@ -74,15 +60,11 @@ export default function StudentExperimentDetailPage() {
   )
 }
 
-/**
- * ExperimentDetailContent 按阅读顺序渲染实验说明、阶段、检查点与实验环境,并提供进入入口。
- */
 function ExperimentDetailContent({ experiment }: { experiment: StudentExperiment }) {
   const navigate = useNavigate()
   const [entering, setEntering] = useState(false)
   const [actionError, setActionError] = useState<string>()
 
-  // 所属课程名:用学生自己的课程列表解析(一学期几门课,一页取完);读不到时不显示这一项
   const courses = useAsyncResource(
     () => collectAllPages((params) => api.teaching.getCourses({ role: 'student', ...params }), PAGINATION_MAX_SIZE),
     [],
@@ -98,8 +80,8 @@ function ExperimentDetailContent({ experiment }: { experiment: StudentExperiment
   const { checkpoints, stages, envs, sims } = experiment.components
   const checkpointTotal = checkpoints.reduce((sum, checkpoint) => sum + checkpoint.score, 0)
 
-  /** enterExperiment 创建或恢复实例后进入工作台(接口对活跃实例幂等)。 */
-  const enterExperiment = useCallback(async () => {
+  const enterExperiment = async () => {
+    if (entering || needsGroup) return
     setEntering(true)
     setActionError(undefined)
     try {
@@ -112,7 +94,7 @@ function ExperimentDetailContent({ experiment }: { experiment: StudentExperiment
     } finally {
       setEntering(false)
     }
-  }, [experiment.id, experiment.my_group_id, navigate])
+  }
 
   return (
     <div className="max-w-3xl">
@@ -248,7 +230,6 @@ function ExperimentDetailContent({ experiment }: { experiment: StudentExperiment
   )
 }
 
-/** DetailSection 顺序阅读里的一节:标题(可带计数)+ 内容,不画容器 */
 function DetailSection({
   id,
   title,
@@ -273,7 +254,6 @@ function DetailSection({
   )
 }
 
-/** unlockText 阶段的进入条件,用学生能懂的话说 */
 function unlockText(stage: StudentStageConfig): string {
   const condition = stage.unlock_condition
   if (!condition) return '直接进入'
@@ -283,7 +263,6 @@ function unlockText(stage: StudentStageConfig): string {
   return '由老师开放'
 }
 
-/** StageItem 阶段列表里的一项:编号、名称、说明、包含内容与进入条件 */
 function StageItem({ stage }: { stage: StudentStageConfig }) {
   const envCount = stage.components.envs?.length ?? 0
   const simCount = stage.components.sims?.length ?? 0
@@ -327,7 +306,6 @@ const FACE_FIELDS = [
   ['attachments', '公开材料'],
 ] as const
 
-/** CheckpointItem 检查点列表里的一项:名称、分值、判分方式与公开题面 */
 function CheckpointItem({ checkpoint, index }: { checkpoint: StudentCheckpointConfig; index: number }) {
   const shown = new Set<string>()
   const face = FACE_FIELDS.map(([key, label]) => ({ key, label, value: formatFaceValue(checkpoint.face?.[key]) })).filter(
@@ -365,7 +343,6 @@ function CheckpointItem({ checkpoint, index }: { checkpoint: StudentCheckpointCo
   )
 }
 
-/** formatFaceValue 将公开题面值转为稳定可读文本,不把内部字段名暴露给学生。 */
 function formatFaceValue(value: unknown): string {
   if (typeof value === 'string') return value.trim()
   if (value === undefined || value === null) return ''

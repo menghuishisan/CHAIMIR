@@ -12,12 +12,15 @@ on:
       - "images/image-digests.lock"
       - ".github/workflows/frontend.yml"
       - "deploy/ci/**"
+      - "images/lib/ImageMetadata.psm1"
   pull_request:
     paths:
       - "frontend/**"
       - "images/service/frontend/**"
       - "images/image-digests.lock"
       - ".github/workflows/frontend.yml"
+      - "deploy/ci/**"
+      - "images/lib/ImageMetadata.psm1"
 
 permissions:
   contents: read
@@ -45,7 +48,7 @@ jobs:
             base="$(git rev-parse HEAD^)"
           fi
           source_changed=false
-          if git diff --name-only "$base" HEAD | grep -Eq '^(frontend/|images/service/frontend/|\.github/workflows/frontend\.yml$|deploy/ci/)'; then
+          if git diff --name-only "$base" HEAD | grep -Eq '^(frontend/|images/service/frontend/|\.github/workflows/frontend\.yml$|deploy/ci/|images/lib/ImageMetadata\.psm1$)'; then
             source_changed=true
           fi
           previous_digest="$(git show "$base:images/image-digests.lock" 2>/dev/null | awk '$1 == "base/node-builder" { print $2 }')"
@@ -75,6 +78,12 @@ jobs:
           node-version: "24"
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: 校验前端镜像构建配置
+        shell: pwsh
+        run: |
+          Import-Module ./images/lib/ImageMetadata.psm1
+          $dockerfile = Get-Content -LiteralPath ./images/service/frontend/Dockerfile -Raw
+          Get-ChaimirFrontendBuildArguments -Path ./frontend/.env.example -DockerfileText $dockerfile | Out-Null
       - name: 安装依赖
         working-directory: frontend
         run: pnpm install --frozen-lockfile
@@ -102,40 +111,6 @@ jobs:
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: v2.4.3
-      - id: build-base
-        name: 读取前端不可变构建与运行基座
-        shell: bash
-        run: |
-          set -euo pipefail
-          digest="$(awk '$1 == "base/node-builder" { print $2 }' images/image-digests.lock)"
-          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "images/image-digests.lock 缺少有效 base/node-builder digest" >&2
-            exit 1
-          fi
-          echo "ref=${{ secrets.HARBOR_REGISTRY }}/base/node-builder@$digest" >> "$GITHUB_OUTPUT"
-          runtime="$(awk '
-            /^upstream:[[:space:]]*$/ { inside=1; next }
-            inside && /^[A-Za-z_][A-Za-z0-9_]*:[[:space:]]*/ { inside=0 }
-            inside && /^[[:space:]]+runtime:[[:space:]]*/ {
-              sub("^[[:space:]]+runtime:[[:space:]]*", "");
-              gsub(/^["'\''"]|["'\''"]$/, "");
-              print; exit
-            }
-          ' images/service/frontend/manifest.yaml)"
-          runtime_digest="$(awk '
-            /^upstream:[[:space:]]*$/ { inside=1; next }
-            inside && /^[A-Za-z_][A-Za-z0-9_]*:[[:space:]]*/ { inside=0 }
-            inside && /^[[:space:]]+runtime_digest:[[:space:]]*/ {
-              sub("^[[:space:]]+runtime_digest:[[:space:]]*", "");
-              gsub(/^["'\''"]|["'\''"]$/, "");
-              print; exit
-            }
-          ' images/service/frontend/manifest.yaml)"
-          if [[ -z "$runtime" || ! "$runtime_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "frontend manifest 缺少有效 upstream.runtime/runtime_digest" >&2
-            exit 1
-          fi
-          echo "runtime=$runtime@$runtime_digest" >> "$GITHUB_OUTPUT"
       - name: 构建+扫描+签名+推送(frontend)
         id: frontend-image
         uses: ./deploy/ci/build-scan-sign-push
@@ -144,14 +119,6 @@ jobs:
           tag: ${{ github.sha }}
           context: .
           dockerfile: images/service/frontend/Dockerfile
-          build-args: |
-            NODE_BUILDER_IMAGE=${{ steps.build-base.outputs.ref }}
-            NGINX_RUNTIME_IMAGE=${{ steps.build-base.outputs.runtime }}
-            VITE_API_BASE_URL=/api/v1
-            VITE_WS_BASE_URL=
-            VITE_API_TIMEOUT_MS=30000
-            VITE_SIM_WORKER_COMMAND_TIMEOUT_MS=2000
-            VITE_SIM_STEP_INTERVAL_MS=1200
           registry: ${{ secrets.HARBOR_REGISTRY }}
           registry-username: ${{ secrets.HARBOR_USERNAME }}
           registry-password: ${{ secrets.HARBOR_PASSWORD }}

@@ -1,0 +1,27 @@
+# 本文件定义 ZK 证明器镜像,提供 circom2/snarkjs 证明工具链。
+FROM node:24-alpine3.23@sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436 AS deps
+
+WORKDIR /opt/chaimir/zk-prover
+COPY package.json package-lock.json /opt/chaimir/zk-prover/
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund --fetch-timeout=60000 --fetch-retries=3 \
+    && test -x /opt/chaimir/zk-prover/node_modules/.bin/circom2 \
+    && test -x /opt/chaimir/zk-prover/node_modules/.bin/snarkjs
+
+FROM node:24-alpine3.23@sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436
+
+LABEL org.opencontainers.image.title="tool/zk-prover"
+LABEL org.opencontainers.image.description="Chaimir ZK prover toolchain image"
+ENV HOME=/workspace
+
+WORKDIR /opt/chaimir/zk-prover
+COPY --from=deps /opt/chaimir/zk-prover /opt/chaimir/zk-prover
+RUN apk add --no-cache bash ca-certificates libcrypto3=3.5.8-r0 libssl3=3.5.8-r0 \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+    && mkdir -p /workspace \
+    && chown -R 1000:1000 /workspace
+
+COPY run.mjs /opt/chaimir/zk-prover/run.mjs
+
+USER 1000:1000
+WORKDIR /workspace
+ENTRYPOINT ["node", "/opt/chaimir/zk-prover/run.mjs"]

@@ -121,7 +121,7 @@ export function TranscriptBatchDrawer({ onClose }: { onClose: () => void }) {
     setDownloadingId(transcript.id)
     setFormError(undefined)
     try {
-      const grant = await api.grade.downloadTranscript(transcript.id)
+      const grant = await api.grade.transcriptDownloadGrant(transcript.id)
       const file = await api.storage.consumeGrant(grant.token)
       downloadAttachment(file)
     } catch (error) {

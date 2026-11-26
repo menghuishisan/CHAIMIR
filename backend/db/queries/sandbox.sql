@@ -13,20 +13,30 @@ SELECT id, code, name, eco, adapter_level, adapter_spec, capability_impl, plugin
 FROM runtime
 ORDER BY created_at DESC, id DESC;
 
--- name: UpsertRuntime :one
+-- name: EnsureRuntime :exec
 INSERT INTO runtime (id, code, name, eco, adapter_level, adapter_spec, capability_impl, plugin_ref, selftest_status, selftest_detail, status, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), now())
-ON CONFLICT (code) DO UPDATE
-SET name = EXCLUDED.name,
-    eco = EXCLUDED.eco,
-    adapter_level = EXCLUDED.adapter_level,
-    adapter_spec = EXCLUDED.adapter_spec,
-    capability_impl = EXCLUDED.capability_impl,
-    plugin_ref = EXCLUDED.plugin_ref,
-    selftest_status = EXCLUDED.selftest_status,
-    selftest_detail = EXCLUDED.selftest_detail,
-    status = EXCLUDED.status,
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, '{}', COALESCE(NULLIF(sqlc.arg(status)::smallint, 0), 2), now(), now())
+ON CONFLICT (code) DO NOTHING;
+
+-- name: GetRuntimeByCodeForUpdate :one
+SELECT id, code, name, eco, adapter_level, adapter_spec, capability_impl, plugin_ref, selftest_status, selftest_detail, status, created_at, updated_at
+FROM runtime
+WHERE code = $1
+FOR UPDATE;
+
+-- name: UpdateRuntime :one
+UPDATE runtime
+SET name = $2,
+    eco = $3,
+    adapter_level = $4,
+    adapter_spec = $5,
+    capability_impl = $6,
+    plugin_ref = $7,
+    selftest_status = $8,
+    selftest_detail = $9,
+    status = $10,
     updated_at = now()
+WHERE id = $1
 RETURNING id, code, name, eco, adapter_level, adapter_spec, capability_impl, plugin_ref, selftest_status, selftest_detail, status, created_at, updated_at;
 
 -- name: GetRuntimeByIDForUpdate :one
@@ -94,12 +104,12 @@ FROM runtime_image
 WHERE id = $1 AND runtime_id = $2
 FOR UPDATE;
 
--- name: GetPublishedCompositionSnapshot :one
+-- name: GetCompositionSnapshot :one
 SELECT composition_digest, snapshot, status, created_at, updated_at
 FROM sandbox_composition
 WHERE composition_digest = $1 AND status = 1;
 
--- name: UpsertPublishedCompositionSnapshot :exec
+-- name: UpsertCompositionSnapshot :exec
 INSERT INTO sandbox_composition (composition_digest, snapshot, status, created_at, updated_at)
 VALUES ($1, $2, 1, now(), now())
 ON CONFLICT (composition_digest) DO UPDATE
@@ -107,7 +117,7 @@ SET snapshot = EXCLUDED.snapshot,
     status = 1,
     updated_at = now();
 
--- name: DeletePublishedCompositionSnapshot :exec
+-- name: DeleteCompositionSnapshot :exec
 DELETE FROM sandbox_composition
 WHERE composition_digest = $1 AND status = 1;
 
@@ -148,7 +158,12 @@ RETURNING id, runtime_image_id, composition_digest, status, attempt_id, daemonse
 UPDATE sandbox_composition_prepull p
 SET status = 1, detail = $2, completed_at = NULL, updated_at = now()
 FROM runtime_image i
-WHERE p.runtime_image_id = i.id AND i.runtime_id = $1 AND p.status <> 1;
+WHERE p.runtime_image_id = i.id AND p.status <> 1
+  AND (i.runtime_id = $1 OR EXISTS (
+    SELECT 1 FROM sandbox_composition c
+    WHERE c.composition_digest = p.composition_digest
+      AND c.snapshot->'runtimes' @> jsonb_build_array(jsonb_build_object('runtime_id', $1::bigint))
+  ));
 
 -- name: DeleteCompositionPrepullByRuntimeImage :exec
 DELETE FROM sandbox_composition_prepull WHERE runtime_image_id = $1;
@@ -164,7 +179,7 @@ FROM tool
 ORDER BY created_at DESC, id DESC;
 
 -- name: ListCatalogRuntimes :many
--- 编排目录只取真正可调度的运行时与镜像版本,不把未完成自检或最新闭包预拉取的项暴露给教师。
+-- 目录提供已自检且可用的运行时与可用镜像版本；完整组合的预拉取证明在启动前校验。
 -- 一次 JOIN 平铺取回后由 repo 按运行时分组,既避免按运行时逐个查镜像的 N+1,
 -- 也不用 jsonb_agg —— 那会让生成的行类型退化成 interface{},把解码负担推给业务层。
 SELECT r.code AS runtime_code, r.name AS runtime_name, r.eco, r.adapter_spec,
@@ -183,16 +198,26 @@ FROM tool
 WHERE status = 1
 ORDER BY category, code;
 
--- name: UpsertTool :one
+-- name: EnsureTool :exec
 INSERT INTO tool (id, code, name, category, kind, eco_tags, resource_spec, status, created_at, updated_at)
 VALUES ($1, $2, $3, 'tool', $4, $5, $6, $7, now(), now())
-ON CONFLICT (code) DO UPDATE
-SET name = EXCLUDED.name,
-    kind = EXCLUDED.kind,
-    eco_tags = EXCLUDED.eco_tags,
-    resource_spec = EXCLUDED.resource_spec,
-    status = EXCLUDED.status,
+ON CONFLICT (code) DO NOTHING;
+
+-- name: GetToolByCodeForUpdate :one
+SELECT id, code, name, category, kind, eco_tags, resource_spec, status, created_at, updated_at
+FROM tool
+WHERE code = $1
+FOR UPDATE;
+
+-- name: UpdateTool :one
+UPDATE tool
+SET name = $2,
+    kind = $3,
+    eco_tags = $4,
+    resource_spec = $5,
+    status = $6,
     updated_at = now()
+WHERE id = $1
 RETURNING id, code, name, category, kind, eco_tags, resource_spec, status, created_at, updated_at;
 
 -- name: GetTenantQuota :one
@@ -251,10 +276,10 @@ VALUES (
     $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
     $22, $23, now(), $24, now(), now()
 )
-RETURNING id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at;
+RETURNING *;
 
 -- name: GetSandbox :one
-SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+SELECT *
 FROM sandbox
 WHERE tenant_id = $1 AND id = $2;
 
@@ -265,11 +290,13 @@ SET workspace_revision = workspace_revision + 1,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
   AND workspace_revision = sqlc.arg(expected_revision)::bigint
+  AND phase IN (2, 4) AND status IN (2, 7, 8)
+  AND resource_lease_token = ''
 RETURNING workspace_revision;
 
 -- name: GetSandboxForUpdate :one
 -- 沙箱生命周期、公开文件和归档共用权威行锁，跨副本串行化状态与版本写入。
-SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+SELECT *
 FROM sandbox
 WHERE tenant_id = $1 AND id = $2
 FOR UPDATE;
@@ -279,36 +306,124 @@ FOR UPDATE;
 SELECT pg_advisory_xact_lock($1::bigint);
 
 -- name: ListSandboxesBySourceRef :many
-SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+SELECT *
 FROM sandbox
 WHERE tenant_id = $1 AND source_ref = $2 AND status <> 5
 ORDER BY created_at DESC, id DESC;
 
 -- name: GetSavedSandboxBySourceRef :one
 -- 回收保留持久化代码指针，重建中断后仍可从同一稳定来源恢复。
-SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+SELECT *
 FROM sandbox
 WHERE tenant_id = $1 AND source_ref = $2 AND code_storage_key IS NOT NULL AND code_storage_key <> '' AND code_hash IS NOT NULL AND code_hash <> ''
 ORDER BY created_at DESC, id DESC LIMIT 1;
 
 -- name: ListSandboxesByScopeRef :many
-SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+SELECT *
 FROM sandbox
 WHERE tenant_id = $1 AND scope_ref = $2 AND status <> 5
 ORDER BY created_at DESC, id DESC;
 
 -- name: ListRecycleCandidates :many
-SELECT s.id, s.tenant_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
+SELECT s.*
 FROM sandbox s
 JOIN tenant_quota tq ON tq.tenant_id = s.tenant_id
-WHERE s.status IN (4, 6)
-   OR (s.status = 1 AND s.last_active_at <= $1)
-   OR (s.status = 7 AND s.last_active_at <= $1)
-   OR (s.status = 8 AND s.keep_alive = false AND s.last_active_at <= now() - make_interval(mins => tq.idle_timeout_min))
-   OR (s.status IN (1, 2, 3, 7, 8) AND s.expire_at <= now())
-   OR (s.status IN (1, 2, 3, 7, 8) AND s.keep_alive_until IS NOT NULL AND s.keep_alive_until <= now())
+WHERE (s.resource_lease_until IS NULL OR s.resource_lease_until <= now())
+  AND (
+      s.status IN (4, 6)
+      OR (s.status = 1 AND s.last_active_at <= $1)
+      OR (s.status = 7 AND s.last_active_at <= $1)
+      OR (s.status = 8 AND s.keep_alive = false AND s.last_active_at <= now() - make_interval(mins => tq.idle_timeout_min))
+      OR (s.status IN (1, 2, 3, 7, 8) AND s.expire_at <= now())
+      OR (s.status IN (1, 2, 3, 7, 8) AND s.keep_alive_until IS NOT NULL AND s.keep_alive_until <= now())
+  )
 ORDER BY s.updated_at ASC, s.id ASC
 LIMIT $2;
+
+-- name: ListPendingSandboxStarts :many
+SELECT * FROM sandbox
+WHERE (status = 1 OR (phase = 3 AND status IN (2, 7)) OR (resource_lease_token <> '' AND status IN (2, 7, 8))) AND updated_at <= $1
+  AND (resource_lease_until IS NULL OR resource_lease_until <= now())
+ORDER BY updated_at, id
+LIMIT $2;
+
+-- name: ClaimSandboxRecycle :one
+UPDATE sandbox
+SET status = CASE WHEN status = 6 THEN 6 ELSE 4 END,
+    recycle_saved = CASE WHEN status IN (4, 6) THEN recycle_saved ELSE false END,
+    resource_lease_token = sqlc.arg(lease_token)::varchar,
+    resource_lease_until = now() + sqlc.arg(lease_seconds)::bigint * interval '1 second',
+    updated_at = now()
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND id = sqlc.arg(id)
+  AND (status = sqlc.arg(expected_status)::smallint OR (status = 4 AND sqlc.arg(expected_status)::smallint <> 5))
+  AND status <> 5
+  AND (resource_lease_until IS NULL OR resource_lease_until <= now())
+RETURNING *;
+
+-- name: ClaimExpiredSandboxSnapshotCleanup :one
+UPDATE sandbox
+SET resource_lease_token = sqlc.arg(lease_token)::varchar,
+    resource_lease_until = now() + sqlc.arg(lease_seconds)::bigint * interval '1 second',
+    updated_at = now()
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND id = sqlc.arg(id)
+  AND status = 5
+  AND snapshot_expire_at IS NOT NULL
+  AND snapshot_expire_at <= now()
+  AND (resource_lease_token = '' OR resource_lease_until IS NULL OR resource_lease_until <= now())
+RETURNING *;
+
+-- name: RenewSandboxResourceLease :execrows
+UPDATE sandbox
+SET resource_lease_until = GREATEST(resource_lease_until, now() + sqlc.arg(lease_seconds)::bigint * interval '1 second')
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND id = sqlc.arg(id)
+  AND status IN (1, 2, 4, 5, 6, 7, 8)
+  AND resource_lease_token = sqlc.arg(lease_token)
+  AND resource_lease_until > now();
+
+-- name: ReleaseSandboxResourceLease :execrows
+UPDATE sandbox
+SET resource_lease_token = '', resource_lease_until = NULL, updated_at = now()
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND id = sqlc.arg(id)
+  AND resource_lease_token = sqlc.arg(lease_token);
+
+-- name: CompleteSandboxRecycle :execrows
+UPDATE sandbox
+SET status = 5, resource_lease_token = '', resource_lease_until = NULL, updated_at = now()
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND id = sqlc.arg(id)
+  AND status IN (4, 6)
+  AND resource_lease_token = sqlc.arg(lease_token)
+  AND resource_lease_until > now();
+
+-- name: CompleteExpiredSandboxSnapshotCleanup :execrows
+UPDATE sandbox
+SET snapshot_ref = NULL,
+    snapshot_domains = '[]'::jsonb,
+    snapshot_created_at = NULL,
+    snapshot_expire_at = NULL,
+    resource_lease_token = '',
+    resource_lease_until = NULL,
+    updated_at = now()
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND id = sqlc.arg(id)
+  AND status = 5
+  AND snapshot_expire_at <= now()
+  AND resource_lease_token = sqlc.arg(lease_token)
+  AND resource_lease_until > now();
+
+-- name: QueueSandboxRecycle :execrows
+UPDATE sandbox
+SET status = CASE WHEN status = 6 THEN 6 ELSE 4 END,
+    recycle_saved = CASE WHEN status IN (4, 6) THEN recycle_saved ELSE false END,
+    updated_at = now()
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND id = sqlc.arg(id)
+  AND status = sqlc.arg(expected_status)::smallint
+  AND status <> 5;
 
 -- name: MarkIdleSandboxes :many
 UPDATE sandbox s
@@ -317,13 +432,16 @@ FROM tenant_quota tq
 WHERE tq.tenant_id = s.tenant_id
   AND s.status = 2
   AND s.keep_alive = false
+  AND s.phase IN (2, 4)
+  AND (s.resource_lease_until IS NULL OR s.resource_lease_until <= now())
   AND s.last_active_at <= now() - make_interval(mins => tq.idle_timeout_min)
-RETURNING s.id, s.tenant_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at;
+RETURNING s.*;
 
 -- name: ListSnapshotCleanupCandidates :many
-SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+SELECT *
 FROM sandbox
 WHERE status = 5 AND snapshot_expire_at IS NOT NULL AND snapshot_expire_at <= now()
+  AND (resource_lease_token = '' OR resource_lease_until IS NULL OR resource_lease_until <= now())
 ORDER BY snapshot_expire_at ASC, id ASC
 LIMIT $1;
 
@@ -331,7 +449,32 @@ LIMIT $1;
 UPDATE sandbox
 SET phase = $3, status = $4, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at;
+RETURNING *;
+
+-- name: StartRetainedSandbox :execrows
+UPDATE sandbox
+SET status = 1,
+    recycle_saved = false,
+    resource_lease_token = '',
+    resource_lease_until = NULL,
+    updated_at = now()
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND id = sqlc.arg(id)
+  AND (status = 3 OR (status = 5 AND snapshot_ref IS NOT NULL AND snapshot_ref <> '' AND snapshot_expire_at > now()))
+  AND (resource_lease_token = '' OR resource_lease_until IS NULL OR resource_lease_until <= now());
+
+-- name: ClaimSandboxResources :one
+UPDATE sandbox
+SET resource_lease_token = sqlc.arg(lease_token)::varchar,
+    resource_lease_until = now() + sqlc.arg(lease_seconds)::bigint * interval '1 second',
+    updated_at = now()
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND id = sqlc.arg(id)
+  AND status = sqlc.arg(expected_status)::smallint
+  AND status IN (1, 2, 7, 8)
+  AND (status = 1 OR phase IN (2, 4))
+  AND (resource_lease_until IS NULL OR resource_lease_until <= now())
+RETURNING *;
 
 -- name: MarkSandboxActive :one
 UPDATE sandbox
@@ -340,50 +483,30 @@ SET last_active_at = now(),
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
   AND status IN (2, 7, 8)
-RETURNING id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at;
+  AND phase IN (2, 4)
+  AND resource_lease_token = ''
+RETURNING *;
 
 -- name: UpdateSandboxCode :one
-WITH updated AS (
-    UPDATE sandbox SET code_storage_key = $3, code_hash = $4, updated_at = now()
-    WHERE sandbox.tenant_id = $1 AND sandbox.id = $2 RETURNING sandbox.id
-)
-SELECT s.id, s.tenant_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
-FROM sandbox s JOIN updated u ON u.id = s.id;
+UPDATE sandbox SET code_storage_key = $3, code_hash = $4,
+    recycle_saved = (status = 4), updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
 
 -- name: UpdateSandboxAuthorizedAccounts :one
 WITH updated AS (
     UPDATE sandbox SET shared_account_ids = $3, updated_at = now()
     WHERE sandbox.tenant_id = $1 AND sandbox.id = $2 RETURNING sandbox.id
 )
-SELECT s.id, s.tenant_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
+SELECT s.*
 FROM sandbox s JOIN updated u ON u.id = s.id;
 
 -- name: UpdateSandboxSnapshot :one
-WITH updated AS (
-    UPDATE sandbox SET snapshot_ref = $3, snapshot_domains = $4, snapshot_created_at = $5, snapshot_expire_at = $6, updated_at = now()
-    WHERE sandbox.tenant_id = $1 AND sandbox.id = $2 RETURNING sandbox.id
-)
-SELECT s.id, s.tenant_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
-FROM sandbox s JOIN updated u ON u.id = s.id;
-
--- name: CreateSandboxTool :one
-INSERT INTO sandbox_tool (id, tenant_id, sandbox_id, tool_id, access_endpoint, status)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, tenant_id, sandbox_id, tool_id, access_endpoint, status;
-
--- name: ListSandboxTools :many
-SELECT st.id, st.tenant_id, st.sandbox_id, st.tool_id, st.access_endpoint, st.status,
-       t.code, t.kind, t.resource_spec
-FROM sandbox_tool st
-JOIN tool t ON t.id = st.tool_id
-WHERE st.tenant_id = $1 AND st.sandbox_id = $2
-ORDER BY st.id;
-
--- name: UpdateSandboxToolStatus :one
-UPDATE sandbox_tool
-SET status = $4, access_endpoint = $5
-WHERE tenant_id = $1 AND sandbox_id = $2 AND tool_id = $3
-RETURNING id, tenant_id, sandbox_id, tool_id, access_endpoint, status;
+UPDATE sandbox SET snapshot_ref = $3, snapshot_domains = $4, snapshot_created_at = $5, snapshot_expire_at = $6, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+  AND resource_lease_token = sqlc.arg(lease_token)
+  AND resource_lease_until > now()
+RETURNING *;
 
 -- name: CreateSandboxEvent :one
 INSERT INTO sandbox_event (id, tenant_id, sandbox_id, event_type, detail, created_at)
@@ -391,9 +514,9 @@ VALUES ($1, $2, $3, $4, $5, now())
 RETURNING id, tenant_id, sandbox_id, event_type, detail, created_at;
 
 -- name: CreateSandboxRecycleOutbox :one
-INSERT INTO sandbox_recycle_outbox (id, tenant_id, sandbox_id, source_ref, scope_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, 0, NULL, now(), now(), '', NULL)
-RETURNING id, tenant_id, sandbox_id, source_ref, scope_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
+INSERT INTO sandbox_recycle_outbox (id, tenant_id, sandbox_id, source_ref, scope_ref, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 0, NULL, now(), now(), '', NULL)
+RETURNING *;
 
 -- name: ClaimPendingSandboxRecycleOutbox :many
 WITH exhausted AS (
@@ -414,19 +537,19 @@ UPDATE sandbox_recycle_outbox AS outbox
 SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_token = @lease_token, lease_until = @lease_until::timestamptz
 FROM candidates
 WHERE outbox.id = candidates.id
-RETURNING outbox.id, outbox.tenant_id, outbox.sandbox_id, outbox.source_ref, outbox.scope_ref, outbox.owner_account_id, outbox.reason, outbox.trace_id, outbox.recycled_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until;
+RETURNING outbox.id, outbox.tenant_id, outbox.sandbox_id, outbox.source_ref, outbox.scope_ref, outbox.reason, outbox.trace_id, outbox.recycled_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until;
 
 -- name: MarkSandboxRecycleOutboxPublished :one
 UPDATE sandbox_recycle_outbox
 SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id) AND status = 2 AND lease_token = sqlc.arg(lease_token) AND lease_until > now()
-RETURNING id, tenant_id, sandbox_id, source_ref, scope_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
+RETURNING *;
 
 -- name: MarkSandboxRecycleOutboxFailed :one
 UPDATE sandbox_recycle_outbox
 SET status = 4, last_error = sqlc.arg(last_error), updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id) AND status = 2 AND lease_token = sqlc.arg(lease_token) AND lease_until > now()
-RETURNING id, tenant_id, sandbox_id, source_ref, scope_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
+RETURNING *;
 
 -- name: StatsByTenant :one
 SELECT
@@ -442,3 +565,12 @@ FROM tenant_quota tq
 LEFT JOIN sandbox s ON s.tenant_id = tq.tenant_id
 WHERE tq.tenant_id = $1
 GROUP BY tq.max_concurrent_sandbox, tq.max_cpu, tq.max_memory_mb, tq.idle_timeout_min, tq.max_lifetime_min, tq.max_keepalive_min, tq.max_snapshot_retention_min;
+
+-- name: ReadSandboxAlertMetrics :one
+SELECT (SELECT count(*)::bigint FROM sandbox WHERE status=2) AS active_count,
+ (SELECT COALESCE(max(GREATEST(EXTRACT(EPOCH FROM (sqlc.arg(observed_at)::timestamptz-created_at)),0)),0)::float8 FROM sandbox WHERE status=1) AS pending_seconds,
+ (SELECT COALESCE(count(*) FILTER (WHERE detail->>'status'='6')::float8 / NULLIF(count(*),0),0)::float8
+  FROM (SELECT DISTINCT ON (sandbox_id) sandbox_id,detail FROM sandbox_event
+        WHERE created_at BETWEEN sqlc.arg(window_from)::timestamptz AND sqlc.arg(observed_at)::timestamptz
+          AND event_type IN ('phase_change','error') AND detail->>'status' IN ('2','6')
+        ORDER BY sandbox_id,created_at DESC,id DESC) outcomes) AS failed_rate;

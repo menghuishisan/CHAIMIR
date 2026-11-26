@@ -85,73 +85,6 @@ function Resolve-EvidenceFile {
     return $resolved
 }
 
-# ConvertTo-ProcessArgument 将参数安全编码为 Windows 原生进程参数。
-function ConvertTo-ProcessArgument([string]$Value) {
-    if ($null -eq $Value -or $Value.Length -eq 0) { return '""' }
-    if ($Value -notmatch '[\s"]') { return $Value }
-    $builder = [Text.StringBuilder]::new()
-    [void]$builder.Append('"')
-    $slashes = 0
-    foreach ($character in $Value.ToCharArray()) {
-        if ($character -eq '\') { $slashes++; continue }
-        if ($character -eq '"') {
-            if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
-            [void]$builder.Append('\').Append('"')
-            $slashes = 0
-            continue
-        }
-        if ($slashes -gt 0) { [void]$builder.Append(('\' * $slashes) -join '') }
-        [void]$builder.Append($character)
-        $slashes = 0
-    }
-    if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
-    [void]$builder.Append('"')
-    return $builder.ToString()
-}
-
-# Invoke-DockerBounded 以明确上限执行 Cosign,防止签名验证无限等待。
-function Invoke-DockerBounded {
-    param(
-        [Parameter(Mandatory = $true)][string[]]$Arguments,
-        [Parameter(Mandatory = $true)][int]$TimeoutSeconds
-    )
-    $process = [Diagnostics.Process]::new()
-    $process.StartInfo = [Diagnostics.ProcessStartInfo]::new()
-    $process.StartInfo.FileName = "docker.exe"
-    $process.StartInfo.Arguments = (($Arguments | ForEach-Object { ConvertTo-ProcessArgument ([string]$_) }) -join " ")
-    $process.StartInfo.UseShellExecute = $false
-    $process.StartInfo.CreateNoWindow = $true
-    $process.StartInfo.RedirectStandardOutput = $true
-    $process.StartInfo.RedirectStandardError = $true
-    $process.StartInfo.StandardOutputEncoding = [Text.Encoding]::UTF8
-    $process.StartInfo.StandardErrorEncoding = [Text.Encoding]::UTF8
-    try {
-        if (-not $process.Start()) { throw "Docker CLI 启动失败" }
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            try {
-                & taskkill.exe /PID $process.Id /T /F | Out-Null
-            } catch {
-                Write-Warning ("Cosign 超时后的进程树终止失败: {0}" -f $_.Exception.Message)
-            }
-            try {
-                $process.Kill($true)
-            } catch {
-                Write-Warning ("Cosign 超时后的进程终止失败: {0}" -f $_.Exception.Message)
-            }
-            $stdout = $stdoutTask.GetAwaiter().GetResult()
-            $stderr = $stderrTask.GetAwaiter().GetResult()
-            return [pscustomobject]@{ Code = 124; Text = ((@(("Docker CLI 超时（{0} 秒）: {1}" -f $TimeoutSeconds, ($Arguments -join " ")), $stdout, $stderr) | Where-Object { $_ }) -join "`n").Trim() }
-        }
-        $stdout = $stdoutTask.GetAwaiter().GetResult()
-        $stderr = $stderrTask.GetAwaiter().GetResult()
-        return [pscustomobject]@{ Code = $process.ExitCode; Text = ((@($stdout, $stderr) | Where-Object { $_ }) -join "`n").Trim() }
-    } finally {
-        $process.Dispose()
-    }
-}
-
 # Invoke-CosignVerifyBlob 用固定 Cosign 工具镜像在私有基础设施模式下验证不上传公共透明日志的签名。
 function Invoke-CosignVerifyBlob {
     param(
@@ -173,7 +106,7 @@ function Invoke-CosignVerifyBlob {
         "verify-blob", "--private-infrastructure", "--key", "/cosign/cosign.pub",
         "--signature", "/evidence/$signatureName", "/evidence/$blobName"
     )
-    $result = Invoke-DockerBounded -Arguments $arguments -TimeoutSeconds $DockerTimeoutSeconds
+    $result = Invoke-ChaimirDocker -Arguments $arguments -TimeoutSeconds $DockerTimeoutSeconds
     if ($result.Text) { Write-Output $result.Text }
     if ($result.Code -ne 0) {
         throw "Cosign 验证失败: $Description; $($result.Text)"

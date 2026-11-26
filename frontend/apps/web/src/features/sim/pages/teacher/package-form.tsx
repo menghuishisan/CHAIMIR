@@ -1,13 +1,4 @@
-// 仿真场景提交表单(仿真场景页内弹层)。设计 §7.4:字段多且带上传,用右侧大抽屉(宽 880px、整高、底部固定操作条)。
-//
-// 后端 validateBundleManifestMatchesRequest 要求表单元数据与包内 sim-package.json 的 meta 逐字一致
-// (code/version/name/category 与 scale_limit),故本表单把这些字段全部显式渲染,
-// 并在说明里点明「必须与包内声明一致」—— 不一致后端会拒绝,提前说清比事后报错好。
-//
-// 表单没有「运行方式」:执行位置按代码来源派生,教师与第三方提交的场景一律在平台的隔离容器内运行
-// (见 docs/04-仿真可视化引擎/02-架构设计.md §8),提交请求里不存在这个字段,也就没有可选项。
-//
-// 编号命名空间由后端按登录账号强制为 teacher_<账号编号>__,页面据此在新建时给出前缀提示。
+// 教师提交和更新仿真场景包，表单元数据必须与包内声明一致。
 
 import { useCallback, useState } from 'react'
 import { Upload } from 'lucide-react'
@@ -31,15 +22,14 @@ import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { useSession } from '../../../../components/RoleGuard'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
-/** 规模上限的三个键与后端 manifest meta.scale_limit 一致。 */
 interface ScaleLimitForm {
   nodes: string
   maxTick: string
   maxEvents: string
 }
 
-/** 规模上限默认值:与 sim-sdk 作者模板同量级,教师按场景实际规模调整。 */
 const DEFAULT_SCALE_LIMIT: ScaleLimitForm = { nodes: '50', maxTick: '5000', maxEvents: '10000' }
+const SCALE_LIMIT_MAX = { nodes: 10_000, maxTick: 100_000, maxEvents: 100_000 }
 
 export interface SimPackageFormModalProps {
   /** 传入即为更新已有包(只有草稿与已退回可更新);缺省为新提交 */
@@ -48,9 +38,6 @@ export interface SimPackageFormModalProps {
   onSaved: () => void
 }
 
-/**
- * SimPackageFormModal 承载仿真包提交与更新。
- */
 export function SimPackageFormModal({ item, onClose, onSaved }: SimPackageFormModalProps) {
   return (
     <Drawer open onOpenChange={(open) => !open && onClose()}>
@@ -74,9 +61,6 @@ interface PackageFormProps {
   onSaved: () => void
 }
 
-/**
- * PackageForm 渲染表单本体并提交 multipart 上传。
- */
 function PackageForm({ item, onClose, onSaved }: PackageFormProps) {
   const { me } = useSession()
   const editing = item !== undefined
@@ -107,9 +91,11 @@ function PackageForm({ item, onClose, onSaved }: PackageFormProps) {
         : '分类用小写字母、数字、下划线或连字符,如 consensus',
       file: file ? null : '请选择场景包文件',
       scale:
-        [scale.nodes, scale.maxTick, scale.maxEvents].every((value) => Number(value) > 0)
+        validScaleLimit(scale.nodes, SCALE_LIMIT_MAX.nodes) &&
+        validScaleLimit(scale.maxTick, SCALE_LIMIT_MAX.maxTick) &&
+        validScaleLimit(scale.maxEvents, SCALE_LIMIT_MAX.maxEvents)
           ? null
-          : '规模上限三项都要是大于 0 的整数',
+          : '节点数须为 1 到 10,000 的整数，步数和事件数须为 1 到 100,000 的整数。',
     }
     return next
   }, [category, code, codePrefix, file, name, scale, version]))
@@ -223,6 +209,7 @@ function PackageForm({ item, onClose, onSaved }: PackageFormProps) {
                 id="sim-nodes"
                 type="number"
                 min="1"
+                max={SCALE_LIMIT_MAX.nodes}
                 value={scale.nodes}
                 onChange={(event) => setScale((current) => ({ ...current, nodes: event.target.value }))}
               />
@@ -232,6 +219,7 @@ function PackageForm({ item, onClose, onSaved }: PackageFormProps) {
                 id="sim-max-tick"
                 type="number"
                 min="1"
+                max={SCALE_LIMIT_MAX.maxTick}
                 value={scale.maxTick}
                 onChange={(event) => setScale((current) => ({ ...current, maxTick: event.target.value }))}
               />
@@ -241,6 +229,7 @@ function PackageForm({ item, onClose, onSaved }: PackageFormProps) {
                 id="sim-max-events"
                 type="number"
                 min="1"
+                max={SCALE_LIMIT_MAX.maxEvents}
                 value={scale.maxEvents}
                 onChange={(event) => setScale((current) => ({ ...current, maxEvents: event.target.value }))}
               />
@@ -283,18 +272,13 @@ function PackageForm({ item, onClose, onSaved }: PackageFormProps) {
   )
 }
 
-/** readScaleLimit 从已有包的固定三项规模上限回填表单;缺失键取默认值。 */
 function readScaleLimit(item?: SimPackageMeta): ScaleLimitForm {
-  const raw = item?.scale_limit
-  return {
-    nodes: readPositiveInt(raw?.nodes) ?? DEFAULT_SCALE_LIMIT.nodes,
-    maxTick: readPositiveInt(raw?.max_tick) ?? DEFAULT_SCALE_LIMIT.maxTick,
-    maxEvents: readPositiveInt(raw?.max_events) ?? DEFAULT_SCALE_LIMIT.maxEvents,
-  }
+  if (!item) return DEFAULT_SCALE_LIMIT
+  const { nodes, max_tick, max_events } = item.scale_limit
+  return { nodes: String(nodes), maxTick: String(max_tick), maxEvents: String(max_events) }
 }
 
-/** readPositiveInt 读取正整数字段;非正整数视为未设置。 */
-function readPositiveInt(value: unknown): string | undefined {
-  const parsed = typeof value === 'number' ? value : Number(value)
-  return Number.isInteger(parsed) && parsed > 0 ? String(parsed) : undefined
+function validScaleLimit(value: string, max: number): boolean {
+  const number = Number(value)
+  return Number.isInteger(number) && number > 0 && number <= max
 }

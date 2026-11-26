@@ -15,6 +15,7 @@ Chainlink 预言机节点镜像。
 - 生态或适配范围：evm
 - 必需 provider 能力：evm-json-rpc, postgres-compatible。
 - 必需非敏感配置：`gas_price_max_wei`、`vrf_gas_limit`，分别由统一 `deploy/config/chaimir.env` 的 `CHAINLINK_GAS_PRICE_MAX_WEI`、`CHAINLINK_VRF_GAS_LIMIT` 通过 CompositionSpec 参数注入；前者限制 EVM gas 价格，后者覆盖 VRF fulfill 的 gas 估算上限，均禁止依赖不适用的官方默认值。
+- 链编号与 Gas 价格为正整数，VRF Gas 范围为 1–4294967295，与原生 uint32 一致；目录 schema 与入口同时校验。
 - provider 只能通过 manifest 能力和显式 CompositionSpec link 选择；多个候选必须显式指定，不能按名称猜测。
 
 ## bindings 与 links
@@ -44,11 +45,13 @@ Chainlink 预言机节点镜像。
 
 - Secret 环境键：POSTGRES_PASSWORD, CHAINLINK_KEYSTORE_PASSWORD, CHAINLINK_API_EMAIL, CHAINLINK_API_PASSWORD, CHAINLINK_TLS_CERT_B64, CHAINLINK_TLS_KEY_B64。
 - 必需材料映射：上述键均由 `deploy/config/chaimir.env` 对应 Secret/KMS 字段注入；TLS 证书和私钥以 Base64 Secret 值注入后仅写入 runtime-state，绝不进入镜像层。Chainlink EVM oracle 钱包地址和余额属于组合生成的运行时材料，由受控 EVM 账户注资，不能写入镜像或仓库。
-- Secret 只来自平台 Secret/KMS 运行时注入，不能写入 Dockerfile、manifest、README、镜像层或测试输出；PostgreSQL 服务端证书和私钥由 `middleware/postgres` 的受控 Secret 投影，Chainlink 只通过 TLS 数据库连接消费，不复制数据库私钥。
+- Secret 只来自平台 Secret/KMS 运行时注入，不能写入 Dockerfile、manifest、README、镜像层或测试输出；PostgreSQL 服务端证书和私钥由选定提供者的受控 Secret 投影，Chainlink 只通过 TLS 数据库连接消费，不复制数据库私钥。
+- 数据库 URL 由 Go 标准库编码，TOML 由上游已有库生成，密码不裁剪或限制为 URL 安全字符。API 凭据按原生两行格式保存，邮箱和密码禁止换行；TLS 材料在写入前检查主机名、有效期、服务端用途和密钥匹配。
 
 ## 持久化与隔离边界
 
 - 持久化目录：由组件 mount_domains 决定；未声明持久化数据时不得自行落盘。
+- 原生 `RootDir`、配置、API 凭据及 TLS 文件统一写入 `/runtime-state/chainlink`；目录 0700、生成文件 0600。每次启动重读 Secret，交接原生节点前清除已转换的敏感环境变量及旧式 `ETH_URL`。
 - 组件挂载与文件系统：[{"name":"infra","mount_domains":["runtime-state"],"writable_mount_domains":["runtime-state"],"read_only_root_filesystem":false,"mount_workspace":false}]
 ## 安全边界
 

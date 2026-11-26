@@ -6,7 +6,33 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
+	"chaimir/pkg/apperr"
 )
+
+// AuthorizeLeaderboardSubscription 只授予当前队员指定已发布赛事的榜单订阅权。
+func (s *Service) AuthorizeLeaderboardSubscription(ctx context.Context, organizerTenantID, contestID int64) error {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return err
+	}
+	if organizerTenantID <= 0 || contestID <= 0 {
+		return apperr.ErrContestNotFound
+	}
+	if err := s.roles.RequireTenantModules(ctx, id.TenantID, contracts.TenantModuleContest); err != nil {
+		return err
+	}
+	return s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
+		item, err := tx.GetContest(ctx, organizerTenantID, contestID)
+		if err != nil {
+			return err
+		}
+		if item.Status < ContestStatusSignup || item.Status > ContestStatusArchived {
+			return apperr.ErrContestNotFound
+		}
+		_, err = tx.GetTeamForAccount(ctx, organizerTenantID, contestID, id.TenantID, id.AccountID)
+		return err
+	})
+}
 
 // Stats 读取租户级竞赛统计,供 M9 学校看板聚合。
 func (s *Service) Stats(ctx context.Context, tenantID int64) (contracts.ContestStats, error) {

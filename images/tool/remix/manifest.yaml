@@ -39,7 +39,7 @@ tool:
   kind: web-embed
   eco_tags:
     - evm
-  mount_workspace: true
+  mount_workspace: false
   args:
     - -addr
     - :8080
@@ -48,9 +48,6 @@ tool:
   env:
     - name: CHAIMIR_HTTP_TIMEOUT_SECONDS
       value: "30"
-  ephemeral_mounts:
-    - name: remix-tmp
-      mount_path: /tmp
 ports:
   - name: http
     container_port: 8080
@@ -67,16 +64,10 @@ security:
   drop_capabilities:
     - ALL
   network_policy: deny-all
-security_exceptions:
-  - field: writable_mounts
-    reason: Remix 静态服务若需要临时文件,只能写入平台声明的工具临时卷;根文件系统保持只读。
-    writable_mounts:
-      - /tmp
 student_access:
   enabled: true
   shell: restricted
   allowed_mounts:
-    - workspace
     - public-assets
 resources:
   cpu_request: 100m

@@ -1,11 +1,4 @@
-// 仿真场景审核报告(仿真场景页内弹层)。
-//
-// 只读展示后端 GET /sim/packages/{id}/preview 的审核报告。四个校验子项与后端字段一一对应:
-// 元数据校验与静态扫描在上传时由后端生成,确定性校验与运行预览由平台的隔离预览任务在容器里跑完后回写。
-// 平台要求四项全部通过才能上架,因此这里逐项呈现状态与说明,并摊开容器渲出的样例画面 ——
-// 「跑不起来」与「跑起来但效果不对」是两件事,后者只能看画面。
-//
-// 教师只看自己提交的包(后端 PackagePreview 校验作者归属),本页不含任何审核决策动作。
+// 教师只读查看本人场景的运行校验、扫描提示与样例帧，作者归属由后端校验。
 
 import { CircleCheck, FileSearch, ShieldAlert } from 'lucide-react'
 import {
@@ -46,10 +39,11 @@ const CHECK_LABELS = {
   workerPreview: '运行预览',
 } as const
 
-/** 后端校验状态取值只有 passed / failed 两种(enum.go),其余视为尚未执行。 */
+/** 扫描提示与运行失败分开呈现，缺失结论表示尚未执行。 */
 function checkTone(status: SimValidationStatusValue | undefined): StatusTone {
   if (status === SIM_VALIDATION_STATUS.PASSED) return 'success'
   if (status === SIM_VALIDATION_STATUS.FAILED) return 'danger'
+  if (status === SIM_VALIDATION_STATUS.WARNING) return 'warning'
   return 'neutral'
 }
 
@@ -57,6 +51,7 @@ function checkTone(status: SimValidationStatusValue | undefined): StatusTone {
 function checkLabel(status: SimValidationStatusValue | undefined): string {
   if (status === SIM_VALIDATION_STATUS.PASSED) return '通过'
   if (status === SIM_VALIDATION_STATUS.FAILED) return '未通过'
+  if (status === SIM_VALIDATION_STATUS.WARNING) return '需人工确认'
   return '尚未执行'
 }
 
@@ -81,7 +76,7 @@ export function SimPackagePreviewModal({ item, onClose }: SimPackagePreviewModal
         <DrawerHeader>
           <DrawerTitle>审核报告</DrawerTitle>
           <DrawerDescription>
-            {item.name} · 版本 {item.version}。四项校验全部通过后平台才能让场景上架。
+            {item.name} · 版本 {item.version}。平台将结合运行校验、风险提示与预览画面审核。
           </DrawerDescription>
         </DrawerHeader>
         <ResourceState
@@ -141,7 +136,7 @@ function PreviewBody({ review }: { review: SimPackageReview }) {
             scanFindings.length > 0 ? (
               <div className="flex flex-wrap gap-1">
                 {scanFindings.map((finding) => (
-                  <Badge key={finding} tone="danger">
+                  <Badge key={finding} tone="warning">
                     {finding}
                   </Badge>
                 ))}
@@ -154,11 +149,11 @@ function PreviewBody({ review }: { review: SimPackageReview }) {
       </div>
 
       {scanFindings.length > 0 ? (
-        <Callout tone="danger" title="包里出现了不允许的调用">
+        <Callout tone="warning" title="发现需要人工确认的调用">
           <span className="flex items-start gap-2">
             <ShieldAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
             <span>
-              仿真场景在隔离环境里运行,不能访问网络、页面文档或本机存储。请去掉上面列出的调用后重新提交。
+              平台会结合这些提示和运行预览判断是否上架。场景始终在隔离环境里运行，提示不会改变运行权限。
             </span>
           </span>
         </Callout>

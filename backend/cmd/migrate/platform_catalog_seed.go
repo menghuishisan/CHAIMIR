@@ -50,7 +50,6 @@ type platformRuntimeManifest struct {
 			ResetStrategy  string              `json:"reset_strategy"`
 			MountWorkspace bool                `json:"mount_workspace"`
 			Actions        map[string][]string `json:"actions"`
-			Methods        map[string]string   `json:"methods"`
 		} `json:"native"`
 	} `json:"runtime"`
 	SupplyChain        map[string]any              `json:"supply_chain"`
@@ -187,6 +186,28 @@ func readPlatformManifest(path string, out any) error {
 		return fmt.Errorf("解析 manifest 失败 %s: %w", path, err)
 	}
 	return nil
+}
+
+// readSandboxInfraManifest 先按用途分流，非沙箱清单不套用沙箱组件契约。
+func readSandboxInfraManifest(path string) (*platformInfraManifest, error) {
+	raw, err := readSeedFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("读取 manifest 失败 %s: %w", path, err)
+	}
+	var header struct {
+		Labels map[string]string `json:"labels"`
+	}
+	if err := yaml.Unmarshal(raw, &header); err != nil {
+		return nil, fmt.Errorf("解析 manifest 用途失败 %s: %w", path, err)
+	}
+	if strings.TrimSpace(header.Labels["chaimir.io/scope"]) != "sandbox" {
+		return nil, nil
+	}
+	var manifest platformInfraManifest
+	if err := yaml.UnmarshalStrict(raw, &manifest); err != nil {
+		return nil, fmt.Errorf("解析沙箱基础设施 manifest 失败 %s: %w", path, err)
+	}
+	return &manifest, nil
 }
 
 // platformProof 只接受当前供应链证明解析出的不可变摘要地址。
@@ -355,8 +376,8 @@ func syncPlatformTools(ctx context.Context, tx pgx.Tx, root string) error {
 	return nil
 }
 
-// syncPlatformInfra 将 sandbox 范围的基础设施 manifest 转换为现有 tool 表中的 infra 组件。
-// cluster 范围的控制面组件仍由部署目录管理,不得进入教师沙箱编排目录。
+// syncPlatformInfra 只将 sandbox 范围的基础设施转换为教师可选的 infra 组件。
+// 其余 scope 属于部署、构建或平台控制面，不进入教师沙箱编排目录。
 func syncPlatformInfra(ctx context.Context, tx pgx.Tx, root string) error {
 	entries, err := os.ReadDir(filepath.Join(root, "infra"))
 	if err != nil {
@@ -367,15 +388,15 @@ func syncPlatformInfra(ctx context.Context, tx pgx.Tx, root string) error {
 			continue
 		}
 		path := filepath.Join(root, "infra", entry.Name(), "manifest.yaml")
-		var manifest platformInfraManifest
-		if err := readPlatformManifest(path, &manifest); err != nil {
+		manifest, err := readSandboxInfraManifest(path)
+		if err != nil {
 			return err
+		}
+		if manifest == nil {
+			continue
 		}
 		if manifest.Category != "infra" || manifest.Name != entry.Name() || manifest.Image != "infra/"+entry.Name() {
 			return fmt.Errorf("基础设施 manifest 标识不一致: %s", path)
-		}
-		if strings.TrimSpace(manifest.Labels["chaimir.io/scope"]) == "cluster" {
-			continue
 		}
 		imageURL, proven := platformProof(manifest.Image)
 		status := int16(2)
@@ -385,7 +406,7 @@ func syncPlatformInfra(ctx context.Context, tx pgx.Tx, root string) error {
 		}
 		resource := map[string]any{"disabled_reason": reason}
 		if proven && manifestDeployable(manifest.SupplyChain) {
-			generated, generateErr := infraResourceSpecFromManifest(manifest, imageURL)
+			generated, generateErr := infraResourceSpecFromManifest(*manifest, imageURL)
 			if generateErr != nil {
 				return fmt.Errorf("基础设施 %s 工作负载声明无效: %w", manifest.Name, generateErr)
 			}
@@ -409,36 +430,11 @@ func infraResourceSpecFromManifest(manifest platformInfraManifest, imageURL stri
 	if len(manifest.Infra.ResourceSpec) == 0 {
 		return nil, fmt.Errorf("基础设施必须声明 infra.resource_spec")
 	}
-	spec, err := normalizeExplicitToolResourceSpec(manifest.Infra.ResourceSpec, imageURL, contracts.SandboxToolKindInfra)
+	spec, err := normalizeExplicitToolResourceSpec(manifest.Infra.ResourceSpec, imageURL, manifest.Selftest, manifest.SecretsRequired)
 	if err != nil {
 		return nil, err
 	}
-	command, err := platformManifestSelftestCommand(manifest.Selftest)
-	if err != nil {
-		return nil, err
-	}
-	if len(command) == 0 {
-		return nil, fmt.Errorf("基础设施必须声明 selftest.commands")
-	}
-	if err := appendManifestSecretEnv(spec, manifest.SecretsRequired); err != nil {
-		return nil, err
-	}
-	componentData, err := json.Marshal(spec["components"])
-	if err != nil {
-		return nil, fmt.Errorf("编码基础设施组件失败: %w", err)
-	}
-	var components []workload.ComponentSpec
-	if err := json.Unmarshal(componentData, &components); err != nil || len(components) == 0 {
-		return nil, fmt.Errorf("基础设施 WorkloadSpec 缺少组件: %s", manifest.Name)
-	}
-	for index := range components {
-		if len(components[index].PrepullCommand) == 0 {
-			components[index].PrepullCommand = append([]string(nil), command...)
-		}
-	}
-	spec["components"] = components
-	spec["prepull_command"] = command
-	spec["bindings"] = append([]manifestBinding(nil), manifest.Infra.Bindings...)
+	spec["bindings"] = manifest.Infra.Bindings
 	spec["capabilities"] = map[string]any{
 		"provides":       append([]string(nil), manifest.Capabilities.Provides...),
 		"requires":       append([]string(nil), manifest.Capabilities.Requires...),
@@ -487,21 +483,21 @@ func platformManifestSelftestCommand(raw map[string]any) ([]string, error) {
 func secretEnvFromManifest(requirements []manifestSecretRequirement, component string) ([]workload.SecretEnvVarSpec, error) {
 	component = strings.TrimSpace(component)
 	if component == "" {
-		return nil, fmt.Errorf("Secret 注入目标组件不能为空")
+		return nil, fmt.Errorf("secret 注入目标组件不能为空")
 	}
 	out := make([]workload.SecretEnvVarSpec, 0, len(requirements))
 	seen := map[string]struct{}{}
 	for _, requirement := range requirements {
 		if declared := strings.TrimSpace(requirement.Component); declared == "" || declared != component {
-			return nil, fmt.Errorf("Secret %s 必须显式归属组件 %s", strings.TrimSpace(requirement.Env), component)
+			return nil, fmt.Errorf("secret %s 必须显式归属组件 %s", strings.TrimSpace(requirement.Env), component)
 		}
 		name := strings.TrimSpace(requirement.Env)
 		secretKey := strings.TrimSpace(requirement.SecretKey)
 		if name == "" || secretKey == "" {
-			return nil, fmt.Errorf("Secret 引用必须同时声明 env 和 secret_key")
+			return nil, fmt.Errorf("secret 引用必须同时声明 env 和 secret_key")
 		}
 		if _, exists := seen[name]; exists {
-			return nil, fmt.Errorf("Secret 环境变量重复声明: %s", name)
+			return nil, fmt.Errorf("secret 环境变量重复声明: %s", name)
 		}
 		seen[name] = struct{}{}
 		out = append(out, workload.SecretEnvVarSpec{Name: name, SecretName: "chaimir-secret", SecretKey: secretKey})
@@ -539,18 +535,6 @@ WHERE prepull.status<>1
 		return fmt.Errorf("撤销组合预拉取证明失败: %w", err)
 	}
 	return nil
-}
-
-// splitPlatformCSV 解析数据库中的生态标签列表并忽略空项。
-func splitPlatformCSV(value string) []string {
-	parts := strings.Split(value, ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if item := strings.TrimSpace(part); item != "" {
-			out = append(out, item)
-		}
-	}
-	return out
 }
 
 // syncPlatformJudgers 通过 M2 唯一编译器冻结平台判题器环境，绝不在迁移中手写快照。

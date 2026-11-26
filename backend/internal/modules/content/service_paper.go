@@ -39,7 +39,7 @@ func (s *Service) ListPapers(ctx context.Context, page, size int) ([]PaperDTO, i
 }
 
 // CreatePaper 创建手动或随机试卷。
-func (s *Service) CreatePaper(ctx context.Context, req CreatePaperRequest) (PaperDetailDTO, error) {
+func (s *Service) CreatePaper(ctx context.Context, actor auditActorSnapshot, req CreatePaperRequest) (PaperDetailDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return PaperDetailDTO{}, err
@@ -48,8 +48,11 @@ func (s *Service) CreatePaper(ctx context.Context, req CreatePaperRequest) (Pape
 	if err != nil {
 		return PaperDetailDTO{}, err
 	}
+	if err := actor.validate(id); err != nil {
+		return PaperDetailDTO{}, err
+	}
 	paper := Paper{ID: s.ids.Generate(), TenantID: id.TenantID, Name: req.Name, AuthorID: id.AccountID, GenMode: req.GenMode, GenCriteria: req.GenCriteria}
-	var detail PaperWithItems
+	var out PaperDetailDTO
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		created, err := tx.CreatePaper(ctx, paper)
 		if err != nil {
@@ -59,15 +62,19 @@ func (s *Service) CreatePaper(ctx context.Context, req CreatePaperRequest) (Pape
 		if err != nil {
 			return err
 		}
-		detail, err = s.paperDetailFromItems(ctx, tx, id.TenantID, id.AccountID, created, items)
-		return err
+		detail, err := s.paperDetailFromItems(ctx, tx, id.TenantID, id.AccountID, created, items)
+		if err != nil {
+			return err
+		}
+		out, err = paperDetailDTO(detail)
+		if err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, actor.accountID, actor.role, "content.paper.create", contentAuditTargetPaper, detail.Paper.ID, map[string]any{"name": detail.Paper.Name, "gen_mode": detail.Paper.GenMode})
 	}); err != nil {
 		return PaperDetailDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "content.paper.create", contentAuditTargetPaper, detail.Paper.ID, map[string]any{"name": detail.Paper.Name, "gen_mode": detail.Paper.GenMode}); err != nil {
-		return PaperDetailDTO{}, err
-	}
-	return paperDetailDTO(detail)
+	return out, nil
 }
 
 // GetPaperDetail 查询试卷详情并展开题面。
@@ -95,12 +102,15 @@ func (s *Service) GetPaperDetail(ctx context.Context, paperID int64) (PaperDetai
 }
 
 // RegeneratePaper 按原随机条件重新抽题。
-func (s *Service) RegeneratePaper(ctx context.Context, paperID int64) (PaperDetailDTO, error) {
+func (s *Service) RegeneratePaper(ctx context.Context, actor auditActorSnapshot, paperID int64) (PaperDetailDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return PaperDetailDTO{}, err
 	}
-	var detail PaperWithItems
+	if err := actor.validate(id); err != nil {
+		return PaperDetailDTO{}, err
+	}
+	var out PaperDetailDTO
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		paper, err := tx.GetPaper(ctx, id.TenantID, paperID)
 		if err != nil {
@@ -117,15 +127,19 @@ func (s *Service) RegeneratePaper(ctx context.Context, paperID int64) (PaperDeta
 		if err != nil {
 			return err
 		}
-		detail, err = s.paperDetailFromItems(ctx, tx, id.TenantID, id.AccountID, paper, items)
-		return err
+		detail, err := s.paperDetailFromItems(ctx, tx, id.TenantID, id.AccountID, paper, items)
+		if err != nil {
+			return err
+		}
+		out, err = paperDetailDTO(detail)
+		if err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, actor.accountID, actor.role, "content.paper.regenerate", contentAuditTargetPaper, paperID, map[string]any{})
 	}); err != nil {
 		return PaperDetailDTO{}, err
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "content.paper.regenerate", contentAuditTargetPaper, paperID, map[string]any{}); err != nil {
-		return PaperDetailDTO{}, err
-	}
-	return paperDetailDTO(detail)
+	return out, nil
 }
 
 // buildPaperItems 按当前教师可见范围生成手动或随机组卷题目集合。
@@ -156,7 +170,7 @@ func (s *Service) buildPaperItems(ctx context.Context, tx TxStore, tenantID, vie
 	}
 	picked, err := tx.RandomPickItems(ctx, tenantID, viewerID, req.GenCriteria)
 	if err != nil {
-		return nil, apperr.ErrPaperGenerateFailed.WithCause(err)
+		return nil, apperr.AsAppError(err)
 	}
 	pickedCount, ok := intx.Int32(len(picked))
 	if !ok || pickedCount < req.GenCriteria.Count {

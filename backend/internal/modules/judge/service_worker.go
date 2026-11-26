@@ -3,19 +3,19 @@ package judge
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
-	"reflect"
 	"strings"
 	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
-	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/upload"
@@ -40,9 +40,9 @@ func (s *Service) RunWorkerOnce(ctx context.Context) error {
 	if err := s.publishPendingOutbox(ctx); err != nil {
 		return err
 	}
-	limit, ok := intx.Int32(s.cfg.WorkerBatchSize)
-	if !ok || limit <= 0 {
-		limit = 1
+	limit := s.cfg.WorkerBatchSize
+	if limit <= 0 {
+		return apperr.ErrJudgeTaskPersistFailed
 	}
 	var expired []JudgeTask
 	var tasks []JudgeTask
@@ -78,7 +78,7 @@ func (s *Service) RunWorkerOnce(ctx context.Context) error {
 	}
 	for _, task := range tasks {
 		if err := s.processTask(ctx, task); err != nil {
-			logging.ErrorContext(ctx, "judge task processing failed", err.Error(), slog.Int64("tenant_id", task.TenantID), slog.Int64("task_id", task.ID))
+			logging.ErrorContext(ctx, "judge task processing failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", task.TenantID), slog.Int64("task_id", task.ID))
 		}
 	}
 	return s.publishPendingOutbox(ctx)
@@ -86,8 +86,20 @@ func (s *Service) RunWorkerOnce(ctx context.Context) error {
 
 // processTask 执行单个判题任务,失败时按任务重试策略回队列或落失败终态。
 func (s *Service) processTask(ctx context.Context, task JudgeTask) error {
+	leaseDuration := time.Duration(s.cfg.TaskLeaseDurationMs) * time.Millisecond
+	if leaseDuration < 3*time.Second {
+		return apperr.ErrJudgeTaskPersistFailed
+	}
+	renewed, err := s.renewJudgeTaskLease(ctx, task, leaseDuration)
+	if err != nil {
+		return apperr.ErrJudgeTaskPersistFailed.WithCause(err)
+	}
+	if !renewed {
+		slog.Default().LogAttrs(ctx, slog.LevelWarn, "judge task lease lost before execution", logging.AttrsFromContext(ctx, slog.Int64("tenant_id", task.TenantID), slog.Int64("task_id", task.ID))...)
+		return nil
+	}
 	s.publishProgress(ctx, task.TenantID, task.ID, JudgeTaskStatusJudging, ProgressStageJudging, "判题任务正在执行")
-	result, leaseLost, err := s.executeTaskWithLease(ctx, task)
+	result, leaseLost, err := s.executeTaskWithLease(ctx, task, leaseDuration)
 	if leaseLost {
 		slog.Default().LogAttrs(ctx, slog.LevelWarn, "judge task lease lost during execution", logging.AttrsFromContext(ctx, slog.Int64("tenant_id", task.TenantID), slog.Int64("task_id", task.ID))...)
 		return nil
@@ -99,11 +111,7 @@ func (s *Service) processTask(ctx context.Context, task JudgeTask) error {
 }
 
 // executeTaskWithLease 在整个不可信代码执行期间续租,避免任务超过初始租约后被并发重复执行。
-func (s *Service) executeTaskWithLease(ctx context.Context, task JudgeTask) (JudgeExecutionResult, bool, error) {
-	leaseDuration := time.Duration(s.cfg.TaskLeaseDurationMs) * time.Millisecond
-	if leaseDuration <= 0 {
-		return JudgeExecutionResult{}, false, apperr.ErrJudgeTaskPersistFailed
-	}
+func (s *Service) executeTaskWithLease(ctx context.Context, task JudgeTask, leaseDuration time.Duration) (JudgeExecutionResult, bool, error) {
 	executionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	done := make(chan struct{})
@@ -119,7 +127,7 @@ func (s *Service) executeTaskWithLease(ctx context.Context, task JudgeTask) (Jud
 	}
 }
 
-// renewJudgeTaskLeaseUntilDone 以小于租约的周期续租;任一 CAS 失败都取消执行上下文。
+// renewJudgeTaskLeaseUntilDone 按租约三分之一且最长 30 秒的周期续租;CAS 失败即取消执行。
 func (s *Service) renewJudgeTaskLeaseUntilDone(ctx context.Context, task JudgeTask, leaseDuration time.Duration, done <-chan struct{}, lost chan<- struct{}, cancel context.CancelFunc) {
 	interval := leaseDuration / 3
 	if interval > 30*time.Second {
@@ -137,18 +145,12 @@ func (s *Service) renewJudgeTaskLeaseUntilDone(ctx context.Context, task JudgeTa
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			leaseUntil := timex.Now().Add(leaseDuration)
-			var renewed bool
-			err := s.store.TenantTx(ctx, task.TenantID, func(ctx context.Context, tx TxStore) error {
-				var err error
-				renewed, err = tx.RenewJudgeTaskLease(ctx, task.TenantID, task.ID, task.LeaseToken, leaseUntil)
-				return err
-			})
+			renewed, err := s.renewJudgeTaskLease(ctx, task, leaseDuration)
 			if err == nil && renewed {
 				continue
 			}
 			if err != nil {
-				logging.ErrorContext(ctx, "judge task lease renewal failed", err.Error(), slog.Int64("tenant_id", task.TenantID), slog.Int64("task_id", task.ID))
+				logging.ErrorContext(ctx, "judge task lease renewal failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", task.TenantID), slog.Int64("task_id", task.ID))
 			}
 			select {
 			case lost <- struct{}{}:
@@ -160,6 +162,17 @@ func (s *Service) renewJudgeTaskLeaseUntilDone(ctx context.Context, task JudgeTa
 	}
 }
 
+// renewJudgeTaskLease 仅允许当前持有者延长仍有效的判题任务租约。
+func (s *Service) renewJudgeTaskLease(ctx context.Context, task JudgeTask, leaseDuration time.Duration) (bool, error) {
+	var renewed bool
+	err := s.store.TenantTx(ctx, task.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		renewed, err = tx.RenewJudgeTaskLease(ctx, task.TenantID, task.ID, task.LeaseToken, timex.Now().Add(leaseDuration))
+		return err
+	})
+	return renewed, err
+}
+
 // executeTask 根据判题器类型选择后端策略或沙箱命令执行路径。
 func (s *Service) executeTask(ctx context.Context, task JudgeTask) (JudgeExecutionResult, error) {
 	if task.InputSnapshot.JudgerType == JudgerTypeManual {
@@ -168,6 +181,9 @@ func (s *Service) executeTask(ctx context.Context, task JudgeTask) (JudgeExecuti
 	executionTask, err := s.taskWithExecutionExpectation(ctx, task)
 	if err != nil {
 		return JudgeExecutionResult{}, err
+	}
+	if executionTask.SandboxMode == JudgeSandboxModeFresh {
+		executionTask.SourceRef = judgeSandboxAttemptSourceRef(task)
 	}
 	if !needsSandbox(task) {
 		result, handled, err := s.executeJudgerStrategy(ctx, executionTask, 0)
@@ -178,12 +194,17 @@ func (s *Service) executeTask(ctx context.Context, task JudgeTask) (JudgeExecuti
 			return normalizeExecutionResult(result, executionTask.InputSnapshot.MaxScore, s.cfg.ResultDetailsMaxBytes)
 		}
 	}
-	sandboxID, fresh, err := s.resolveSandbox(ctx, executionTask)
+	sandboxID, fresh, err := s.resolveSandbox(ctx, &executionTask, task.SourceRef)
 	if fresh {
 		defer s.destroyJudgeSandbox(ctx, executionTask, sandboxID)
 	}
 	if err != nil {
 		return JudgeExecutionResult{}, err
+	}
+	if executionTask.InputSnapshot.TimeoutSec > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(executionTask.InputSnapshot.TimeoutSec)*time.Second)
+		defer cancel()
 	}
 	if result, handled, err := s.executeJudgerStrategy(ctx, executionTask, sandboxID); handled {
 		if err != nil {
@@ -219,7 +240,7 @@ func (s *Service) taskWithExecutionExpectation(ctx context.Context, task JudgeTa
 	if spec.JudgerCode != "" && spec.JudgerCode != task.InputSnapshot.JudgerCode {
 		return JudgeTask{}, apperr.ErrJudgeSpecUnavailable
 	}
-	expectation, err := s.executionExpectationForJudger(task.InputSnapshot.JudgerType, spec, task.InputSnapshot.Expectation)
+	expectation, err := executionExpectationForJudger(task.InputSnapshot.JudgerType, spec.Expectation, task.InputSnapshot.Expectation)
 	if err != nil {
 		return JudgeTask{}, err
 	}
@@ -242,23 +263,13 @@ func needsSandbox(task JudgeTask) bool {
 }
 
 // resolveSandbox 返回本次判题使用的沙箱 ID,fresh 模式会创建并等待干净判题沙箱就绪。
-func (s *Service) resolveSandbox(ctx context.Context, task JudgeTask) (int64, bool, error) {
+func (s *Service) resolveSandbox(ctx context.Context, task *JudgeTask, scopeRef string) (int64, bool, error) {
 	if task.SandboxMode == JudgeSandboxModeReuse {
-		id, err := parseSandboxRef(task.TargetSandboxRef)
-		if err != nil {
-			return 0, false, err
-		}
-		info, err := s.sandbox.GetSandbox(ctx, task.TenantID, id)
-		if err != nil {
-			return 0, false, apperr.ErrJudgeWorkerFailed.WithCause(err)
-		}
-		if info.TenantID != task.TenantID || info.Status == contracts.SandboxStatusDestroyed || info.Status == contracts.SandboxStatusFailed {
-			return 0, false, apperr.ErrJudgeTaskStateInvalid
-		}
-		if info.SourceRef != strings.TrimSpace(task.InputSnapshot.SandboxSourceRef) {
-			return 0, false, apperr.ErrJudgeTaskStateInvalid
-		}
-		return id, false, nil
+		id, err := s.resolveReuseSandbox(ctx, task)
+		return id, false, err
+	}
+	if scopeRef == "" {
+		return 0, false, apperr.ErrJudgeTaskStateInvalid
 	}
 	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{
 		TenantID:            task.TenantID,
@@ -266,34 +277,78 @@ func (s *Service) resolveSandbox(ctx context.Context, task JudgeTask) (int64, bo
 		InitScriptRef:       task.InputSnapshot.InitScriptRef,
 		OwnerAccountID:      task.SubmitterID,
 		SourceRef:           task.SourceRef,
-		ScopeRef:            task.SourceRef,
+		ScopeRef:            scopeRef,
 		KeepAlive:           false,
 		SnapshotEnabled:     false,
-		PrivateSidecars:     privateSidecarsForSandbox(task.InputSnapshot.ExecutionSidecars),
 	})
 	if err != nil {
 		return 0, false, apperr.ErrJudgeWorkerFailed.WithCause(err)
 	}
-	if err := s.waitSandboxReady(ctx, task, info.SandboxID); err != nil {
+	if err := s.waitSandboxReady(ctx, *task, info.SandboxID); err != nil {
 		return info.SandboxID, true, err
 	}
 	if judgerRequiresCode(task.InputSnapshot.JudgerType, task.SandboxMode) {
-		if err := s.injectStudentCode(ctx, task, info.SandboxID); err != nil {
+		if err := s.injectStudentCode(ctx, *task, info.SandboxID); err != nil {
 			return info.SandboxID, true, err
 		}
 	}
-	if err := s.injectPrivateSuite(ctx, task, info.SandboxID); err != nil {
+	if err := s.injectPrivateSuite(ctx, *task, info.SandboxID); err != nil {
 		return info.SandboxID, true, err
 	}
 	return info.SandboxID, true, nil
 }
 
-// sandboxSourceRef 返回 M2 资源所有权来源; reuse 判题不能使用本次任务事件来源。
-func sandboxSourceRef(task JudgeTask) string {
-	if task.SandboxMode == JudgeSandboxModeReuse && strings.TrimSpace(task.InputSnapshot.SandboxSourceRef) != "" {
-		return task.InputSnapshot.SandboxSourceRef
+// resolveReuseSandbox 在提交与执行时核验同一份 M2 身份，权限不取自调用方输入。
+func (s *Service) resolveReuseSandbox(ctx context.Context, task *JudgeTask) (int64, error) {
+	id, err := parseSandboxRef(task.TargetSandboxRef)
+	if err != nil {
+		return 0, err
 	}
-	return task.SourceRef
+	info, err := s.sandbox.GetSandbox(ctx, task.TenantID, id)
+	if err != nil {
+		return 0, apperr.ErrJudgeWorkerFailed.WithCause(err)
+	}
+	if info.SandboxID != id || info.TenantID != task.TenantID || info.SourceRef != strings.TrimSpace(task.InputSnapshot.SandboxSourceRef) ||
+		(info.Status != contracts.SandboxStatusReady && info.Status != contracts.SandboxStatusRunning) || info.Phase != contracts.SandboxPhaseFullyReady || strings.TrimSpace(info.WorkspaceRuntimeInstance) == "" {
+		return 0, apperr.ErrJudgeTaskStateInvalid
+	}
+	switch info.AccessProfile {
+	case contracts.SandboxAccessExperiment, contracts.SandboxAccessContestSolve:
+		if isBattleTask(*task) {
+			return 0, apperr.ErrJudgeTaskStateInvalid
+		}
+	case contracts.SandboxAccessContestBattle:
+		if !isBattleTask(*task) || task.SourceRef != info.SourceRef || task.SubmitterTenantID != info.TenantID ||
+			task.SubmitterID <= 0 || task.SubmitterID != info.OwnerAccountID || task.SourceOwnerID != info.OwnerAccountID ||
+			task.InputSnapshot.SandboxCompositionDigest == "" || task.InputSnapshot.SandboxCompositionDigest != info.CompositionDigest {
+			return 0, apperr.ErrJudgeTaskStateInvalid
+		}
+	default:
+		return 0, apperr.ErrJudgeTaskStateInvalid
+	}
+	task.runtimeInstance = info.WorkspaceRuntimeInstance
+	task.accessProfile = info.AccessProfile
+	return id, nil
+}
+
+// isBattleTask 识别由 M8 独立调度、不能在原环境重跑的私有对局任务。
+func isBattleTask(task JudgeTask) bool {
+	parts := strings.Split(task.SourceRef, ":")
+	return task.SandboxMode == JudgeSandboxModeReuse && task.SourceScope == "contest" && len(parts) == 4 && parts[0] == "contest" && parts[2] == "battle"
+}
+
+// judgeSandboxAttemptSourceRef 隔离每次租约执行的沙箱来源,避免旧 worker 清理重试 worker 的环境。
+func judgeSandboxAttemptSourceRef(task JudgeTask) string {
+	digest := sha256.Sum256([]byte(task.LeaseToken))
+	return fmt.Sprintf("judge:%04d:task:%s-%s", timex.Now().Year(), ids.Format(task.ID), hex.EncodeToString(digest[:16]))
+}
+
+// sandboxSourceRef 返回沙箱资源的所有权来源,复用模式必须使用快照中的来源。
+func sandboxSourceRef(task JudgeTask) string {
+	if task.SandboxMode == JudgeSandboxModeReuse {
+		return strings.TrimSpace(task.InputSnapshot.SandboxSourceRef)
+	}
+	return strings.TrimSpace(task.SourceRef)
 }
 
 // privateSidecarsForSandbox 把 M3 判题器内部 WorkloadSpec 转为 M2 跨模块 DTO。
@@ -330,8 +385,8 @@ func privateSidecarsForSandbox(items []workload.ComponentSpec) []contracts.Sandb
 
 // waitSandboxReady 轮询 M2 沙箱状态直到运行时可执行或超时。
 func (s *Service) waitSandboxReady(ctx context.Context, task JudgeTask, sandboxID int64) error {
-	graceSeconds, ok := intx.Int32(s.cfg.SandboxReadyGraceSeconds)
-	if !ok || graceSeconds < 0 {
+	graceSeconds := s.cfg.SandboxReadyGraceSeconds
+	if graceSeconds < 0 {
 		return apperr.ErrJudgeTimeout
 	}
 	timeoutSeconds := int64(task.InputSnapshot.TimeoutSec) + int64(graceSeconds)
@@ -345,7 +400,7 @@ func (s *Service) waitSandboxReady(ctx context.Context, task JudgeTask, sandboxI
 	deadline := timex.Now().Add(timeout)
 	interval := time.Duration(s.cfg.SandboxReadyPollIntervalMs) * time.Millisecond
 	if interval <= 0 {
-		interval = time.Second
+		return apperr.ErrJudgeWorkerFailed
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -377,7 +432,7 @@ func (s *Service) injectPrivateSuite(ctx context.Context, task JudgeTask, sandbo
 	if strings.TrimSpace(task.InputSnapshot.SuiteRef) == "" {
 		return nil
 	}
-	injectCtx, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.InputInjectTimeoutSeconds)*time.Second)
+	injectCtx, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.InputTimeoutSeconds)*time.Second)
 	defer cancel()
 	name, data, err := s.readObjectRef(injectCtx, task.InputSnapshot.SuiteRef)
 	if err != nil {
@@ -411,13 +466,13 @@ func (s *Service) injectStudentCode(ctx context.Context, task JudgeTask, sandbox
 	if archiveName == "" {
 		archiveName = "submission.tar"
 	}
-	injectCtx, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.InputInjectTimeoutSeconds)*time.Second)
+	injectCtx, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.InputTimeoutSeconds)*time.Second)
 	defer cancel()
 	_, data, err := s.readObjectRef(injectCtx, task.InputSnapshot.SanitizedCodeArchiveRef)
 	if err != nil {
 		return apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
 	}
-	// 历史排队/重判任务的执行归档可能早于净化规则,注入前统一校验并剔除平台私有副本。
+	// 从对象存储重新读取后复验归档与私有路径边界。
 	data, err = upload.SafeArchiveTar(archiveName, data, upload.ArchiveLimits{MaxFiles: s.cfg.InputArchiveMaxFiles, MaxUnpackedBytes: s.cfg.InputArchiveMaxUnpackedBytes})
 	if err != nil {
 		return apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
@@ -515,6 +570,7 @@ func (s *Service) completeTask(ctx context.Context, task JudgeTask, result Judge
 
 // retryOrFail 按任务快照中的重试上限回队列或写失败终态事件。
 func (s *Service) retryOrFail(ctx context.Context, task JudgeTask, cause error) error {
+	logging.ErrorContext(ctx, "judge execution failed", apperr.AsAppError(cause).LogString(), slog.Int64("tenant_id", task.TenantID), slog.Int64("task_id", task.ID), slog.String("trace_id", task.InputSnapshot.TraceID))
 	reason := safeFailureReason(cause)
 	if task.RetryCount < task.MaxRetries {
 		var retry JudgeTask
@@ -553,17 +609,17 @@ func (s *Service) retryOrFail(ctx context.Context, task JudgeTask, cause error) 
 // publishPendingOutbox 发布已落库的终态事件并回写发布状态。
 func (s *Service) publishPendingOutbox(ctx context.Context) error {
 	var items []JudgeEventOutbox
-	limit, ok := intx.Int32(s.cfg.WorkerBatchSize)
-	if !ok || limit <= 0 {
-		limit = 10
+	limit := s.cfg.WorkerBatchSize
+	if limit <= 0 {
+		return apperr.ErrJudgeEventPublishFailed
 	}
 	leaseToken, err := pkgcrypto.RandomToken(48)
 	if err != nil {
 		return apperr.ErrJudgeEventPublishFailed.WithCause(err)
 	}
 	leaseUntil := time.Now().Add(time.Duration(s.cfg.OutboxLeaseDurationMs) * time.Millisecond)
-	maxAttempts, ok := intx.Int32(s.cfg.OutboxMaxAttempts)
-	if !ok || maxAttempts <= 0 {
+	maxAttempts := s.cfg.OutboxMaxAttempts
+	if maxAttempts <= 0 {
 		return apperr.ErrJudgeEventPublishFailed
 	}
 	staleBefore := time.Now()
@@ -595,8 +651,9 @@ func (s *Service) publishPendingOutbox(ctx context.Context) error {
 
 // recordOutboxPublishFailure 记录发布失败状态,失败标记本身也必须进入结构化日志。
 func (s *Service) recordOutboxPublishFailure(ctx context.Context, item JudgeEventOutbox, cause error) {
+	logging.ErrorContext(ctx, "judge outbox publish failed", apperr.AsAppError(cause).LogString(), slog.Int64("tenant_id", item.TenantID), slog.Int64("task_id", item.TaskID), slog.Int64("outbox_id", item.ID), slog.String("subject", item.Subject))
 	if err := s.markOutboxFailed(ctx, item, cause); err != nil {
-		logging.ErrorContext(ctx, "judge outbox failure mark failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("task_id", item.TaskID), slog.Int64("outbox_id", item.ID), slog.String("subject", item.Subject))
+		logging.ErrorContext(ctx, "judge outbox failure mark failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", item.TenantID), slog.Int64("task_id", item.TaskID), slog.Int64("outbox_id", item.ID), slog.String("subject", item.Subject))
 	}
 }
 
@@ -607,19 +664,6 @@ func resultDetailsJSONBytes(details []JudgeResultDetail) (int, error) {
 		return 0, err
 	}
 	return len(raw), nil
-}
-
-// hasDeterministicExpectation 判断快照期望是否包含非确定性显式标记。
-func hasDeterministicExpectation(expectation map[string]any) bool {
-	if expectation == nil {
-		return true
-	}
-	for _, key := range []string{"random", "wall_clock", "external_network"} {
-		if value, ok := expectation[key]; ok && !reflect.ValueOf(value).IsZero() {
-			return false
-		}
-	}
-	return true
 }
 
 // markOutboxPublished 用特权事务回写 outbox 发布成功状态。
@@ -755,8 +799,10 @@ func (s *Service) destroyJudgeSandbox(ctx context.Context, task JudgeTask, sandb
 	if sandboxID <= 0 {
 		return
 	}
-	if err := s.sandbox.DestroySandbox(ctx, contracts.SandboxControlRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef}); err != nil {
-		logging.ErrorContext(ctx, "judge sandbox destroy failed", err.Error(), slog.Int64("tenant_id", task.TenantID), slog.Int64("task_id", task.ID), slog.Int64("sandbox_id", sandboxID))
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(s.cfg.InputTimeoutSeconds)*time.Second)
+	defer cancel()
+	if err := s.sandbox.DestroySandbox(cleanupCtx, contracts.SandboxControlRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef}); err != nil {
+		logging.ErrorContext(cleanupCtx, "judge sandbox destroy failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", task.TenantID), slog.Int64("task_id", task.ID), slog.Int64("sandbox_id", sandboxID))
 	}
 }
 
@@ -776,18 +822,4 @@ func judgeSandboxRef(id int64) string {
 		return ""
 	}
 	return "sandbox:" + ids.Format(id)
-}
-
-// int64FromAny 从自检 JSON 配置读取 int64。
-func int64FromAny(v any) int64 {
-	return jsonx.Int64FromAny(v, 0)
-}
-
-// int32FromAny 从自检 JSON 配置读取 int32。
-func int32FromAny(v any) int32 {
-	n := int64FromAny(v)
-	if n <= 0 || n > 1<<31-1 {
-		return 0
-	}
-	return int32(n)
 }

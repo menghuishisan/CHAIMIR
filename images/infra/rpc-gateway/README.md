@@ -15,17 +15,20 @@ DApp 多节点 RPC 网关教学镜像。
 - 生态或适配范围：evm
 - 必需 provider 能力：evm-json-rpc。
 - provider 只能通过 manifest 能力和显式 CompositionSpec link 选择；多个候选必须显式指定，不能按名称猜测。
+- 上游 URL 必须带显式端口，且不含凭据、路径、查询、片段或 IPv6 zone。HTTP 明文连接；HTTPS 使用 Envoy 原生 TLS、系统 CA 和 DNS/IP SAN 校验，DNS 同时发送 SNI。
 
 ## bindings 与 links
 
-- 必需 bindings：[{"name":"upstream","capability":"evm-json-rpc","source_component":"infra","endpoint":"rpc","protocol":"HTTP","required_at_start":true,"config_binding":"env:CHAIMIR_RPC_UPSTREAM_URL"}]。
+- 必需绑定 `upstream`：`evm-json-rpc` 能力、`rpc` 端点、HTTP 协议，源组件 `infra`；允许明确选择一个或多个目标，全部目标就绪后才启动。
+- M2 将完整地址数组写入 `CHAIMIR_RPC_UPSTREAM_URLS`，同一绑定的多条 link 各自生成网络规则。没有单地址环境变量或手工填上游的旁路。
+- 所有节点进入同一 Envoy `STRICT_DNS` / `ROUND_ROBIN` 集群，每个端点独立匹配明文或 TLS 配置；不自动重试交易。上游须属于同一条链，独立账本使用不同网关。
 - 必需 links：无；本镜像不声明跨组件 link。
 - binding 的 endpoint、协议、配置键和启动前置以 manifest 为准；缺失、重复、错误能力或错误 provider 均拒绝编排。
 
 ## 端口与服务
 
-- http：8080/TCP，暴露边界 proxy，用途：RPC gateway proxy。
-- CompositionSpec services：[{"name":"infra-rpc-gateway-http","component":"infra","ports":[{"name":"http","port":8080,"target_port":"http","protocol":"TCP"}]}]
+- rpc：8080/TCP，暴露边界 proxy，用途：RPC gateway proxy。
+- CompositionSpec services：[{"name":"infra-rpc-gateway-rpc","component":"infra","ports":[{"name":"rpc","port":8080,"target_port":"rpc","protocol":"TCP"}]}]
 - 组件：infra。
 
 ## command / args 语义
@@ -56,9 +59,9 @@ DApp 多节点 RPC 网关教学镜像。
 
 ## readiness / health
 
-- 组件 infra readiness：{"type":"tcp","port":"http","period_seconds":2,"failure_threshold":30}。
+- 组件 infra readiness：{"type":"tcp","port":"rpc","period_seconds":2,"failure_threshold":30}。
 - 镜像自检 envoy-version：["envoy","--version"]。
-- 镜像自检 entrypoint-syntax：["sh","-n","/usr/local/bin/chaimir-rpc-gateway-entrypoint"]。
+- 镜像自检 entrypoint-version：["/usr/local/bin/chaimir-rpc-gateway-entrypoint","--version"]，不依赖上游配置。
 
 ## 清理
 

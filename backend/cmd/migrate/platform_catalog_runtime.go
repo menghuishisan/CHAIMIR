@@ -2,7 +2,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -52,11 +51,10 @@ func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL
 	}
 	archiveTarget := "sandbox/private-archive"
 	initAssetTarget := "sandbox/init-assets"
-	env, err := runtimeAdapterEnv(manifest)
-	if err != nil {
-		return nil, err
-	}
-	env, err = mergeRuntimeWorkloadEnv(env, manifest.Runtime.Workload.Env)
+	env, err := mergeRuntimeWorkloadEnv([]workload.EnvVarSpec{
+		{Name: "CHAIMIR_CHAIN_RPC_URL", Value: fmt.Sprintf("http://127.0.0.1:%d", runtimeRPCPort(manifest.Ports))},
+		{Name: "HOME", Value: "/runtime-state/adapter-home"},
+	}, manifest.Runtime.Workload.Env)
 	if err != nil {
 		return nil, err
 	}
@@ -220,19 +218,18 @@ func capabilityCommandSet(helper, target, resetStrategy string, actions map[stri
 	if strings.TrimSpace(helper) == "" {
 		return map[string]any{}
 	}
-	command := func(action string, timeout int) map[string]any {
-		argv := append([]string(nil), actions[action]...)
-		if len(argv) == 0 {
-			argv = []string{helper, action}
+	out := map[string]any{"reset_strategy": resetStrategy}
+	for _, action := range []string{"deploy", "tx", "query"} {
+		if len(actions[action]) == 0 {
+			continue
 		}
-		return map[string]any{"exec_target": target, "command": argv, "timeout_seconds": timeout}
+		timeout := 120
+		if action == "query" {
+			timeout = 60
+		}
+		out[action] = map[string]any{"exec_target": target, "command": append([]string(nil), actions[action]...), "timeout_seconds": timeout}
 	}
-	return map[string]any{
-		"deploy":         command("deploy", 120),
-		"tx":             command("tx", 120),
-		"query":          command("query", 60),
-		"reset_strategy": resetStrategy,
-	}
+	return out
 }
 
 // runtimeCapabilityImpl 只为声明真实 native helper 的 L2/L3 runtime 选择内置执行器。
@@ -254,10 +251,10 @@ func runtimeManifestCapabilityReason(manifest platformRuntimeManifest) string {
 		return ""
 	}
 	for _, action := range []string{"deploy", "tx", "query"} {
-		if len(manifest.Runtime.Native.Actions[action]) > 0 || strings.TrimSpace(manifest.Runtime.Native.Methods[action]) != "" {
+		if len(manifest.Runtime.Native.Actions[action]) > 0 {
 			continue
 		}
-		return fmt.Sprintf("运行时未声明 native.%s 动作或方法", action)
+		return fmt.Sprintf("运行时未声明 native.actions.%s 动作", action)
 	}
 	deployPayload, deployOK := manifest.CapabilitySelftest["deploy_payload"].(map[string]any)
 	if !deployOK || len(deployPayload) == 0 {
@@ -277,37 +274,6 @@ func runtimeSelftestSpec(manifest platformRuntimeManifest) map[string]any {
 		out[key] = value
 	}
 	return out
-}
-
-// runtimeAdapterEnv 将运行时 manifest 的插件 argv/RPC 方法转成受控环境变量,不解释生态语义。
-func runtimeAdapterEnv(manifest platformRuntimeManifest) ([]workload.EnvVarSpec, error) {
-	port := runtimeRPCPort(manifest.Ports)
-	url := fmt.Sprintf("http://127.0.0.1:%d", port)
-	env := []workload.EnvVarSpec{
-		{Name: "CHAIMIR_RUNTIME_PROFILE", Value: manifest.Runtime.Native.Profile},
-		{Name: "CHAIMIR_CHAIN_RPC_URL", Value: url},
-		{Name: "HOME", Value: "/runtime-state/adapter-home"},
-	}
-	for action, argv := range manifest.Runtime.Native.Actions {
-		if len(argv) == 0 {
-			continue
-		}
-		raw, err := json.Marshal(argv)
-		if err != nil {
-			return nil, fmt.Errorf("编码运行时 %s 动作 argv 失败: %w", action, err)
-		}
-		name := "CHAIMIR_ADAPTER_" + strings.ToUpper(strings.TrimSpace(action)) + "_ARGV"
-		env = append(env, workload.EnvVarSpec{Name: name, Value: string(raw)})
-	}
-	for action, method := range manifest.Runtime.Native.Methods {
-		method = strings.TrimSpace(method)
-		if method == "" {
-			continue
-		}
-		name := "CHAIMIR_ADAPTER_" + strings.ToUpper(strings.TrimSpace(action)) + "_METHOD"
-		env = append(env, workload.EnvVarSpec{Name: name, Value: method})
-	}
-	return env, nil
 }
 
 // runtimeRPCPort 按端口名称选择链能力入口,不能把 P2P/共识端口误当成 RPC。

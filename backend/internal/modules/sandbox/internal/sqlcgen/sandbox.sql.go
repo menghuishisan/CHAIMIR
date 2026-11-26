@@ -11,6 +11,71 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimExpiredSandboxSnapshotCleanup = `-- name: ClaimExpiredSandboxSnapshotCleanup :one
+UPDATE sandbox
+SET resource_lease_token = $1::varchar,
+    resource_lease_until = now() + $2::bigint * interval '1 second',
+    updated_at = now()
+WHERE tenant_id = $3
+  AND id = $4
+  AND status = 5
+  AND snapshot_expire_at IS NOT NULL
+  AND snapshot_expire_at <= now()
+  AND (resource_lease_token = '' OR resource_lease_until IS NULL OR resource_lease_until <= now())
+RETURNING id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, recycle_saved, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, resource_lease_token, resource_lease_until, created_at, updated_at
+`
+
+type ClaimExpiredSandboxSnapshotCleanupParams struct {
+	LeaseToken   string `json:"lease_token"`
+	LeaseSeconds int64  `json:"lease_seconds"`
+	TenantID     int64  `json:"tenant_id"`
+	ID           int64  `json:"id"`
+}
+
+func (q *Queries) ClaimExpiredSandboxSnapshotCleanup(ctx context.Context, arg ClaimExpiredSandboxSnapshotCleanupParams) (Sandbox, error) {
+	row := q.db.QueryRow(ctx, claimExpiredSandboxSnapshotCleanup,
+		arg.LeaseToken,
+		arg.LeaseSeconds,
+		arg.TenantID,
+		arg.ID,
+	)
+	var i Sandbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Namespace,
+		&i.SourceRef,
+		&i.ScopeRef,
+		&i.CompositionDigest,
+		&i.CompositionSnapshot,
+		&i.AccessProfile,
+		&i.OwnerAccountID,
+		&i.SharedAccountIds,
+		&i.Phase,
+		&i.Status,
+		&i.KeepAlive,
+		&i.SnapshotEnabled,
+		&i.CodeStorageKey,
+		&i.CodeHash,
+		&i.RecycleSaved,
+		&i.WorkspaceRevision,
+		&i.InitCodeRef,
+		&i.InitScriptRef,
+		&i.SnapshotRef,
+		&i.SnapshotDomains,
+		&i.SnapshotCreatedAt,
+		&i.SnapshotExpireAt,
+		&i.KeepAliveUntil,
+		&i.LastActiveAt,
+		&i.ExpireAt,
+		&i.ResourceLeaseToken,
+		&i.ResourceLeaseUntil,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const claimPendingSandboxRecycleOutbox = `-- name: ClaimPendingSandboxRecycleOutbox :many
 WITH exhausted AS (
     UPDATE sandbox_recycle_outbox AS expired
@@ -30,7 +95,7 @@ UPDATE sandbox_recycle_outbox AS outbox
 SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_token = $1, lease_until = $2::timestamptz
 FROM candidates
 WHERE outbox.id = candidates.id
-RETURNING outbox.id, outbox.tenant_id, outbox.sandbox_id, outbox.source_ref, outbox.scope_ref, outbox.owner_account_id, outbox.reason, outbox.trace_id, outbox.recycled_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until
+RETURNING outbox.id, outbox.tenant_id, outbox.sandbox_id, outbox.source_ref, outbox.scope_ref, outbox.reason, outbox.trace_id, outbox.recycled_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until
 `
 
 type ClaimPendingSandboxRecycleOutboxParams struct {
@@ -62,7 +127,6 @@ func (q *Queries) ClaimPendingSandboxRecycleOutbox(ctx context.Context, arg Clai
 			&i.SandboxID,
 			&i.SourceRef,
 			&i.ScopeRef,
-			&i.OwnerAccountID,
 			&i.Reason,
 			&i.TraceID,
 			&i.RecycledAt,
@@ -84,12 +148,149 @@ func (q *Queries) ClaimPendingSandboxRecycleOutbox(ctx context.Context, arg Clai
 	return items, nil
 }
 
+const claimSandboxRecycle = `-- name: ClaimSandboxRecycle :one
+UPDATE sandbox
+SET status = CASE WHEN status = 6 THEN 6 ELSE 4 END,
+    recycle_saved = CASE WHEN status IN (4, 6) THEN recycle_saved ELSE false END,
+    resource_lease_token = $1::varchar,
+    resource_lease_until = now() + $2::bigint * interval '1 second',
+    updated_at = now()
+WHERE tenant_id = $3
+  AND id = $4
+  AND (status = $5::smallint OR (status = 4 AND $5::smallint <> 5))
+  AND status <> 5
+  AND (resource_lease_until IS NULL OR resource_lease_until <= now())
+RETURNING id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, recycle_saved, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, resource_lease_token, resource_lease_until, created_at, updated_at
+`
+
+type ClaimSandboxRecycleParams struct {
+	LeaseToken     string `json:"lease_token"`
+	LeaseSeconds   int64  `json:"lease_seconds"`
+	TenantID       int64  `json:"tenant_id"`
+	ID             int64  `json:"id"`
+	ExpectedStatus int16  `json:"expected_status"`
+}
+
+func (q *Queries) ClaimSandboxRecycle(ctx context.Context, arg ClaimSandboxRecycleParams) (Sandbox, error) {
+	row := q.db.QueryRow(ctx, claimSandboxRecycle,
+		arg.LeaseToken,
+		arg.LeaseSeconds,
+		arg.TenantID,
+		arg.ID,
+		arg.ExpectedStatus,
+	)
+	var i Sandbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Namespace,
+		&i.SourceRef,
+		&i.ScopeRef,
+		&i.CompositionDigest,
+		&i.CompositionSnapshot,
+		&i.AccessProfile,
+		&i.OwnerAccountID,
+		&i.SharedAccountIds,
+		&i.Phase,
+		&i.Status,
+		&i.KeepAlive,
+		&i.SnapshotEnabled,
+		&i.CodeStorageKey,
+		&i.CodeHash,
+		&i.RecycleSaved,
+		&i.WorkspaceRevision,
+		&i.InitCodeRef,
+		&i.InitScriptRef,
+		&i.SnapshotRef,
+		&i.SnapshotDomains,
+		&i.SnapshotCreatedAt,
+		&i.SnapshotExpireAt,
+		&i.KeepAliveUntil,
+		&i.LastActiveAt,
+		&i.ExpireAt,
+		&i.ResourceLeaseToken,
+		&i.ResourceLeaseUntil,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const claimSandboxResources = `-- name: ClaimSandboxResources :one
+UPDATE sandbox
+SET resource_lease_token = $1::varchar,
+    resource_lease_until = now() + $2::bigint * interval '1 second',
+    updated_at = now()
+WHERE tenant_id = $3
+  AND id = $4
+  AND status = $5::smallint
+  AND status IN (1, 2, 7, 8)
+  AND (status = 1 OR phase IN (2, 4))
+  AND (resource_lease_until IS NULL OR resource_lease_until <= now())
+RETURNING id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, recycle_saved, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, resource_lease_token, resource_lease_until, created_at, updated_at
+`
+
+type ClaimSandboxResourcesParams struct {
+	LeaseToken     string `json:"lease_token"`
+	LeaseSeconds   int64  `json:"lease_seconds"`
+	TenantID       int64  `json:"tenant_id"`
+	ID             int64  `json:"id"`
+	ExpectedStatus int16  `json:"expected_status"`
+}
+
+func (q *Queries) ClaimSandboxResources(ctx context.Context, arg ClaimSandboxResourcesParams) (Sandbox, error) {
+	row := q.db.QueryRow(ctx, claimSandboxResources,
+		arg.LeaseToken,
+		arg.LeaseSeconds,
+		arg.TenantID,
+		arg.ID,
+		arg.ExpectedStatus,
+	)
+	var i Sandbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Namespace,
+		&i.SourceRef,
+		&i.ScopeRef,
+		&i.CompositionDigest,
+		&i.CompositionSnapshot,
+		&i.AccessProfile,
+		&i.OwnerAccountID,
+		&i.SharedAccountIds,
+		&i.Phase,
+		&i.Status,
+		&i.KeepAlive,
+		&i.SnapshotEnabled,
+		&i.CodeStorageKey,
+		&i.CodeHash,
+		&i.RecycleSaved,
+		&i.WorkspaceRevision,
+		&i.InitCodeRef,
+		&i.InitScriptRef,
+		&i.SnapshotRef,
+		&i.SnapshotDomains,
+		&i.SnapshotCreatedAt,
+		&i.SnapshotExpireAt,
+		&i.KeepAliveUntil,
+		&i.LastActiveAt,
+		&i.ExpireAt,
+		&i.ResourceLeaseToken,
+		&i.ResourceLeaseUntil,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const claimSandboxWorkspaceRevision = `-- name: ClaimSandboxWorkspaceRevision :one
 UPDATE sandbox
 SET workspace_revision = workspace_revision + 1,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
   AND workspace_revision = $3::bigint
+  AND phase IN (2, 4) AND status IN (2, 7, 8)
+  AND resource_lease_token = ''
 RETURNING workspace_revision
 `
 
@@ -105,6 +306,61 @@ func (q *Queries) ClaimSandboxWorkspaceRevision(ctx context.Context, arg ClaimSa
 	var workspace_revision int64
 	err := row.Scan(&workspace_revision)
 	return workspace_revision, err
+}
+
+const completeExpiredSandboxSnapshotCleanup = `-- name: CompleteExpiredSandboxSnapshotCleanup :execrows
+UPDATE sandbox
+SET snapshot_ref = NULL,
+    snapshot_domains = '[]'::jsonb,
+    snapshot_created_at = NULL,
+    snapshot_expire_at = NULL,
+    resource_lease_token = '',
+    resource_lease_until = NULL,
+    updated_at = now()
+WHERE tenant_id = $1
+  AND id = $2
+  AND status = 5
+  AND snapshot_expire_at <= now()
+  AND resource_lease_token = $3
+  AND resource_lease_until > now()
+`
+
+type CompleteExpiredSandboxSnapshotCleanupParams struct {
+	TenantID   int64  `json:"tenant_id"`
+	ID         int64  `json:"id"`
+	LeaseToken string `json:"lease_token"`
+}
+
+func (q *Queries) CompleteExpiredSandboxSnapshotCleanup(ctx context.Context, arg CompleteExpiredSandboxSnapshotCleanupParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeExpiredSandboxSnapshotCleanup, arg.TenantID, arg.ID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const completeSandboxRecycle = `-- name: CompleteSandboxRecycle :execrows
+UPDATE sandbox
+SET status = 5, resource_lease_token = '', resource_lease_until = NULL, updated_at = now()
+WHERE tenant_id = $1
+  AND id = $2
+  AND status IN (4, 6)
+  AND resource_lease_token = $3
+  AND resource_lease_until > now()
+`
+
+type CompleteSandboxRecycleParams struct {
+	TenantID   int64  `json:"tenant_id"`
+	ID         int64  `json:"id"`
+	LeaseToken string `json:"lease_token"`
+}
+
+func (q *Queries) CompleteSandboxRecycle(ctx context.Context, arg CompleteSandboxRecycleParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeSandboxRecycle, arg.TenantID, arg.ID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const countActiveSandboxes = `-- name: CountActiveSandboxes :one
@@ -199,7 +455,7 @@ VALUES (
     $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
     $22, $23, now(), $24, now(), now()
 )
-RETURNING id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+RETURNING id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, recycle_saved, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, resource_lease_token, resource_lease_until, created_at, updated_at
 `
 
 type CreateSandboxParams struct {
@@ -274,6 +530,7 @@ func (q *Queries) CreateSandbox(ctx context.Context, arg CreateSandboxParams) (S
 		&i.SnapshotEnabled,
 		&i.CodeStorageKey,
 		&i.CodeHash,
+		&i.RecycleSaved,
 		&i.WorkspaceRevision,
 		&i.InitCodeRef,
 		&i.InitScriptRef,
@@ -284,6 +541,8 @@ func (q *Queries) CreateSandbox(ctx context.Context, arg CreateSandboxParams) (S
 		&i.KeepAliveUntil,
 		&i.LastActiveAt,
 		&i.ExpireAt,
+		&i.ResourceLeaseToken,
+		&i.ResourceLeaseUntil,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -325,21 +584,20 @@ func (q *Queries) CreateSandboxEvent(ctx context.Context, arg CreateSandboxEvent
 }
 
 const createSandboxRecycleOutbox = `-- name: CreateSandboxRecycleOutbox :one
-INSERT INTO sandbox_recycle_outbox (id, tenant_id, sandbox_id, source_ref, scope_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, 0, NULL, now(), now(), '', NULL)
-RETURNING id, tenant_id, sandbox_id, source_ref, scope_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+INSERT INTO sandbox_recycle_outbox (id, tenant_id, sandbox_id, source_ref, scope_ref, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 0, NULL, now(), now(), '', NULL)
+RETURNING id, tenant_id, sandbox_id, source_ref, scope_ref, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type CreateSandboxRecycleOutboxParams struct {
-	ID             int64              `json:"id"`
-	TenantID       int64              `json:"tenant_id"`
-	SandboxID      int64              `json:"sandbox_id"`
-	SourceRef      string             `json:"source_ref"`
-	ScopeRef       string             `json:"scope_ref"`
-	OwnerAccountID int64              `json:"owner_account_id"`
-	Reason         string             `json:"reason"`
-	TraceID        string             `json:"trace_id"`
-	RecycledAt     pgtype.Timestamptz `json:"recycled_at"`
+	ID         int64              `json:"id"`
+	TenantID   int64              `json:"tenant_id"`
+	SandboxID  int64              `json:"sandbox_id"`
+	SourceRef  string             `json:"source_ref"`
+	ScopeRef   string             `json:"scope_ref"`
+	Reason     string             `json:"reason"`
+	TraceID    string             `json:"trace_id"`
+	RecycledAt pgtype.Timestamptz `json:"recycled_at"`
 }
 
 func (q *Queries) CreateSandboxRecycleOutbox(ctx context.Context, arg CreateSandboxRecycleOutboxParams) (SandboxRecycleOutbox, error) {
@@ -349,7 +607,6 @@ func (q *Queries) CreateSandboxRecycleOutbox(ctx context.Context, arg CreateSand
 		arg.SandboxID,
 		arg.SourceRef,
 		arg.ScopeRef,
-		arg.OwnerAccountID,
 		arg.Reason,
 		arg.TraceID,
 		arg.RecycledAt,
@@ -361,7 +618,6 @@ func (q *Queries) CreateSandboxRecycleOutbox(ctx context.Context, arg CreateSand
 		&i.SandboxID,
 		&i.SourceRef,
 		&i.ScopeRef,
-		&i.OwnerAccountID,
 		&i.Reason,
 		&i.TraceID,
 		&i.RecycledAt,
@@ -376,42 +632,6 @@ func (q *Queries) CreateSandboxRecycleOutbox(ctx context.Context, arg CreateSand
 	return i, err
 }
 
-const createSandboxTool = `-- name: CreateSandboxTool :one
-INSERT INTO sandbox_tool (id, tenant_id, sandbox_id, tool_id, access_endpoint, status)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, tenant_id, sandbox_id, tool_id, access_endpoint, status
-`
-
-type CreateSandboxToolParams struct {
-	ID             int64  `json:"id"`
-	TenantID       int64  `json:"tenant_id"`
-	SandboxID      int64  `json:"sandbox_id"`
-	ToolID         int64  `json:"tool_id"`
-	AccessEndpoint string `json:"access_endpoint"`
-	Status         int16  `json:"status"`
-}
-
-func (q *Queries) CreateSandboxTool(ctx context.Context, arg CreateSandboxToolParams) (SandboxTool, error) {
-	row := q.db.QueryRow(ctx, createSandboxTool,
-		arg.ID,
-		arg.TenantID,
-		arg.SandboxID,
-		arg.ToolID,
-		arg.AccessEndpoint,
-		arg.Status,
-	)
-	var i SandboxTool
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.SandboxID,
-		&i.ToolID,
-		&i.AccessEndpoint,
-		&i.Status,
-	)
-	return i, err
-}
-
 const deleteCompositionPrepullByRuntimeImage = `-- name: DeleteCompositionPrepullByRuntimeImage :exec
 DELETE FROM sandbox_composition_prepull WHERE runtime_image_id = $1
 `
@@ -421,13 +641,13 @@ func (q *Queries) DeleteCompositionPrepullByRuntimeImage(ctx context.Context, ru
 	return err
 }
 
-const deletePublishedCompositionSnapshot = `-- name: DeletePublishedCompositionSnapshot :exec
+const deleteCompositionSnapshot = `-- name: DeleteCompositionSnapshot :exec
 DELETE FROM sandbox_composition
 WHERE composition_digest = $1 AND status = 1
 `
 
-func (q *Queries) DeletePublishedCompositionSnapshot(ctx context.Context, compositionDigest string) error {
-	_, err := q.db.Exec(ctx, deletePublishedCompositionSnapshot, compositionDigest)
+func (q *Queries) DeleteCompositionSnapshot(ctx context.Context, compositionDigest string) error {
+	_, err := q.db.Exec(ctx, deleteCompositionSnapshot, compositionDigest)
 	return err
 }
 
@@ -456,6 +676,39 @@ func (q *Queries) DisableRuntimeImage(ctx context.Context, arg DisableRuntimeIma
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const ensureRuntime = `-- name: EnsureRuntime :exec
+INSERT INTO runtime (id, code, name, eco, adapter_level, adapter_spec, capability_impl, plugin_ref, selftest_status, selftest_detail, status, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, '{}', COALESCE(NULLIF($9::smallint, 0), 2), now(), now())
+ON CONFLICT (code) DO NOTHING
+`
+
+type EnsureRuntimeParams struct {
+	ID             int64       `json:"id"`
+	Code           string      `json:"code"`
+	Name           string      `json:"name"`
+	Eco            string      `json:"eco"`
+	AdapterLevel   int16       `json:"adapter_level"`
+	AdapterSpec    []byte      `json:"adapter_spec"`
+	CapabilityImpl pgtype.Text `json:"capability_impl"`
+	PluginRef      pgtype.Text `json:"plugin_ref"`
+	Status         int16       `json:"status"`
+}
+
+func (q *Queries) EnsureRuntime(ctx context.Context, arg EnsureRuntimeParams) error {
+	_, err := q.db.Exec(ctx, ensureRuntime,
+		arg.ID,
+		arg.Code,
+		arg.Name,
+		arg.Eco,
+		arg.AdapterLevel,
+		arg.AdapterSpec,
+		arg.CapabilityImpl,
+		arg.PluginRef,
+		arg.Status,
+	)
+	return err
 }
 
 const ensureTenantQuota = `-- name: EnsureTenantQuota :one
@@ -521,6 +774,35 @@ func (q *Queries) EnsureTenantQuota(ctx context.Context, arg EnsureTenantQuotaPa
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const ensureTool = `-- name: EnsureTool :exec
+INSERT INTO tool (id, code, name, category, kind, eco_tags, resource_spec, status, created_at, updated_at)
+VALUES ($1, $2, $3, 'tool', $4, $5, $6, $7, now(), now())
+ON CONFLICT (code) DO NOTHING
+`
+
+type EnsureToolParams struct {
+	ID           int64  `json:"id"`
+	Code         string `json:"code"`
+	Name         string `json:"name"`
+	Kind         int16  `json:"kind"`
+	EcoTags      string `json:"eco_tags"`
+	ResourceSpec []byte `json:"resource_spec"`
+	Status       int16  `json:"status"`
+}
+
+func (q *Queries) EnsureTool(ctx context.Context, arg EnsureToolParams) error {
+	_, err := q.db.Exec(ctx, ensureTool,
+		arg.ID,
+		arg.Code,
+		arg.Name,
+		arg.Kind,
+		arg.EcoTags,
+		arg.ResourceSpec,
+		arg.Status,
+	)
+	return err
 }
 
 const finishCompositionPrepull = `-- name: FinishCompositionPrepull :one
@@ -655,14 +937,14 @@ func (q *Queries) GetCompositionPrepullForUpdate(ctx context.Context, arg GetCom
 	return i, err
 }
 
-const getPublishedCompositionSnapshot = `-- name: GetPublishedCompositionSnapshot :one
+const getCompositionSnapshot = `-- name: GetCompositionSnapshot :one
 SELECT composition_digest, snapshot, status, created_at, updated_at
 FROM sandbox_composition
 WHERE composition_digest = $1 AND status = 1
 `
 
-func (q *Queries) GetPublishedCompositionSnapshot(ctx context.Context, compositionDigest string) (SandboxComposition, error) {
-	row := q.db.QueryRow(ctx, getPublishedCompositionSnapshot, compositionDigest)
+func (q *Queries) GetCompositionSnapshot(ctx context.Context, compositionDigest string) (SandboxComposition, error) {
+	row := q.db.QueryRow(ctx, getCompositionSnapshot, compositionDigest)
 	var i SandboxComposition
 	err := row.Scan(
 		&i.CompositionDigest,
@@ -682,6 +964,34 @@ WHERE code = $1
 
 func (q *Queries) GetRuntimeByCode(ctx context.Context, code string) (Runtime, error) {
 	row := q.db.QueryRow(ctx, getRuntimeByCode, code)
+	var i Runtime
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Name,
+		&i.Eco,
+		&i.AdapterLevel,
+		&i.AdapterSpec,
+		&i.CapabilityImpl,
+		&i.PluginRef,
+		&i.SelftestStatus,
+		&i.SelftestDetail,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getRuntimeByCodeForUpdate = `-- name: GetRuntimeByCodeForUpdate :one
+SELECT id, code, name, eco, adapter_level, adapter_spec, capability_impl, plugin_ref, selftest_status, selftest_detail, status, created_at, updated_at
+FROM runtime
+WHERE code = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetRuntimeByCodeForUpdate(ctx context.Context, code string) (Runtime, error) {
+	row := q.db.QueryRow(ctx, getRuntimeByCodeForUpdate, code)
 	var i Runtime
 	err := row.Scan(
 		&i.ID,
@@ -865,7 +1175,7 @@ func (q *Queries) GetRuntimeImageByVersionForShare(ctx context.Context, arg GetR
 }
 
 const getSandbox = `-- name: GetSandbox :one
-SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, recycle_saved, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, resource_lease_token, resource_lease_until, created_at, updated_at
 FROM sandbox
 WHERE tenant_id = $1 AND id = $2
 `
@@ -895,6 +1205,7 @@ func (q *Queries) GetSandbox(ctx context.Context, arg GetSandboxParams) (Sandbox
 		&i.SnapshotEnabled,
 		&i.CodeStorageKey,
 		&i.CodeHash,
+		&i.RecycleSaved,
 		&i.WorkspaceRevision,
 		&i.InitCodeRef,
 		&i.InitScriptRef,
@@ -905,6 +1216,8 @@ func (q *Queries) GetSandbox(ctx context.Context, arg GetSandboxParams) (Sandbox
 		&i.KeepAliveUntil,
 		&i.LastActiveAt,
 		&i.ExpireAt,
+		&i.ResourceLeaseToken,
+		&i.ResourceLeaseUntil,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -912,7 +1225,7 @@ func (q *Queries) GetSandbox(ctx context.Context, arg GetSandboxParams) (Sandbox
 }
 
 const getSandboxForUpdate = `-- name: GetSandboxForUpdate :one
-SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, recycle_saved, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, resource_lease_token, resource_lease_until, created_at, updated_at
 FROM sandbox
 WHERE tenant_id = $1 AND id = $2
 FOR UPDATE
@@ -944,6 +1257,7 @@ func (q *Queries) GetSandboxForUpdate(ctx context.Context, arg GetSandboxForUpda
 		&i.SnapshotEnabled,
 		&i.CodeStorageKey,
 		&i.CodeHash,
+		&i.RecycleSaved,
 		&i.WorkspaceRevision,
 		&i.InitCodeRef,
 		&i.InitScriptRef,
@@ -954,6 +1268,8 @@ func (q *Queries) GetSandboxForUpdate(ctx context.Context, arg GetSandboxForUpda
 		&i.KeepAliveUntil,
 		&i.LastActiveAt,
 		&i.ExpireAt,
+		&i.ResourceLeaseToken,
+		&i.ResourceLeaseUntil,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -961,7 +1277,7 @@ func (q *Queries) GetSandboxForUpdate(ctx context.Context, arg GetSandboxForUpda
 }
 
 const getSavedSandboxBySourceRef = `-- name: GetSavedSandboxBySourceRef :one
-SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, recycle_saved, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, resource_lease_token, resource_lease_until, created_at, updated_at
 FROM sandbox
 WHERE tenant_id = $1 AND source_ref = $2 AND code_storage_key IS NOT NULL AND code_storage_key <> '' AND code_hash IS NOT NULL AND code_hash <> ''
 ORDER BY created_at DESC, id DESC LIMIT 1
@@ -993,6 +1309,7 @@ func (q *Queries) GetSavedSandboxBySourceRef(ctx context.Context, arg GetSavedSa
 		&i.SnapshotEnabled,
 		&i.CodeStorageKey,
 		&i.CodeHash,
+		&i.RecycleSaved,
 		&i.WorkspaceRevision,
 		&i.InitCodeRef,
 		&i.InitScriptRef,
@@ -1003,6 +1320,8 @@ func (q *Queries) GetSavedSandboxBySourceRef(ctx context.Context, arg GetSavedSa
 		&i.KeepAliveUntil,
 		&i.LastActiveAt,
 		&i.ExpireAt,
+		&i.ResourceLeaseToken,
+		&i.ResourceLeaseUntil,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -1080,11 +1399,41 @@ func (q *Queries) GetToolByCode(ctx context.Context, code string) (Tool, error) 
 	return i, err
 }
 
+const getToolByCodeForUpdate = `-- name: GetToolByCodeForUpdate :one
+SELECT id, code, name, category, kind, eco_tags, resource_spec, status, created_at, updated_at
+FROM tool
+WHERE code = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetToolByCodeForUpdate(ctx context.Context, code string) (Tool, error) {
+	row := q.db.QueryRow(ctx, getToolByCodeForUpdate, code)
+	var i Tool
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Name,
+		&i.Category,
+		&i.Kind,
+		&i.EcoTags,
+		&i.ResourceSpec,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const invalidateCompositionPrepullByRuntime = `-- name: InvalidateCompositionPrepullByRuntime :exec
 UPDATE sandbox_composition_prepull p
 SET status = 1, detail = $2, completed_at = NULL, updated_at = now()
 FROM runtime_image i
-WHERE p.runtime_image_id = i.id AND i.runtime_id = $1 AND p.status <> 1
+WHERE p.runtime_image_id = i.id AND p.status <> 1
+  AND (i.runtime_id = $1 OR EXISTS (
+    SELECT 1 FROM sandbox_composition c
+    WHERE c.composition_digest = p.composition_digest
+      AND c.snapshot->'runtimes' @> jsonb_build_array(jsonb_build_object('runtime_id', $1::bigint))
+  ))
 `
 
 type InvalidateCompositionPrepullByRuntimeParams struct {
@@ -1116,7 +1465,7 @@ type ListCatalogRuntimesRow struct {
 	ImageVersion string `json:"image_version"`
 }
 
-// 编排目录只取真正可调度的运行时与镜像版本,不把未完成自检或最新闭包预拉取的项暴露给教师。
+// 目录提供已自检且可用的运行时与可用镜像版本；完整组合的预拉取证明在启动前校验。
 // 一次 JOIN 平铺取回后由 repo 按运行时分组,既避免按运行时逐个查镜像的 N+1,
 // 也不用 jsonb_agg —— 那会让生成的行类型退化成 interface{},把解码负担推给业务层。
 func (q *Queries) ListCatalogRuntimes(ctx context.Context) ([]ListCatalogRuntimesRow, error) {
@@ -1189,16 +1538,84 @@ func (q *Queries) ListCatalogTools(ctx context.Context) ([]ListCatalogToolsRow, 
 	return items, nil
 }
 
+const listPendingSandboxStarts = `-- name: ListPendingSandboxStarts :many
+SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, recycle_saved, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, resource_lease_token, resource_lease_until, created_at, updated_at FROM sandbox
+WHERE (status = 1 OR (phase = 3 AND status IN (2, 7)) OR (resource_lease_token <> '' AND status IN (2, 7, 8))) AND updated_at <= $1
+  AND (resource_lease_until IS NULL OR resource_lease_until <= now())
+ORDER BY updated_at, id
+LIMIT $2
+`
+
+type ListPendingSandboxStartsParams struct {
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	Limit     int32              `json:"limit"`
+}
+
+func (q *Queries) ListPendingSandboxStarts(ctx context.Context, arg ListPendingSandboxStartsParams) ([]Sandbox, error) {
+	rows, err := q.db.Query(ctx, listPendingSandboxStarts, arg.UpdatedAt, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Sandbox{}
+	for rows.Next() {
+		var i Sandbox
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Namespace,
+			&i.SourceRef,
+			&i.ScopeRef,
+			&i.CompositionDigest,
+			&i.CompositionSnapshot,
+			&i.AccessProfile,
+			&i.OwnerAccountID,
+			&i.SharedAccountIds,
+			&i.Phase,
+			&i.Status,
+			&i.KeepAlive,
+			&i.SnapshotEnabled,
+			&i.CodeStorageKey,
+			&i.CodeHash,
+			&i.RecycleSaved,
+			&i.WorkspaceRevision,
+			&i.InitCodeRef,
+			&i.InitScriptRef,
+			&i.SnapshotRef,
+			&i.SnapshotDomains,
+			&i.SnapshotCreatedAt,
+			&i.SnapshotExpireAt,
+			&i.KeepAliveUntil,
+			&i.LastActiveAt,
+			&i.ExpireAt,
+			&i.ResourceLeaseToken,
+			&i.ResourceLeaseUntil,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecycleCandidates = `-- name: ListRecycleCandidates :many
-SELECT s.id, s.tenant_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
+SELECT s.id, s.tenant_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.recycle_saved, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.resource_lease_token, s.resource_lease_until, s.created_at, s.updated_at
 FROM sandbox s
 JOIN tenant_quota tq ON tq.tenant_id = s.tenant_id
-WHERE s.status IN (4, 6)
-   OR (s.status = 1 AND s.last_active_at <= $1)
-   OR (s.status = 7 AND s.last_active_at <= $1)
-   OR (s.status = 8 AND s.keep_alive = false AND s.last_active_at <= now() - make_interval(mins => tq.idle_timeout_min))
-   OR (s.status IN (1, 2, 3, 7, 8) AND s.expire_at <= now())
-   OR (s.status IN (1, 2, 3, 7, 8) AND s.keep_alive_until IS NOT NULL AND s.keep_alive_until <= now())
+WHERE (s.resource_lease_until IS NULL OR s.resource_lease_until <= now())
+  AND (
+      s.status IN (4, 6)
+      OR (s.status = 1 AND s.last_active_at <= $1)
+      OR (s.status = 7 AND s.last_active_at <= $1)
+      OR (s.status = 8 AND s.keep_alive = false AND s.last_active_at <= now() - make_interval(mins => tq.idle_timeout_min))
+      OR (s.status IN (1, 2, 3, 7, 8) AND s.expire_at <= now())
+      OR (s.status IN (1, 2, 3, 7, 8) AND s.keep_alive_until IS NOT NULL AND s.keep_alive_until <= now())
+  )
 ORDER BY s.updated_at ASC, s.id ASC
 LIMIT $2
 `
@@ -1234,6 +1651,7 @@ func (q *Queries) ListRecycleCandidates(ctx context.Context, arg ListRecycleCand
 			&i.SnapshotEnabled,
 			&i.CodeStorageKey,
 			&i.CodeHash,
+			&i.RecycleSaved,
 			&i.WorkspaceRevision,
 			&i.InitCodeRef,
 			&i.InitScriptRef,
@@ -1244,6 +1662,8 @@ func (q *Queries) ListRecycleCandidates(ctx context.Context, arg ListRecycleCand
 			&i.KeepAliveUntil,
 			&i.LastActiveAt,
 			&i.ExpireAt,
+			&i.ResourceLeaseToken,
+			&i.ResourceLeaseUntil,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -1332,64 +1752,8 @@ func (q *Queries) ListRuntimes(ctx context.Context) ([]Runtime, error) {
 	return items, nil
 }
 
-const listSandboxTools = `-- name: ListSandboxTools :many
-SELECT st.id, st.tenant_id, st.sandbox_id, st.tool_id, st.access_endpoint, st.status,
-       t.code, t.kind, t.resource_spec
-FROM sandbox_tool st
-JOIN tool t ON t.id = st.tool_id
-WHERE st.tenant_id = $1 AND st.sandbox_id = $2
-ORDER BY st.id
-`
-
-type ListSandboxToolsParams struct {
-	TenantID  int64 `json:"tenant_id"`
-	SandboxID int64 `json:"sandbox_id"`
-}
-
-type ListSandboxToolsRow struct {
-	ID             int64  `json:"id"`
-	TenantID       int64  `json:"tenant_id"`
-	SandboxID      int64  `json:"sandbox_id"`
-	ToolID         int64  `json:"tool_id"`
-	AccessEndpoint string `json:"access_endpoint"`
-	Status         int16  `json:"status"`
-	Code           string `json:"code"`
-	Kind           int16  `json:"kind"`
-	ResourceSpec   []byte `json:"resource_spec"`
-}
-
-func (q *Queries) ListSandboxTools(ctx context.Context, arg ListSandboxToolsParams) ([]ListSandboxToolsRow, error) {
-	rows, err := q.db.Query(ctx, listSandboxTools, arg.TenantID, arg.SandboxID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListSandboxToolsRow{}
-	for rows.Next() {
-		var i ListSandboxToolsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.TenantID,
-			&i.SandboxID,
-			&i.ToolID,
-			&i.AccessEndpoint,
-			&i.Status,
-			&i.Code,
-			&i.Kind,
-			&i.ResourceSpec,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listSandboxesByScopeRef = `-- name: ListSandboxesByScopeRef :many
-SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, recycle_saved, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, resource_lease_token, resource_lease_until, created_at, updated_at
 FROM sandbox
 WHERE tenant_id = $1 AND scope_ref = $2 AND status <> 5
 ORDER BY created_at DESC, id DESC
@@ -1426,6 +1790,7 @@ func (q *Queries) ListSandboxesByScopeRef(ctx context.Context, arg ListSandboxes
 			&i.SnapshotEnabled,
 			&i.CodeStorageKey,
 			&i.CodeHash,
+			&i.RecycleSaved,
 			&i.WorkspaceRevision,
 			&i.InitCodeRef,
 			&i.InitScriptRef,
@@ -1436,6 +1801,8 @@ func (q *Queries) ListSandboxesByScopeRef(ctx context.Context, arg ListSandboxes
 			&i.KeepAliveUntil,
 			&i.LastActiveAt,
 			&i.ExpireAt,
+			&i.ResourceLeaseToken,
+			&i.ResourceLeaseUntil,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -1450,7 +1817,7 @@ func (q *Queries) ListSandboxesByScopeRef(ctx context.Context, arg ListSandboxes
 }
 
 const listSandboxesBySourceRef = `-- name: ListSandboxesBySourceRef :many
-SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, recycle_saved, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, resource_lease_token, resource_lease_until, created_at, updated_at
 FROM sandbox
 WHERE tenant_id = $1 AND source_ref = $2 AND status <> 5
 ORDER BY created_at DESC, id DESC
@@ -1487,6 +1854,7 @@ func (q *Queries) ListSandboxesBySourceRef(ctx context.Context, arg ListSandboxe
 			&i.SnapshotEnabled,
 			&i.CodeStorageKey,
 			&i.CodeHash,
+			&i.RecycleSaved,
 			&i.WorkspaceRevision,
 			&i.InitCodeRef,
 			&i.InitScriptRef,
@@ -1497,6 +1865,8 @@ func (q *Queries) ListSandboxesBySourceRef(ctx context.Context, arg ListSandboxe
 			&i.KeepAliveUntil,
 			&i.LastActiveAt,
 			&i.ExpireAt,
+			&i.ResourceLeaseToken,
+			&i.ResourceLeaseUntil,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -1511,9 +1881,10 @@ func (q *Queries) ListSandboxesBySourceRef(ctx context.Context, arg ListSandboxe
 }
 
 const listSnapshotCleanupCandidates = `-- name: ListSnapshotCleanupCandidates :many
-SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, recycle_saved, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, resource_lease_token, resource_lease_until, created_at, updated_at
 FROM sandbox
 WHERE status = 5 AND snapshot_expire_at IS NOT NULL AND snapshot_expire_at <= now()
+  AND (resource_lease_token = '' OR resource_lease_until IS NULL OR resource_lease_until <= now())
 ORDER BY snapshot_expire_at ASC, id ASC
 LIMIT $1
 `
@@ -1544,6 +1915,7 @@ func (q *Queries) ListSnapshotCleanupCandidates(ctx context.Context, limit int32
 			&i.SnapshotEnabled,
 			&i.CodeStorageKey,
 			&i.CodeHash,
+			&i.RecycleSaved,
 			&i.WorkspaceRevision,
 			&i.InitCodeRef,
 			&i.InitScriptRef,
@@ -1554,6 +1926,8 @@ func (q *Queries) ListSnapshotCleanupCandidates(ctx context.Context, limit int32
 			&i.KeepAliveUntil,
 			&i.LastActiveAt,
 			&i.ExpireAt,
+			&i.ResourceLeaseToken,
+			&i.ResourceLeaseUntil,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -1621,8 +1995,10 @@ FROM tenant_quota tq
 WHERE tq.tenant_id = s.tenant_id
   AND s.status = 2
   AND s.keep_alive = false
+  AND s.phase IN (2, 4)
+  AND (s.resource_lease_until IS NULL OR s.resource_lease_until <= now())
   AND s.last_active_at <= now() - make_interval(mins => tq.idle_timeout_min)
-RETURNING s.id, s.tenant_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
+RETURNING s.id, s.tenant_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.recycle_saved, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.resource_lease_token, s.resource_lease_until, s.created_at, s.updated_at
 `
 
 func (q *Queries) MarkIdleSandboxes(ctx context.Context) ([]Sandbox, error) {
@@ -1651,6 +2027,7 @@ func (q *Queries) MarkIdleSandboxes(ctx context.Context) ([]Sandbox, error) {
 			&i.SnapshotEnabled,
 			&i.CodeStorageKey,
 			&i.CodeHash,
+			&i.RecycleSaved,
 			&i.WorkspaceRevision,
 			&i.InitCodeRef,
 			&i.InitScriptRef,
@@ -1661,6 +2038,8 @@ func (q *Queries) MarkIdleSandboxes(ctx context.Context) ([]Sandbox, error) {
 			&i.KeepAliveUntil,
 			&i.LastActiveAt,
 			&i.ExpireAt,
+			&i.ResourceLeaseToken,
+			&i.ResourceLeaseUntil,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -1681,7 +2060,9 @@ SET last_active_at = now(),
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
   AND status IN (2, 7, 8)
-RETURNING id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+  AND phase IN (2, 4)
+  AND resource_lease_token = ''
+RETURNING id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, recycle_saved, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, resource_lease_token, resource_lease_until, created_at, updated_at
 `
 
 type MarkSandboxActiveParams struct {
@@ -1709,6 +2090,7 @@ func (q *Queries) MarkSandboxActive(ctx context.Context, arg MarkSandboxActivePa
 		&i.SnapshotEnabled,
 		&i.CodeStorageKey,
 		&i.CodeHash,
+		&i.RecycleSaved,
 		&i.WorkspaceRevision,
 		&i.InitCodeRef,
 		&i.InitScriptRef,
@@ -1719,6 +2101,8 @@ func (q *Queries) MarkSandboxActive(ctx context.Context, arg MarkSandboxActivePa
 		&i.KeepAliveUntil,
 		&i.LastActiveAt,
 		&i.ExpireAt,
+		&i.ResourceLeaseToken,
+		&i.ResourceLeaseUntil,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -1729,7 +2113,7 @@ const markSandboxRecycleOutboxFailed = `-- name: MarkSandboxRecycleOutboxFailed 
 UPDATE sandbox_recycle_outbox
 SET status = 4, last_error = $1, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $2 AND id = $3 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, sandbox_id, source_ref, scope_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, sandbox_id, source_ref, scope_ref, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkSandboxRecycleOutboxFailedParams struct {
@@ -1753,7 +2137,6 @@ func (q *Queries) MarkSandboxRecycleOutboxFailed(ctx context.Context, arg MarkSa
 		&i.SandboxID,
 		&i.SourceRef,
 		&i.ScopeRef,
-		&i.OwnerAccountID,
 		&i.Reason,
 		&i.TraceID,
 		&i.RecycledAt,
@@ -1772,7 +2155,7 @@ const markSandboxRecycleOutboxPublished = `-- name: MarkSandboxRecycleOutboxPubl
 UPDATE sandbox_recycle_outbox
 SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
-RETURNING id, tenant_id, sandbox_id, source_ref, scope_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, sandbox_id, source_ref, scope_ref, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkSandboxRecycleOutboxPublishedParams struct {
@@ -1790,7 +2173,6 @@ func (q *Queries) MarkSandboxRecycleOutboxPublished(ctx context.Context, arg Mar
 		&i.SandboxID,
 		&i.SourceRef,
 		&i.ScopeRef,
-		&i.OwnerAccountID,
 		&i.Reason,
 		&i.TraceID,
 		&i.RecycledAt,
@@ -1803,6 +2185,111 @@ func (q *Queries) MarkSandboxRecycleOutboxPublished(ctx context.Context, arg Mar
 		&i.LeaseUntil,
 	)
 	return i, err
+}
+
+const queueSandboxRecycle = `-- name: QueueSandboxRecycle :execrows
+UPDATE sandbox
+SET status = CASE WHEN status = 6 THEN 6 ELSE 4 END,
+    recycle_saved = CASE WHEN status IN (4, 6) THEN recycle_saved ELSE false END,
+    updated_at = now()
+WHERE tenant_id = $1
+  AND id = $2
+  AND status = $3::smallint
+  AND status <> 5
+`
+
+type QueueSandboxRecycleParams struct {
+	TenantID       int64 `json:"tenant_id"`
+	ID             int64 `json:"id"`
+	ExpectedStatus int16 `json:"expected_status"`
+}
+
+func (q *Queries) QueueSandboxRecycle(ctx context.Context, arg QueueSandboxRecycleParams) (int64, error) {
+	result, err := q.db.Exec(ctx, queueSandboxRecycle, arg.TenantID, arg.ID, arg.ExpectedStatus)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const readSandboxAlertMetrics = `-- name: ReadSandboxAlertMetrics :one
+SELECT (SELECT count(*)::bigint FROM sandbox WHERE status=2) AS active_count,
+ (SELECT COALESCE(max(GREATEST(EXTRACT(EPOCH FROM ($1::timestamptz-created_at)),0)),0)::float8 FROM sandbox WHERE status=1) AS pending_seconds,
+ (SELECT COALESCE(count(*) FILTER (WHERE detail->>'status'='6')::float8 / NULLIF(count(*),0),0)::float8
+  FROM (SELECT DISTINCT ON (sandbox_id) sandbox_id,detail FROM sandbox_event
+        WHERE created_at BETWEEN $2::timestamptz AND $1::timestamptz
+          AND event_type IN ('phase_change','error') AND detail->>'status' IN ('2','6')
+        ORDER BY sandbox_id,created_at DESC,id DESC) outcomes) AS failed_rate
+`
+
+type ReadSandboxAlertMetricsParams struct {
+	ObservedAt pgtype.Timestamptz `json:"observed_at"`
+	WindowFrom pgtype.Timestamptz `json:"window_from"`
+}
+
+type ReadSandboxAlertMetricsRow struct {
+	ActiveCount    int64   `json:"active_count"`
+	PendingSeconds float64 `json:"pending_seconds"`
+	FailedRate     float64 `json:"failed_rate"`
+}
+
+func (q *Queries) ReadSandboxAlertMetrics(ctx context.Context, arg ReadSandboxAlertMetricsParams) (ReadSandboxAlertMetricsRow, error) {
+	row := q.db.QueryRow(ctx, readSandboxAlertMetrics, arg.ObservedAt, arg.WindowFrom)
+	var i ReadSandboxAlertMetricsRow
+	err := row.Scan(&i.ActiveCount, &i.PendingSeconds, &i.FailedRate)
+	return i, err
+}
+
+const releaseSandboxResourceLease = `-- name: ReleaseSandboxResourceLease :execrows
+UPDATE sandbox
+SET resource_lease_token = '', resource_lease_until = NULL, updated_at = now()
+WHERE tenant_id = $1
+  AND id = $2
+  AND resource_lease_token = $3
+`
+
+type ReleaseSandboxResourceLeaseParams struct {
+	TenantID   int64  `json:"tenant_id"`
+	ID         int64  `json:"id"`
+	LeaseToken string `json:"lease_token"`
+}
+
+func (q *Queries) ReleaseSandboxResourceLease(ctx context.Context, arg ReleaseSandboxResourceLeaseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, releaseSandboxResourceLease, arg.TenantID, arg.ID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const renewSandboxResourceLease = `-- name: RenewSandboxResourceLease :execrows
+UPDATE sandbox
+SET resource_lease_until = GREATEST(resource_lease_until, now() + $1::bigint * interval '1 second')
+WHERE tenant_id = $2
+  AND id = $3
+  AND status IN (1, 2, 4, 5, 6, 7, 8)
+  AND resource_lease_token = $4
+  AND resource_lease_until > now()
+`
+
+type RenewSandboxResourceLeaseParams struct {
+	LeaseSeconds int64  `json:"lease_seconds"`
+	TenantID     int64  `json:"tenant_id"`
+	ID           int64  `json:"id"`
+	LeaseToken   string `json:"lease_token"`
+}
+
+func (q *Queries) RenewSandboxResourceLease(ctx context.Context, arg RenewSandboxResourceLeaseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renewSandboxResourceLease,
+		arg.LeaseSeconds,
+		arg.TenantID,
+		arg.ID,
+		arg.LeaseToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const startCompositionPrepull = `-- name: StartCompositionPrepull :one
@@ -1854,6 +2341,32 @@ func (q *Queries) StartCompositionPrepull(ctx context.Context, arg StartComposit
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const startRetainedSandbox = `-- name: StartRetainedSandbox :execrows
+UPDATE sandbox
+SET status = 1,
+    recycle_saved = false,
+    resource_lease_token = '',
+    resource_lease_until = NULL,
+    updated_at = now()
+WHERE tenant_id = $1
+  AND id = $2
+  AND (status = 3 OR (status = 5 AND snapshot_ref IS NOT NULL AND snapshot_ref <> '' AND snapshot_expire_at > now()))
+  AND (resource_lease_token = '' OR resource_lease_until IS NULL OR resource_lease_until <= now())
+`
+
+type StartRetainedSandboxParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) StartRetainedSandbox(ctx context.Context, arg StartRetainedSandboxParams) (int64, error) {
+	result, err := q.db.Exec(ctx, startRetainedSandbox, arg.TenantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const startRuntimeSelftest = `-- name: StartRuntimeSelftest :one
@@ -1933,12 +2446,73 @@ func (q *Queries) StatsByTenant(ctx context.Context, tenantID int64) (StatsByTen
 	return i, err
 }
 
+const updateRuntime = `-- name: UpdateRuntime :one
+UPDATE runtime
+SET name = $2,
+    eco = $3,
+    adapter_level = $4,
+    adapter_spec = $5,
+    capability_impl = $6,
+    plugin_ref = $7,
+    selftest_status = $8,
+    selftest_detail = $9,
+    status = $10,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, code, name, eco, adapter_level, adapter_spec, capability_impl, plugin_ref, selftest_status, selftest_detail, status, created_at, updated_at
+`
+
+type UpdateRuntimeParams struct {
+	ID             int64       `json:"id"`
+	Name           string      `json:"name"`
+	Eco            string      `json:"eco"`
+	AdapterLevel   int16       `json:"adapter_level"`
+	AdapterSpec    []byte      `json:"adapter_spec"`
+	CapabilityImpl pgtype.Text `json:"capability_impl"`
+	PluginRef      pgtype.Text `json:"plugin_ref"`
+	SelftestStatus int16       `json:"selftest_status"`
+	SelftestDetail []byte      `json:"selftest_detail"`
+	Status         int16       `json:"status"`
+}
+
+func (q *Queries) UpdateRuntime(ctx context.Context, arg UpdateRuntimeParams) (Runtime, error) {
+	row := q.db.QueryRow(ctx, updateRuntime,
+		arg.ID,
+		arg.Name,
+		arg.Eco,
+		arg.AdapterLevel,
+		arg.AdapterSpec,
+		arg.CapabilityImpl,
+		arg.PluginRef,
+		arg.SelftestStatus,
+		arg.SelftestDetail,
+		arg.Status,
+	)
+	var i Runtime
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Name,
+		&i.Eco,
+		&i.AdapterLevel,
+		&i.AdapterSpec,
+		&i.CapabilityImpl,
+		&i.PluginRef,
+		&i.SelftestStatus,
+		&i.SelftestDetail,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateSandboxAuthorizedAccounts = `-- name: UpdateSandboxAuthorizedAccounts :one
 WITH updated AS (
     UPDATE sandbox SET shared_account_ids = $3, updated_at = now()
     WHERE sandbox.tenant_id = $1 AND sandbox.id = $2 RETURNING sandbox.id
 )
-SELECT s.id, s.tenant_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
+SELECT s.id, s.tenant_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.recycle_saved, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.resource_lease_token, s.resource_lease_until, s.created_at, s.updated_at
 FROM sandbox s JOIN updated u ON u.id = s.id
 `
 
@@ -1968,6 +2542,7 @@ func (q *Queries) UpdateSandboxAuthorizedAccounts(ctx context.Context, arg Updat
 		&i.SnapshotEnabled,
 		&i.CodeStorageKey,
 		&i.CodeHash,
+		&i.RecycleSaved,
 		&i.WorkspaceRevision,
 		&i.InitCodeRef,
 		&i.InitScriptRef,
@@ -1978,6 +2553,8 @@ func (q *Queries) UpdateSandboxAuthorizedAccounts(ctx context.Context, arg Updat
 		&i.KeepAliveUntil,
 		&i.LastActiveAt,
 		&i.ExpireAt,
+		&i.ResourceLeaseToken,
+		&i.ResourceLeaseUntil,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -1985,12 +2562,10 @@ func (q *Queries) UpdateSandboxAuthorizedAccounts(ctx context.Context, arg Updat
 }
 
 const updateSandboxCode = `-- name: UpdateSandboxCode :one
-WITH updated AS (
-    UPDATE sandbox SET code_storage_key = $3, code_hash = $4, updated_at = now()
-    WHERE sandbox.tenant_id = $1 AND sandbox.id = $2 RETURNING sandbox.id
-)
-SELECT s.id, s.tenant_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
-FROM sandbox s JOIN updated u ON u.id = s.id
+UPDATE sandbox SET code_storage_key = $3, code_hash = $4,
+    recycle_saved = (status = 4), updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, recycle_saved, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, resource_lease_token, resource_lease_until, created_at, updated_at
 `
 
 type UpdateSandboxCodeParams struct {
@@ -2025,6 +2600,7 @@ func (q *Queries) UpdateSandboxCode(ctx context.Context, arg UpdateSandboxCodePa
 		&i.SnapshotEnabled,
 		&i.CodeStorageKey,
 		&i.CodeHash,
+		&i.RecycleSaved,
 		&i.WorkspaceRevision,
 		&i.InitCodeRef,
 		&i.InitScriptRef,
@@ -2035,6 +2611,8 @@ func (q *Queries) UpdateSandboxCode(ctx context.Context, arg UpdateSandboxCodePa
 		&i.KeepAliveUntil,
 		&i.LastActiveAt,
 		&i.ExpireAt,
+		&i.ResourceLeaseToken,
+		&i.ResourceLeaseUntil,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -2045,7 +2623,7 @@ const updateSandboxPhaseStatus = `-- name: UpdateSandboxPhaseStatus :one
 UPDATE sandbox
 SET phase = $3, status = $4, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+RETURNING id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, recycle_saved, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, resource_lease_token, resource_lease_until, created_at, updated_at
 `
 
 type UpdateSandboxPhaseStatusParams struct {
@@ -2080,6 +2658,7 @@ func (q *Queries) UpdateSandboxPhaseStatus(ctx context.Context, arg UpdateSandbo
 		&i.SnapshotEnabled,
 		&i.CodeStorageKey,
 		&i.CodeHash,
+		&i.RecycleSaved,
 		&i.WorkspaceRevision,
 		&i.InitCodeRef,
 		&i.InitScriptRef,
@@ -2090,6 +2669,8 @@ func (q *Queries) UpdateSandboxPhaseStatus(ctx context.Context, arg UpdateSandbo
 		&i.KeepAliveUntil,
 		&i.LastActiveAt,
 		&i.ExpireAt,
+		&i.ResourceLeaseToken,
+		&i.ResourceLeaseUntil,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -2097,12 +2678,11 @@ func (q *Queries) UpdateSandboxPhaseStatus(ctx context.Context, arg UpdateSandbo
 }
 
 const updateSandboxSnapshot = `-- name: UpdateSandboxSnapshot :one
-WITH updated AS (
-    UPDATE sandbox SET snapshot_ref = $3, snapshot_domains = $4, snapshot_created_at = $5, snapshot_expire_at = $6, updated_at = now()
-    WHERE sandbox.tenant_id = $1 AND sandbox.id = $2 RETURNING sandbox.id
-)
-SELECT s.id, s.tenant_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
-FROM sandbox s JOIN updated u ON u.id = s.id
+UPDATE sandbox SET snapshot_ref = $3, snapshot_domains = $4, snapshot_created_at = $5, snapshot_expire_at = $6, updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+  AND resource_lease_token = $7
+  AND resource_lease_until > now()
+RETURNING id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, recycle_saved, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, resource_lease_token, resource_lease_until, created_at, updated_at
 `
 
 type UpdateSandboxSnapshotParams struct {
@@ -2112,6 +2692,7 @@ type UpdateSandboxSnapshotParams struct {
 	SnapshotDomains   []byte             `json:"snapshot_domains"`
 	SnapshotCreatedAt pgtype.Timestamptz `json:"snapshot_created_at"`
 	SnapshotExpireAt  pgtype.Timestamptz `json:"snapshot_expire_at"`
+	LeaseToken        string             `json:"lease_token"`
 }
 
 func (q *Queries) UpdateSandboxSnapshot(ctx context.Context, arg UpdateSandboxSnapshotParams) (Sandbox, error) {
@@ -2122,6 +2703,7 @@ func (q *Queries) UpdateSandboxSnapshot(ctx context.Context, arg UpdateSandboxSn
 		arg.SnapshotDomains,
 		arg.SnapshotCreatedAt,
 		arg.SnapshotExpireAt,
+		arg.LeaseToken,
 	)
 	var i Sandbox
 	err := row.Scan(
@@ -2141,6 +2723,7 @@ func (q *Queries) UpdateSandboxSnapshot(ctx context.Context, arg UpdateSandboxSn
 		&i.SnapshotEnabled,
 		&i.CodeStorageKey,
 		&i.CodeHash,
+		&i.RecycleSaved,
 		&i.WorkspaceRevision,
 		&i.InitCodeRef,
 		&i.InitScriptRef,
@@ -2151,48 +2734,61 @@ func (q *Queries) UpdateSandboxSnapshot(ctx context.Context, arg UpdateSandboxSn
 		&i.KeepAliveUntil,
 		&i.LastActiveAt,
 		&i.ExpireAt,
+		&i.ResourceLeaseToken,
+		&i.ResourceLeaseUntil,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
 }
 
-const updateSandboxToolStatus = `-- name: UpdateSandboxToolStatus :one
-UPDATE sandbox_tool
-SET status = $4, access_endpoint = $5
-WHERE tenant_id = $1 AND sandbox_id = $2 AND tool_id = $3
-RETURNING id, tenant_id, sandbox_id, tool_id, access_endpoint, status
+const updateTool = `-- name: UpdateTool :one
+UPDATE tool
+SET name = $2,
+    kind = $3,
+    eco_tags = $4,
+    resource_spec = $5,
+    status = $6,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, code, name, category, kind, eco_tags, resource_spec, status, created_at, updated_at
 `
 
-type UpdateSandboxToolStatusParams struct {
-	TenantID       int64  `json:"tenant_id"`
-	SandboxID      int64  `json:"sandbox_id"`
-	ToolID         int64  `json:"tool_id"`
-	Status         int16  `json:"status"`
-	AccessEndpoint string `json:"access_endpoint"`
+type UpdateToolParams struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Kind         int16  `json:"kind"`
+	EcoTags      string `json:"eco_tags"`
+	ResourceSpec []byte `json:"resource_spec"`
+	Status       int16  `json:"status"`
 }
 
-func (q *Queries) UpdateSandboxToolStatus(ctx context.Context, arg UpdateSandboxToolStatusParams) (SandboxTool, error) {
-	row := q.db.QueryRow(ctx, updateSandboxToolStatus,
-		arg.TenantID,
-		arg.SandboxID,
-		arg.ToolID,
+func (q *Queries) UpdateTool(ctx context.Context, arg UpdateToolParams) (Tool, error) {
+	row := q.db.QueryRow(ctx, updateTool,
+		arg.ID,
+		arg.Name,
+		arg.Kind,
+		arg.EcoTags,
+		arg.ResourceSpec,
 		arg.Status,
-		arg.AccessEndpoint,
 	)
-	var i SandboxTool
+	var i Tool
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
-		&i.SandboxID,
-		&i.ToolID,
-		&i.AccessEndpoint,
+		&i.Code,
+		&i.Name,
+		&i.Category,
+		&i.Kind,
+		&i.EcoTags,
+		&i.ResourceSpec,
 		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
-const upsertPublishedCompositionSnapshot = `-- name: UpsertPublishedCompositionSnapshot :exec
+const upsertCompositionSnapshot = `-- name: UpsertCompositionSnapshot :exec
 INSERT INTO sandbox_composition (composition_digest, snapshot, status, created_at, updated_at)
 VALUES ($1, $2, 1, now(), now())
 ON CONFLICT (composition_digest) DO UPDATE
@@ -2201,78 +2797,14 @@ SET snapshot = EXCLUDED.snapshot,
     updated_at = now()
 `
 
-type UpsertPublishedCompositionSnapshotParams struct {
+type UpsertCompositionSnapshotParams struct {
 	CompositionDigest string `json:"composition_digest"`
 	Snapshot          []byte `json:"snapshot"`
 }
 
-func (q *Queries) UpsertPublishedCompositionSnapshot(ctx context.Context, arg UpsertPublishedCompositionSnapshotParams) error {
-	_, err := q.db.Exec(ctx, upsertPublishedCompositionSnapshot, arg.CompositionDigest, arg.Snapshot)
+func (q *Queries) UpsertCompositionSnapshot(ctx context.Context, arg UpsertCompositionSnapshotParams) error {
+	_, err := q.db.Exec(ctx, upsertCompositionSnapshot, arg.CompositionDigest, arg.Snapshot)
 	return err
-}
-
-const upsertRuntime = `-- name: UpsertRuntime :one
-INSERT INTO runtime (id, code, name, eco, adapter_level, adapter_spec, capability_impl, plugin_ref, selftest_status, selftest_detail, status, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), now())
-ON CONFLICT (code) DO UPDATE
-SET name = EXCLUDED.name,
-    eco = EXCLUDED.eco,
-    adapter_level = EXCLUDED.adapter_level,
-    adapter_spec = EXCLUDED.adapter_spec,
-    capability_impl = EXCLUDED.capability_impl,
-    plugin_ref = EXCLUDED.plugin_ref,
-    selftest_status = EXCLUDED.selftest_status,
-    selftest_detail = EXCLUDED.selftest_detail,
-    status = EXCLUDED.status,
-    updated_at = now()
-RETURNING id, code, name, eco, adapter_level, adapter_spec, capability_impl, plugin_ref, selftest_status, selftest_detail, status, created_at, updated_at
-`
-
-type UpsertRuntimeParams struct {
-	ID             int64       `json:"id"`
-	Code           string      `json:"code"`
-	Name           string      `json:"name"`
-	Eco            string      `json:"eco"`
-	AdapterLevel   int16       `json:"adapter_level"`
-	AdapterSpec    []byte      `json:"adapter_spec"`
-	CapabilityImpl pgtype.Text `json:"capability_impl"`
-	PluginRef      pgtype.Text `json:"plugin_ref"`
-	SelftestStatus int16       `json:"selftest_status"`
-	SelftestDetail []byte      `json:"selftest_detail"`
-	Status         int16       `json:"status"`
-}
-
-func (q *Queries) UpsertRuntime(ctx context.Context, arg UpsertRuntimeParams) (Runtime, error) {
-	row := q.db.QueryRow(ctx, upsertRuntime,
-		arg.ID,
-		arg.Code,
-		arg.Name,
-		arg.Eco,
-		arg.AdapterLevel,
-		arg.AdapterSpec,
-		arg.CapabilityImpl,
-		arg.PluginRef,
-		arg.SelftestStatus,
-		arg.SelftestDetail,
-		arg.Status,
-	)
-	var i Runtime
-	err := row.Scan(
-		&i.ID,
-		&i.Code,
-		&i.Name,
-		&i.Eco,
-		&i.AdapterLevel,
-		&i.AdapterSpec,
-		&i.CapabilityImpl,
-		&i.PluginRef,
-		&i.SelftestStatus,
-		&i.SelftestDetail,
-		&i.Status,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
 }
 
 const upsertTenantQuota = `-- name: UpsertTenantQuota :one
@@ -2322,55 +2854,6 @@ func (q *Queries) UpsertTenantQuota(ctx context.Context, arg UpsertTenantQuotaPa
 		&i.MaxLifetimeMin,
 		&i.MaxKeepaliveMin,
 		&i.MaxSnapshotRetentionMin,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const upsertTool = `-- name: UpsertTool :one
-INSERT INTO tool (id, code, name, category, kind, eco_tags, resource_spec, status, created_at, updated_at)
-VALUES ($1, $2, $3, 'tool', $4, $5, $6, $7, now(), now())
-ON CONFLICT (code) DO UPDATE
-SET name = EXCLUDED.name,
-    kind = EXCLUDED.kind,
-    eco_tags = EXCLUDED.eco_tags,
-    resource_spec = EXCLUDED.resource_spec,
-    status = EXCLUDED.status,
-    updated_at = now()
-RETURNING id, code, name, category, kind, eco_tags, resource_spec, status, created_at, updated_at
-`
-
-type UpsertToolParams struct {
-	ID           int64  `json:"id"`
-	Code         string `json:"code"`
-	Name         string `json:"name"`
-	Kind         int16  `json:"kind"`
-	EcoTags      string `json:"eco_tags"`
-	ResourceSpec []byte `json:"resource_spec"`
-	Status       int16  `json:"status"`
-}
-
-func (q *Queries) UpsertTool(ctx context.Context, arg UpsertToolParams) (Tool, error) {
-	row := q.db.QueryRow(ctx, upsertTool,
-		arg.ID,
-		arg.Code,
-		arg.Name,
-		arg.Kind,
-		arg.EcoTags,
-		arg.ResourceSpec,
-		arg.Status,
-	)
-	var i Tool
-	err := row.Scan(
-		&i.ID,
-		&i.Code,
-		&i.Name,
-		&i.Category,
-		&i.Kind,
-		&i.EcoTags,
-		&i.ResourceSpec,
-		&i.Status,
-		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err

@@ -98,6 +98,9 @@ func (s *Service) rollbackSMSRateLimit(ctx context.Context, resendKey, dayKey st
 func (s *Service) verifySMSCodeInTx(ctx context.Context, tx TxStore, tenantID int64, phoneHash string, scene int16, codeHash string) error {
 	row, err := tx.GetLatestSMSCode(ctx, tenantID, phoneHash, scene)
 	if err != nil {
+		if !isNoRows(err) {
+			return apperr.ErrInternal.WithCause(err)
+		}
 		return apperr.ErrIdentitySMSInvalid
 	}
 	if row.Used || timex.Now().After(row.ExpireAt) {

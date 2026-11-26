@@ -1,15 +1,4 @@
-// 通知收件箱页(顶栏铃铛进入,{prefix}/notifications)。设计 §7.7:
-// 标签「消息 / 公告」(都带未读数),右上角「全部已读」与「提醒设置」。消息为按天分组的列表行
-// (未读圆点、标题加粗、内容摘要一行、相对时间),分段「全部 / 未读」;点击一条标为已读,有链接的
-// 跳转到对应页面,没有链接的就地展开全文;行内删除在悬停时出现。公告标签为公告列表,点开展开全文
-// 并标为已读。「提醒设置」在右侧抽屉里列出提醒类型开关,强制类显示为不可关闭并说明原因。
-// 标签与分段写进地址。
-//
-// 三端共用同一实现:学生、教师、学校管理端都是租户身份(平台管理端无收件箱)。
-// 通知偏好只渲染 GET /notify/preferences 返回的类型,前端不硬编码类型清单(对齐清单 §6.5)。
-// 未读数改变后经资源失效协议广播给顶栏角标 —— 壳层与页面不在同一渲染树。
-// 公告的未读数取公告列表的 facets.is_read:公告列表在页面层读一次,标签数字与列表共用这次请求;
-// 公告页码写进地址的 notice_page(消息列表用 page),两个标签互不干扰。
+// 租户用户的消息、公告与提醒设置；与顶栏共享未读刷新。
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
@@ -56,9 +45,7 @@ const INBOX_QUERY = {
   filter: { defaultValue: 'all', allowed: ['all', 'unread'] },
 } as const
 
-/**
- * NotificationInboxPage 承载站内消息、公告与提醒设置。
- */
+/** 查看本人通知、可见公告和接收偏好。 */
 export default function NotificationInboxPage() {
   usePageLocation([{ label: '通知收件箱' }])
   const [query, setQuery] = useUrlState(INBOX_QUERY)
@@ -74,6 +61,7 @@ export default function NotificationInboxPage() {
   const unreadAnnouncements = facetCount(announcements.data?.facets, 'is_read', false)
 
   const markAllRead = useCallback(async () => {
+    if (markingAll) return
     setMarkingAll(true)
     setActionError(undefined)
     try {
@@ -85,7 +73,7 @@ export default function NotificationInboxPage() {
     } finally {
       setMarkingAll(false)
     }
-  }, [])
+  }, [markingAll])
 
   return (
     <PageScaffold>
@@ -101,7 +89,7 @@ export default function NotificationInboxPage() {
                 disabled={unreadCount === 0}
                 onClick={() => void markAllRead()}
               >
-                全部已读
+                消息全部已读
               </Button>
               <Button variant="outline" leftIcon={Settings2} onClick={() => setSettingsOpen(true)}>
                 提醒设置
@@ -114,6 +102,14 @@ export default function NotificationInboxPage() {
           <Callout tone="danger" className="mb-4">
             {actionError}
           </Callout>
+        ) : null}
+
+        {unread.status === 'error' ? (
+          <ResourceError
+            message={unread.error?.message ?? '未读消息数暂时读取不到'}
+            traceId={unread.error?.traceId}
+            onRetry={unread.reload}
+          />
         ) : null}
 
         <Tabs value={query.tab} onValueChange={(value) => setQuery({ tab: value })}>
@@ -291,7 +287,7 @@ function MessageList({ filter, onFilterChange }: { filter: string; onFilterChang
   )
 }
 
-/** MessageRow 一条消息:未读圆点、标题(未读加粗)、类型与摘要一行、相对时间;删除在悬停或聚焦时出现 */
+/** 消息链接跳转到业务页；无链接时展开正文。 */
 function MessageRow({
   item,
   expanded,
@@ -341,11 +337,7 @@ function MessageRow({
   )
 }
 
-/**
- * AnnouncementList 系统公告:点开展开全文并标为已读。
- * 公告是「收」的一侧:发布在校管/平台端的侧栏「系统公告」页,两者不互相替代。
- * 列表由页面层读取后传入:标签上的未读数与列表共用同一次请求,标为已读后一起刷新。
- */
+/** 展开公告并标记已读，列表与未读数一起刷新。 */
 function AnnouncementList({ announcements }: { announcements: PagedResourceState<Announcement> }) {
   const [expandedId, setExpandedId] = useState<string>()
   const [actionError, setActionError] = useState<string>()
@@ -433,10 +425,7 @@ function AnnouncementList({ announcements }: { announcements: PagedResourceState
   )
 }
 
-/**
- * PreferenceList 提醒类型开关:类型清单来自服务端;强制类单独成组,显示为不可关闭并说明原因。
- * 后端 UpsertPreference 仍独立校验强制类型,不依赖前端自律。
- */
+/** 按服务端类型目录显示偏好，必要提醒不可关闭。 */
 function PreferenceList() {
   const [pendingType, setPendingType] = useState<string>()
   const [actionError, setActionError] = useState<string>()
@@ -444,6 +433,7 @@ function PreferenceList() {
 
   const toggle = useCallback(
     async (preference: NotificationPreference, enabled: boolean) => {
+      if (pendingType !== undefined || preference.force) return
       setPendingType(preference.type)
       setActionError(undefined)
       try {
@@ -455,7 +445,7 @@ function PreferenceList() {
         setPendingType(undefined)
       }
     },
-    [preferences],
+    [pendingType, preferences],
   )
 
   return (
@@ -478,7 +468,7 @@ function PreferenceList() {
                   <PreferenceRow
                     key={preference.type}
                     preference={preference}
-                    pending={pendingType === preference.type}
+                    pending={pendingType !== undefined}
                     onToggle={(enabled) => void toggle(preference, enabled)}
                   />
                 ))}
@@ -492,7 +482,7 @@ function PreferenceList() {
                     <PreferenceRow
                       key={preference.type}
                       preference={preference}
-                      pending={pendingType === preference.type}
+                      pending={pendingType !== undefined}
                       onToggle={(enabled) => void toggle(preference, enabled)}
                     />
                   ))}
@@ -506,7 +496,7 @@ function PreferenceList() {
   )
 }
 
-/** PreferenceRow 一个提醒类型的开关;强制类换锁形图标并禁用开关(不只靠变淡表达) */
+/** 显示提醒开关及不可关闭状态。 */
 function PreferenceRow({
   preference,
   pending,

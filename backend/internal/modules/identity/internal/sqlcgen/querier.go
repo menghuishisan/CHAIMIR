@@ -23,6 +23,7 @@ type Querier interface {
 	CountAccountsByStatus(ctx context.Context, arg CountAccountsByStatusParams) ([]CountAccountsByStatusRow, error)
 	CountActiveRoleAccounts(ctx context.Context, arg CountActiveRoleAccountsParams) (int64, error)
 	CountClassStudents(ctx context.Context, arg CountClassStudentsParams) (int64, error)
+	CountLoginFailures(ctx context.Context, arg CountLoginFailuresParams) (int64, error)
 	CountPendingImportPreviews(ctx context.Context, arg CountPendingImportPreviewsParams) (int64, error)
 	// 学校管理列表的状态分段计数:套用关键词筛选,不套用状态筛选。
 	CountTenantsByStatus(ctx context.Context, keyword string) ([]CountTenantsByStatusRow, error)
@@ -67,6 +68,7 @@ type Querier interface {
 	IncrementSMSVerifyAttempts(ctx context.Context, arg IncrementSMSVerifyAttemptsParams) error
 	ListAccounts(ctx context.Context, arg ListAccountsParams) ([]ListAccountsRow, error)
 	ListAccountsByPhoneHashPrivileged(ctx context.Context, phoneHash string) ([]ListAccountsByPhoneHashPrivilegedRow, error)
+	ListAlertRecipients(ctx context.Context, tenantID int64) ([]int64, error)
 	ListAuthSessionsByAccount(ctx context.Context, arg ListAuthSessionsByAccountParams) ([]AuthSession, error)
 	// 按班级取在校学生摘要,供 M6 按班级批量选课。班级是 account_profile.org_id 指向的组织节点
 	// (学生的 org_id 必为同租户在用班级,由 0001 迁移的触发器保证),故按 org_id 过滤即为按班级。

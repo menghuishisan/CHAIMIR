@@ -1,4 +1,3 @@
-// experiment service_report 文件实现实验报告提交、批改和分数重算。
 package experiment
 
 import (
@@ -83,11 +82,16 @@ func (s *Service) SubmitReport(ctx context.Context, instanceID int64, req Report
 		return ReportDTO{}, err
 	}
 	if err := s.storage.Put(ctx, plan.Bucket, plan.Key, bytes.NewReader(req.Content), plan.Size, plan.ContentType); err != nil {
-		return ReportDTO{}, apperr.ErrExperimentReportInvalid.WithCause(err)
+		return ReportDTO{}, apperr.ErrExperimentReportInvalid.WithCause(storage.CompensateUpload(ctx, s.cleanupTimeout, err, false, func(ctx context.Context) error {
+			return s.storage.Delete(ctx, plan.Bucket, plan.Key)
+		}))
 	}
 
 	var report ExperimentReport
 	var previousContentRef string
+	var profiles map[int64]contracts.AccountInfo
+	shouldPublish := false
+	commitAttempted := false
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		inst, err := tx.GetInstanceForUpdate(ctx, id.TenantID, instanceID)
 		if err != nil {
@@ -106,19 +110,43 @@ func (s *Service) SubmitReport(ctx context.Context, instanceID int64, req Report
 			return previousErr
 		}
 		report, err = tx.UpsertReport(ctx, ExperimentReport{ID: s.ids.Generate(), TenantID: id.TenantID, InstanceID: instanceID, StudentID: id.AccountID, ContentRef: plan.ObjectRef})
-		return err
+		if err != nil {
+			return err
+		}
+		if inst.Status == InstanceStatusFinished {
+			score, err := tx.SumScores(ctx, id.TenantID, instanceID)
+			if err != nil {
+				return err
+			}
+			inst, _, err = tx.UpdateInstanceScoreIfChanged(ctx, id.TenantID, instanceID, score)
+			if err != nil {
+				return err
+			}
+			if err := s.enqueueExperimentEventOutbox(ctx, tx, inst); err != nil {
+				return err
+			}
+			shouldPublish = true
+		}
+		profiles, err = s.reportProfiles(ctx, []ExperimentReport{report})
+		if err != nil {
+			return err
+		}
+		if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "experiment.report.submit", auditTargetReport, report.ID, map[string]any{"instance_id": instanceID}); err != nil {
+			return err
+		}
+		commitAttempted = true
+		return nil
 	}); err != nil {
-		s.deleteUploadedReportObject(ctx, plan.Bucket, plan.Key, "清理未关联实验报告失败")
+		err = storage.CompensateUpload(ctx, s.cleanupTimeout, err, commitAttempted, func(ctx context.Context) error { return s.storage.Delete(ctx, plan.Bucket, plan.Key) })
 		return ReportDTO{}, err
+	}
+	if shouldPublish {
+		s.drainExperimentEventOutboxBestEffort(ctx)
 	}
 	if previousContentRef != "" && previousContentRef != plan.ObjectRef {
 		s.deletePreviousReportObject(ctx, id.TenantID, instanceID, id.AccountID, previousContentRef)
 	}
-	profiles, err := s.reportProfiles(ctx, []ExperimentReport{report})
-	if err != nil {
-		return ReportDTO{}, err
-	}
-	return reportDTOFromModel(report, profiles), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "experiment.report.submit", auditTargetReport, report.ID, map[string]any{"instance_id": instanceID})
+	return reportDTOFromModel(report, profiles), nil
 }
 
 // ensureReportUploadAllowed 在写对象前复用实例访问规则,阻止越权或终态上传。
@@ -172,15 +200,10 @@ func reportFileKindValid(fileName, contentType string, content []byte) bool {
 	}
 }
 
-// deleteUploadedReportObject 记录补偿删除失败,避免用清理错误覆盖原始业务错误链。
-func (s *Service) deleteUploadedReportObject(ctx context.Context, bucket, key, message string) {
-	if err := s.storage.Delete(ctx, bucket, key); err != nil {
-		logging.ErrorContext(ctx, message, err.Error())
-	}
-}
-
 // deletePreviousReportObject 只删除当前实例和学生受控前缀内的旧报告对象。
 func (s *Service) deletePreviousReportObject(ctx context.Context, tenantID, instanceID, studentID int64, raw string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.cleanupTimeout)
+	defer cancel()
 	if err := validateReportObjectRef(s.storage.BucketReport(), tenantID, instanceID, studentID, raw); err != nil {
 		logging.ErrorContext(ctx, "旧实验报告引用不在受控路径,跳过清理", apperr.AsAppError(err).LogString())
 		return
@@ -190,7 +213,9 @@ func (s *Service) deletePreviousReportObject(ctx context.Context, tenantID, inst
 		logging.ErrorContext(ctx, "解析旧实验报告引用失败", err.Error())
 		return
 	}
-	s.deleteUploadedReportObject(ctx, ref.Bucket, ref.Key, "清理已替换实验报告失败")
+	if err := s.storage.Delete(ctx, ref.Bucket, ref.Key); err != nil {
+		logging.ErrorContext(ctx, "清理已替换实验报告失败", err.Error())
+	}
 }
 
 // reportProfiles 把报告提交者一次批量解析为账号档案,避免逐条调用形成 N+1。
@@ -330,7 +355,7 @@ func (s *Service) GradeReport(ctx context.Context, reportID int64, req GradeRepo
 		return ReportDTO{}, err
 	}
 	req.Comment = strings.TrimSpace(req.Comment)
-	if req.ManualScore == nil {
+	if req.ManualScore == nil || req.SubmittedAt.IsZero() {
 		return ReportDTO{}, apperr.ErrExperimentScoreInvalid
 	}
 	manualScore := *req.ManualScore
@@ -338,14 +363,18 @@ func (s *Service) GradeReport(ctx context.Context, reportID int64, req GradeRepo
 		return ReportDTO{}, err
 	}
 	var report ExperimentReport
-	var inst ExperimentInstance
+	var profiles map[int64]contracts.AccountInfo
 	shouldPublish := false
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		current, err := tx.GetReport(ctx, id.TenantID, reportID)
 		if err != nil {
 			return err
 		}
-		inst, err = tx.GetInstanceForUpdate(ctx, id.TenantID, current.InstanceID)
+		inst, err := tx.GetInstanceForUpdate(ctx, id.TenantID, current.InstanceID)
+		if err != nil {
+			return err
+		}
+		current, err = tx.GetReport(ctx, id.TenantID, reportID)
 		if err != nil {
 			return err
 		}
@@ -356,36 +385,43 @@ func (s *Service) GradeReport(ctx context.Context, reportID int64, req GradeRepo
 		if err := s.ensureTeacherCanManage(ctx, id.AccountID, exp); err != nil {
 			return err
 		}
+		if !req.SubmittedAt.Equal(current.SubmittedAt) {
+			return apperr.New(apperr.CodeConflict, "报告已重新提交,请刷新并审阅最新报告后再批改")
+		}
 		report, err = tx.GradeReport(ctx, id.TenantID, reportID, manualScore, req.Comment)
 		if err != nil {
 			return err
 		}
-		if inst.Status != InstanceStatusFinished && inst.Status != InstanceStatusRecycled {
-			return nil
+		if inst.Status == InstanceStatusFinished || inst.Status == InstanceStatusRecycled {
+			if err := s.syncTerminalCheckpointResults(ctx, tx, inst, exp); err != nil {
+				return err
+			}
+			score, err := tx.SumScores(ctx, id.TenantID, inst.ID)
+			if err != nil {
+				return err
+			}
+			var changed bool
+			inst, changed, err = tx.UpdateInstanceScoreIfChanged(ctx, id.TenantID, inst.ID, score)
+			if err != nil {
+				return err
+			}
+			shouldPublish = changed || current.Status != ReportStatusGraded
+			if shouldPublish {
+				if err := s.enqueueExperimentEventOutbox(ctx, tx, inst); err != nil {
+					return err
+				}
+			}
 		}
-		score, err := tx.SumScores(ctx, id.TenantID, inst.ID)
+		profiles, err = s.reportProfiles(ctx, []ExperimentReport{report})
 		if err != nil {
 			return err
 		}
-		var changed bool
-		inst, changed, err = tx.UpdateInstanceScoreIfChanged(ctx, id.TenantID, inst.ID, score)
-		if err != nil {
-			return err
-		}
-		if !changed && current.Status == ReportStatusGraded {
-			return nil
-		}
-		shouldPublish = true
-		return s.enqueueExperimentEventOutbox(ctx, tx, inst)
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.report.grade", auditTargetReport, report.ID, map[string]any{"manual_score": manualScore})
 	}); err != nil {
 		return ReportDTO{}, err
 	}
 	if shouldPublish {
 		s.drainExperimentEventOutboxBestEffort(ctx)
 	}
-	profiles, err := s.reportProfiles(ctx, []ExperimentReport{report})
-	if err != nil {
-		return ReportDTO{}, err
-	}
-	return reportDTOFromModel(report, profiles), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.report.grade", auditTargetReport, report.ID, map[string]any{"manual_score": manualScore})
+	return reportDTOFromModel(report, profiles), nil
 }

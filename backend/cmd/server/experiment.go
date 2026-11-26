@@ -21,23 +21,25 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ExperimentModuleDeps 汇总组合根装配 M7 需要的基础设施和跨模块契约。
+// ExperimentModuleDeps 是 M7 装配所需的依赖。
 type ExperimentModuleDeps struct {
-	Router      gin.IRouter
-	Database    *db.DB
-	IDs         snowflake.Generator
-	Config      config.ExperimentConfig
-	Content     contracts.ContentReadService
-	Sandbox     contracts.SandboxService
-	Judge       contracts.JudgeService
-	Sim         contracts.SimService
-	Audit       audit.Writer
-	EventBus    eventbus.Bus
-	Storage     *storage.Storage
-	Upload      config.UploadConfig
-	FileService storage.Service
-	Auth        *auth.Manager
-	Roles       contracts.IdentityService
+	Router       gin.IRouter
+	Database     *db.DB
+	IDs          snowflake.Generator
+	Config       config.ExperimentConfig
+	Content      contracts.ContentReadService
+	ContentClone contracts.ContentCloneService
+	Sandbox      contracts.SandboxService
+	SandboxClone contracts.SandboxCompositionCloneService
+	Judge        contracts.JudgeService
+	Sim          contracts.SimService
+	Audit        audit.Writer
+	EventBus     eventbus.Bus
+	Storage      *storage.Storage
+	Upload       config.UploadConfig
+	FileService  storage.Service
+	Auth         *auth.Manager
+	Roles        contracts.IdentityService
 }
 
 // RegisterExperimentModule 构造实验 store/service,注册路由、事件和生命周期后台任务。
@@ -53,19 +55,23 @@ func RegisterExperimentModule(ctx context.Context, deps ExperimentModuleDeps) (*
 	}
 	store := experiment.NewStore(deps.Database)
 	svc, err := experiment.NewService(experiment.ServiceDeps{
+		CleanupTimeout:   time.Duration(deps.Upload.CleanupTimeoutSeconds) * time.Second,
 		Store:            store,
 		IDs:              deps.IDs,
 		Config:           deps.Config,
 		Audit:            deps.Audit,
 		Roles:            deps.Roles,
 		Content:          deps.Content,
+		ContentClone:     deps.ContentClone,
 		Sandbox:          deps.Sandbox,
+		SandboxClone:     deps.SandboxClone,
 		Judge:            deps.Judge,
 		Sim:              deps.Sim,
 		Bus:              deps.EventBus,
 		Storage:          deps.Storage,
 		FileService:      deps.FileService,
 		ReportMaxBytes:   deps.Upload.ExperimentReportMaxBytes,
+		CloneMaxBytes:    deps.Upload.ContentAttachmentMaxBytes,
 		ReportScanPolicy: upload.ScanPolicy{Required: deps.Upload.VirusScanRequired},
 	})
 	if err != nil {
@@ -77,47 +83,19 @@ func RegisterExperimentModule(ctx context.Context, deps ExperimentModuleDeps) (*
 	if _, err := experiment.SubscribeEvents(deps.EventBus, svc); err != nil {
 		return nil, err
 	}
-	eventTask, err := experimentEventOutboxTask(deps.Config, svc)
-	if err != nil {
-		return nil, err
-	}
-	go background.Run(ctx, eventTask)
-	task, err := experimentRecycleTask(deps.Config, svc)
-	if err != nil {
-		return nil, err
-	}
-	go background.Run(ctx, task)
-	return svc, nil
-}
-
-// experimentEventOutboxTask 把 M7 绑定与得分事件 outbox 接入统一后台任务运行器。
-func experimentEventOutboxTask(cfg config.ExperimentConfig, svc *experiment.Service) (background.Task, error) {
-	if svc == nil {
-		return background.Task{}, fmt.Errorf("experiment event outbox worker 缺少 service")
-	}
-	if cfg.EventOutboxPollMs <= 0 {
-		return background.Task{}, fmt.Errorf("EXPERIMENT_EVENT_OUTBOX_POLL_INTERVAL_MS 必须大于 0")
-	}
-	return background.Task{
-		Name:     "experiment.event_outbox",
-		Interval: time.Duration(cfg.EventOutboxPollMs) * time.Millisecond,
-		Run: func(ctx context.Context) error {
-			return svc.RunExperimentEventOutboxOnce(ctx)
+	if err := background.Start(ctx,
+		background.Task{
+			Name:     "experiment.event_outbox",
+			Interval: time.Duration(deps.Config.EventOutboxPollMs) * time.Millisecond,
+			Run:      svc.RunExperimentEventOutboxOnce,
 		},
-	}, nil
-}
-
-// experimentRecycleTask 把 M7 实例生命周期回收接入统一后台任务运行器。
-func experimentRecycleTask(cfg config.ExperimentConfig, svc *experiment.Service) (background.Task, error) {
-	if svc == nil {
-		return background.Task{}, fmt.Errorf("experiment recycle task 缺少 service")
+		background.Task{
+			Name:     "experiment.recycle",
+			Interval: time.Duration(deps.Config.RecyclePollIntervalSeconds) * time.Second,
+			Run:      svc.RunRecycleOnce,
+		},
+	); err != nil {
+		return nil, err
 	}
-	if cfg.RecyclePollIntervalSeconds <= 0 {
-		return background.Task{}, fmt.Errorf("EXPERIMENT_RECYCLE_POLL_INTERVAL_SECONDS 必须大于 0")
-	}
-	return background.Task{
-		Name:     "experiment.recycle",
-		Interval: time.Duration(cfg.RecyclePollIntervalSeconds) * time.Second,
-		Run:      svc.RunRecycleOnce,
-	}, nil
+	return svc, nil
 }

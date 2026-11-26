@@ -32,6 +32,7 @@ env_keys:
     - CHAIMIR_FABRIC_ORDERER_ADDRESS
     - CHAIMIR_FABRIC_EXPLORER_PORT
     - CHAIMIR_HTTP_TIMEOUT_SECONDS
+    - CHAIMIR_FABRIC_OUTPUT_MAX_BYTES
     - CORE_PEER_TLS_ENABLED
     - CORE_PEER_TLS_ROOTCERT_FILE
     - CORE_PEER_TLS_CLIENTCERT_FILE
@@ -77,6 +78,7 @@ tool:
       required_at_start: true
       config_binding: env:CHAIMIR_FABRIC_ORDERER_ADDRESS
   resource_spec:
+    volume_source: binding:peer
     components:
       - name: web
         image_url: "@self"
@@ -109,6 +111,8 @@ tool:
             value: "8080"
           - name: CHAIMIR_HTTP_TIMEOUT_SECONDS
             value: "30"
+          - name: CHAIMIR_FABRIC_OUTPUT_MAX_BYTES
+            value: "1048576"
         ports:
           - name: http
             container_port: 8080
@@ -123,7 +127,7 @@ tool:
             memory: 2Gi
         readiness_probe:
           type: http
-          path: /
+          path: /healthz
           port: http
           period_seconds: 2
           failure_threshold: 60

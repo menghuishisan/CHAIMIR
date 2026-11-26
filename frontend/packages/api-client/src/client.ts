@@ -1,9 +1,9 @@
-// API 客户端核心：封装后端统一信封、鉴权头、trace_id 透传和用户向错误。
-// 后端业务面 HTTP 状态码恒为 200(docs/总-API接口总览.md §2 统一响应体),
-// 一切业务结果——含登录失效——都在信封的 code 里,因此本文件只按 code 判定,
-// axios 的 error 分支只剩「拿不到响应体」的传输层失败。
-
-import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios'
+import axios, {
+  type AxiosError,
+  type AxiosInstance,
+  type AxiosRequestConfig,
+  type InternalAxiosRequestConfig,
+} from 'axios'
 import {
   API_BASE_PATH,
   API_ERROR_CODES,
@@ -61,13 +61,10 @@ interface RetriableRequestConfig extends InternalAxiosRequestConfig {
 }
 
 export class ApiClient {
-  private client: AxiosInstance
-  private config: ApiConfig
+  private readonly client: AxiosInstance
+  private readonly config: ApiConfig
   private refreshPromise: Promise<void> | null = null
 
-  /**
-   * constructor 创建绑定后端统一 API 根路径的 Axios 客户端。
-   */
   constructor(config: ApiConfig) {
     this.config = {
       ...config,
@@ -78,24 +75,25 @@ export class ApiClient {
       baseURL: this.config.baseURL,
       timeout: this.config.timeout,
       withCredentials: true,
-      headers: {
-        'Content-Type': 'application/json',
-      },
     })
 
     this.setupInterceptors()
   }
 
-  /**
-   * setupInterceptors 注入认证、trace_id 和后端统一信封解析逻辑。
-   */
   private setupInterceptors() {
-    // 请求拦截：注入 Token
     this.client.interceptors.request.use(
       (config: InternalAxiosRequestConfig) => {
         const token = this.config.getToken?.()
         if (token && config.headers) {
           config.headers.Authorization = `Bearer ${token}`
+        }
+        if (config.headers) {
+          // FormData 的 boundary 必须由浏览器生成;固定 JSON 头会让 multipart 请求缺少 boundary。
+          if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+            delete config.headers['Content-Type']
+          } else if (!config.headers['Content-Type']) {
+            config.headers['Content-Type'] = 'application/json'
+          }
         }
         return config
       },
@@ -104,7 +102,7 @@ export class ApiClient {
       }
     )
 
-    // 响应拦截：业务结果全在信封的 code 里，按 code 判定
+    // HTTP 200 仅表示收到业务响应，具体结果由信封的 code 决定。
     this.client.interceptors.response.use(
       async (response) => {
         const requestConfig = response.config as RetriableRequestConfig
@@ -116,23 +114,32 @@ export class ApiClient {
             return { blob: response.data, disposition } as never
           }
           const apiResponse = await envelopeFromBlob(response.data)
-          if (!apiResponse) {
-            return Promise.reject(new ApiError(API_TRANSPORT_ERROR_MESSAGES.MALFORMED_RESPONSE))
-          }
-          if (apiResponse.code === API_SUCCESS_CODE) {
+          if (!apiResponse || apiResponse.code === API_SUCCESS_CODE) {
             return Promise.reject(new ApiError(API_TRANSPORT_ERROR_MESSAGES.MALFORMED_RESPONSE))
           }
           return this.handleEnvelope(apiResponse, requestConfig) as never
         }
 
-        // 边界校验：不是平台信封的 200 响应来自网关而非后端，按传输层失败处理
         if (!isEnvelope(response.data)) {
           return Promise.reject(new ApiError(API_TRANSPORT_ERROR_MESSAGES.MALFORMED_RESPONSE))
         }
 
         return this.handleEnvelope(response.data, requestConfig) as never
       },
-      (error: AxiosError) => Promise.reject(transformTransportError(error))
+      async (error: AxiosError) => {
+        const requestConfig = error.config as RetriableRequestConfig | undefined
+        if (requestConfig?.responseType === 'blob' && error.response) {
+          const apiResponse = await envelopeFromBlob(error.response.data)
+          if (apiResponse && apiResponse.code !== API_SUCCESS_CODE) {
+            try {
+              return await this.handleEnvelope(apiResponse, requestConfig)
+            } catch (cause) {
+              return Promise.reject(cause)
+            }
+          }
+        }
+        return Promise.reject(transformTransportError(error))
+      }
     )
   }
 
@@ -150,7 +157,7 @@ export class ApiClient {
       requestConfig.chaimirRetried = true
       // 刷新错误保留自己的类别和报障编号，临时网络故障不能被改写为原请求的登录失效。
       await this.refreshAccessToken()
-      return this.client.request(requestConfig)
+      return this.request(requestConfig)
     }
 
     if (requiresReauthentication(apiResponse.code)) {
@@ -209,58 +216,34 @@ export class ApiClient {
     this.config.onTokensRefreshed?.(envelope.data)
   }
 
-  // === HTTP 方法 ===
-
-  /**
-   * get 发送 GET 请求并返回后端信封中的 data 字段。
-   */
-  async get<T = unknown>(url: string, params?: object): Promise<T> {
-    return this.client.get<unknown, T>(url, { params }) as unknown as T
+  private request<T>(config: AxiosRequestConfig): Promise<T> {
+    // 响应拦截器已取出业务数据，Axios 类型仍声明为原始响应。
+    return this.client.request(config) as Promise<unknown> as Promise<T>
   }
 
-  /**
-   * post 发送 POST 请求并返回后端信封中的 data 字段。
-   */
-  async post<T = unknown>(url: string, data?: unknown): Promise<T> {
-    return this.client.post<unknown, T>(url, data) as unknown as T
+  get<T = unknown>(url: string, params?: object): Promise<T> {
+    return this.request({ method: 'GET', url, params })
   }
 
-  /**
-   * postLongRunning 等待服务端有界完成一个同步写操作,不使用普通页面请求的短超时。
-   * 仅用于接口契约明确会在本次响应中返回最终资源的长事务;真正的后台任务必须使用
-   * postBackground 并通过独立状态接口查询,不能用本方法代替任务状态机。
-   */
-  async postLongRunning<T = unknown>(url: string, data?: unknown): Promise<T> {
-    return this.client.post<unknown, T>(url, data, { timeout: 0 }) as unknown as T
+  post<T = unknown>(url: string, data?: unknown): Promise<T> {
+    return this.request({ method: 'POST', url, data })
   }
 
-  /**
-   * postBackground 发起由服务端有界执行的长任务,不让浏览器连接超时打断状态落库。
-   * 调用方应立即使用独立查询接口读取任务状态,不能等待该 Promise 更新界面。
-   */
-  async postBackground<T = unknown>(url: string, data?: unknown): Promise<T> {
-    return this.client.post<unknown, T>(url, data, { timeout: 0 }) as unknown as T
+  /** 仅用于服务端已有执行时限的操作，避免普通客户端超时提前中断请求。 */
+  postWithoutClientTimeout<T = unknown>(url: string, data?: unknown): Promise<T> {
+    return this.request({ method: 'POST', url, data, timeout: 0 })
   }
 
-  /**
-   * put 发送 PUT 请求并返回后端信封中的 data 字段。
-   */
-  async put<T = unknown>(url: string, data?: unknown): Promise<T> {
-    return this.client.put<unknown, T>(url, data) as unknown as T
+  put<T = unknown>(url: string, data?: unknown): Promise<T> {
+    return this.request({ method: 'PUT', url, data })
   }
 
-  /**
-   * patch 发送 PATCH 请求并返回后端信封中的 data 字段。
-   */
-  async patch<T = unknown>(url: string, data?: unknown): Promise<T> {
-    return this.client.patch<unknown, T>(url, data) as unknown as T
+  patch<T = unknown>(url: string, data?: unknown): Promise<T> {
+    return this.request({ method: 'PATCH', url, data })
   }
 
-  /**
-   * delete 发送 DELETE 请求并返回后端信封中的 data 字段。
-   */
-  async delete<T = unknown>(url: string): Promise<T> {
-    return this.client.delete<unknown, T>(url) as unknown as T
+  delete<T = unknown>(url: string): Promise<T> {
+    return this.request({ method: 'DELETE', url })
   }
 
   // === URL 构造 ===
@@ -269,7 +252,7 @@ export class ApiClient {
    * 返回规范化后的 HTTP API 根地址，供 iframe 工具入口等浏览器原生能力使用。
    */
   public baseURL(): string {
-    return normalizeBaseURL(this.config.baseURL)
+    return this.config.baseURL
   }
 
   /**
@@ -330,70 +313,31 @@ export class ApiClient {
 
   // === 文件上传 ===
 
-  /**
-   * upload 以默认 file 字段提交单文件上传。
-   */
-  async upload<T = unknown>(
+  /** 后端单文件上传协议使用 file 字段。 */
+  upload<T = unknown>(
     url: string,
     file: File,
     onProgress?: (progress: number) => void
   ): Promise<T> {
     const formData = new FormData()
     formData.append('file', file)
-
-    return this.client.post<unknown, T>(url, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-      onUploadProgress: (progressEvent) => {
-        if (onProgress && progressEvent.total) {
-          const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-          onProgress(progress)
-        }
-      },
-    }) as unknown as T
+    return this.sendFormData('POST', url, formData, onProgress)
   }
 
-  /**
-   * 提交 multipart 表单，用于后端要求多个元数据字段和指定文件字段名的上传接口。
-   */
-  async postFormData<T = unknown>(
+  sendFormData<T = unknown>(
+    method: 'POST' | 'PATCH',
     url: string,
-    formData: FormData,
+    data: FormData,
     onProgress?: (progress: number) => void
   ): Promise<T> {
-    return this.client.post<unknown, T>(url, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-      onUploadProgress: (progressEvent) => {
-        if (onProgress && progressEvent.total) {
-          const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-          onProgress(progress)
-        }
-      },
-    }) as unknown as T
-  }
-
-  /**
-   * 以 PATCH 方式提交 multipart 表单。
-   */
-  async patchFormData<T = unknown>(
-    url: string,
-    formData: FormData,
-    onProgress?: (progress: number) => void
-  ): Promise<T> {
-    return this.client.patch<unknown, T>(url, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-      onUploadProgress: (progressEvent) => {
-        if (onProgress && progressEvent.total) {
-          const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-          onProgress(progress)
-        }
-      },
-    }) as unknown as T
+    return this.request({
+      method,
+      url,
+      data,
+      onUploadProgress: onProgress && (({ loaded, total }) => {
+        if (total) onProgress(Math.round((loaded * 100) / total))
+      }),
+    })
   }
 
   /**
@@ -403,7 +347,9 @@ export class ApiClient {
    * 客户端不自造名字、不按多个业务字段依次取值。
    */
   async getAttachment(url: string, params?: object): Promise<AttachmentResponse> {
-    const response = await this.client.get<unknown, AttachmentResult>(url, {
+    const response = await this.request<AttachmentResult>({
+      method: 'GET',
+      url,
       params,
       responseType: 'blob',
     })
@@ -463,11 +409,22 @@ function isEnvelope(data: unknown): data is ApiResponse {
   return typeof candidate.code === 'string' && typeof candidate.message === 'string'
 }
 
-/** envelopeFromBlob 从无附件响应头的 Blob 中恢复平台错误信封。 */
+/** envelopeFromBlob 从无附件响应头的响应体中恢复平台错误信封。 */
 async function envelopeFromBlob(data: unknown): Promise<ApiResponse | undefined> {
-  if (!(data instanceof Blob)) return undefined
+  let text: string
+  if (typeof data === 'string') {
+    text = data
+  } else if (typeof Blob !== 'undefined' && data instanceof Blob) {
+    text = await data.text()
+  } else if (data instanceof ArrayBuffer) {
+    text = new TextDecoder().decode(data)
+  } else if (ArrayBuffer.isView(data)) {
+    text = new TextDecoder().decode(data)
+  } else {
+    return undefined
+  }
   try {
-    const parsed: unknown = JSON.parse(await data.text())
+    const parsed: unknown = JSON.parse(text)
     return isEnvelope(parsed) ? parsed : undefined
   } catch {
     return undefined

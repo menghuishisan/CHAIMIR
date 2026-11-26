@@ -1,4 +1,3 @@
-// sandbox model 文件定义 M2 沙箱引擎内部领域模型和运行时快照。
 package sandbox
 
 import (
@@ -36,7 +35,7 @@ type RuntimeImage struct {
 	GenesisBaked bool
 }
 
-// CompositionPrepull 描述某个运行时镜像与已发布组合摘要绑定的预拉取证明。
+// CompositionPrepull 描述某个运行时镜像与冻结组合摘要绑定的预拉取证明。
 // 预拉取状态属于组合闭包,不能挂在镜像版本本身,否则不同组合会互相覆盖。
 type CompositionPrepull struct {
 	ID                int64
@@ -124,6 +123,7 @@ type Sandbox struct {
 	SnapshotEnabled     bool
 	CodeStorageKey      string
 	CodeHash            string
+	recycleSaved        bool
 	WorkspaceRevision   int64
 	InitCodeRef         string
 	InitScriptRef       string
@@ -136,14 +136,12 @@ type Sandbox struct {
 	ExpireAt            time.Time
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+	resourceLeaseToken  string
+	resourceLeaseUntil  time.Time
 }
 
-// SandboxTool 描述沙箱内已挂载工具的访问端点。
+// SandboxTool 是冻结组件在本次读取中的访问投影，不持久化。
 type SandboxTool struct {
-	ID             int64
-	TenantID       int64
-	SandboxID      int64
-	ToolID         int64
 	ToolCode       string
 	Kind           int16
 	ResourceSpec   ToolResourceSpec
@@ -165,39 +163,21 @@ type TenantQuota struct {
 
 // SandboxRecycleOutbox 是沙箱回收事件的生产者 outbox 记录。
 type SandboxRecycleOutbox struct {
-	ID             int64
-	TenantID       int64
-	SandboxID      int64
-	SourceRef      string
-	ScopeRef       string
-	OwnerAccountID int64
-	Reason         string
-	TraceID        string
-	RecycledAt     time.Time
-	Status         int16
-	RetryCount     int32
-	LastError      string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	LeaseToken     string
-	LeaseUntil     time.Time
-}
-
-// CreateSandboxInputModel 是 service 传入规则层的本模块创建校验模型。
-type CreateSandboxInputModel struct {
-	TenantID                 int64
-	CompositionSnapshot      contracts.SandboxCompositionSnapshot
-	InitCodeRef              string
-	InitScriptRef            string
-	OwnerAccountID           int64
-	AuthorizedAccountIDs     []int64
-	SourceRef                string
-	ScopeRef                 string
-	KeepAlive                bool
-	SnapshotEnabled          bool
-	KeepAliveMinutes         int32
-	SnapshotRetentionMinutes int32
-	PrivateSidecars          []workload.ComponentSpec
+	ID         int64
+	TenantID   int64
+	SandboxID  int64
+	SourceRef  string
+	ScopeRef   string
+	Reason     string
+	TraceID    string
+	RecycledAt time.Time
+	Status     int16
+	RetryCount int32
+	LastError  string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	LeaseToken string
+	LeaseUntil time.Time
 }
 
 // AdapterSpec 是 runtime.adapter_spec 的控制面可执行结构。
@@ -219,7 +199,7 @@ type AdapterSpec struct {
 	PrivateArchiveOps  PrivateArchiveOps          `json:"private_archive_ops"`
 	InitAssetOps       PrivateArchiveOps          `json:"init_asset_ops"`
 	CapabilityCommands CapabilityCommandSet       `json:"capability_commands"`
-	// StartupOrder is the deterministic component order for links marked required_at_start.
+	// StartupOrder uses composition component codes, independent of runtime Pod names.
 	StartupOrder []string `json:"startup_order,omitempty"`
 }
 
@@ -232,13 +212,12 @@ type VolumeDomainSpec struct {
 	SnapshotScope string `json:"snapshot_scope"`
 }
 
-// InitAssetSpec 描述个性化阶段注入的已审核资产。
+// InitAssetSpec 描述消费者启动前注入的已审核资产。
 type InitAssetSpec struct {
 	Name           string `json:"name"`
 	SourceRef      string `json:"source_ref"`
 	TargetDomain   string `json:"target_domain"`
 	ExpectedSHA256 string `json:"expected_sha256"`
-	ApplyPhase     string `json:"apply_phase"`
 }
 
 // WorkspaceOps 声明受控工作区命令,学生文件/终端与私有脚本/清理分别使用独立执行目标。
@@ -283,12 +262,12 @@ type ToolResourceSpec struct {
 	// DisabledReason 记录目录能力暂不可用的原因;它是展示元数据,不是可执行工作负载声明。
 	DisabledReason  string                     `json:"disabled_reason,omitempty"`
 	BuiltinEndpoint string                     `json:"builtin_endpoint"`
+	VolumeSource    string                     `json:"volume_source,omitempty"`
 	Components      []workload.ComponentSpec   `json:"components"`
 	Services        []workload.ServiceSpec     `json:"services"`
 	Routes          []workload.RouteSpec       `json:"routes"`
 	NetworkRules    []workload.NetworkRuleSpec `json:"network_rules"`
 	CommandPolicy   CommandToolPolicy          `json:"command_policy"`
-	PrepullCommand  []string                   `json:"prepull_command"`
 	Bindings        []ComponentBinding         `json:"bindings"`
 	Capabilities    CapabilityConstraints      `json:"capabilities"`
 }
@@ -307,6 +286,8 @@ type CommandToolPolicy struct {
 // 绑定以稳定角色和目标能力表达,不记录具体 runtime/tool code。
 type ComponentBinding struct {
 	Name            string `json:"name"`
+	Title           string `json:"title,omitempty"`
+	Optional        bool   `json:"optional,omitempty"`
 	Capability      string `json:"capability"`
 	SourceComponent string `json:"source_component"`
 	SourceEndpoint  string `json:"source_endpoint,omitempty"`
@@ -314,6 +295,8 @@ type ComponentBinding struct {
 	Protocol        string `json:"protocol"`
 	RequiredAtStart bool   `json:"required_at_start"`
 	ConfigBinding   string `json:"config_binding"`
+	// Multiple 将一个或多个目标编码为 JSON 地址数组，不能用作卷来源。
+	Multiple bool `json:"multiple,omitempty"`
 }
 
 // RuntimePlan 汇总一个组合 runtime 实例的冻结目录行和镜像。
@@ -323,20 +306,27 @@ type RuntimePlan struct {
 	Image        RuntimeImage
 }
 
+// RuntimeInitArchive 是已校验并重打的初始化归档，仅在本次资源操作中传递。
+type RuntimeInitArchive struct {
+	RuntimeInstance string
+	TargetDomain    string
+	Tarball         []byte
+}
+
 // CreateSandboxPlan 汇总创建沙箱时 service 交给编排器的完整上下文。
 type CreateSandboxPlan struct {
 	Sandbox                  Sandbox
 	WorkspaceRuntimeInstance string
+	InitChainSteps           []contracts.CompositionChainStep
 	Runtimes                 []RuntimePlan
 	Tools                    []Tool
 	PrivateSidecars          []workload.ComponentSpec
-	// RuntimeOnlyBootstrap 只在组合初始化阶段使用:保留完整卷和网络声明,暂不创建工具/基础设施 Pod。
-	// 这样 init_assets/init_script 完成后,依赖材料的组件才会首次启动。
-	RuntimeOnlyBootstrap bool
+	// DeferTools 延后非运行时前置的工具,直到工作区初始化完成。
+	DeferTools bool
 }
 
-// WorkspaceRuntime 返回组合显式指定的工作区运行时,禁止按数组顺序隐式选择。
-func (p CreateSandboxPlan) WorkspaceRuntime(instanceCode string) (RuntimePlan, bool) {
+// RuntimeInstance 按实例标识选择运行时，不默认使用工作区或数组首项。
+func (p CreateSandboxPlan) RuntimeInstance(instanceCode string) (RuntimePlan, bool) {
 	instanceCode = strings.TrimSpace(instanceCode)
 	if instanceCode == "" {
 		return RuntimePlan{}, false

@@ -1,4 +1,3 @@
-// grade service_transcript_pdf 文件负责把成绩摘要渲染为可下载 PDF 字节。
 package grade
 
 import (
@@ -12,8 +11,12 @@ import (
 	"github.com/go-pdf/fpdf"
 )
 
-// renderTranscriptPDF 生成成绩单 PDF 文件内容。
-func renderTranscriptPDF(summary GradeSummaryDTO, signingKey string) ([]byte, error) {
+type transcriptData struct {
+	GradeSummaryDTO
+	CourseGrades []CourseGradeInput
+}
+
+func renderTranscriptPDF(summary transcriptData, signingKey string) ([]byte, error) {
 	pdf := fpdf.New("P", "mm", "A4", "")
 	pdf.SetTitle("Chaimir Transcript", false)
 	pdf.AddPage()
@@ -51,8 +54,8 @@ func renderTranscriptPDF(summary GradeSummaryDTO, signingKey string) ([]byte, er
 	return buf.Bytes(), nil
 }
 
-// verificationText 生成不暴露密钥的成绩单 HMAC 校验码。
-func verificationText(summary GradeSummaryDTO, signingKey string) (string, error) {
+// 签名覆盖 GPA 和渲染进 PDF 的每一条课程成绩。
+func verificationText(summary transcriptData, signingKey string) (string, error) {
 	var seed strings.Builder
 	if _, err := fmt.Fprintf(&seed, "student=%d;semester=%d;gpa=%.3f;cumulative=%.3f;credits=%.1f;",
 		summary.StudentID, summary.SemesterID, summary.GPA, summary.CumulativeGPA, summary.TotalCredits); err != nil {

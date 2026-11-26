@@ -1,5 +1,3 @@
-// IDE 公共类型：描述编辑器和终端的受控生命周期。
-
 export interface DisposableHandle {
   dispose: () => void
 }
@@ -28,5 +26,6 @@ export interface MountedTerminal extends DisposableHandle {
   write: (data: string | Uint8Array) => void
   clear: () => void
   focus: () => void
-  resize: () => void
+  getSize: () => { cols: number; rows: number }
+  onResize: (listener: (size: { cols: number; rows: number }) => void) => DisposableHandle
 }

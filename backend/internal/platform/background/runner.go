@@ -1,4 +1,4 @@
-// background 提供后台轮询任务的统一运行语义,不承载任何业务状态机。
+// Package background 运行模块声明的周期任务。
 package background
 
 import (
@@ -22,17 +22,27 @@ type Task struct {
 	Run      func(context.Context) error
 }
 
-// Run 按固定间隔执行后台任务,单轮错误或 panic 只记录日志而不终止整个循环。
-func Run(ctx context.Context, task Task) {
-	interval := task.Interval
-	if interval <= 0 {
-		logging.ErrorContext(ctx, "background task invalid interval", "interval must be greater than zero", slog.String("task", task.Name))
-		return
+// Start 校验一批任务后立即启动，各任务在同一个 context 取消时结束。
+func Start(ctx context.Context, tasks ...Task) error {
+	if ctx == nil {
+		return fmt.Errorf("后台任务缺少 context")
 	}
-	ticker := time.NewTicker(interval)
+	for _, task := range tasks {
+		if task.Name == "" || task.Run == nil || task.Interval <= 0 {
+			return fmt.Errorf("后台任务 %q 缺少名称、回调或有效间隔", task.Name)
+		}
+	}
+	for _, task := range tasks {
+		go run(ctx, task)
+	}
+	return nil
+}
+
+func run(ctx context.Context, task Task) {
+	ticker := time.NewTicker(task.Interval)
 	defer ticker.Stop()
 
-	for {
+	for ctx.Err() == nil {
 		runOnce(ctx, task)
 		select {
 		case <-ctx.Done():
@@ -42,7 +52,6 @@ func Run(ctx context.Context, task Task) {
 	}
 }
 
-// runOnce 包装单轮执行的错误与 panic 边界,统一后台任务的失败处理方式。
 func runOnce(ctx context.Context, task Task) {
 	traceID := uuid.NewString()
 	ctx = response.WithTrace(ctx, traceID)
@@ -57,12 +66,7 @@ func runOnce(ctx context.Context, task Task) {
 			logging.ErrorContext(ctx, "background task panic", fmt.Sprintf("%v\n%s", v, debug.Stack()))
 		}
 	}()
-	if task.Run == nil {
-		logging.ErrorContext(ctx, "background task missing runner", "nil runner")
-		return
-	}
 	if err := task.Run(ctx); err != nil {
-		// 后台日志属于运维边界,必须保留应用错误包装的内部原因链以便定位根因。
 		logging.ErrorContext(ctx, "background task failed", apperr.AsAppError(err).LogString())
 	}
 }

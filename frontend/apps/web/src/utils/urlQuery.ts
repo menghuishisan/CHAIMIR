@@ -1,7 +1,3 @@
-// urlQuery.ts 把列表页的筛选、搜索、标签页与地址参数互相转换(纯函数,供 useUrlState 与 usePagedResource 使用)。
-// 地址参数来自用户可以手改的地址栏,属于外部输入:不认识的值一律回到默认值,而不是让页面拿着它去请求后端。
-// 本文件供 node:test 直接运行,不得使用 enum,也不得在运行时导入 @chaimir/*。
-
 /** 一个地址参数的规则:默认值,以及可选的合法取值清单(不给则任意文本都接受,如搜索词)。 */
 export interface QueryFieldSpec {
   defaultValue: string
@@ -14,7 +10,6 @@ export type QuerySchema = Record<string, QueryFieldSpec>
 /** 按规则读出的参数值,每个键都有值(缺失时是默认值)。 */
 export type QueryValues<S extends QuerySchema> = { [K in keyof S]: string }
 
-/** normalizeValue 去掉首尾空白;空值或不在合法清单里的值视为默认值。 */
 function normalizeValue(raw: string | null, spec: QueryFieldSpec): string {
   const value = (raw ?? '').trim()
   if (value === '') return spec.defaultValue
@@ -54,8 +49,10 @@ export function writeQuery<S extends QuerySchema>(
   return next
 }
 
-/** readPage 读取页码:只接受正整数,其余(缺失、0、负数、小数、科学计数法、文字)都回到第一页。 */
+/** readPage 只接受可精确表示的十进制正整数，非法页码按第一页处理。 */
 export function readPage(params: URLSearchParams, key: string): number {
   const raw = params.get(key) ?? ''
-  return /^[1-9]\d*$/.test(raw) ? Number(raw) : 1
+  if (!/^[1-9]\d*$/.test(raw)) return 1
+  const page = Number(raw)
+  return Number.isSafeInteger(page) ? page : 1
 }

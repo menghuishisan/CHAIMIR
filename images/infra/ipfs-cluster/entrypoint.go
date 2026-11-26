@@ -2,8 +2,12 @@
 package main
 
 import (
+	"bytes"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -12,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"unicode"
 )
 
 func main() {
@@ -20,12 +25,21 @@ func main() {
 		fail("CHAIMIR_IPFS_API_URL is required")
 	}
 	parsed, err := url.Parse(apiURL)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+	if err != nil || parsed.Scheme != "http" || parsed.Hostname() == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || strings.ContainsAny(apiURL, "?#") {
 		fail("CHAIMIR_IPFS_API_URL is invalid")
 	}
-	clusterSecret := strings.TrimSpace(os.Getenv("CHAIMIR_IPFS_CLUSTER_SECRET"))
-	if len([]byte(clusterSecret)) < 16 {
-		fail("CHAIMIR_IPFS_CLUSTER_SECRET must contain at least 16 bytes")
+	clusterSecret := os.Getenv("CHAIMIR_IPFS_CLUSTER_SECRET")
+	if clusterSecret != strings.TrimSpace(clusterSecret) {
+		fail("CHAIMIR_IPFS_CLUSTER_SECRET must not contain surrounding whitespace")
+	}
+	if len(clusterSecret) != 64 {
+		fail("CHAIMIR_IPFS_CLUSTER_SECRET must be 32 bytes encoded as 64 hexadecimal characters")
+	}
+	if _, err := hex.DecodeString(clusterSecret); err != nil {
+		fail("CHAIMIR_IPFS_CLUSTER_SECRET must be hexadecimal")
+	}
+	if err := os.Unsetenv("CHAIMIR_IPFS_CLUSTER_SECRET"); err != nil {
+		fail("remove cluster secret from child environment: " + err.Error())
 	}
 	port := parsed.Port()
 	if port == "" {
@@ -66,33 +80,67 @@ func main() {
 	if err != nil {
 		fail("read IPFS Cluster service.json: " + err.Error())
 	}
+	decoder := json.NewDecoder(bytes.NewReader(contents))
+	decoder.UseNumber()
 	var config map[string]any
-	if err := json.Unmarshal(contents, &config); err != nil {
+	if err := decoder.Decode(&config); err != nil {
 		fail("parse IPFS Cluster service.json: " + err.Error())
 	}
-	setTopLevelString(config, "cluster", "secret", clusterSecret)
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		fail("IPFS Cluster service.json must contain one JSON document")
+	}
+	configSection(config, "cluster")["secret"] = clusterSecret
 	trustedPeers, err := trustedPeerIDs(identityID, os.Getenv("CHAIMIR_IPFS_CLUSTER_TRUSTED_PEERS"))
 	if err != nil {
 		fail("IPFS Cluster trusted peers are invalid: " + err.Error())
 	}
-	setStringArray(config, "consensus", "crdt", "trusted_peers", trustedPeers)
-	setString(config, "api", "ipfsproxy", "node_multiaddress", multiaddress)
+	configSection(config, "consensus", "crdt")["trusted_peers"] = trustedPeers
+	configSection(config, "api", "ipfsproxy")["node_multiaddress"] = multiaddress
 	// REST、proxy 和 pinning API 都是跨容器 provider endpoint，不能只绑定 loopback。
-	setString(config, "api", "restapi", "http_listen_multiaddress", "/ip4/0.0.0.0/tcp/9094")
-	setString(config, "api", "ipfsproxy", "listen_multiaddress", "/ip4/0.0.0.0/tcp/9095")
-	setString(config, "api", "pinsvcapi", "http_listen_multiaddress", "/ip4/0.0.0.0/tcp/9097")
-	setString(config, "ipfs_connector", "ipfshttp", "node_multiaddress", multiaddress)
-	updated, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		fail("encode IPFS Cluster service.json: " + err.Error())
-	}
-	if err := os.WriteFile(configPath, append(updated, '\n'), 0600); err != nil {
+	configSection(config, "api", "restapi")["http_listen_multiaddress"] = "/ip4/0.0.0.0/tcp/9094"
+	configSection(config, "api", "ipfsproxy")["listen_multiaddress"] = "/ip4/0.0.0.0/tcp/9095"
+	configSection(config, "api", "pinsvcapi")["http_listen_multiaddress"] = "/ip4/0.0.0.0/tcp/9097"
+	configSection(config, "ipfs_connector", "ipfshttp")["node_multiaddress"] = multiaddress
+	if err := writeServiceConfig(configPath, config); err != nil {
 		fail("write IPFS Cluster service.json: " + err.Error())
 	}
 	args := append([]string{"ipfs-cluster-service", "daemon"}, os.Args[1:]...)
-	if err := syscall.Exec("/usr/local/bin/ipfs-cluster-service", args, os.Environ()); err != nil {
+	env := os.Environ()
+	if err := syscall.Exec("/usr/local/bin/ipfs-cluster-service", args, env); err != nil {
 		fail("exec IPFS Cluster: " + err.Error())
 	}
+}
+
+// writeServiceConfig 只在完整写入并关闭成功后替换官方配置，避免中断启动损坏上一份状态。
+func writeServiceConfig(configPath string, config map[string]any) (writeErr error) {
+	directory := filepath.Dir(configPath)
+	temporary, err := os.CreateTemp(directory, ".service-*.json")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer func() {
+		if temporaryPath != "" {
+			writeErr = errors.Join(writeErr, os.Remove(temporaryPath))
+		}
+	}()
+	encoder := json.NewEncoder(temporary)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(config); err != nil {
+		return errors.Join(err, temporary.Close())
+	}
+	if err := temporary.Sync(); err != nil {
+		return errors.Join(err, temporary.Close())
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(temporaryPath, configPath); err != nil {
+		return err
+	}
+	temporaryPath = ""
+	return nil
 }
 
 // ensureServiceConfig 用官方初始化命令在空 runtime-state 卷生成完整 service.json。
@@ -138,6 +186,9 @@ func readIdentityID(identityPath string) (string, error) {
 func trustedPeerIDs(identityID, raw string) ([]string, error) {
 	parts := []string{}
 	for _, item := range strings.Split(raw, ",") {
+		if strings.IndexFunc(item, unicode.IsControl) >= 0 {
+			return nil, fmt.Errorf("peer IDs cannot contain control characters")
+		}
 		peerID := strings.TrimSpace(item)
 		if peerID != "" {
 			parts = append(parts, peerID)
@@ -148,7 +199,7 @@ func trustedPeerIDs(identityID, raw string) ([]string, error) {
 	}
 	seen := make(map[string]struct{}, len(parts))
 	for _, peerID := range parts {
-		if peerID == "*" || strings.ContainsAny(peerID, "\r\n\t") {
+		if peerID == "*" {
 			return nil, fmt.Errorf("wildcard or control characters are not allowed")
 		}
 		if _, exists := seen[peerID]; exists {
@@ -159,42 +210,16 @@ func trustedPeerIDs(identityID, raw string) ([]string, error) {
 	return parts, nil
 }
 
-// setTopLevelString 写入官方 service.json 的顶层分组字段，并拒绝结构漂移。
-func setTopLevelString(root map[string]any, sectionName, key, value string) {
-	section, ok := root[sectionName].(map[string]any)
-	if !ok {
-		fail("IPFS Cluster service.json missing " + sectionName)
+// configSection 定位官方配置分组，结构不符时拒绝覆盖已有状态。
+func configSection(root map[string]any, path ...string) map[string]any {
+	for index, key := range path {
+		section, ok := root[key].(map[string]any)
+		if !ok || section == nil {
+			fail("IPFS Cluster service.json missing " + strings.Join(path[:index+1], "."))
+		}
+		root = section
 	}
-	section[key] = value
-}
-
-// setStringArray 写入官方 CRDT peer 配置，确保最终配置不会保留通配信任。
-func setStringArray(root map[string]any, first, second, key string, values []string) {
-	level, ok := root[first].(map[string]any)
-	if !ok {
-		fail("IPFS Cluster service.json missing " + first + "." + second)
-	}
-	section, ok := level[second].(map[string]any)
-	if !ok {
-		fail("IPFS Cluster service.json missing " + first + "." + second)
-	}
-	items := make([]any, len(values))
-	for index, value := range values {
-		items[index] = value
-	}
-	section[key] = items
-}
-
-func setString(root map[string]any, first, second, key, value string) {
-	level, ok := root[first].(map[string]any)
-	if !ok {
-		fail("IPFS Cluster service.json missing " + first + "." + second)
-	}
-	section, ok := level[second].(map[string]any)
-	if !ok {
-		fail("IPFS Cluster service.json missing " + first + "." + second)
-	}
-	section[key] = value
+	return root
 }
 
 func fail(message string) {

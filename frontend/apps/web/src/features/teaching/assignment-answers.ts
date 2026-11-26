@@ -26,7 +26,7 @@ export function itemStatement(item: AssignmentItem): string | undefined {
   return typeof statement === 'string' && statement.trim() !== '' ? statement : undefined
 }
 
-/** itemChoices 只读取理论题约定的选项,不推测旧字段或丢弃非法成员。 */
+/** itemChoices 只读取理论题约定的选项。 */
 export function itemChoices(item: AssignmentItem): string[] {
   const options = item.body?.options
   return Array.isArray(options) && options.every((entry) => typeof entry === 'string')
@@ -34,7 +34,7 @@ export function itemChoices(item: AssignmentItem): string[] {
     : []
 }
 
-/** draftAnswers 恢复当前作业的答案,不让旧题号进入后续保存请求。 */
+/** draftAnswers 恢复当前作业的答案,过滤不属于当前题目的键。 */
 export function draftAnswers(
   content: Record<string, unknown>,
   items: AssignmentItem[],

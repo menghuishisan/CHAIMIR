@@ -28,9 +28,6 @@ upstream:
   dirs_digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
   runtime_image: gcr.io/distroless/static-debian12:nonroot
   runtime_digest: sha256:b7bb25d9f7c31d2bdd1982feb4dafcaf137703c7075dbe2febb41c24212b946f
-  build_base_arg: GO_BUILDER_IMAGE
-  build_base_image: registry.chaimir.io/base/go-builder
-  build_base_digest: sha256:46d92c9696e24102dd211235153b05362a58a9f3d2068a5384f8dde7c1bccfac
   reuse_policy: rebuild-official-release-source
   security_rebuild:
     golang.org/x/crypto: v0.55.0
@@ -66,6 +63,7 @@ infra:
     - storage
     - content-addressing
   resource_spec:
+    volume_source: self
     components:
       - name: infra
         image_url: "@self"

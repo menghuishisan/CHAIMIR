@@ -1,4 +1,4 @@
-// contracts 定义第 2 层竞赛模块对聚合层开放的只读统计与成就契约。
+// contracts 定义竞赛模块对聚合层开放的统计、成就与订阅授权契约。
 package contracts
 
 import "context"
@@ -22,10 +22,12 @@ type ContestAchievement struct {
 }
 
 // ContestReadService 是 M8 对聚合层开放的唯一只读竞赛契约。
-// 聚合模块只能通过本接口读取竞赛统计和成就,不得直接写 M8 表或新增旧式 HTTP 别名。
+// 聚合模块不得直接访问 M8 表。
 type ContestReadService interface {
 	// Stats 读取租户级竞赛统计,供 M9 学校看板聚合。
 	Stats(ctx context.Context, tenantID int64) (ContestStats, error)
 	// ListStudentAchievements 读取学生竞赛成就,供 M11 与 GPA 分离展示。
 	ListStudentAchievements(ctx context.Context, tenantID, studentID int64) ([]ContestAchievement, error)
+	// AuthorizeLeaderboardSubscription 校验上下文账号的竞赛授权及指定主办方赛事的当前队员资格。
+	AuthorizeLeaderboardSubscription(ctx context.Context, organizerTenantID, contestID int64) error
 }

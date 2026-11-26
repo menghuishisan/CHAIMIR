@@ -120,15 +120,6 @@ func checkpointFromUpsertRow(row sqlcgen.UpsertCheckpointResultRow) (CheckpointR
 	return CheckpointResult{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, CheckpointID: row.CheckpointID, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Passed: row.Passed, Score: row.Score, DetailRef: pgtypex.TextValue(row.DetailRef), BindingOutput: bindingOutput, JudgedAt: timex.FromTimestamptz(row.JudgedAt)}, nil
 }
 
-// checkpointFromJudgeTaskRow 转换按判题任务查询返回行。
-func checkpointFromJudgeTaskRow(row sqlcgen.GetCheckpointResultByJudgeTaskRow) (CheckpointResult, error) {
-	bindingOutput, err := decodeOptionalMap(row.BindingOutput)
-	if err != nil {
-		return CheckpointResult{}, err
-	}
-	return CheckpointResult{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, CheckpointID: row.CheckpointID, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Passed: row.Passed, Score: row.Score, DetailRef: pgtypex.TextValue(row.DetailRef), BindingOutput: bindingOutput, JudgedAt: timex.FromTimestamptz(row.JudgedAt)}, nil
-}
-
 // reportFromUpsertRow 转换报告提交返回行。
 func reportFromUpsertRow(row sqlcgen.UpsertExperimentReportRow) ExperimentReport {
 	return ExperimentReport{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, StudentID: row.StudentID, ContentRef: row.ContentRef, ManualScore: row.ManualScore, Comment: pgtypex.TextValue(row.Comment), Status: row.Status, SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}

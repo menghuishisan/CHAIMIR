@@ -1,10 +1,4 @@
-// organizationTree.ts 组织树的纯逻辑(教师组织查看 / 校管组织架构共用,设计 §7.4 / §7.5):
-// 院系→专业树按搜索词收窄(院系名或代码、专业名、班级名),地址里的选中节点不存在时回到默认,
-// 专业下的班级按在读在前、入学年份新的在前排序。
-// 纯函数,供 node:test 直接运行:不得使用 enum,也不得在运行时导入 @chaimir/*。
-
-/** 班级状态取值,与 @chaimir/api-client 的 ClassStatus 一致 */
-const CLASS_ACTIVE = 1
+import { ClassStatus } from '@chaimir/api-client'
 
 /** 树用到的院系字段 */
 export interface TreeDepartment {
@@ -121,7 +115,7 @@ export function classesOfMajor<C extends TreeClass>(
     .filter((entity) => entity.major_id === majorId)
     .sort(
       (a, b) =>
-        Number(b.status === CLASS_ACTIVE) - Number(a.status === CLASS_ACTIVE) ||
+        Number(b.status === ClassStatus.ACTIVE) - Number(a.status === ClassStatus.ACTIVE) ||
         b.enrollment_year - a.enrollment_year ||
         a.name.localeCompare(b.name, 'zh-CN'),
     )

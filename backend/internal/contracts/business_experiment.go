@@ -3,6 +3,27 @@ package contracts
 
 import "context"
 
+// ExperimentCloneRequest 的来源由已锁定课程产生，不接受外部请求直接指定。
+type ExperimentCloneRequest struct {
+	SourceTenantID      int64
+	SourceCourseID      int64
+	SourceTeacherID     int64
+	TargetCourseID      int64
+	LessonExperimentIDs []int64
+}
+
+// ExperimentClonePlan 由 M7 持有目标保存和对象补偿，只向 M6 返回实验编号映射。
+type ExperimentClonePlan struct {
+	IDs     map[int64]int64
+	Save    func(context.Context) error
+	Discard func(context.Context) error
+}
+
+// ExperimentCloneService 仅供 M6 克隆已授权课程；保存复用目标普通事务。
+type ExperimentCloneService interface {
+	PrepareExperimentClone(ctx context.Context, req ExperimentCloneRequest) (ExperimentClonePlan, error)
+}
+
 // ExperimentStats 是 M7 输出给 M9 的实验统计摘要。
 type ExperimentStats struct {
 	TenantID            int64 `json:"tenant_id"`

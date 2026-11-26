@@ -1,11 +1,7 @@
-// 学校「审计日志」:本校范围的审计查询(设计 §7.7)。
-// 操作人姓名与学工号随审计记录由服务端给出(当前页批量解析),按人筛选用账号搜索,不把全校账号一次取回;
-// 解析不到的写「已移除的账号」,平台管理员的操作只写身份,系统自动产生的记录写「系统」。
-// 详情里记录的学生只在打开那一条时按编号读取一次。查询、导出、详情由 AuditLogPage 承担。
+// 本校审计复用服务端操作人信息；详情中的学生按需读取。
 
 import { useMemo, useState } from 'react'
 import {
-  AccountStatus,
   API_ERROR_CODES,
   ApiError,
   AuditActorRole,
@@ -16,7 +12,6 @@ import { api } from '../../../../app/api'
 import { useAsyncResource, type AsyncResourceState } from '../../../../hooks'
 import { AccountPicker } from '../../../identity/components/AccountPicker'
 import { AccountNameText } from '../../../identity/components/AccountNameText'
-import { accountStatusLabel } from '../../../../utils/labels/identity'
 import { auditActorRoleLabel, auditTargetTypeLabel } from '../../../../utils/labels/admin'
 import { auditDetailText, type AuditDetailLookups } from '../../auditDetail'
 import { AuditLogPage, type AuditTargetOption } from '../../components/AuditLogPage'
@@ -48,7 +43,6 @@ const TARGET_TYPES = [
   'judge_task',
   'sandbox',
   'notify.announcement',
-  'system_config',
   'alert_rule',
 ] as const
 
@@ -56,11 +50,6 @@ const TARGET_OPTIONS: readonly AuditTargetOption[] = TARGET_TYPES.map((value) =>
   value,
   label: auditTargetTypeLabel(value),
 }))
-
-/** 账号状态的取值,用于把「更新账号状态」记录里的状态换成文字 */
-const ACCOUNT_STATUSES = new Set<number>(
-  Object.values(AccountStatus).filter((value) => typeof value === 'number')
-)
 
 /** 系统自动产生的记录没有操作人(编号为 0) */
 function isSystem(entry: AuditLogEntry): boolean {
@@ -103,10 +92,6 @@ export default function SchoolAdminAuditPage() {
       student_id: (value) =>
         typeof value === 'string' && value === detailStudentId
           ? studentText(detailStudent)
-          : undefined,
-      status: (value) =>
-        typeof value === 'number' && ACCOUNT_STATUSES.has(value)
-          ? accountStatusLabel(value as AccountStatus)
           : undefined,
     }),
     [detailStudent, detailStudentId]

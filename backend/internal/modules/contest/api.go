@@ -75,8 +75,9 @@ func (a contestAPI) registerTeacherRoutes(g gin.IRouter) {
 	g.POST("/vuln-sources", a.upsertVulnSource)
 	g.POST("/vuln-sources/:id/sync", a.syncVulnSource)
 	g.GET("/vuln-problems", a.listVulnProblems)
-	// 草稿录入只有这一条:请求体的可选 source_id 已表达来源归属,不再按路径区分手工与导入
-	g.POST("/vuln-problems", a.importVulnProblem)
+	g.POST("/vuln-problems", a.createVulnProblem)
+	g.GET("/vuln-problems/:id", a.getVulnProblem)
+	g.PUT("/vuln-problems/:id", a.updateVulnProblem)
 	g.POST("/vuln-problems/:id/prevalidate", a.prevalidateVulnProblem)
 	g.POST("/vuln-problems/:id/finalize", a.finalizeVulnProblem)
 }
@@ -107,7 +108,6 @@ func (a contestAPI) registerStudentRoutes(g gin.IRouter) {
 	g.POST("/contests/:id/battle/entry", a.submitBattleEntry)
 	g.GET("/contests/:id/battle/entries", a.listBattleEntries)
 	g.GET("/contests/:id/battle/replay-window", a.getBattleReplayWindow)
-	g.GET("/matches/:id/replay", a.getBattleReplay)
 	g.POST("/matches/:id/replay/download-grant", a.issueBattleReplayDownloadGrant)
 	g.GET("/my/contest-records", a.myRecords)
 }
@@ -480,16 +480,6 @@ func (a contestAPI) getBattleReplayWindow(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// getBattleReplay 读取回放引用。
-func (a contestAPI) getBattleReplay(c *gin.Context) {
-	id, ok := httpx.PathID(c, "id")
-	if !ok {
-		return
-	}
-	out, err := a.svc.GetBattleReplay(c.Request.Context(), id)
-	httpx.Write(c, out, err)
-}
-
 // issueBattleReplayDownloadGrant 为已授权学生签发统一文件服务回放取件授权。
 func (a contestAPI) issueBattleReplayDownloadGrant(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
@@ -561,7 +551,7 @@ func (a contestAPI) listCheatSuspects(c *gin.Context) {
 	var threshold float64
 	if raw := strings.TrimSpace(c.Query("threshold")); raw != "" {
 		v, err := strconv.ParseFloat(raw, 64)
-		if err != nil || v <= 0 || v >= 1 {
+		if err != nil || !(v > 0 && v < 1) {
 			response.Fail(c, apperr.ErrQueryParamInvalid)
 			return
 		}
@@ -619,13 +609,37 @@ func (a contestAPI) listVulnProblems(c *gin.Context) {
 	httpx.WritePageWithFacets(c, out, total, p, s, facets.Map(), err)
 }
 
-// importVulnProblem 手动导入漏洞题。
-func (a contestAPI) importVulnProblem(c *gin.Context) {
-	var req ImportVulnProblemRequest
+// createVulnProblem 新建漏洞题草稿。
+func (a contestAPI) createVulnProblem(c *gin.Context) {
+	var req VulnProblemRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrContestVulnProblemInvalid) {
 		return
 	}
-	out, err := a.svc.ImportVulnProblem(c.Request.Context(), req)
+	out, err := a.svc.CreateVulnProblem(c.Request.Context(), req)
+	httpx.Write(c, out, err)
+}
+
+// getVulnProblem 读取租户内指定草稿及版本。
+func (a contestAPI) getVulnProblem(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.GetVulnProblem(c.Request.Context(), id)
+	httpx.Write(c, out, err)
+}
+
+// updateVulnProblem 保存指定草稿，不按来源猜测目标。
+func (a contestAPI) updateVulnProblem(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	var req UpdateVulnProblemRequest
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrContestVulnProblemInvalid) {
+		return
+	}
+	out, err := a.svc.UpdateVulnProblem(c.Request.Context(), id, req)
 	httpx.Write(c, out, err)
 }
 
@@ -635,11 +649,7 @@ func (a contestAPI) prevalidateVulnProblem(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var req PrevalidateRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrContestVulnProblemInvalid) {
-		return
-	}
-	out, err := a.svc.SetVulnPrevalidate(c.Request.Context(), id, req)
+	out, err := a.svc.SetVulnPrevalidate(c.Request.Context(), id)
 	httpx.Write(c, out, err)
 }
 
@@ -841,7 +851,8 @@ func (a contestAPI) contestSandboxTerminal(c *gin.Context) {
 		if err := conn.BindSession(c.Request.Context(), ws.SessionKey{TenantID: id.TenantID, AccountID: id.AccountID, Scope: contestSandboxSessionScope(access.Principal.AuthorizationID, sandboxID)}); err != nil {
 			return apperr.ErrContestTeamAccessDenied.WithCause(err)
 		}
-		return a.svc.AttachContestSandboxTerminal(conn.Context(), access, target, conn.Reader(), conn.Writer())
+		stdin, sizes := conn.TerminalInput()
+		return a.svc.AttachContestSandboxTerminal(conn.Context(), access, target, stdin, conn.Writer(), sizes)
 	}); err != nil {
 		response.Fail(c, apperr.ErrSandboxToolProxyUnavailable.WithCause(err))
 	}
@@ -853,14 +864,9 @@ func (a contestAPI) contestSandboxToolProxy(c *gin.Context) {
 	if !ok {
 		return
 	}
-	access, target, err := a.svc.ContestSandboxToolProxyTarget(c.Request.Context(), sandboxID, c.Param("tool_code"))
+	access, target, err := a.svc.ContestSandboxToolProxyTarget(c.Request.Context(), sandboxID, c.Param("tool_code"), c.Param("proxy_path"))
 	if err != nil {
 		response.Fail(c, err)
-		return
-	}
-	parsed, err := url.Parse(target.TargetURL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		response.Fail(c, apperr.ErrSandboxToolProxyUnavailable)
 		return
 	}
 	externalPrefix := contestToolProxyExternalPrefix(sandboxID, c.Param("tool_code"))
@@ -868,14 +874,14 @@ func (a contestAPI) contestSandboxToolProxy(c *gin.Context) {
 		return
 	}
 	proxy := httpx.NewPrefixReverseProxy(httpx.PrefixReverseProxyConfig{
-		Target: parsed, ProxyPath: c.Param("proxy_path"), ExternalPrefix: externalPrefix,
+		Target: target, ProxyPath: c.Param("proxy_path"), ExternalPrefix: externalPrefix,
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			response.Fail(c, apperr.ErrSandboxToolProxyUnavailable.WithCause(err))
 		},
 	})
 	proxy.ServeHTTP(c.Writer, c.Request)
 	if err := a.svc.ObserveContestSandboxToolAccess(c.Request.Context(), access); err != nil {
-		// 代理响应可能已经结束,保存观察失败只进入日志,不再向已写出的响应追加错误信封。
+		// 代理响应已经结束,观察失败只进日志,不再向响应追加错误信封。
 		logging.ErrorContext(c.Request.Context(), "contest sandbox tool access observation failed", apperr.AsAppError(err).LogString(),
 			slog.Int64("tenant_id", access.TenantID), slog.Int64("sandbox_id", sandboxID), slog.String("tool_code", c.Param("tool_code")))
 	}

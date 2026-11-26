@@ -17,20 +17,11 @@ func (s *Service) HandleGradeUpdated(ctx context.Context, evt contracts.Teaching
 		return apperr.ErrGradeAggregationFailed
 	}
 	ctx = response.WithTrace(ctx, evt.TraceID)
-	var semesters []SemesterDTO
 	err := s.store.TenantTx(ctx, evt.TenantID, func(ctx context.Context, tx TxStore) error {
 		if err := tx.LockGradeCourseScope(ctx, evt.TenantID, evt.CourseID); err != nil {
 			return err
 		}
-		if err := tx.LockGradeStudentScope(ctx, evt.TenantID, evt.StudentID); err != nil {
-			return err
-		}
 		var err error
-		// 重投也失效缓存,覆盖上次提交后、删除缓存前进程中断的情况。
-		semesters, err = tx.ListSemesters(ctx)
-		if err != nil {
-			return err
-		}
 		applied, err := tx.ApplyGradeEventRevision(ctx, evt.TenantID, evt.CourseID, evt.StudentID, evt.Revision)
 		if err != nil || !applied {
 			return err
@@ -63,13 +54,20 @@ func (s *Service) HandleGradeUpdated(ctx context.Context, evt contracts.Teaching
 		if review.SemesterID <= 0 || review.TenantID.Int64() != evt.TenantID || review.CourseID.Int64() != evt.CourseID {
 			return apperr.ErrGradeReviewStateInvalid
 		}
-		_, err = s.recomputeStudentWarningsTx(ctx, tx, evt.TenantID, evt.StudentID, review.SemesterID.Int64())
-		if err != nil {
+		// 未改变课程发布范围时只重算事件学生；重锁时按编号锁住全部课程学生。
+		recomputeStudent := func() error {
+			if err := tx.LockGradeStudentScope(ctx, evt.TenantID, evt.StudentID); err != nil {
+				return err
+			}
+			_, err := s.recomputeStudentWarningsTx(ctx, tx, evt.TenantID, evt.StudentID, review.SemesterID.Int64())
 			return err
 		}
 		appeals, err := tx.ListAcceptedAppealsByCourseStudent(ctx, evt.CourseID, evt.StudentID)
-		if err != nil || len(appeals) == 0 {
+		if err != nil {
 			return err
+		}
+		if len(appeals) == 0 {
+			return recomputeStudent()
 		}
 		if !hasAuthority || authority.ReviewID != review.ID.Int64() {
 			return apperr.ErrGradeReviewStateInvalid.WithCause(fmt.Errorf("成绩修订与课程审核不一致: course_id=%d review_id=%d event_revision=%d lock_revision=%d", evt.CourseID, review.ID, evt.Revision, evt.LockRevision))
@@ -88,25 +86,29 @@ func (s *Service) HandleGradeUpdated(ctx context.Context, evt contracts.Teaching
 			completed = true
 		}
 		if !completed {
-			return nil
+			return recomputeStudent()
 		}
 		remaining, err := tx.HasAcceptedAppealsByCourse(ctx, evt.CourseID)
-		if err != nil || remaining || review.IsLocked {
+		if err != nil {
 			return err
+		}
+		if remaining || review.IsLocked {
+			return recomputeStudent()
 		}
 		relocked, err := tx.RelockGradeReview(ctx, review.ID.Int64(), review.ReviewerID.Int64(), "成绩已更新并完成复核")
 		if err != nil {
 			return err
 		}
-		return s.enqueueLockOutbox(ctx, tx, relocked, true, "grade_updated")
+		if err := s.enqueueLockOutbox(ctx, tx, relocked, true, "grade_updated"); err != nil {
+			return err
+		}
+		return s.recomputeCourseTx(ctx, tx, evt.TenantID, evt.CourseID, review.SemesterID.Int64())
 	})
 	if err != nil {
 		return apperr.ErrGradeAggregationFailed.WithCause(err)
 	}
-	s.invalidateSummaryCache(ctx, evt.TenantID, evt.StudentID, 0)
-	for _, semester := range semesters {
-		s.invalidateSummaryCache(ctx, evt.TenantID, evt.StudentID, semester.ID.Int64())
-	}
+	s.invalidateGradeAggregateCache(ctx, evt.TenantID, evt.StudentID)
+	s.invalidateCourseAggregateCache(ctx, evt.TenantID, evt.CourseID)
 	s.drainLockOutboxBestEffort(ctx)
 	return nil
 }

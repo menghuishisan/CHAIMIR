@@ -53,7 +53,7 @@ policy-controller、Prometheus Adapter。该目录不得放 Chaimir 平台自身
 ingress-nginx 使用 `charts/ingress-nginx/values.yaml` 保存生产安全基线,由容器化 Helm
 按 `config/chaimir.env` 中固定的官方 chart 版本安装。控制器镜像 digest 只能从
 `images/image-digests.lock` 注入,chart 与控制器保持同一 1.15 版本代;admission 证书工具
-使用 `images/ingress/kube-webhook-certgen/manifest.yaml` 固定的上游 digest。部署入口不再
+使用 `images/infra/kube-webhook-certgen/manifest.yaml` 固定的上游 digest。部署入口不再
 下载和修改远程静态清单,避免版本、RBAC 与安全上下文漂移。
 
 数据库初始化脚本不放在 `deploy/charts/`:建库、应用角色、RLS 初始化入口、seed 编排归
@@ -184,7 +184,7 @@ M2 快照能力分为两层:通用 `VolumeSnapshot` CRD/snapshot-controller 与�
 - 只改 `images/service/backend/**`、`images/service/migrate/**` 或 `images/service/cron/**` 时,只更新对应服务。
 - 共享构建基座 digest 变化时,按 Dockerfile 的真实 `FROM` 依赖扩展受影响集合;未受影响镜像继续使用正式锁中的原 digest。
 
-选定集合必须使用 `images/build-images.ps1 -Images` 生成候选锁,再用 `images/pull-images.ps1 -Images` 按候选锁回拉。候选集合必须通过 `deploy/scripts/image-attestations-generate.ps1 -Images -NoEnvWrite -DigestFragmentsDir <证据目录>\\fragments`;脚本只有在选定集合全部验证成功时才写出 `verified-images.lock`。把该片段交给 `images/sync-image-metadata.ps1` 后,才更新正式 `images/image-digests.lock`、`deploy/base` 与资源所属 component 的镜像引用、`deploy/config/chaimir.env` 和存在时的环境 `backend/.env` 准入证明。禁止把候选锁直接复制成正式锁,也禁止用 tag、手工 digest、`kubectl set image` 或临时本地镜像绕过流程。最后仍执行 `make dev-refresh`;该命令只会因 digest 变化滚动更新对应工作负载,未变更服务继续使用原镜像。
+选定集合必须使用 `images/build-images.ps1 -Images @('service/backend', 'service/migrate')` 生成候选锁,再用 `images/pull-images.ps1 -Images @('service/backend', 'service/migrate')` 按候选锁回拉。候选集合必须通过 `deploy/scripts/image-attestations-generate.ps1 -Images @('service/backend', 'service/migrate') -NoEnvWrite -DigestFragmentsDir <证据目录>\\fragments`;脚本只有在选定集合全部验证成功时才写出 `verified-images.lock`。把该片段交给 `images/sync-image-metadata.ps1` 后,才更新正式 `images/image-digests.lock`、`deploy/base` 与资源所属 component 的镜像引用、`deploy/config/chaimir.env` 和存在时的环境 `backend/.env` 准入证明。禁止把候选锁直接复制成正式锁,也禁止用 tag、手工 digest、`kubectl set image` 或临时本地镜像绕过流程。最后仍执行 `make dev-refresh`;该命令只会因 digest 变化滚动更新对应工作负载,未变更服务继续使用原镜像。
 
 ## Harbor 与供应链工具
 
@@ -209,7 +209,7 @@ Docker/Kubernetes 重启变化。`SUPPLY_CHAIN_HARBOR_EXTERNAL_URL`、`SUPPLY_CH
 镜像构建、签名、验签、digest 锁和集群运行时都走其标准 443 入口；禁止 port-forward、附加端口或直连 `harbor-core`，
 否则上传路径、TLS 和生产链路会分叉。
 
-`harbor-projects-ensure` 创建镜像规范里的 Harbor project:`service/runtime/infra/tool/judger/sim/sidecar/init/base/middleware/observability/ingress/network`,并创建供应链 robot 账号。平台镜像不得推到默认 `library`,否则 digest 锁和准入策略无法按分类审计。
+`harbor-projects-ensure` 创建镜像规范里的九个 Harbor project:`service/runtime/infra/tool/judger/sim/sidecar/init/base`,并创建供应链 robot 账号。平台镜像不得推到默认 `library`,否则 digest 锁和准入策略无法按分类审计。
 
 该目标通过 `deploy/scripts/harbor-projects-ensure.ps1` 运行,避免把 PowerShell 逻辑塞进 Makefile 字符串里。首次创建 robot 时,Harbor 只返回一次 token;脚本会把 `HARBOR_ROBOT_USERNAME` 和 `HARBOR_ROBOT_PASSWORD` 回写到被忽略的 `deploy/config/supply-chain.secret.env`,不得提交。
 

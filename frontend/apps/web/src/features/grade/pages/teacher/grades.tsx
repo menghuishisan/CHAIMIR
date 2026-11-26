@@ -1,12 +1,4 @@
-// 成绩报送页(教师侧栏,/teacher/grades)。设计 §7.4:
-// 左栏本学期课程列表,每行显示报送状态(未报送 / 待审核 / 已通过 / 已驳回),驳回的显示原因;
-// 学期下拉在列表上方。右栏是所选课程的权重与全班成绩(学生姓名用成员列表解析),
-// 底部「报送成绩」(可填备注,朱砂落印按钮);待审核或已通过时不可用并写原因。
-// 所选课程与学期写进地址;默认选中第一门未报送的课。
-//
-// 报送以课程成绩为依据:「配置权重 → 计算 → 报送」在同一右栏里完成,与课程详情的「成绩」标签共用
-// CourseGrades 组件。报送时不指定学期,由后端按课程学期名解析;课程学期未登记时写明原因。
-// 学校暂未开放课程教学时,只显示自己的报送记录。申诉处理在批改中心,本页不重复放入口。
+// 教师维护课程成绩并报送审核；报送学期由后端按课程学期名称解析。
 
 import { useCallback, useMemo, useState } from 'react'
 import { Send } from 'lucide-react'
@@ -94,6 +86,13 @@ function ReportWorkspace() {
   return (
     <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
       <section aria-label="课程与报送状态" className="flex flex-col gap-3 lg:w-80 lg:shrink-0">
+        {semesters.status === 'error' ? (
+          <ResourceError
+            message={semesters.error?.message ?? '学期暂时读取不到'}
+            traceId={semesters.error?.traceId}
+            onRetry={semesters.reload}
+          />
+        ) : null}
         <Select
           aria-label="按学期筛选课程"
           options={[
@@ -198,7 +197,7 @@ function SelectedCourse({
   const [submitError, setSubmitError] = useState<string>()
   const blocked = reportBlockedReason(review)
   const semesterProblem = !semestersReady
-    ? undefined
+    ? '正在核对学校学期,请在读取成功后报送'
     : !course.semester
       ? '这门课还没填学期,请先在课程信息里补上'
       : !semesters.some((semester) => semester.name === course.semester)
@@ -207,6 +206,7 @@ function SelectedCourse({
   const reason = blocked ?? semesterProblem
 
   const submit = useCallback(async () => {
+    if (submitting || reason) return
     setSubmitting(true)
     setSubmitError(undefined)
     try {
@@ -219,7 +219,7 @@ function SelectedCourse({
     } finally {
       setSubmitting(false)
     }
-  }, [comment, course.id, onSubmitted])
+  }, [comment, course.id, onSubmitted, reason, submitting])
 
   return (
     <div className="flex flex-col gap-5">

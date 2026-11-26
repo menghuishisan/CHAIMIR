@@ -1,58 +1,46 @@
-// admin service 文件实现 M9 管理后台聚合、配置、告警和备份业务编排。
+// 装配 M9 依赖，提供共同鉴权、事务和审计入口。
 package admin
 
 import (
-	"bytes"
 	"context"
-	"encoding/csv"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"log/slog"
-	"strings"
 	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/eventbus"
-	"chaimir/internal/platform/ids"
-	"chaimir/internal/platform/intx"
-	"chaimir/internal/platform/pagex"
-	"chaimir/internal/platform/response"
-	"chaimir/internal/platform/secretmap"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/tenant"
-	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/transfer"
 	"chaimir/pkg/apperr"
-	pkgcrypto "chaimir/pkg/crypto"
-	"chaimir/pkg/logging"
 	"chaimir/pkg/snowflake"
 )
 
 // Service 承载 M9 管理后台业务编排。
 type Service struct {
-	store        Store
-	ids          snowflake.Generator
-	audit        audit.Writer
-	roles        roleReader
-	identity     contracts.IdentityTenantReadService
-	accounts     accountReader
-	stats        contracts.IdentityStatsService
-	auditRead    contracts.IdentityAuditReadService
-	teaching     contracts.TeachingReadService
-	sandbox      contracts.SandboxReadService
-	experiment   contracts.ExperimentReadService
-	contest      contracts.ContestReadService
-	bus          eventbus.Bus
-	monitoring   config.MonitoringConfig
-	secretCipher *pkgcrypto.Cipher
-	transfers    transferService
-	storage      objectStorage
-	files        fileService
-	cfg          config.AdminConfig
+	cleanupTimeout time.Duration
+	metrics        []contracts.AlertMetricReader
+	recipients     contracts.AlertRecipientReader
+	store          Store
+	ids            snowflake.Generator
+	audit          audit.Writer
+	roles          roleReader
+	identity       contracts.IdentityTenantReadService
+	accounts       accountReader
+	stats          contracts.IdentityStatsService
+	auditRead      contracts.IdentityAuditReadService
+	teaching       contracts.TeachingReadService
+	sandbox        contracts.SandboxReadService
+	experiment     contracts.ExperimentReadService
+	contest        contracts.ContestReadService
+	bus            eventbus.Bus
+	monitoring     config.MonitoringConfig
+	transfers      transferService
+	storage        objectStorage
+	files          fileService
+	cfg            config.AdminConfig
 }
 
 // objectStorage 描述 M9 导出产物写入统一对象存储所需能力。
@@ -71,20 +59,23 @@ type fileService interface {
 type transferService interface {
 	CreateTask(context.Context, transfer.NewTaskRequest) (transfer.Task, error)
 	GetTask(context.Context, int64, int64) (transfer.Task, error)
-	DeletePendingTask(context.Context, int64, int64) error
 	ClaimTask(context.Context, int64, int64) (transfer.Task, error)
+	RunWithLease(context.Context, transfer.Task, func(context.Context) error) error
 	CompleteTask(context.Context, transfer.Task, transfer.CompleteTaskRequest) (transfer.Task, error)
 	FailTask(context.Context, transfer.Task, error, time.Time) (transfer.Task, error)
 }
 
 // ServiceDeps 是 M9 服务装配依赖。
 type ServiceDeps struct {
-	Store    Store
-	IDs      snowflake.Generator
-	Audit    audit.Writer
-	Roles    roleReader
-	Identity contracts.IdentityTenantReadService
-	// Accounts 解析学校管理员姓名(学校配置的变更历史);平台管理员姓名经 Identity.PlatformAdminNames
+	CleanupTimeout time.Duration
+	Metrics        []contracts.AlertMetricReader
+	Recipients     contracts.AlertRecipientReader
+	Store          Store
+	IDs            snowflake.Generator
+	Audit          audit.Writer
+	Roles          roleReader
+	Identity       contracts.IdentityTenantReadService
+	// Accounts 解析学校审计记录的操作人姓名。
 	Accounts    accountReader
 	Stats       contracts.IdentityStatsService
 	AuditRead   contracts.IdentityAuditReadService
@@ -95,7 +86,6 @@ type ServiceDeps struct {
 	Bus         eventbus.Bus
 	Monitoring  config.MonitoringConfig
 	Config      config.AdminConfig
-	Cipher      *pkgcrypto.Cipher
 	Transfers   transferService
 	Storage     objectStorage
 	FileService fileService
@@ -103,8 +93,22 @@ type ServiceDeps struct {
 
 // NewService 构造 M9 服务。
 func NewService(deps ServiceDeps) (*Service, error) {
+	if deps.CleanupTimeout <= 0 {
+		return nil, fmt.Errorf("上传清理超时必须大于 0")
+	}
 	if deps.Store == nil || deps.IDs == nil || deps.Audit == nil || deps.Roles == nil || deps.Identity == nil || deps.Accounts == nil || deps.Stats == nil || deps.AuditRead == nil || deps.Teaching == nil || deps.Sandbox == nil || deps.Experiment == nil || deps.Contest == nil || deps.Bus == nil {
 		return nil, fmt.Errorf("admin service 依赖不完整")
+	}
+	if len(deps.Metrics) != 5 || deps.Recipients == nil {
+		return nil, fmt.Errorf("admin alert dependencies incomplete")
+	}
+	for _, reader := range deps.Metrics {
+		if reader == nil {
+			return nil, fmt.Errorf("admin alert metric reader missing")
+		}
+	}
+	if deps.Config.AlertPollSeconds <= 0 || deps.Config.AlertWindowSeconds <= 0 || deps.Config.AlertNotifyBatchSize <= 0 || deps.Config.AlertNotifyLeaseSeconds <= 0 || deps.Config.AlertNotifyMaxAttempts <= 0 {
+		return nil, fmt.Errorf("admin alert configuration incomplete")
 	}
 	objects := deps.Storage
 	if deps.Transfers == nil || objects == nil || deps.FileService == nil {
@@ -113,813 +117,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Config.AuditExportWorkerBatchSize <= 0 || deps.Config.AuditExportWorkerPollMs <= 0 {
 		return nil, fmt.Errorf("admin audit export worker 配置不完整")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, identity: deps.Identity, accounts: deps.Accounts, stats: deps.Stats, auditRead: deps.AuditRead, teaching: deps.Teaching, sandbox: deps.Sandbox, experiment: deps.Experiment, contest: deps.Contest, bus: deps.Bus, monitoring: deps.Monitoring, secretCipher: deps.Cipher, transfers: deps.Transfers, storage: objects, files: deps.FileService, cfg: deps.Config}, nil
-}
-
-// PlatformDashboard 聚合平台级看板。
-func (s *Service) PlatformDashboard(ctx context.Context) (DashboardDTO, error) {
-	if _, err := requirePlatform(ctx); err != nil {
-		return DashboardDTO{}, err
-	}
-	stats, err := s.stats.PlatformStats(ctx)
-	if err != nil {
-		return DashboardDTO{}, apperr.ErrAdminDashboardIdentityFailed.WithCause(err)
-	}
-	tenants, err := s.identity.ListTenants(ctx)
-	if err != nil {
-		return DashboardDTO{}, apperr.ErrAdminDashboardIdentityFailed.WithCause(err)
-	}
-	ops, err := s.aggregateTenantOperations(ctx, tenants)
-	if err != nil {
-		return DashboardDTO{}, err
-	}
-	return DashboardDTO{Scope: ScopeGlobal, TenantCount: stats.TenantCount, AccountCount: stats.AccountCount, TeacherCount: stats.TeacherCount, StudentCount: stats.StudentCount, ActiveAccountCount: stats.ActiveAccountCount, CourseCount: ops.CourseCount, ActiveCourseCount: ops.ActiveCourseCount, ExperimentCount: ops.ExperimentCount, ActiveInstanceCount: ops.ActiveInstanceCount, ContestCount: ops.ContestCount, ActiveContestCount: ops.ActiveContestCount, ActiveSandboxCount: ops.ActiveSandboxCount, PendingApplyCount: stats.PendingApplyCount, ResourceQuotaSnapshot: ops.ResourceQuotaSnapshot(), GeneratedAt: timex.Now()}, nil
-}
-
-// SchoolDashboard 聚合学校级看板。
-func (s *Service) SchoolDashboard(ctx context.Context) (DashboardDTO, error) {
-	id, err := s.requireTenantAdmin(ctx)
-	if err != nil {
-		return DashboardDTO{}, err
-	}
-	stats, err := s.stats.TenantStats(ctx, id.TenantID)
-	if err != nil {
-		return DashboardDTO{}, apperr.ErrAdminDashboardIdentityFailed.WithCause(err)
-	}
-	out := DashboardDTO{Scope: ScopeTenant, TenantID: ids.ID(id.TenantID), AccountCount: stats.AccountCount, TeacherCount: stats.TeacherCount, StudentCount: stats.StudentCount, ActiveAccountCount: stats.ActiveAccountCount, GeneratedAt: timex.Now()}
-	t, err := s.teaching.Stats(ctx, id.TenantID)
-	if err != nil {
-		return DashboardDTO{}, apperr.ErrAdminDashboardTeachingFailed.WithCause(err)
-	}
-	out.CourseCount = t.CourseCount
-	out.ActiveCourseCount = t.ActiveCourseCount
-	e, err := s.experiment.Stats(ctx, contracts.ExperimentStatsQuery{TenantID: id.TenantID})
-	if err != nil {
-		return DashboardDTO{}, apperr.ErrAdminDashboardExperimentFailed.WithCause(err)
-	}
-	out.ExperimentCount = e.ExperimentCount
-	out.ActiveInstanceCount = e.ActiveInstanceCount
-	c, err := s.contest.Stats(ctx, id.TenantID)
-	if err != nil {
-		return DashboardDTO{}, apperr.ErrAdminDashboardContestFailed.WithCause(err)
-	}
-	out.ContestCount = c.ContestCount
-	out.ActiveContestCount = c.ActiveContestCount
-	q, err := s.sandbox.Stats(ctx, id.TenantID)
-	if err != nil {
-		return DashboardDTO{}, apperr.ErrAdminDashboardSandboxFailed.WithCause(err)
-	}
-	out.ActiveSandboxCount = q.ActiveSandboxCount
-	out.ResourceQuotaSnapshot = &ResourceQuotaSnapshotDTO{
-		MaxConcurrentSandbox: int64(q.MaxConcurrentSandbox),
-		MaxCPU:               int64(q.MaxCPU),
-		MaxMemoryMB:          int64(q.MaxMemoryMB),
-	}
-	return out, nil
-}
-
-// PlatformStatistics 读取平台级周期统计快照。
-func (s *Service) PlatformStatistics(ctx context.Context, fromDate, toDate string) ([]StatisticsDTO, error) {
-	if _, err := requirePlatform(ctx); err != nil {
-		return nil, err
-	}
-	if err := validateDateRange(fromDate, toDate); err != nil {
-		return nil, err
-	}
-	return runAdminRead(ctx, s.store, 0, func(ctx context.Context, tx TxStore) ([]StatisticsDTO, error) {
-		rows, err := tx.ListPlatformStatistics(ctx, ScopeGlobal, 0, fromDate, toDate)
-		if err != nil {
-			return nil, apperr.ErrAdminStatisticsInvalid.WithCause(err)
-		}
-		return rows, nil
-	})
-}
-
-// SchoolStatistics 读取当前学校的周期统计快照。
-func (s *Service) SchoolStatistics(ctx context.Context, fromDate, toDate string) ([]StatisticsDTO, error) {
-	id, err := s.requireTenantAdmin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateDateRange(fromDate, toDate); err != nil {
-		return nil, err
-	}
-	return runAdminRead(ctx, s.store, id.TenantID, func(ctx context.Context, tx TxStore) ([]StatisticsDTO, error) {
-		rows, err := tx.ListPlatformStatistics(ctx, ScopeTenant, id.TenantID, fromDate, toDate)
-		if err != nil {
-			return nil, apperr.ErrAdminStatisticsInvalid.WithCause(err)
-		}
-		return rows, nil
-	})
-}
-
-// RunStatisticsSnapshotOnce 生成当天平台与租户统计快照。
-func (s *Service) RunStatisticsSnapshotOnce(ctx context.Context) error {
-	statDate := timex.DateOrEmpty(timex.Now())
-	tenants, err := s.identity.ListTenants(ctx)
-	if err != nil {
-		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
-	}
-	if err := s.snapshotGlobalStats(ctx, statDate, tenants); err != nil {
-		return err
-	}
-	for _, item := range tenants {
-		if item.TenantID <= 0 {
-			continue
-		}
-		if err := s.snapshotTenantStats(ctx, item.TenantID, statDate); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// QueryAudit 查询统一审计日志。
-func (s *Service) QueryAudit(ctx context.Context, query contracts.AuditQuery) (contracts.AuditQueryResult, error) {
-	id, ok := tenant.FromContext(ctx)
-	if !ok {
-		return contracts.AuditQueryResult{}, apperr.ErrUnauthorized
-	}
-	query = scopedAuditQuery(id, query)
-	result, err := s.auditRead.QueryAuditLogs(ctx, query)
-	if err != nil {
-		return contracts.AuditQueryResult{}, apperr.ErrAdminAuditQueryInvalid.WithCause(err)
-	}
-	return result, nil
-}
-
-// AuditActor 是一条审计记录操作人的显示信息。
-type AuditActor struct {
-	Name string
-	No   string
-}
-
-// QueryAuditPage 查询审计分页并解析当前页操作人:学校身份解析本校账号;平台身份只解析平台管理员,
-// 不跨校读取学校人员姓名(学校的操作人在平台审计里只显示身份)。系统记录(操作人编号 0)没有姓名。
-func (s *Service) QueryAuditPage(ctx context.Context, query contracts.AuditQuery) (contracts.AuditQueryResult, map[int64]AuditActor, error) {
-	result, err := s.QueryAudit(ctx, query)
-	if err != nil {
-		return contracts.AuditQueryResult{}, nil, err
-	}
-	id, _ := tenant.FromContext(ctx)
-	actors, err := s.auditActors(ctx, id.IsPlatform, result.List)
-	if err != nil {
-		return contracts.AuditQueryResult{}, nil, err
-	}
-	return result, actors, nil
-}
-
-// auditActors 按身份范围批量解析当前页操作人:平台视角只取平台管理员,学校视角只取本校账号。
-func (s *Service) auditActors(ctx context.Context, platform bool, entries []contracts.AuditLogEntry) (map[int64]AuditActor, error) {
-	seen := map[int64]struct{}{}
-	wanted := make([]int64, 0, len(entries))
-	for _, entry := range entries {
-		platformAdmin := entry.ActorRole == contracts.RoleNumPlatformAdmin
-		if _, ok := seen[entry.ActorID]; ok || entry.ActorID <= 0 || platformAdmin != platform {
-			continue
-		}
-		seen[entry.ActorID] = struct{}{}
-		wanted = append(wanted, entry.ActorID)
-	}
-	actors := make(map[int64]AuditActor, len(wanted))
-	if len(wanted) == 0 {
-		return actors, nil
-	}
-	if platform {
-		names, err := s.identity.PlatformAdminNames(ctx, wanted)
-		if err != nil {
-			return nil, apperr.ErrInternal.WithCause(err)
-		}
-		for actorID, name := range names {
-			actors[actorID] = AuditActor{Name: name}
-		}
-		return actors, nil
-	}
-	accounts, err := s.accounts.BatchGetAccounts(ctx, wanted)
-	if err != nil {
-		return nil, apperr.ErrInternal.WithCause(err)
-	}
-	for _, account := range accounts {
-		actors[account.AccountID] = AuditActor{Name: account.Name, No: account.No}
-	}
-	return actors, nil
-}
-
-const auditExportSubject = "admin.audit_export"
-
-// ExportAuditCSV 创建可重放的审计导出任务，产物由 M9 worker 异步生成。
-func (s *Service) ExportAuditCSV(ctx context.Context, query contracts.AuditQuery) (transfer.TaskDTO, error) {
-	id, err := s.currentAdminIdentity(ctx)
-	if err != nil {
-		return transfer.TaskDTO{}, err
-	}
-	query = scopedAuditQuery(id, query)
-	snapshot, err := json.Marshal(query)
-	if err != nil {
-		return transfer.TaskDTO{}, apperr.ErrAdminAuditExportTaskCreateFailed.WithCause(err)
-	}
-	fileName := "audit.csv"
-	task, err := s.transfers.CreateTask(ctx, transfer.NewTaskRequest{
-		TenantID:    id.TenantID,
-		AccountID:   id.AccountID,
-		Channel:     transfer.ChannelExport,
-		Subject:     auditExportSubject,
-		FileName:    fileName,
-		ContentType: "text/csv; charset=utf-8",
-	})
-	if err != nil {
-		return transfer.TaskDTO{}, apperr.ErrAdminAuditExportTaskCreateFailed.WithCause(err)
-	}
-	if err := s.runWrite(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.CreateAuditExportRequest(ctx, AuditExportRequest{TransferTaskID: task.TaskID, TenantID: id.TenantID, AccountID: id.AccountID, QuerySnapshot: snapshot})
-		return err
-	}); err != nil {
-		if cleanupErr := s.transfers.DeletePendingTask(ctx, id.TenantID, task.TaskID); cleanupErr != nil {
-			logging.ErrorContext(ctx, "admin audit export task compensation failed", cleanupErr.Error(), slog.Int64("tenant_id", id.TenantID), slog.Int64("transfer_task_id", task.TaskID))
-		}
-		return transfer.TaskDTO{}, apperr.ErrAdminAuditExportTaskCreateFailed.WithCause(err)
-	}
-	if err := s.writeAudit(ctx, id, "admin.audit.export", "audit_log", 0, map[string]any{"transfer_task_id": task.TaskID}); err != nil {
-		return transfer.TaskDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
-	}
-	return exportTaskDTO(task), nil
-}
-
-// RunAuditExportOnce 执行一次 M9 审计导出请求扫描，供统一 background runner 调用。
-func (s *Service) RunAuditExportOnce(ctx context.Context) error {
-	limit, ok := intx.Int32(s.cfg.AuditExportWorkerBatchSize)
-	if !ok || limit <= 0 {
-		return apperr.ErrAdminAuditExportTaskCreateFailed
-	}
-	var requests []AuditExportRequest
-	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-		var err error
-		requests, err = tx.ListDueAuditExportRequests(ctx, timex.Now(), limit)
-		return err
-	}); err != nil {
-		return apperr.ErrAdminAuditExportTaskCreateFailed.WithCause(err)
-	}
-	for _, req := range requests {
-		if err := s.runAuditExportRequest(ctx, req); err != nil {
-			logging.ErrorContext(ctx, "admin audit export worker item failed", err.Error(), slog.Int64("tenant_id", req.TenantID), slog.Int64("transfer_task_id", req.TransferTaskID))
-		}
-	}
-	return nil
-}
-
-// runAuditExportRequest claims one request's transfer task and generates its CSV artifact.
-func (s *Service) runAuditExportRequest(ctx context.Context, req AuditExportRequest) error {
-	task, err := s.transfers.ClaimTask(ctx, req.TenantID, req.TransferTaskID)
-	if err != nil {
-		return s.reconcileAuditExportRequest(ctx, req)
-	}
-	data, err := s.buildAuditExportCSV(ctx, req)
-	if err == nil {
-		artifactFileName, nameErr := transfer.LeaseArtifactFileName(task.FileName, task.LeaseToken)
-		plan, planErr := s.files.PlanUpload(ctx, storage.PlanUploadRequest{TenantID: req.TenantID, AccountID: req.AccountID, AllowPlatformScope: req.TenantID == 0, Module: "transfer", ResourceType: string(transfer.ChannelExport), ResourceID: ids.Format(task.TaskID), FileName: artifactFileName, ContentType: task.ContentType, Size: int64(len(data)), ExpectedBucket: s.storage.BucketReport(), AllowedFileName: true, Content: data})
-		if nameErr != nil {
-			planErr = nameErr
-		}
-		if planErr == nil {
-			planErr = s.storage.Put(ctx, plan.Bucket, plan.Key, bytes.NewReader(data), int64(len(data)), task.ContentType)
-		}
-		if planErr == nil {
-			_, planErr = s.transfers.CompleteTask(ctx, task, transfer.CompleteTaskRequest{ObjectRef: plan.ObjectRef, Size: int64(len(data))})
-			if planErr != nil {
-				if cleanupErr := s.storage.Delete(ctx, plan.Bucket, plan.Key); cleanupErr != nil {
-					logging.ErrorContext(ctx, "admin audit export artifact cleanup failed", cleanupErr.Error(), slog.Int64("tenant_id", req.TenantID), slog.Int64("transfer_task_id", req.TransferTaskID))
-				}
-			}
-		}
-		err = planErr
-	}
-	if err != nil {
-		return s.failAuditExportRequest(ctx, req, task, err)
-	}
-	return s.deleteAuditExportRequest(ctx, req)
-}
-
-// buildAuditExportCSV restores the persisted, already-authorized audit query for worker execution.
-func (s *Service) buildAuditExportCSV(ctx context.Context, req AuditExportRequest) ([]byte, error) {
-	var query contracts.AuditQuery
-	if err := json.Unmarshal(req.QuerySnapshot, &query); err != nil {
-		return nil, apperr.ErrAdminAuditExportCSVFailed.WithCause(err)
-	}
-	workerCtx := tenant.WithContext(ctx, tenant.Identity{TenantID: req.TenantID, AccountID: req.AccountID, IsPlatform: req.TenantID == 0})
-	if req.TenantID > 0 {
-		hasRole, err := s.roles.HasRole(workerCtx, req.AccountID, contracts.RoleSchoolAdmin)
-		if err != nil {
-			return nil, apperr.ErrForbidden.WithCause(err)
-		}
-		if !hasRole {
-			return nil, apperr.ErrForbidden
-		}
-	}
-	result, err := s.collectAuditExportRows(workerCtx, query)
-	if err != nil {
-		return nil, err
-	}
-	return auditCSVBytes(result)
-}
-
-// reconcileAuditExportRequest clears terminal requests or waits until their task becomes claimable.
-func (s *Service) reconcileAuditExportRequest(ctx context.Context, req AuditExportRequest) error {
-	task, err := s.transfers.GetTask(ctx, req.TenantID, req.TransferTaskID)
-	if err != nil {
-		if errors.Is(err, apperr.ErrTransferTaskNotFound) {
-			return s.deleteAuditExportRequest(ctx, req)
-		}
-		return s.deferAuditExportRequest(ctx, req, timex.Now().Add(time.Duration(s.cfg.AuditExportWorkerPollMs)*time.Millisecond))
-	}
-	switch task.Status {
-	case transfer.StatusSucceeded, transfer.StatusFailed:
-		return s.deleteAuditExportRequest(ctx, req)
-	case transfer.StatusRetrying:
-		return s.deferAuditExportRequest(ctx, req, task.NextAttemptAfter)
-	case transfer.StatusRunning:
-		return s.deferAuditExportRequest(ctx, req, task.LeaseUntil)
-	default:
-		return s.deferAuditExportRequest(ctx, req, timex.Now().Add(time.Duration(s.cfg.AuditExportWorkerPollMs)*time.Millisecond))
-	}
-}
-
-// failAuditExportRequest advances the leased task retry state and synchronizes its next M9 scan.
-func (s *Service) failAuditExportRequest(ctx context.Context, req AuditExportRequest, task transfer.Task, cause error) error {
-	failed, err := s.transfers.FailTask(ctx, task, cause, timex.Now())
-	if err != nil {
-		return s.deferAuditExportRequest(ctx, req, timex.Now().Add(time.Duration(s.cfg.AuditExportWorkerPollMs)*time.Millisecond))
-	}
-	if failed.Status == transfer.StatusFailed {
-		return s.deleteAuditExportRequest(ctx, req)
-	}
-	return s.deferAuditExportRequest(ctx, req, failed.NextAttemptAfter)
-}
-
-// deferAuditExportRequest schedules the next attempt in the request table owned by M9.
-func (s *Service) deferAuditExportRequest(ctx context.Context, req AuditExportRequest, next time.Time) error {
-	if next.IsZero() || !next.After(timex.Now()) {
-		next = timex.Now().Add(time.Duration(s.cfg.AuditExportWorkerPollMs) * time.Millisecond)
-	}
-	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.SetAuditExportRequestNextCheck(ctx, req.TenantID, req.TransferTaskID, next)
-		return err
-	})
-}
-
-// deleteAuditExportRequest removes a terminal M9 request after its transfer task is durable.
-func (s *Service) deleteAuditExportRequest(ctx context.Context, req AuditExportRequest) error {
-	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-		return tx.DeleteAuditExportRequest(ctx, req.TenantID, req.TransferTaskID)
-	})
-}
-
-// scopedAuditQuery 按调用方身份冻结审计读取范围,查询与导出共用:
-// 平台身份可按学校筛选(TenantID 非 0 只读该校,为 0 读全平台含平台自身记录);学校身份永远固定在本校。
-func scopedAuditQuery(id tenant.Identity, query contracts.AuditQuery) contracts.AuditQuery {
-	if id.IsPlatform {
-		query.IncludePlatform = true
-		return query
-	}
-	query.TenantID = id.TenantID
-	query.IncludePlatform = false
-	return query
-}
-
-// collectAuditExportRows 按统一分页上限拉取当前权限范围内全部匹配审计记录。
-func (s *Service) collectAuditExportRows(ctx context.Context, query contracts.AuditQuery) (contracts.AuditQueryResult, error) {
-	var out contracts.AuditQueryResult
-	for page := int32(1); ; page++ {
-		query.Page = page
-		query.Size = 0
-		result, err := s.QueryAudit(ctx, query)
-		if err != nil {
-			return contracts.AuditQueryResult{}, err
-		}
-		if out.Page == 0 {
-			out.Page = 1
-			out.Size = result.Size
-			out.Total = result.Total
-		}
-		out.List = append(out.List, result.List...)
-		if len(result.List) == 0 || int64(len(out.List)) >= result.Total {
-			break
-		}
-	}
-	return out, nil
-}
-
-// auditCSVBytes 将审计查询结果编码为 CSV 文件内容。
-func auditCSVBytes(result contracts.AuditQueryResult) ([]byte, error) {
-	var b strings.Builder
-	w := csv.NewWriter(&b)
-	if err := w.Write([]string{"id", "tenant_id", "actor_id", "action", "target_type", "target_id", "trace_id", "created_at"}); err != nil {
-		return nil, fmt.Errorf("写入 CSV 表头失败: %w", err)
-	}
-	for _, row := range result.List {
-		if err := w.Write([]string{ids.Format(row.ID), ids.Format(row.TenantID), ids.Format(row.ActorID), row.Action, row.TargetType, ids.Format(row.TargetID), row.TraceID, timex.RFC3339OrEmpty(row.CreatedAt)}); err != nil {
-			return nil, fmt.Errorf("写入 CSV 行失败: %w", err)
-		}
-	}
-	w.Flush()
-	if err := w.Error(); err != nil {
-		return nil, fmt.Errorf("刷新 CSV 内容失败: %w", err)
-	}
-	return []byte(b.String()), nil
-}
-
-// ListConfigs 查询系统配置。
-func (s *Service) ListConfigs(ctx context.Context, scope int16) ([]ConfigDTO, error) {
-	id, err := s.currentAdminIdentity(ctx)
-	if err != nil {
-		return nil, err
-	}
-	tenantID := int64(0)
-	if id.IsPlatform {
-		if scope == 0 {
-			scope = ScopeGlobal
-		}
-		if scope != ScopeGlobal {
-			return nil, apperr.ErrAdminConfigInvalid
-		}
-	} else {
-		scope = ScopeTenant
-		tenantID = id.TenantID
-	}
-	return runAdminRead(ctx, s.store, tenantID, func(ctx context.Context, tx TxStore) ([]ConfigDTO, error) {
-		rows, err := tx.ListSystemConfigs(ctx, scope, tenantID)
-		if err != nil {
-			return nil, err
-		}
-		return maskConfigs(rows), nil
-	})
-}
-
-// GetConfig 查询单条系统配置并返回脱敏值,避免详情页依赖全量列表。
-func (s *Service) GetConfig(ctx context.Context, scope int16, key string) (ConfigDTO, error) {
-	id, err := s.currentAdminIdentity(ctx)
-	if err != nil {
-		return ConfigDTO{}, err
-	}
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return ConfigDTO{}, apperr.ErrAdminConfigInvalid
-	}
-	tenantID := int64(0)
-	if id.IsPlatform {
-		if scope == 0 {
-			scope = ScopeGlobal
-		}
-		if scope != ScopeGlobal {
-			return ConfigDTO{}, apperr.ErrAdminConfigInvalid
-		}
-	} else {
-		scope = ScopeTenant
-		tenantID = id.TenantID
-	}
-	out, err := runAdminRead(ctx, s.store, tenantID, func(ctx context.Context, tx TxStore) (ConfigDTO, error) {
-		cfg, err := tx.GetSystemConfig(ctx, scope, tenantID, key)
-		if err != nil {
-			return ConfigDTO{}, apperr.ErrAdminConfigNotFound.WithCause(err)
-		}
-		return cfg, nil
-	})
-	if err != nil {
-		return ConfigDTO{}, err
-	}
-	out.Value = secretmap.Mask(out.Value)
-	return out, nil
-}
-
-// UpdateConfig 更新或创建系统配置。
-func (s *Service) UpdateConfig(ctx context.Context, key string, req ConfigUpdateRequest) (ConfigDTO, error) {
-	id, err := s.currentAdminIdentity(ctx)
-	if err != nil {
-		return ConfigDTO{}, err
-	}
-	key = strings.TrimSpace(key)
-	if key == "" || req.Value == nil {
-		return ConfigDTO{}, apperr.ErrAdminConfigInvalid
-	}
-	if !id.IsPlatform {
-		req.Scope = ScopeTenant
-		req.TenantID = ids.ID(id.TenantID)
-	}
-	if id.IsPlatform && req.Scope == ScopeTenant {
-		return ConfigDTO{}, apperr.ErrAdminConfigInvalid
-	}
-	protected, err := secretmap.Protect(s.secretCipher, req.Value, "系统配置")
-	if err != nil {
-		return ConfigDTO{}, apperr.ErrAdminConfigInvalid.WithCause(err)
-	}
-	req.Value = protected
-	if err := validateScopeTenant(req.Scope, req.TenantID.Int64()); err != nil {
-		return ConfigDTO{}, err
-	}
-	var out ConfigDTO
-	err = s.runWrite(ctx, req.TenantID.Int64(), func(ctx context.Context, tx TxStore) error {
-		old, err := tx.GetSystemConfig(ctx, req.Scope, req.TenantID.Int64(), key)
-		if err != nil && !isNoRows(err) {
-			return apperr.ErrAdminConfigInvalid.WithCause(err)
-		}
-		if isNoRows(err) {
-			out, err = tx.CreateSystemConfig(ctx, s.ids.Generate(), req.Scope, req.TenantID.Int64(), key, req.Value, id.AccountID)
-			if err != nil {
-				return apperr.ErrAdminConfigInvalid.WithCause(err)
-			}
-			_, err = tx.CreateConfigChangeLog(ctx, s.ids.Generate(), out.ID.Int64(), req.TenantID.Int64(), map[string]any{}, out.Value, id.AccountID)
-			return err
-		}
-		out, err = tx.UpdateSystemConfig(ctx, req.Scope, req.TenantID.Int64(), key, req.Value, id.AccountID, req.Version)
-		if err != nil {
-			return apperr.ErrAdminConfigConflict.WithCause(err)
-		}
-		_, err = tx.CreateConfigChangeLog(ctx, s.ids.Generate(), out.ID.Int64(), req.TenantID.Int64(), old.Value, out.Value, id.AccountID)
-		return err
-	})
-	if err != nil {
-		return ConfigDTO{}, err
-	}
-	if err := s.writeAudit(ctx, id, "admin.config.update", "system_config", out.ID.Int64(), map[string]any{"key": key}); err != nil {
-		return ConfigDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
-	}
-	out.Value = secretmap.Mask(out.Value)
-	return out, nil
-}
-
-// ListConfigHistory 查询配置历史。
-func (s *Service) ListConfigHistory(ctx context.Context, scope int16, tenantID int64, key string, page, size int) ([]ConfigChangeLogDTO, int64, int, int, error) {
-	id, err := s.currentAdminIdentity(ctx)
-	if err != nil {
-		return nil, 0, page, size, err
-	}
-	page, size = pagex.Normalize(page, size)
-	if !id.IsPlatform {
-		scope = ScopeTenant
-		tenantID = id.TenantID
-	} else if scope != ScopeGlobal {
-		return nil, 0, page, size, apperr.ErrAdminConfigInvalid
-	}
-	var total int64
-	rows, err := runAdminRead(ctx, s.store, tenantID, func(ctx context.Context, tx TxStore) ([]ConfigChangeLogDTO, error) {
-		cfg, err := tx.GetSystemConfig(ctx, scope, tenantID, key)
-		if err != nil {
-			return nil, apperr.ErrAdminConfigNotFound.WithCause(err)
-		}
-		rows, count, err := tx.ListConfigChangeLogs(ctx, cfg.ID.Int64(), page, size)
-		if err != nil {
-			return nil, err
-		}
-		total = count
-		return maskConfigLogs(rows), nil
-	})
-	if err != nil {
-		return nil, 0, page, size, err
-	}
-	names, err := s.configOperatorNames(ctx, id.IsPlatform, rows)
-	if err != nil {
-		return nil, 0, page, size, err
-	}
-	return applyOperatorNames(rows, names), total, page, size, nil
-}
-
-// configOperatorNames 一次批量解析当前页变更记录的操作人姓名:平台配置的操作人是平台管理员,学校配置是本校账号。
-func (s *Service) configOperatorNames(ctx context.Context, platform bool, rows []ConfigChangeLogDTO) (map[int64]string, error) {
-	seen := map[int64]struct{}{}
-	operatorIDs := make([]int64, 0, len(rows))
-	for _, row := range rows {
-		if _, ok := seen[row.OperatorID.Int64()]; ok {
-			continue
-		}
-		seen[row.OperatorID.Int64()] = struct{}{}
-		operatorIDs = append(operatorIDs, row.OperatorID.Int64())
-	}
-	if len(operatorIDs) == 0 {
-		return map[int64]string{}, nil
-	}
-	if platform {
-		names, err := s.identity.PlatformAdminNames(ctx, operatorIDs)
-		if err != nil {
-			return nil, apperr.ErrAdminConfigInvalid.WithCause(err)
-		}
-		return names, nil
-	}
-	accounts, err := s.accounts.BatchGetAccounts(ctx, operatorIDs)
-	if err != nil {
-		return nil, apperr.ErrAdminConfigInvalid.WithCause(err)
-	}
-	names := make(map[int64]string, len(accounts))
-	for _, account := range accounts {
-		names[account.AccountID] = account.Name
-	}
-	return names, nil
-}
-
-// applyOperatorNames 把操作人姓名合并到变更记录(返回新切片);读不到的留空,页面显示「已移除的账号」。
-func applyOperatorNames(rows []ConfigChangeLogDTO, names map[int64]string) []ConfigChangeLogDTO {
-	out := append([]ConfigChangeLogDTO(nil), rows...)
-	for i := range out {
-		out[i].OperatorName = names[out[i].OperatorID.Int64()]
-	}
-	return out
-}
-
-// RollbackConfig 把配置回退到指定历史记录的变更前值。
-func (s *Service) RollbackConfig(ctx context.Context, key string, req ConfigRollbackRequest) (ConfigDTO, error) {
-	id, err := s.currentAdminIdentity(ctx)
-	if err != nil {
-		return ConfigDTO{}, err
-	}
-	key = strings.TrimSpace(key)
-	if key == "" || req.ChangeLogID <= 0 {
-		return ConfigDTO{}, apperr.ErrAdminConfigInvalid
-	}
-	if !id.IsPlatform {
-		req.Scope = ScopeTenant
-		req.TenantID = ids.ID(id.TenantID)
-	}
-	if id.IsPlatform && req.Scope == ScopeTenant {
-		return ConfigDTO{}, apperr.ErrAdminConfigInvalid
-	}
-	if err := validateScopeTenant(req.Scope, req.TenantID.Int64()); err != nil {
-		return ConfigDTO{}, err
-	}
-	var out ConfigDTO
-	err = s.runWrite(ctx, req.TenantID.Int64(), func(ctx context.Context, tx TxStore) error {
-		current, err := tx.GetSystemConfig(ctx, req.Scope, req.TenantID.Int64(), key)
-		if err != nil {
-			return apperr.ErrAdminConfigNotFound.WithCause(err)
-		}
-		history, err := tx.GetConfigChangeLog(ctx, req.ChangeLogID.Int64(), current.ID.Int64())
-		if err != nil {
-			return apperr.ErrAdminConfigNotFound.WithCause(err)
-		}
-		out, err = tx.UpdateSystemConfig(ctx, req.Scope, req.TenantID.Int64(), key, history.OldValue, id.AccountID, req.Version)
-		if err != nil {
-			return apperr.ErrAdminConfigConflict.WithCause(err)
-		}
-		_, err = tx.CreateConfigChangeLog(ctx, s.ids.Generate(), out.ID.Int64(), req.TenantID.Int64(), current.Value, out.Value, id.AccountID)
-		return err
-	})
-	if err != nil {
-		return ConfigDTO{}, err
-	}
-	if err := s.writeAudit(ctx, id, "admin.config.rollback", "system_config", out.ID.Int64(), map[string]any{"key": key, "change_log_id": req.ChangeLogID.String()}); err != nil {
-		return ConfigDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
-	}
-	out.Value = secretmap.Mask(out.Value)
-	return out, nil
-}
-
-// ListAlertRules 查询告警规则。
-func (s *Service) ListAlertRules(ctx context.Context, scope int16) ([]AlertRuleDTO, error) {
-	id, err := s.currentAdminIdentity(ctx)
-	if err != nil {
-		return nil, err
-	}
-	tenantID := int64(0)
-	if id.IsPlatform {
-		if scope == 0 {
-			scope = ScopeGlobal
-		}
-		if scope != ScopeGlobal {
-			return nil, apperr.ErrAdminAlertInvalid
-		}
-	} else {
-		scope = ScopeTenant
-		tenantID = id.TenantID
-	}
-	return runAdminRead(ctx, s.store, tenantID, func(ctx context.Context, tx TxStore) ([]AlertRuleDTO, error) {
-		return tx.ListAlertRules(ctx, scope, tenantID)
-	})
-}
-
-// CreateAlertRule 创建告警规则。
-func (s *Service) CreateAlertRule(ctx context.Context, req AlertRuleRequest) (AlertRuleDTO, error) {
-	id, err := s.currentAdminIdentity(ctx)
-	if err != nil {
-		return AlertRuleDTO{}, err
-	}
-	if !id.IsPlatform {
-		req.Scope = ScopeTenant
-		req.TenantID = ids.ID(id.TenantID)
-	}
-	if id.IsPlatform && req.Scope == ScopeTenant {
-		return AlertRuleDTO{}, apperr.ErrAdminAlertInvalid
-	}
-	if err := validateAlertRule(req); err != nil {
-		return AlertRuleDTO{}, err
-	}
-	var out AlertRuleDTO
-	err = s.runWrite(ctx, req.TenantID.Int64(), func(ctx context.Context, tx TxStore) error {
-		var err error
-		out, err = tx.CreateAlertRule(ctx, s.ids.Generate(), req)
-		return err
-	})
-	if err != nil {
-		return AlertRuleDTO{}, apperr.ErrAdminAlertInvalid.WithCause(err)
-	}
-	if err := s.writeAudit(ctx, id, "admin.alert_rule.create", "alert_rule", out.ID.Int64(), map[string]any{"scope": out.Scope, "tenant_id": out.TenantID.String(), "metric": out.Metric, "level": out.Level}); err != nil {
-		return AlertRuleDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
-	}
-	return out, nil
-}
-
-// UpdateAlertRule 更新告警规则。
-func (s *Service) UpdateAlertRule(ctx context.Context, ruleID int64, req AlertRuleRequest) (AlertRuleDTO, error) {
-	id, err := s.currentAdminIdentity(ctx)
-	if err != nil {
-		return AlertRuleDTO{}, err
-	}
-	if !id.IsPlatform {
-		req.Scope = ScopeTenant
-		req.TenantID = ids.ID(id.TenantID)
-	}
-	if id.IsPlatform && req.Scope == ScopeTenant {
-		return AlertRuleDTO{}, apperr.ErrAdminAlertInvalid
-	}
-	if err := validateAlertRule(req); err != nil {
-		return AlertRuleDTO{}, err
-	}
-	var out AlertRuleDTO
-	err = s.runWrite(ctx, req.TenantID.Int64(), func(ctx context.Context, tx TxStore) error {
-		var err error
-		out, err = tx.UpdateAlertRule(ctx, ruleID, req)
-		return err
-	})
-	if err != nil {
-		return AlertRuleDTO{}, apperr.ErrAdminAlertNotFound.WithCause(err)
-	}
-	if err := s.writeAudit(ctx, id, "admin.alert_rule.update", "alert_rule", out.ID.Int64(), map[string]any{"scope": out.Scope, "tenant_id": out.TenantID.String(), "metric": out.Metric, "level": out.Level}); err != nil {
-		return AlertRuleDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
-	}
-	return out, nil
-}
-
-// ListAlertEvents 查询告警事件。
-func (s *Service) ListAlertEvents(ctx context.Context, status, level int16, page, size int) ([]AlertEventDTO, int64, int, int, pagex.Facets, error) {
-	id, err := s.currentAdminIdentity(ctx)
-	if err != nil {
-		return nil, 0, page, size, nil, err
-	}
-	page, size = pagex.Normalize(page, size)
-	tenantID := int64(0)
-	if !id.IsPlatform {
-		tenantID = id.TenantID
-	}
-	var total int64
-	var byStatus pagex.FacetGroup
-	rows, err := runAdminRead(ctx, s.store, tenantID, func(ctx context.Context, tx TxStore) ([]AlertEventDTO, error) {
-		out, count, err := tx.ListAlertEvents(ctx, status, level, tenantID, page, size)
-		if err != nil {
-			return nil, err
-		}
-		total = count
-		// 状态分段计数:套用级别与学校范围,不套用状态筛选
-		byStatus, err = tx.CountAlertEventsByStatus(ctx, level, tenantID)
-		return out, err
-	})
-	return rows, total, page, size, pagex.Facets{"status": byStatus}, err
-}
-
-// HandleAlertEvent 处理告警事件。
-func (s *Service) HandleAlertEvent(ctx context.Context, eventID int64, req AlertEventRequest) (AlertEventDTO, error) {
-	id, err := s.currentAdminIdentity(ctx)
-	if err != nil {
-		return AlertEventDTO{}, err
-	}
-	if req.Status != AlertStatusHandled && req.Status != AlertStatusIgnored {
-		return AlertEventDTO{}, apperr.ErrAdminAlertStateInvalid
-	}
-	var out AlertEventDTO
-	err = s.runWrite(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		out, err = tx.HandleAlertEvent(ctx, eventID, id.TenantID, req.Status, id.AccountID)
-		return err
-	})
-	if err != nil {
-		return AlertEventDTO{}, apperr.ErrAdminAlertNotFound.WithCause(err)
-	}
-	if out.TenantID > 0 {
-		// 告警推送为提交后即时通知,统一走异步事件由 M10 兜底投递,失败不回滚已处理的告警事件。
-		payload, marshalErr := json.Marshal(AlertEventPushDTO{EventID: out.ID, RuleID: out.RuleID, Level: out.Level, Status: out.Status, HandlerID: out.HandlerID})
-		if marshalErr != nil {
-			logging.ErrorContext(ctx, "admin alert notify serialization failed", marshalErr.Error(), slog.Int64("tenant_id", out.TenantID.Int64()), slog.Int64("alert_event_id", out.ID.Int64()))
-		} else {
-			evt := contracts.NotifyPushRequestedEvent{
-				TenantID: out.TenantID.Int64(),
-				TraceID:  response.TraceFromContext(ctx),
-				Topic:    "tenant:" + ids.Format(out.TenantID.Int64()) + ":alert",
-				Payload:  payload,
-			}
-			if pubErr := s.bus.Publish(ctx, contracts.SubjectNotifyPushRequested, evt); pubErr != nil {
-				logging.ErrorContext(ctx, "admin alert notify publish failed", pubErr.Error(), slog.Int64("tenant_id", out.TenantID.Int64()), slog.Int64("alert_event_id", out.ID.Int64()))
-			}
-		}
-	}
-	if err := s.writeAudit(ctx, id, "admin.alert.handle", "alert_event", out.ID.Int64(), map[string]any{"status": out.Status}); err != nil {
-		return AlertEventDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
-	}
-	return out, nil
+	return &Service{cleanupTimeout: deps.CleanupTimeout, metrics: deps.Metrics, recipients: deps.Recipients, store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, identity: deps.Identity, accounts: deps.Accounts, stats: deps.Stats, auditRead: deps.AuditRead, teaching: deps.Teaching, sandbox: deps.Sandbox, experiment: deps.Experiment, contest: deps.Contest, bus: deps.Bus, monitoring: deps.Monitoring, transfers: deps.Transfers, storage: objects, files: deps.FileService, cfg: deps.Config}, nil
 }
 
 // MonitoringPanels 返回外部监控面板入口。
@@ -928,26 +126,6 @@ func (s *Service) MonitoringPanels(ctx context.Context) ([]MonitoringPanel, erro
 		return nil, err
 	}
 	return ParseMonitoringPanels(s.monitoring.PanelsJSON, s.monitoring.AllowedPanelOrigins)
-}
-
-// ListBackups 查询备份记录;status 传 0 表示不按结果过滤。
-func (s *Service) ListBackups(ctx context.Context, status int16, page, size int) ([]BackupRecordDTO, int64, int, int, pagex.Facets, error) {
-	if _, err := requirePlatform(ctx); err != nil {
-		return nil, 0, page, size, nil, err
-	}
-	page, size = pagex.Normalize(page, size)
-	var total int64
-	var byStatus pagex.FacetGroup
-	rows, err := runAdminRead(ctx, s.store, 0, func(ctx context.Context, tx TxStore) ([]BackupRecordDTO, error) {
-		out, count, err := tx.ListBackupRecords(ctx, status, page, size)
-		if err != nil {
-			return nil, err
-		}
-		total = count
-		byStatus, err = tx.CountBackupRecordsByStatus(ctx)
-		return out, err
-	})
-	return rows, total, page, size, pagex.Facets{"status": byStatus}, err
 }
 
 // runWrite 按是否存在 tenant_id 选择平台事务或租户 RLS 事务。
@@ -1014,20 +192,6 @@ func (s *Service) requireTenantAdmin(ctx context.Context) (tenant.Identity, erro
 	return id, nil
 }
 
-// validateAlertRule 校验告警规则范围、指标、条件和等级。
-func validateAlertRule(req AlertRuleRequest) error {
-	if err := validateScopeTenant(req.Scope, req.TenantID.Int64()); err != nil {
-		return apperr.ErrAdminAlertInvalid
-	}
-	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Metric) != req.Metric || req.Level < AlertLevelNotice || req.Level > AlertLevelCritical {
-		return apperr.ErrAdminAlertInvalid
-	}
-	if err := validateAlertCondition(req.Metric, req.Condition); err != nil {
-		return apperr.ErrAdminAlertInvalid
-	}
-	return nil
-}
-
 // writeAudit 将 M9 管理操作写入 identity 共享审计表。
 func (s *Service) writeAudit(ctx context.Context, id tenant.Identity, action, targetType string, targetID int64, detail map[string]any) error {
 	role := contracts.RoleNumSchoolAdmin
@@ -1038,122 +202,10 @@ func (s *Service) writeAudit(ctx context.Context, id tenant.Identity, action, ta
 	}
 	entry, err := audit.BuildEntry(ctx, tenantID, id.AccountID, role, action, targetType, targetID, detail)
 	if err != nil {
-		return err
+		return apperr.ErrAdminAuditWriteFailed.WithCause(err)
 	}
-	return s.audit.Write(ctx, entry)
-}
-
-// snapshotGlobalStats 聚合平台级只读指标并写入 M9 自有统计快照。
-func (s *Service) snapshotGlobalStats(ctx context.Context, statDate string, tenants []contracts.TenantSummary) error {
-	stats, err := s.stats.PlatformStats(ctx)
-	if err != nil {
-		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
-	}
-	ops, err := s.aggregateTenantOperations(ctx, tenants)
-	if err != nil {
-		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
-	}
-	metrics := map[string]any{
-		"tenant_count":           stats.TenantCount,
-		"account_count":          stats.AccountCount,
-		"teacher_count":          stats.TeacherCount,
-		"student_count":          stats.StudentCount,
-		"active_account_count":   stats.ActiveAccountCount,
-		"pending_apply_count":    stats.PendingApplyCount,
-		"course_count":           ops.CourseCount,
-		"active_course_count":    ops.ActiveCourseCount,
-		"learning_duration_sec":  ops.LearningDurationSec,
-		"experiment_count":       ops.ExperimentCount,
-		"active_instance_count":  ops.ActiveInstanceCount,
-		"contest_count":          ops.ContestCount,
-		"active_contest_count":   ops.ActiveContestCount,
-		"participant_count":      ops.ParticipantCount,
-		"active_sandbox_count":   ops.ActiveSandboxCount,
-		"max_concurrent_sandbox": ops.MaxConcurrentSandbox,
-		"max_cpu":                ops.MaxCPU,
-		"max_memory_mb":          ops.MaxMemoryMB,
-	}
-	return s.upsertStatistics(ctx, 0, ScopeGlobal, 0, statDate, metrics)
-}
-
-// snapshotTenantStats 聚合单租户只读指标并写入 M9 自有统计快照。
-func (s *Service) snapshotTenantStats(ctx context.Context, tenantID int64, statDate string) error {
-	stats, err := s.stats.TenantStats(ctx, tenantID)
-	if err != nil {
-		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
-	}
-	metrics := map[string]any{
-		"account_count":        stats.AccountCount,
-		"teacher_count":        stats.TeacherCount,
-		"student_count":        stats.StudentCount,
-		"active_account_count": stats.ActiveAccountCount,
-	}
-	t, err := s.teaching.Stats(ctx, tenantID)
-	if err != nil {
-		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
-	}
-	metrics["course_count"] = t.CourseCount
-	metrics["active_course_count"] = t.ActiveCourseCount
-	metrics["learning_duration_sec"] = t.LearningDurationSec
-	e, err := s.experiment.Stats(ctx, contracts.ExperimentStatsQuery{TenantID: tenantID})
-	if err != nil {
-		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
-	}
-	metrics["experiment_count"] = e.ExperimentCount
-	metrics["active_instance_count"] = e.ActiveInstanceCount
-	c, err := s.contest.Stats(ctx, tenantID)
-	if err != nil {
-		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
-	}
-	metrics["contest_count"] = c.ContestCount
-	metrics["active_contest_count"] = c.ActiveContestCount
-	metrics["participant_count"] = c.ParticipantCount
-	q, err := s.sandbox.Stats(ctx, tenantID)
-	if err != nil {
-		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
-	}
-	metrics["active_sandbox_count"] = q.ActiveSandboxCount
-	metrics["max_concurrent_sandbox"] = q.MaxConcurrentSandbox
-	metrics["max_cpu"] = q.MaxCPU
-	metrics["max_memory_mb"] = q.MaxMemoryMB
-	return s.upsertStatistics(ctx, tenantID, ScopeTenant, tenantID, statDate, metrics)
-}
-
-// upsertStatistics 在正确的 RLS 边界内写入 M9 自有统计快照。
-func (s *Service) upsertStatistics(ctx context.Context, txTenantID int64, scope int16, tenantID int64, statDate string, metrics map[string]any) error {
-	run := func(ctx context.Context, tx TxStore) error {
-		_, err := tx.UpsertPlatformStatistics(ctx, s.ids.Generate(), scope, tenantID, statDate, metrics)
-		return err
-	}
-	var err error
-	if txTenantID > 0 {
-		err = s.store.TenantTx(ctx, txTenantID, run)
-	} else {
-		err = s.store.PlatformTx(ctx, run)
-	}
-	if err != nil {
-		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
+	if err := s.audit.Write(ctx, entry); err != nil {
+		return apperr.ErrAdminAuditWriteFailed.WithCause(err)
 	}
 	return nil
-}
-
-// maskConfigs 返回配置列表前隐藏敏感字段。
-func maskConfigs(rows []ConfigDTO) []ConfigDTO {
-	out := make([]ConfigDTO, 0, len(rows))
-	for _, row := range rows {
-		row.Value = secretmap.Mask(row.Value)
-		out = append(out, row)
-	}
-	return out
-}
-
-// maskConfigLogs 返回配置历史前隐藏敏感字段。
-func maskConfigLogs(rows []ConfigChangeLogDTO) []ConfigChangeLogDTO {
-	out := make([]ConfigChangeLogDTO, 0, len(rows))
-	for _, row := range rows {
-		row.OldValue = secretmap.Mask(row.OldValue)
-		row.NewValue = secretmap.Mask(row.NewValue)
-		out = append(out, row)
-	}
-	return out
 }

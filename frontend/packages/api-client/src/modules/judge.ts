@@ -1,6 +1,3 @@
-// Judge API：判题
-// 对应后端 M3 模块
-
 import { ApiClient, encodePathSegment } from '../client'
 import type { JudgeTaskState } from '../constants/judge'
 import type { PaginatedResponse } from '../types/common'
@@ -55,7 +52,7 @@ export class JudgeApi {
    */
   async runJudgerSelftest(judgerId: string): Promise<Judger> {
     // 判题器自检会真实创建组合沙箱、执行声明命令并回收资源,等待服务端返回最终状态。
-    return this.client.postLongRunning(`/judge/judgers/${encodePathSegment(judgerId)}/selftest`)
+    return this.client.postWithoutClientTimeout(`/judge/judgers/${encodePathSegment(judgerId)}/selftest`)
   }
 
   /**

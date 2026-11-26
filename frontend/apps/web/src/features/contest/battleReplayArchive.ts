@@ -1,11 +1,4 @@
-// 对局回放归档的边界校验。
-//
-// 归档是后端写下的事实,但它经过对象存储与统一下载出口才到浏览器,故在进入渲染前按协议逐字段校验:
-// 版本不认识、动作序列缺失或形状不符,一律当作「读不出来」给用户向文案,绝不半信半疑地渲染
-// (CLAUDE.md §4 边界处校验)。
-//
-// 本文件只做解析,不碰网络 —— 取件在 battleTrace.ts。分开的理由是解析必须可单独验证:
-// 混进 api 依赖后,想验证「坏归档会不会被拦住」就得先起一个应用环境。
+// 解析下载的对局归档；未知版本或损坏字段直接拒绝，不猜测缺失数据。
 
 import type {
   BattleReplayAction,
@@ -18,12 +11,7 @@ import { BattleRole, BattleRule, VULN_CHAIN_OPERATION } from '@chaimir/api-clien
 /** 当前认识的归档协议版本,与后端 battleReplayArchiveVersion 一致。 */
 const SUPPORTED_ARCHIVE_VERSION = 1
 
-/** 链操作的封闭集,与 M3 runChainStep 支持的 op 一致。 */
-const KNOWN_OPS = new Set<string>([
-  VULN_CHAIN_OPERATION.DEPLOY,
-  VULN_CHAIN_OPERATION.TX,
-  VULN_CHAIN_OPERATION.RESET,
-])
+const CHAIN_OPERATIONS = Object.values(VULN_CHAIN_OPERATION)
 
 /**
  * parseBattleReplayArchive 把归档正文解析为协议对象。
@@ -55,6 +43,17 @@ export function parseBattleReplayArchive(text: string): BattleReplayArchive {
   if (!isObject(result)) throw new Error('轨迹归档缺少判定结果。')
   if (typeof result.passed !== 'boolean') throw new Error('轨迹归档里的判定结果格式不正确。')
 
+  const battleRule = readBattleRule(initial.battle_rule)
+  const details = readDetails(result.details)
+  const hasOutcome = details.some((detail) => detail.outcome !== undefined)
+  if (battleRule === BattleRule.GAME) {
+    if (!result.passed || !hasOutcome || details.some((detail) => !detail.passed)) {
+      throw new Error('轨迹归档缺少有效的对局结果。')
+    }
+  } else if (hasOutcome) {
+    throw new Error('轨迹归档的对局结果与规则不一致。')
+  }
+
   return {
     version: SUPPORTED_ARCHIVE_VERSION,
     match_id: readSnowflakeID(raw.match_id),
@@ -63,7 +62,7 @@ export function parseBattleReplayArchive(text: string): BattleReplayArchive {
     initial_state: {
       contest_id: readSnowflakeID(initial.contest_id),
       problem_id: readSnowflakeID(initial.problem_id),
-      battle_rule: readBattleRule(initial.battle_rule),
+      battle_rule: battleRule,
       entry_a: entryA,
       entry_b: entryB,
     },
@@ -72,22 +71,24 @@ export function parseBattleReplayArchive(text: string): BattleReplayArchive {
       passed: result.passed,
       score: readFiniteNumber(result.score),
       max_score: readFiniteNumber(result.max_score),
-      details: readDetails(result.details),
+      details,
       result_ref: readOptionalString(result.result_ref),
     },
     finished_at: readString(raw.finished_at),
   }
 }
 
-/** readActions 严格读取封闭集内的链操作,并按 seq 稳定升序。 */
 function readActions(value: unknown): BattleReplayAction[] {
   if (!Array.isArray(value)) throw new Error('轨迹归档缺少链上动作记录。')
   const out = value.map((item) => {
     if (!isObject(item)) throw new Error('轨迹归档里的链上动作格式不正确。')
-    const op = readString(item.op)
-    if (!KNOWN_OPS.has(op)) throw new Error('轨迹归档包含无法识别的链上动作。')
+    const op = CHAIN_OPERATIONS.find((op) => op === item.op)
+    if (!op) throw new Error('轨迹归档包含无法识别的链上动作。')
+    const runtimeInstance = readString(item.runtime_instance).trim()
+    if (runtimeInstance === '') throw new Error('轨迹归档缺少动作的目标链。')
     return {
       seq: readPositiveInteger(item.seq),
+      runtime_instance: runtimeInstance,
       op,
       payload: readOptionalObject(item.payload),
       output: readOptionalObject(item.output),
@@ -96,12 +97,19 @@ function readActions(value: unknown): BattleReplayAction[] {
   return out.sort((left, right) => left.seq - right.seq)
 }
 
-/** readDetails 严格读取断言结论,不忽略损坏条目。 */
 function readDetails(value: unknown): BattleReplayResultDetail[] {
   if (!Array.isArray(value)) throw new Error('轨迹归档缺少判定明细。')
+  let hasOutcome = false
   return value.map((item) => {
     if (!isObject(item) || typeof item.passed !== 'boolean') {
       throw new Error('轨迹归档里的判定明细格式不正确。')
+    }
+    const outcome = item.outcome
+    if (outcome !== undefined) {
+      if (hasOutcome || !item.passed || (outcome !== 'a_win' && outcome !== 'b_win' && outcome !== 'draw')) {
+        throw new Error('轨迹归档里的对局结果格式不正确。')
+      }
+      hasOutcome = true
     }
     return {
       case: readString(item.case),
@@ -109,11 +117,11 @@ function readDetails(value: unknown): BattleReplayResultDetail[] {
       expected_label: readOptionalString(item.expected_label),
       actual: readOptionalString(item.actual),
       hint: readOptionalString(item.hint),
+      outcome,
     }
   })
 }
 
-/** readEntryState 读一侧参战物的角色与版本;角色不在封闭集内视为缺失。 */
 function readEntryState(value: unknown) {
   if (!isObject(value)) return undefined
   const role = value.role
@@ -126,43 +134,36 @@ function readEntryState(value: unknown) {
   }
 }
 
-/** readBattleRule 严格读取已登记的对局规则。 */
 function readBattleRule(value: unknown): BattleRule {
   if (value === BattleRule.ATTACK_DEFENSE || value === BattleRule.GAME) return value
   throw new Error('轨迹归档里的对局规则无法识别。')
 }
 
-/** isObject 是普通对象(不含数组与 null) */
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** readString 读必填的非空文本,缺失时按归档损坏报错 */
 function readString(value: unknown): string {
   if (typeof value === 'string' && value.length > 0) return value
   throw new Error('轨迹归档缺少必要文本。')
 }
 
-/** readOptionalString 读可选文本;给了就必须是非空文本 */
 function readOptionalString(value: unknown): string | undefined {
   if (value === undefined) return undefined
   return readString(value)
 }
 
-/** readFiniteNumber 读有限数值,不是数值时按归档损坏报错 */
 function readFiniteNumber(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   throw new Error('轨迹归档里的数值格式不正确。')
 }
 
-/** readPositiveInteger 读正整数(步号、版本号这类计数) */
 function readPositiveInteger(value: unknown): number {
   const number = readFiniteNumber(value)
   if (Number.isInteger(number) && number > 0) return number
   throw new Error('轨迹归档里的序号格式不正确。')
 }
 
-/** readOptionalObject 读可选对象;给了就必须是对象 */
 function readOptionalObject(value: unknown): Record<string, unknown> | undefined {
   if (value === undefined) return undefined
   if (isObject(value)) return value

@@ -56,6 +56,7 @@ type EnvComponentRequest struct {
 	ResourceProfile          map[string]string                   `json:"resource_profile,omitempty"`
 	NetworkProfile           map[string]any                      `json:"network_profile,omitempty"`
 	InitAssets               []contracts.CompositionInitAsset    `json:"init_assets,omitempty"`
+	InitChainSteps           []contracts.CompositionChainStep    `json:"init_chain_steps,omitempty"`
 	InitCodeRef              string                              `json:"init_code_ref"`
 	InitScriptRef            string                              `json:"init_script_ref"`
 	KeepAlive                bool                                `json:"keep_alive"`
@@ -88,7 +89,6 @@ type SimComponent struct {
 // CheckpointComponent 描述 M3 判题检查点及其分值。
 type CheckpointComponent struct {
 	ID          string         `json:"id"`
-	JudgerCode  string         `json:"judger"`
 	ItemCode    string         `json:"item_code"`
 	ItemVersion string         `json:"item_version"`
 	Score       float64        `json:"score"`
@@ -203,6 +203,7 @@ type CheckpointResult struct {
 	InstanceID    int64
 	CheckpointID  string
 	JudgeTaskRef  string
+	JudgeStatus   int16 // 由 M3 读取投影，不持久化。
 	Passed        bool
 	Score         float64
 	DetailRef     string

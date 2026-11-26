@@ -32,8 +32,6 @@ type Querier interface {
 	FinishExperimentInstance(ctx context.Context, arg FinishExperimentInstanceParams) (FinishExperimentInstanceRow, error)
 	GetActiveGroupInstance(ctx context.Context, arg GetActiveGroupInstanceParams) (GetActiveGroupInstanceRow, error)
 	GetActiveOwnerInstance(ctx context.Context, arg GetActiveOwnerInstanceParams) (GetActiveOwnerInstanceRow, error)
-	GetCheckpointResult(ctx context.Context, arg GetCheckpointResultParams) (GetCheckpointResultRow, error)
-	GetCheckpointResultByJudgeTask(ctx context.Context, arg GetCheckpointResultByJudgeTaskParams) (GetCheckpointResultByJudgeTaskRow, error)
 	GetExperiment(ctx context.Context, arg GetExperimentParams) (Experiment, error)
 	GetExperimentGroup(ctx context.Context, arg GetExperimentGroupParams) (ExperimentGroup, error)
 	GetExperimentGroupForUpdate(ctx context.Context, arg GetExperimentGroupForUpdateParams) (ExperimentGroup, error)
@@ -46,6 +44,7 @@ type Querier interface {
 	GradeExperimentReport(ctx context.Context, arg GradeExperimentReportParams) (GradeExperimentReportRow, error)
 	HasPendingInstanceReports(ctx context.Context, arg HasPendingInstanceReportsParams) (bool, error)
 	ListCheckpointResults(ctx context.Context, arg ListCheckpointResultsParams) ([]ListCheckpointResultsRow, error)
+	ListCourseExperimentsForClone(ctx context.Context, arg ListCourseExperimentsForCloneParams) ([]Experiment, error)
 	// 按实验列出全部分组,供教师编组视角一次取齐(小组编号只在创建响应出现过一次,无列表则无法再定位)。
 	ListExperimentGroups(ctx context.Context, arg ListExperimentGroupsParams) ([]ExperimentGroup, error)
 	// status 传 0 不按状态过滤;传具体状态供批改台按「待批改/已批改」取数与计数。
@@ -54,8 +53,7 @@ type Querier interface {
 	ListGroupMembers(ctx context.Context, arg ListGroupMembersParams) ([]GroupMember, error)
 	// 按实验一次取回全部分组成员,避免教师编组页逐组调用形成 N+1。
 	ListGroupMembersByExperiment(ctx context.Context, arg ListGroupMembersByExperimentParams) ([]GroupMember, error)
-	// 列出某课程下仍占用引擎资源的实验实例,供课程结束时级联回收(M7 需求 D3)。
-	// 只取 creating/running/paused/released 四态:已完成、已回收与错误态不再持有沙箱或仿真会话。
+	// 完成态和错误态可能仍在等待资源清理；仅排除已回收实例。
 	ListLiveInstancesByCourse(ctx context.Context, arg ListLiveInstancesByCourseParams) ([]ListLiveInstancesByCourseRow, error)
 	// 按学生视角批量解析其在给定实验集合中所属的小组,供学生实验列表/详情一次性填充 my_group_id。
 	ListStudentGroupsForExperiments(ctx context.Context, arg ListStudentGroupsForExperimentsParams) ([]ListStudentGroupsForExperimentsRow, error)
@@ -67,11 +65,12 @@ type Querier interface {
 	LockInstanceCreation(ctx context.Context, lockKey int64) error
 	MarkExperimentEventOutboxFailed(ctx context.Context, arg MarkExperimentEventOutboxFailedParams) (ExperimentEventOutbox, error)
 	MarkExperimentEventOutboxPublished(ctx context.Context, arg MarkExperimentEventOutboxPublishedParams) (ExperimentEventOutbox, error)
-	SetExperimentStatus(ctx context.Context, arg SetExperimentStatusParams) (Experiment, error)
+	PublishExperimentIfUnchanged(ctx context.Context, arg PublishExperimentIfUnchangedParams) (Experiment, error)
 	SetInstanceStatus(ctx context.Context, arg SetInstanceStatusParams) (SetInstanceStatusRow, error)
 	SumCheckpointScores(ctx context.Context, arg SumCheckpointScoresParams) (float64, error)
 	SumReportScores(ctx context.Context, arg SumReportScoresParams) (float64, error)
 	TouchExperimentInstance(ctx context.Context, arg TouchExperimentInstanceParams) (TouchExperimentInstanceRow, error)
+	UnpublishExperiment(ctx context.Context, arg UnpublishExperimentParams) (Experiment, error)
 	UpdateExperiment(ctx context.Context, arg UpdateExperimentParams) (Experiment, error)
 	// 仅在总分真正变化时写入,让重复 M3 事件不能生成新的得分 outbox 修订版。
 	UpdateExperimentInstanceScoreIfChanged(ctx context.Context, arg UpdateExperimentInstanceScoreIfChangedParams) (UpdateExperimentInstanceScoreIfChangedRow, error)

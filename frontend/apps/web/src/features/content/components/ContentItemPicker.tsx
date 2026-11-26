@@ -1,7 +1,4 @@
-// 内容域统一题库选题列表片段,由试卷页面或课程作业内容区承载。
-//
-// 试卷与课程作业都从 M5 题库选择已发布版本,查询、列表展示和选择交互属于同一内容能力;
-// 调用方只负责把选中题目写入自己的业务表单,避免跨模块重复实现题库读取逻辑。
+// 为试卷和作业搜索、选择已发布题目版本。
 
 import { useId, useState } from 'react'
 import { FileText, Search } from 'lucide-react'
@@ -64,6 +61,29 @@ export function ContentItemPicker({
     else setSubmittedKeyword(next)
   }
 
+  /** renderPickButton 共用桌面与移动选择动作，按最新状态切换同一题目编号。 */
+  const renderPickButton = (item: ContentItem) => {
+    const alreadyInTarget = selectedCodes.has(item.code)
+    const isPicked = picked.some((candidate) => candidate.code === item.code)
+    return (
+      <Button
+        type="button"
+        variant={isPicked ? 'outline' : 'ghost'}
+        size="sm"
+        disabled={alreadyInTarget}
+        onClick={() =>
+          setPicked((current) =>
+            current.some((candidate) => candidate.code === item.code)
+              ? current.filter((candidate) => candidate.code !== item.code)
+              : [...current, item]
+          )
+        }
+      >
+        {alreadyInTarget ? `已在${targetName}中` : isPicked ? '取消选择' : '选择'}
+      </Button>
+    )
+  }
+
   const columns: TableColumn<ContentItem>[] = [
     {
       key: 'title',
@@ -79,27 +99,7 @@ export function ContentItemPicker({
       key: 'actions',
       header: '操作',
       align: 'right',
-      render: (item) => {
-        const alreadyInTarget = selectedCodes.has(item.code)
-        const isPicked = picked.some((candidate) => candidate.code === item.code)
-        return (
-          <Button
-            type="button"
-            variant={isPicked ? 'outline' : 'ghost'}
-            size="sm"
-            disabled={alreadyInTarget}
-            onClick={() =>
-              setPicked((current) =>
-                isPicked
-                  ? current.filter((candidate) => candidate.code !== item.code)
-                  : [...current, item]
-              )
-            }
-          >
-            {alreadyInTarget ? `已在${targetName}中` : isPicked ? '取消选择' : '选择'}
-          </Button>
-        )
-      },
+      render: renderPickButton,
     },
   ]
 
@@ -151,32 +151,11 @@ export function ContentItemPicker({
               data={page.list}
               rowKey={(item) => item.id}
               elevated={false}
-              // <md 换行卡(§6.4.1 规则 3):题名一行、分类一行,选择按钮在右
-              mobileCard={(item) => {
-                const alreadyInTarget = selectedCodes.has(item.code)
-                const isPicked = picked.some((candidate) => candidate.code === item.code)
-                return {
-                  title: item.title,
-                  meta: <ContentItemClassificationCell item={item} />,
-                  action: (
-                    <Button
-                      type="button"
-                      variant={isPicked ? 'outline' : 'ghost'}
-                      size="sm"
-                      disabled={alreadyInTarget}
-                      onClick={() =>
-                        setPicked((current) =>
-                          isPicked
-                            ? current.filter((candidate) => candidate.code !== item.code)
-                            : [...current, item]
-                        )
-                      }
-                    >
-                      {alreadyInTarget ? `已在${targetName}中` : isPicked ? '取消选择' : '选择'}
-                    </Button>
-                  ),
-                }
-              }}
+              mobileCard={(item) => ({
+                title: item.title,
+                meta: <ContentItemClassificationCell item={item} />,
+                action: renderPickButton(item),
+              })}
             />
           )}
         </ResourceState>

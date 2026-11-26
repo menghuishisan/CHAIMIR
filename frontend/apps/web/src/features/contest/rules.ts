@@ -4,11 +4,9 @@ import {
   BattleRole,
   BattleRule,
   ContestStatus,
-  SANDBOX_ACCESS_PROFILE,
   UserRole,
   type Account,
   type Contest,
-  type ContestBattleRuntimeConfig,
 } from '@chaimir/api-client'
 
 /**
@@ -39,17 +37,4 @@ export function battleEntryRoles(rule: BattleRule): BattleRole[] {
   return rule === BattleRule.GAME
     ? [BattleRole.STRATEGY]
     : [BattleRole.ATTACK, BattleRole.DEFENSE]
-}
-
-/**
- * battleRuntimeConfig 组装对抗题的赛制参数。
- * 环境组合不在这里 —— 它由题库锁定版本的组合声明唯一提供,竞赛侧只决定「怎么打」。
- * 回放取平台唯一支持的完整记录模式(键与平台目录基线一致)。
- */
-export function battleRuntimeConfig(rule: BattleRule): ContestBattleRuntimeConfig {
-  return {
-    execution_profile: SANDBOX_ACCESS_PROFILE.CONTEST_BATTLE,
-    entry_roles: battleEntryRoles(rule),
-    replay_profile: { mode: 'full' },
-  }
 }

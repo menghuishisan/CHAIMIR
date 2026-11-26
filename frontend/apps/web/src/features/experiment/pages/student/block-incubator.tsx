@@ -1,94 +1,38 @@
-// 区块孵化器(实验工作台右栏)。
-//
-// 这是阶段 5 的创新①:把实验的检查点做成一条可见的「链」。
-// 为什么这样做 —— 实验的判分点在数据上就是一串独立结果(通过/未通过 + 得分),
-// 学生看到的却常是一个笼统的百分比,不知道自己卡在哪一环、下一环要做什么。
-// 平台的进度语言本来就是链式区块(设计规范 §5.4),于是把每个检查点当成一个待铸的区块:
-//   待孵化 = 还没判过;孵化中 = 判分正在跑;已铸块 = 判过且通过;未成块 = 判过但没通过。
-// 铸块是不可逆的既成事实(通过就记分),这与区块的语义一致;未成块可以重判,也与之一致。
-//
-// 全部状态取自真实数据:阶段来自实例的 stages,区块来自实例的 checkpoints 与实验的检查点配置。
-// 没有任何为了好看而造的中间态 —— 后端没给的状态这里就不显示。
-
-import { useCallback, useMemo, useState } from 'react'
 import { Blocks, CircleCheck, CircleX, Lock, Play, Unlock } from 'lucide-react'
 import {
   EXPERIMENT_STAGE_STATUS,
+  ExperimentInstanceStatus,
+  JudgeTaskStatusCode,
   type CheckpointResult,
   type StageState,
   type StudentCheckpointConfig,
 } from '@chaimir/api-client'
-import { Badge, Button, ChainProgress, toast } from '@chaimir/ui'
-import { api } from '../../../../app/api'
+import { Badge, Button, ChainProgress } from '@chaimir/ui'
 import { experimentStageStatusLabel } from '../../../../utils/labels/experiment'
-import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
-/** CheckpointJudge 是工作台持有的判分状态:正在判的检查点、最近一次失败原因、发起判分 */
+/** 顶栏和检查点面板共用工作台的判分动作。 */
 export interface CheckpointJudge {
   judgingId: string | undefined
-  error: string | undefined
   judge: (checkpointId: string) => Promise<void>
 }
 
-/**
- * useCheckpointJudge 触发检查点判分。
- * 服务端在存在现场沙箱时于本次判分动作内固化快照;页面引用仅作为无现场沙箱时的输入。
- * 同一时刻只判一个;判完请调用方重读实例。
- */
-export function useCheckpointJudge(
-  instanceId: string,
-  codeRef: WorkspaceCodeRef | undefined,
-  onJudged: () => void,
-): CheckpointJudge {
-  const [judgingId, setJudgingId] = useState<string>()
-  const [error, setError] = useState<string>()
-  const judge = useCallback(
-    async (checkpointId: string) => {
-      setJudgingId(checkpointId)
-      setError(undefined)
-      try {
-        const result = await api.experiment.judgeCheckpoint(instanceId, checkpointId, {
-          code_storage_key: codeRef?.codeStorageKey,
-          code_hash: codeRef?.codeHash,
-        })
-        toast.success(result.passed ? '判分通过,区块已铸成' : '判分完成,这次没有通过')
-        onJudged()
-      } catch (cause) {
-        setError(userFacingErrorMessage(cause, '判分没有跑完,请稍后重试。'))
-      } finally {
-        setJudgingId(undefined)
-      }
-    },
-    [codeRef, instanceId, onJudged],
-  )
-  return { judgingId, error, judge }
-}
-
-/** BlockPhase 是一个检查点区块的四种形态。 */
-type BlockPhase = 'pending' | 'incubating' | 'minted' | 'failed'
+type BlockPhase = 'pending' | 'incubating' | 'minted' | 'failed' | 'error' | 'cancelled'
 
 const PHASE_LABELS: Record<BlockPhase, string> = {
   pending: '待孵化',
   incubating: '孵化中',
   minted: '已铸块',
   failed: '未成块',
-}
-
-/** 页面最近一次保存返回的代码引用;有现场沙箱时后端会在判分动作内重新固化快照。 */
-export interface WorkspaceCodeRef {
-  codeStorageKey: string
-  codeHash: string
+  error: '判分未完成',
+  cancelled: '判分已取消',
 }
 
 export interface BlockIncubatorProps {
-  /** 实验配置里的检查点(学生投影:只有编号与分值,没有判题器与题目配置) */
   checkpoints: StudentCheckpointConfig[]
-  /** 实例上的判分结果 */
   results: CheckpointResult[]
-  /** 实例阶段状态 */
   stages: StageState[]
-  /** 页面最近一次「保存工作区」的产物;现场沙箱可在判分动作内生成快照 */
-  codeRef?: WorkspaceCodeRef
+  instanceStatus: ExperimentInstanceStatus
+  busy: boolean
   /** 只有实例处于 running/paused 时才允许触发检查点判分。 */
   canJudge: boolean
   /** 判分状态与动作:由工作台持有,顶栏的「判分」与这里的按钮共用同一份 */
@@ -97,41 +41,24 @@ export interface BlockIncubatorProps {
   onActivateStage: (stage: number) => void
 }
 
-/**
- * BlockIncubator 渲染阶段链与检查点区块,并承载判分。
- */
 export function BlockIncubator({
   checkpoints,
   results,
   stages,
-  codeRef,
+  instanceStatus,
+  busy,
   canJudge,
   judging,
   onActivateStage,
 }: BlockIncubatorProps) {
-  const { judgingId, error: panelError, judge } = judging
+  const { judgingId, judge } = judging
 
-  const resultById = useMemo(
-    () => new Map(results.map((result) => [result.id, result])),
-    [results],
-  )
-
-  const blocks = useMemo(
-    () =>
-      checkpoints.map((checkpoint) => {
-        const result = resultById.get(checkpoint.id)
-        const phase: BlockPhase =
-          judgingId === checkpoint.id
-            ? 'incubating'
-            : result === undefined
-              ? 'pending'
-              : result.passed
-                ? 'minted'
-                : 'failed'
-        return { checkpoint, result, phase }
-      }),
-    [checkpoints, judgingId, resultById],
-  )
+  const resultById = new Map(results.map((result) => [result.id, result]))
+  const blocks = checkpoints.map((checkpoint) => {
+    const result = resultById.get(checkpoint.id)
+    const phase = judgingId === checkpoint.id ? 'incubating' : resultPhase(result)
+    return { checkpoint, result, phase }
+  })
 
   const minted = blocks.filter((block) => block.phase === 'minted').length
   const failedIndexes = blocks.reduce<number[]>((indexes, block, index) => {
@@ -139,7 +66,10 @@ export function BlockIncubator({
     return indexes
   }, [])
 
-  const earned = results.reduce((sum, result) => sum + result.score, 0)
+  const earned = results.reduce(
+    (sum, result) => sum + (result.judge_status === JudgeTaskStatusCode.DONE ? result.score : 0),
+    0,
+  )
   const total = checkpoints.reduce((sum, checkpoint) => sum + checkpoint.score, 0)
 
   return (
@@ -150,7 +80,7 @@ export function BlockIncubator({
           <h2 className="text-sm font-medium text-on-dark">区块孵化器</h2>
         </div>
         <p className="text-xs text-on-dark-sub">
-          每通过一个检查点就铸成一个区块。铸成的区块不会回退,没成的可以改完再判一次。
+          每个区块对应一个检查点,重新判分后以最新结果为准。
         </p>
         <ChainProgress
           onDark
@@ -185,14 +115,19 @@ export function BlockIncubator({
                 ) : null}
                 {stage.status === EXPERIMENT_STAGE_STATUS.AVAILABLE ? (
                   <div>
-                    <Button
-                      variant="on-dark"
-                      size="sm"
-                      leftIcon={Unlock}
-                      onClick={() => onActivateStage(stage.stage)}
-                    >
-                      进入这个阶段
-                    </Button>
+                    {instanceStatus === ExperimentInstanceStatus.PAUSED ? (
+                      <p className="text-xs text-on-dark-faint">请先恢复实验，再进入这个阶段。</p>
+                    ) : (
+                      <Button
+                        variant="on-dark"
+                        size="sm"
+                        leftIcon={Unlock}
+                        disabled={busy || instanceStatus !== ExperimentInstanceStatus.RUNNING}
+                        onClick={() => onActivateStage(stage.stage)}
+                      >
+                        进入这个阶段
+                      </Button>
+                    )}
                   </div>
                 ) : null}
                 {stage.status === EXPERIMENT_STAGE_STATUS.LOCKED && stage.unlock_condition ? (
@@ -222,9 +157,13 @@ export function BlockIncubator({
                   <PhaseBadge phase={block.phase} />
                 </div>
                 <p className="font-mono text-xs tabular-nums text-on-dark-sub">
-                  {block.result
+                  {block.result && block.result.judge_status === JudgeTaskStatusCode.DONE
                     ? `得分 ${block.result.score}/${block.checkpoint.score}`
-                    : `分值 ${block.checkpoint.score}`}
+                    : block.phase === 'incubating'
+                      ? '判分正在处理,请稍后刷新结果'
+                      : block.phase === 'error' || block.phase === 'cancelled'
+                        ? '请重新判分后查看结果'
+                        : `分值 ${block.checkpoint.score}`}
                 </p>
                 <div>
                   <Button
@@ -244,22 +183,22 @@ export function BlockIncubator({
         )}
       </section>
 
-      {!codeRef && blocks.length > 0 ? (
-        <p className="text-xs text-on-dark-sub">
-          当前页面还没有保存引用。开始判分时,平台会按实验环境里的当前工作区生成本次快照。
-        </p>
-      ) : null}
-
       {!canJudge && blocks.length > 0 ? (
         <p className="text-xs text-on-dark-sub">实验状态或环境状态暂不支持判分，请刷新状态后重试。</p>
       ) : null}
 
-      {panelError ? <p className="text-xs text-on-dark-danger">{panelError}</p> : null}
     </div>
   )
 }
 
-/** StageBadge 渲染阶段状态。 */
+function resultPhase(result?: CheckpointResult): BlockPhase {
+  if (!result) return 'pending'
+  if (result.judge_status === JudgeTaskStatusCode.QUEUED || result.judge_status === JudgeTaskStatusCode.JUDGING) return 'incubating'
+  if (result.judge_status === JudgeTaskStatusCode.FAILED) return 'error'
+  if (result.judge_status === JudgeTaskStatusCode.CANCELLED) return 'cancelled'
+  return result.passed ? 'minted' : 'failed'
+}
+
 function StageBadge({ status }: { status: StageState['status'] }) {
   if (status === EXPERIMENT_STAGE_STATUS.ACTIVE) {
     return <Badge tone="jade">{experimentStageStatusLabel(status)}</Badge>
@@ -277,7 +216,6 @@ function StageBadge({ status }: { status: StageState['status'] }) {
   )
 }
 
-/** PhaseBadge 渲染区块形态;通过与未通过各自配图标,不只靠颜色区分。 */
 function PhaseBadge({ phase }: { phase: BlockPhase }) {
   if (phase === 'minted') {
     return (
@@ -302,7 +240,6 @@ function PhaseBadge({ phase }: { phase: BlockPhase }) {
   return <Badge tone={phase === 'incubating' ? 'info' : 'neutral'}>{PHASE_LABELS[phase]}</Badge>
 }
 
-/** unlockHint 用自然语言说明这个阶段怎么解锁,不显示内部检查点编号。 */
 function unlockHint(type: 'checkpoint' | 'manual', minScore?: number): string {
   if (type === 'manual') return '这个阶段由老师手动放行。'
   return minScore !== undefined && minScore > 0

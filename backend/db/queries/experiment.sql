@@ -9,6 +9,15 @@ SELECT id, tenant_id, course_id, author_id, template_ref, template_version, name
 FROM experiment
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL;
 
+-- name: ListCourseExperimentsForClone :many
+SELECT id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, group_config, require_report, wizard_step, status, created_at, updated_at, deleted_at
+FROM experiment
+WHERE tenant_id = sqlc.arg(tenant_id)::bigint AND deleted_at IS NULL
+  AND (course_id = sqlc.arg(course_id)::bigint
+       OR (course_id IS NULL AND author_id = sqlc.arg(source_teacher_id)::bigint AND id = ANY(sqlc.arg(lesson_experiment_ids)::bigint[])))
+ORDER BY id
+FOR SHARE;
+
 -- name: ListExperiments :many
 SELECT id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, group_config, require_report, wizard_step, status, created_at, updated_at, deleted_at
 FROM experiment
@@ -62,13 +71,20 @@ SET course_id = $3,
     require_report = $11,
     wizard_step = $12,
     updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
-WHERE tenant_id = $1 AND id = $2 AND status = 1 AND deleted_at IS NULL
+WHERE tenant_id = $1 AND id = $2 AND status IN (1, 3) AND deleted_at IS NULL
 RETURNING id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, group_config, require_report, wizard_step, status, created_at, updated_at, deleted_at;
 
--- name: SetExperimentStatus :one
+-- name: UnpublishExperiment :one
 UPDATE experiment
-SET status = $3, updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
-WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+SET status = 3, updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND deleted_at IS NULL
+RETURNING id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, group_config, require_report, wizard_step, status, created_at, updated_at, deleted_at;
+
+-- name: PublishExperimentIfUnchanged :one
+UPDATE experiment
+SET status = 2, updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
+WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id) AND status IN (1, 3) AND deleted_at IS NULL
+  AND updated_at = sqlc.arg(expected_updated_at)::timestamptz
 RETURNING id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, group_config, require_report, wizard_step, status, created_at, updated_at, deleted_at;
 
 -- name: CreateExperimentGroup :one
@@ -196,7 +212,7 @@ UPDATE experiment_instance
 SET scope_ref = $3,
     sandbox_refs = $4,
     sim_session_refs = $5,
-    status = CASE WHEN status = 6 THEN 6 ELSE $6 END,
+    status = $6,
     last_active_at = now()
 WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
@@ -250,13 +266,12 @@ WHERE id IN (
 RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
 
 -- name: ListLiveInstancesByCourse :many
--- 列出某课程下仍占用引擎资源的实验实例,供课程结束时级联回收(M7 需求 D3)。
--- 只取 creating/running/paused/released 四态:已完成、已回收与错误态不再持有沙箱或仿真会话。
+-- 完成态和错误态可能仍在等待资源清理；仅排除已回收实例。
 SELECT i.id, i.tenant_id, i.experiment_id, i.owner_account_id, i.group_id, i.source_ref, i.sandbox_refs, i.sim_session_refs, i.status,
        i.scope_ref, COALESCE(i.score::float8, 0)::float8 AS score, i.started_at, i.finished_at, i.last_active_at
 FROM experiment_instance i
 JOIN experiment e ON e.tenant_id = i.tenant_id AND e.id = i.experiment_id
-WHERE i.tenant_id = $1 AND e.course_id = $2 AND i.status IN (1, 2, 3, 7)
+WHERE i.tenant_id = $1 AND e.course_id = $2 AND i.status IN (1, 2, 3, 4, 6, 7)
 ORDER BY i.id;
 
 -- name: CountTeacherInstancesByStatus :many
@@ -296,23 +311,15 @@ WHERE i.tenant_id = sqlc.arg(tenant_id)::bigint
 INSERT INTO checkpoint_result (id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score, detail_ref, binding_output, judged_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7::text::numeric, $8, $9, now())
 ON CONFLICT (tenant_id, instance_id, checkpoint_id) DO UPDATE
-SET judge_task_ref = EXCLUDED.judge_task_ref,
+SET id = EXCLUDED.id,
+    judge_task_ref = EXCLUDED.judge_task_ref,
     passed = EXCLUDED.passed,
     score = EXCLUDED.score,
     detail_ref = EXCLUDED.detail_ref,
-    binding_output = CASE WHEN EXCLUDED.binding_output = '{}'::jsonb THEN checkpoint_result.binding_output ELSE EXCLUDED.binding_output END,
+    binding_output = EXCLUDED.binding_output,
     judged_at = now()
+WHERE checkpoint_result.id <= EXCLUDED.id
 RETURNING id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, binding_output, judged_at;
-
--- name: GetCheckpointResult :one
-SELECT id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, binding_output, judged_at
-FROM checkpoint_result
-WHERE tenant_id = $1 AND instance_id = $2 AND checkpoint_id = $3;
-
--- name: GetCheckpointResultByJudgeTask :one
-SELECT id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, binding_output, judged_at
-FROM checkpoint_result
-WHERE tenant_id = $1 AND judge_task_ref = $2;
 
 -- name: ListCheckpointResults :many
 SELECT id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, binding_output, judged_at
@@ -322,11 +329,13 @@ ORDER BY checkpoint_id ASC;
 
 -- name: UpsertExperimentReport :one
 INSERT INTO experiment_report (id, tenant_id, instance_id, student_id, content_ref, manual_score, comment, status, submitted_at)
-VALUES ($1, $2, $3, $4, $5, NULL, NULL, 1, now())
+VALUES ($1, $2, $3, $4, $5, NULL, NULL, 1, clock_timestamp())
 ON CONFLICT (tenant_id, instance_id, student_id) DO UPDATE
 SET content_ref = EXCLUDED.content_ref,
+    manual_score = NULL,
+    comment = NULL,
     status = 1,
-    submitted_at = now()
+    submitted_at = GREATEST(clock_timestamp(), experiment_report.submitted_at + INTERVAL '1 microsecond')
 RETURNING id, tenant_id, instance_id, student_id, content_ref, COALESCE(manual_score::float8, 0)::float8 AS manual_score, comment, status, submitted_at;
 
 -- name: GradeExperimentReport :one

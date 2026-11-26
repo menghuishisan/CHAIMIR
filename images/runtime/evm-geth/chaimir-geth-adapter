@@ -11,7 +11,11 @@ last_contract_file="$state_dir/last-contract-address"
 
 fail() { printf '%s\n' "$1" >&2; exit "${2:-1}"; }
 payload="$(cat)"; [ -n "$payload" ] || payload='{}'
-jq -e . >/dev/null <<<"$payload" || fail "输入不是有效 JSON" 22
+payload="$(jq -ces 'if length == 1 and (.[0] | type == "object") then .[0] else error("expected one action payload") end' <<<"$payload")" || fail "输入必须是单份 JSON 对象" 22
+
+json_string() {
+  jq -r "$1 | if . == null then empty elif type == \"string\" then . else error(\"expected string\") end" <<<"$payload"
+}
 
 rpc() {
   local method="$1"; local params="${2:-[]}"
@@ -22,7 +26,12 @@ rpc() {
     jq -c '.error' <<<"$response" >&2
     exit 70
   fi
-  jq -c '.result' <<<"$response"
+  jq -ces --arg method "$method" '
+    if length != 1 then error("expected one RPC response") else .[0] |
+      if type == "object" and .jsonrpc == "2.0" and .id == 1 and has("result") and (has("error") | not)
+        and (.result != null or $method == "eth_getTransactionReceipt")
+      then .result else error("invalid RPC response") end
+    end' <<<"$response" || fail "节点返回了无效的 JSON-RPC 响应" 70
 }
 
 first_account() {
@@ -35,46 +44,59 @@ wait_receipt() {
   local tx_hash="$1"; local receipt="null"
   for _ in $(seq 1 60); do
     receipt="$(rpc eth_getTransactionReceipt "$(jq -cn --arg hash "$tx_hash" '[ $hash ]')")"
-    if [ "$receipt" != "null" ]; then printf '%s' "$receipt"; return; fi
+    if [ "$receipt" != "null" ]; then
+      jq -e --arg hash "$tx_hash" 'type == "object" and .status == "0x1" and .transactionHash == $hash' >/dev/null <<<"$receipt" || fail "交易未成功执行或回执不属于本次交易" 70
+      printf '%s' "$receipt"
+      return
+    fi
     sleep 1
   done
   fail "交易未在超时时间内确认" 70
 }
 
 send_transaction() {
-  local tx_json="$1"; local tx_hash receipt address
-  tx_hash="$(rpc eth_sendTransaction "$(jq -cn --argjson tx "$tx_json" '[ $tx ]')" | jq -r '.')"
-  [ -n "$tx_hash" ] && [ "$tx_hash" != "null" ] || fail "节点未返回交易哈希" 70
+  local method="$1"; local params="$2"; local tx_hash receipt address
+  tx_hash="$(rpc "$method" "$params" | jq -r '.')"
+  [[ "$tx_hash" =~ ^0x[0-9a-fA-F]{64}$ ]] || fail "节点未返回有效交易哈希" 70
   receipt="$(wait_receipt "$tx_hash")"
   address="$(jq -r '.contractAddress // empty' <<<"$receipt")"
   if [ -n "$address" ]; then
+    [[ "$address" =~ ^0x[0-9a-fA-F]{40}$ && "$address" != '0x0000000000000000000000000000000000000000' ]] || fail "回执包含无效合约地址" 70
     mkdir -p "$state_dir"; printf '%s' "$address" > "$last_contract_file"
     jq -cn --arg tx_hash "$tx_hash" --arg contract_address "$address" --argjson receipt "$receipt" '{tx_hash:$tx_hash,contract_address:$contract_address,receipt:$receipt}'
   else
+    [ "$action" != deploy ] || fail "部署未返回有效合约地址" 70
     jq -cn --arg tx_hash "$tx_hash" --argjson receipt "$receipt" '{tx_hash:$tx_hash,receipt:$receipt}'
   fi
 }
 
 case "$action" in
   deploy)
-    bytecode="$(jq -r '.bytecode // empty' <<<"$payload")"
+    bytecode="$(json_string '.bytecode')"
     [ -n "$bytecode" ] || fail "deploy payload requires bytecode" 22
-    from="$(jq -r '.from // empty' <<<"$payload")"; [ -n "$from" ] || from="$(first_account)"
+    from="$(json_string '.from')"; [ -n "$from" ] || from="$(first_account)"
     [ -n "$from" ] || fail "节点没有可用部署账户" 70
     tx_json="$(jq -cn --arg from "$from" --arg data "$bytecode" '{from:$from,data:$data}')"
-    send_transaction "$tx_json"
+    send_transaction eth_sendTransaction "$(jq -cn --argjson tx "$tx_json" '[ $tx ]')"
     ;;
   tx)
-    to="$(jq -r '.to // empty' <<<"$payload")"
+    if jq -e 'has("raw_transaction")' >/dev/null <<<"$payload"; then
+      raw_transaction="$(jq -er 'if keys == ["raw_transaction"] and (.raw_transaction | type == "string" and test("^0x([0-9a-fA-F]{2})+$")) then .raw_transaction else error("invalid signed transaction payload") end' <<<"$payload")" || fail "raw_transaction must be the only field and contain non-empty hex bytes" 22
+      send_transaction eth_sendRawTransaction "$(jq -cn --arg raw "$raw_transaction" '[ $raw ]')"
+      exit 0
+    fi
+    to="$(json_string '.to')"
     if [ -z "$to" ] && [ -f "$last_contract_file" ]; then to="$(cat "$last_contract_file")"; fi
-    data="$(jq -r '.data // empty' <<<"$payload")"; [ -n "$to" ] && [ -n "$data" ] || fail "tx payload requires to and data" 22
-    from="$(jq -r '.from // empty' <<<"$payload")"; [ -n "$from" ] || from="$(first_account)"
-    value="$(jq -r '.value // empty' <<<"$payload")"
+    data="$(json_string '.data')"; [ -n "$to" ] && [ -n "$data" ] || fail "tx payload requires to and data" 22
+    from="$(json_string '.from')"
+    value="$(json_string '.value')"
+    [ -n "$from" ] || from="$(first_account)"
+    [ -n "$from" ] || fail "节点没有可用交易账户" 70
     tx_json="$(jq -cn --arg from "$from" --arg to "$to" --arg data "$data" --arg value "$value" '({from:$from,to:$to,data:$data} + (if $value != "" then {value:$value} else {} end))')"
-    send_transaction "$tx_json"
+    send_transaction eth_sendTransaction "$(jq -cn --argjson tx "$tx_json" '[ $tx ]')"
     ;;
   query)
-    target="$(jq -r '.target // empty' <<<"$payload")"; [ -n "$target" ] || fail "query target is required" 22
+    target="$(json_string '.target')"; [ -n "$target" ] || fail "query target is required" 22
     case "$target" in
       chainId) result="$(rpc eth_chainId)"; jq -cn --arg target "$target" --arg value "$(jq -r '.' <<<"$result")" '{target:$target,chain_id:$value}' ;;
       latest|blockNumber) result="$(rpc eth_blockNumber)"; jq -cn --arg target "$target" --arg value "$(jq -r '.' <<<"$result")" '{target:$target,block_number:$value}' ;;

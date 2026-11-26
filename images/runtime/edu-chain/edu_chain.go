@@ -58,9 +58,12 @@ func main() {
 
 // runAdapter 将平台统一 JSON 请求转成自研教学链的 HTTP API,不向平台泄漏内部存储结构。
 func runAdapter(action string) error {
-	raw, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
+	raw, err := io.ReadAll(io.LimitReader(os.Stdin, (1<<20)+1))
 	if err != nil {
 		return fmt.Errorf("读取适配器请求失败: %w", err)
+	}
+	if len(raw) > 1<<20 {
+		return errors.New("适配器请求超出大小限制")
 	}
 	if len(bytes.TrimSpace(raw)) == 0 {
 		raw = []byte("{}")
@@ -68,6 +71,9 @@ func runAdapter(action string) error {
 	var payload map[string]any
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return fmt.Errorf("适配器输入不是有效 JSON: %w", err)
+	}
+	if payload == nil {
+		return errors.New("适配器输入必须是 JSON 对象")
 	}
 	endpoint := strings.TrimRight(strings.TrimSpace(os.Getenv("CHAIMIR_CHAIN_RPC_URL")), "/")
 	if endpoint == "" {
@@ -153,9 +159,12 @@ func adapterJSONRequest(method, endpoint string, body []byte, timeout time.Durat
 		return nil, fmt.Errorf("教学链请求失败: %w", err)
 	}
 	defer resp.Body.Close()
-	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, (4<<20)+1))
 	if err != nil {
 		return nil, fmt.Errorf("读取教学链响应失败: %w", err)
+	}
+	if len(responseBody) > 4<<20 {
+		return nil, errors.New("教学链响应超出大小限制")
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return nil, fmt.Errorf("教学链返回 HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
@@ -163,6 +172,9 @@ func adapterJSONRequest(method, endpoint string, body []byte, timeout time.Durat
 	var out map[string]any
 	if err := json.Unmarshal(responseBody, &out); err != nil {
 		return nil, fmt.Errorf("教学链响应不是 JSON 对象: %w", err)
+	}
+	if out == nil {
+		return nil, errors.New("教学链响应不是 JSON 对象")
 	}
 	return out, nil
 }
@@ -177,7 +189,7 @@ type eduChainHandler struct {
 }
 
 // routes 注册教学链只读查询和受控交易提交端点。
-func (h eduChainHandler) routes() http.Handler {
+func (h *eduChainHandler) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", h.healthz)
 	mux.HandleFunc("/chain", h.chain)
@@ -189,7 +201,7 @@ func (h eduChainHandler) routes() http.Handler {
 }
 
 // healthz 返回节点存活状态。
-func (h eduChainHandler) healthz(w http.ResponseWriter, r *http.Request) {
+func (h *eduChainHandler) healthz(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.NotFound(w, r)
 		return
@@ -198,7 +210,7 @@ func (h eduChainHandler) healthz(w http.ResponseWriter, r *http.Request) {
 }
 
 // chain 返回教学链基本信息。
-func (h eduChainHandler) chain(w http.ResponseWriter, r *http.Request) {
+func (h *eduChainHandler) chain(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.NotFound(w, r)
 		return
@@ -207,7 +219,7 @@ func (h eduChainHandler) chain(w http.ResponseWriter, r *http.Request) {
 }
 
 // latestBlock 返回按时间推进的确定性最新区块。
-func (h eduChainHandler) latestBlock(w http.ResponseWriter, r *http.Request) {
+func (h *eduChainHandler) latestBlock(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.NotFound(w, r)
 		return
@@ -217,7 +229,7 @@ func (h eduChainHandler) latestBlock(w http.ResponseWriter, r *http.Request) {
 }
 
 // tx 接收教学交易并返回确定性交易哈希。
-func (h eduChainHandler) tx(w http.ResponseWriter, r *http.Request) {
+func (h *eduChainHandler) tx(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.NotFound(w, r)
 		return
@@ -227,17 +239,13 @@ func (h eduChainHandler) tx(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
 		return
 	}
-	if len(body) == 0 || !json.Valid(body) {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil || payload == nil {
 		http.Error(w, "交易内容无效", http.StatusBadRequest)
 		return
 	}
 	sum := sha256.Sum256(body)
 	hash := hex.EncodeToString(sum[:])
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		http.Error(w, "交易内容无效", http.StatusBadRequest)
-		return
-	}
 	h.mu.Lock()
 	h.txs[hash] = payload
 	h.mu.Unlock()
@@ -245,18 +253,18 @@ func (h eduChainHandler) tx(w http.ResponseWriter, r *http.Request) {
 }
 
 // deploy 创建教学链上的可查询对象,返回由内容摘要确定的对象标识。
-func (h eduChainHandler) deploy(w http.ResponseWriter, r *http.Request) {
+func (h *eduChainHandler) deploy(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.NotFound(w, r)
 		return
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.maxBodyBytes))
-	if err != nil || len(body) == 0 || !json.Valid(body) {
+	if err != nil {
 		http.Error(w, "部署内容无效", http.StatusBadRequest)
 		return
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
+	if err := json.Unmarshal(body, &payload); err != nil || payload == nil {
 		http.Error(w, "部署内容无效", http.StatusBadRequest)
 		return
 	}
@@ -277,7 +285,7 @@ func (h eduChainHandler) deploy(w http.ResponseWriter, r *http.Request) {
 }
 
 // query 查询教学链已部署对象或已提交交易,不暴露内部存储结构。
-func (h eduChainHandler) query(w http.ResponseWriter, r *http.Request) {
+func (h *eduChainHandler) query(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.NotFound(w, r)
 		return
@@ -318,7 +326,7 @@ func stringValue(payload map[string]any, key string) string {
 }
 
 // blockHash 按高度生成确定性教学区块哈希。
-func (h eduChainHandler) blockHash(height int64) string {
+func (h *eduChainHandler) blockHash(height int64) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d", h.chainID, height)))
 	return hex.EncodeToString(sum[:])
 }

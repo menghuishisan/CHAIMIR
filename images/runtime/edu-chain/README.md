@@ -29,6 +29,8 @@
 
 ## command / args 语义
 
+节点的交易、部署和查询共用同一状态锁，处理器按指针注册，不复制互斥锁。交易载荷和适配器响应必须为非 `null` 的 JSON 对象；适配器请求限 1 MiB、响应限 4 MiB，超限直接拒绝。非法输入不写入状态，非法响应不返回成功。
+
 - 镜像默认 ENTRYPOINT：["/usr/local/bin/chaimir-edu-chain"]；manifest 未覆盖组件 command/args，使用该入口语义。
 - runtime 原生动作：helper=/usr/local/bin/chaimir-edu-chain；profile=edu-chain-http；actions={"deploy":["/usr/local/bin/chaimir-edu-chain","-adapter","deploy"],"tx":["/usr/local/bin/chaimir-edu-chain","-adapter","tx"],"query":["/usr/local/bin/chaimir-edu-chain","-adapter","query"]}。
 

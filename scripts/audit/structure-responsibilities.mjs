@@ -20,17 +20,6 @@ const expectedDomains = [
   'sim',
   'teaching',
 ]
-const contractMethodsByDomain = {
-  content: new Set(['GetContentFace', 'GetContentFull', 'BatchGetContentFace', 'ReplaceUsageRefs', 'GetJudgeSpec', 'SystemImportContent']),
-  contest: new Set(['Stats', 'ListStudentAchievements']),
-  experiment: new Set(['GetInstanceScore', 'Stats']),
-  identity: new Set(['GetAccount', 'BatchGetAccounts', 'HasRole', 'ListClassStudents', 'ListTenants', 'GetTenant', 'PlatformStats', 'TenantStats', 'QueryAuditLogs']),
-  judge: new Set(['SubmitJudgeTask', 'ValidateJudgeMode', 'GetJudgeTask', 'CancelJudgeTask', 'Rejudge', 'RejudgeBySourceRef', 'FindExactMatch', 'FindSimilarity']),
-  notify: new Set(['Send', 'Push']),
-  sandbox: new Set(['ValidateSandboxTemplate', 'CreateSandbox', 'GetSandbox', 'PauseSandbox', 'ResumeSandbox', 'DestroySandbox', 'RecycleBySourceRef', 'PutSandboxFile', 'PutSandboxPrivateArchive', 'RestoreSandboxArchive', 'SaveSandboxFiles', 'ExecSandboxCommand', 'ChainDeploy', 'ChainSendTx', 'ChainQuery', 'ChainReset', 'Stats']),
-  sim: new Set(['CreateSession', 'GetReplay', 'ReportCheckpoint', 'DestroySession', 'RecycleBySourceRef']),
-  teaching: new Set(['GetCourse', 'GetCourseGrade', 'IsCourseMember', 'ListCourseGrades', 'ListStudentGrades', 'Stats']),
-}
 
 /** collectFiles 递归收集指定扩展名的文件。 */
 function collectFiles(directory, extensions) {
@@ -70,12 +59,6 @@ for (const moduleName of expectedDomains) {
       if (name !== 'dto.go') violations.push(`${rel}: 公共 DTO ${match[1]} 必须放 dto.go`)
     }
 
-    for (const match of source.matchAll(/^func \(s \*Service\) ([A-Za-z0-9_]+)\(/gm)) {
-      if (contractMethodsByDomain[moduleName]?.has(match[1]) && name !== 'service_contract.go') {
-        violations.push(`${rel}: contracts 方法 ${match[1]} 必须放 service_contract.go`)
-      }
-    }
-
     if (
       /func \(s \*Service\)/.test(source) &&
       !/^service(?:_.+)?\.go$/.test(name) &&
@@ -83,12 +66,17 @@ for (const moduleName of expectedDomains) {
     ) {
       violations.push(`${rel}: Service 方法必须放 service*.go、audit.go 或 events.go`)
     }
+    if (name === 'service_contract.go') {
+      for (const match of source.matchAll(/^func \(s \*Service\) (\w+)\([^{}]*?\) [^{]*\{\s*return s\.\w+\(\s*\w+(?:\s*,\s*\w+)*\s*\)\s*\}/gm)) {
+        violations.push(`${rel}: ${match[1]} 仅转发同一 Service 方法，应将契约名直接用于业务实现`)
+      }
+    }
     if (
       /internal\/modules\/.+\/internal\/sqlcgen/.test(source) &&
       !/^repo(?:_.+)?\.go$/.test(name) &&
-      name !== 'row_convert.go'
+      !['row_convert.go', 'row_convert_test.go'].includes(name)
     ) {
-      violations.push(`${rel}: sqlcgen 只能由 repo*.go 或 row_convert.go 使用`)
+      violations.push(`${rel}: sqlcgen 只能由 repo*.go、row_convert.go 及其同包测试使用`)
     }
     if (
       /^api(?:_.+)?\.go$/.test(name) &&

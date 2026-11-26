@@ -139,10 +139,23 @@
 /api/v1/judge/internal/fingerprints/similarity:
   post:
     tags: [judge]
-    summary: 相似度查重
+    summary: 在已授权提交来源集合内进行相似度查重
     operationId: judgeSimilarity
     x-chaimir-audience: internal
     x-chaimir-internal: true
     security: [{ serviceAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [problem_ref]
+            properties:
+              problem_ref: { type: string, minLength: 1 }
+              source_refs: { type: array, items: { type: string }, description: 已鉴权的提交来源集合；空集合无匹配 }
+              code_hash: { type: string }
+              exclude_source_ref: { type: string }
+              threshold: { type: number }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

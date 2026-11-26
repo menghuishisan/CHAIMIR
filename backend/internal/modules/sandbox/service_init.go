@@ -1,9 +1,8 @@
-// sandbox service_init 文件实现初始化归档恢复、私有脚本执行与开放前清理,复用对象存储和上传安全原语。
 package sandbox
 
 import (
 	"context"
-	"encoding/hex"
+	"fmt"
 	"path"
 	"strings"
 
@@ -17,72 +16,135 @@ import (
 	"chaimir/pkg/logging"
 )
 
-// applyInitAssetsIfNeeded 在个性化阶段注入运行时声明的已审核初始化资产。
-func (s *Service) applyInitAssetsIfNeeded(ctx context.Context, sb Sandbox, runtime Runtime) error {
-	for _, asset := range runtime.AdapterSpec.InitAssets {
-		if strings.TrimSpace(asset.Name) == "" || strings.TrimSpace(asset.SourceRef) == "" || strings.TrimSpace(asset.TargetDomain) == "" {
-			return apperr.ErrSandboxInitAssetConfigInvalid
+// validateInitChainSteps 在编译时拒绝无效动作和运行时无法执行的初始化。
+func validateInitChainSteps(steps []contracts.CompositionChainStep, runtimes []RuntimePlan) error {
+	plan := CreateSandboxPlan{Runtimes: runtimes}
+	for i, step := range steps {
+		selected, ok := plan.RuntimeInstance(step.RuntimeInstance)
+		if !ok || step.RuntimeInstance != selected.InstanceCode {
+			return fmt.Errorf("链初始化步骤 %d 引用无效运行时: %w", i+1, apperr.ErrSandboxCreateRequestInvalid)
 		}
-		domain, ok := volumeDomainByName(runtime.AdapterSpec, asset.TargetDomain)
-		if !ok || (domain.Name != VolumeDomainPublicAssets && domain.Name != VolumeDomainRuntimeState) || domain.StudentAccess == VolumeAccessReadWrite {
-			return apperr.ErrSandboxInitAssetConfigInvalid
-		}
-		if hash := strings.TrimSpace(asset.ExpectedSHA256); hash != "" {
-			decoded, err := hex.DecodeString(hash)
-			if err != nil || len(decoded) != 32 {
-				return apperr.ErrSandboxInitAssetConfigInvalid
+		var action string
+		switch step.Op {
+		case "deploy", "tx":
+			if len(step.Payload) == 0 || step.Target != "" {
+				return apperr.ErrSandboxCreateRequestInvalid
 			}
+			action = ChainOperationDeploy
+			if step.Op == "tx" {
+				action = ChainOperationTransaction
+			}
+		case "query":
+			if strings.TrimSpace(step.Target) == "" || len(step.Payload) > 0 {
+				return apperr.ErrSandboxCreateRequestInvalid
+			}
+			action = ChainOperationQuery
+		case "reset":
+			commands := selected.Runtime.AdapterSpec.CapabilityCommands
+			if len(step.Payload) > 0 || step.Target != "" ||
+				(selected.Runtime.AdapterLevel != RuntimeAdapterLevelPlugin && commands.ResetStrategy != "recreate_runtime" && len(commands.Reset.Command) == 0) {
+				return apperr.ErrSandboxCreateRequestInvalid
+			}
+			continue
+		default:
+			return apperr.ErrSandboxCreateRequestInvalid
 		}
-		phase := strings.TrimSpace(asset.ApplyPhase)
-		if phase != "" &&
-			!strings.EqualFold(phase, InitAssetApplyPhaseInit) &&
-			!strings.EqualFold(phase, InitAssetApplyPhasePersonalization) {
-			return apperr.ErrSandboxInitAssetConfigInvalid
-		}
-		if err := s.restoreArchiveToDomain(ctx, sb, runtime, asset.SourceRef, asset.ExpectedSHA256, domain); err != nil {
-			return err
+		if err := ensureRuntimeAction(selected.Runtime, action); err != nil {
+			return fmt.Errorf("链初始化步骤 %d 无可用能力: %w", i+1, err)
 		}
 	}
 	return nil
 }
 
-// restoreArchiveToDomain 把审核归档解包到运行时声明的非学生安全域,不借用 workspace 文件接口。
-func (s *Service) restoreArchiveToDomain(ctx context.Context, sb Sandbox, runtime Runtime, objectRef, expectedHash string, domain VolumeDomainSpec) error {
-	ref, err := storage.ParseObjectRef(objectRef)
-	if err != nil {
-		return apperr.ErrSandboxInitObjectRefInvalid.WithCause(err)
-	}
-	if err := validateInitObjectRef(sb.TenantID, ref, s.objectStorage.BucketCode(), s.objectStorage.BucketAttach()); err != nil {
+// initializeChains 仅在启动资源租约内执行，不能调用面向用户的就绪门禁入口。
+func (s *Service) initializeChains(ctx context.Context, plan CreateSandboxPlan) error {
+	if err := validateInitChainSteps(plan.InitChainSteps, plan.Runtimes); err != nil {
 		return err
+	}
+	for i, step := range plan.InitChainSteps {
+		selected, _ := plan.RuntimeInstance(step.RuntimeInstance)
+		capability, err := s.resolveCapability(selected.Runtime)
+		if err != nil {
+			return err
+		}
+		switch step.Op {
+		case "deploy":
+			_, err = capability.Deploy(ctx, plan.Sandbox, selected.Runtime, step.Payload)
+		case "tx":
+			_, err = capability.SendTx(ctx, plan.Sandbox, selected.Runtime, step.Payload)
+		case "query":
+			_, err = capability.Query(ctx, plan.Sandbox, selected.Runtime, step.Target)
+		case "reset":
+			err = s.resetRuntimeForPlan(ctx, plan, step.RuntimeInstance, capability)
+		}
+		if err != nil {
+			return apperr.ErrSandboxInitExecFailed.WithCause(fmt.Errorf("链初始化步骤 %d (%s/%s) 失败: %w", i+1, step.RuntimeInstance, step.Op, err))
+		}
+	}
+	return nil
+}
+
+func (s *Service) prepareRuntimeInitArchives(ctx context.Context, sb Sandbox, runtimes []RuntimePlan) ([]RuntimeInitArchive, error) {
+	if sb.TenantID < 0 {
+		return nil, apperr.ErrSandboxInitObjectRefInvalid
+	}
+	var archives []RuntimeInitArchive
+	for _, runtime := range runtimes {
+		if err := validateInitAssets(runtime.Runtime.AdapterSpec); err != nil {
+			return nil, err
+		}
+		for _, asset := range runtime.Runtime.AdapterSpec.InitAssets {
+			ref, err := storage.ParseObjectRef(asset.SourceRef)
+			if err != nil {
+				return nil, apperr.ErrSandboxInitObjectRefInvalid.WithCause(err)
+			}
+			ownerID := sb.TenantID
+			// 共享素材由已自检目录带入；教师追加引用在组合编译时限定为本租户。
+			if strings.HasPrefix(ref.Key, "0/") {
+				ownerID = 0
+			}
+			tarball, err := s.readInitArchive(ctx, ownerID, ref, asset.ExpectedSHA256)
+			if err != nil {
+				return nil, err
+			}
+			archives = append(archives, RuntimeInitArchive{RuntimeInstance: runtime.InstanceCode, TargetDomain: asset.TargetDomain, Tarball: tarball})
+		}
+	}
+	return archives, nil
+}
+
+func (s *Service) readInitObject(ctx context.Context, ownerID int64, ref storage.ObjectRef) ([]byte, error) {
+	if err := validateInitObjectRef(ownerID, ref, s.objectStorage.BucketCode(), s.objectStorage.BucketAttach()); err != nil {
+		return nil, err
 	}
 	reader, err := s.objectStorage.Get(ctx, ref.Bucket, ref.Key)
 	if err != nil {
-		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
+		return nil, apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
 	}
-	defer logging.CloseContext(ctx, "关闭沙箱初始化归档读取器失败", reader)
+	defer logging.CloseContext(ctx, "关闭沙箱初始化对象读取器失败", reader)
 	data, sizeResult, err := upload.ReadBounded(reader, s.cfg.InitArchiveMaxBytes)
 	if err != nil {
-		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
+		return nil, apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
 	}
 	if sizeResult == upload.SizeEmpty || sizeResult == upload.SizeTooLarge {
-		return apperr.ErrSandboxInitArchiveTooLarge
+		return nil, apperr.ErrSandboxInitArchiveTooLarge
+	}
+	return data, nil
+}
+
+func (s *Service) readInitArchive(ctx context.Context, ownerID int64, ref storage.ObjectRef, expectedHash string) ([]byte, error) {
+	data, err := s.readInitObject(ctx, ownerID, ref)
+	if err != nil {
+		return nil, err
 	}
 	if hash := strings.TrimSpace(expectedHash); hash != "" && !strings.EqualFold(hash, pkgcrypto.SHA256Hex(data)) {
-		return apperr.ErrSandboxInitArchiveInvalid
+		return nil, apperr.ErrSandboxInitArchiveInvalid
 	}
 	tarball, err := upload.SafeArchiveTar(ref.Key, data, upload.ArchiveLimits{MaxFiles: s.cfg.InitArchiveMaxFiles, MaxUnpackedBytes: s.cfg.InitArchiveMaxUnpackedBytes})
 	if err != nil {
-		return apperr.ErrSandboxInitArchiveInvalid.WithCause(err)
+		return nil, apperr.ErrSandboxInitArchiveInvalid.WithCause(err)
 	}
-	ops := runtime.AdapterSpec.InitAssetOps
-	if !componentCanWriteDomain(runtime.AdapterSpec, ops.ExecTarget, domain.Name) {
-		return apperr.ErrSandboxInitAssetConfigInvalid
-	}
-	command := workspaceCommand(ops.UnpackTar, runtime.AdapterSpec.WorkspaceDir, domain.MountPath)
-	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, ops.ExecTarget, command, tarball, false); err != nil {
-		return sandboxExecFailure(apperr.ErrSandboxInitExecFailed, err, stderr)
-	}
-	return nil
+	return tarball, nil
 }
 
 // componentCanWriteDomain 确认初始化归档的执行目标显式拥有目标域写权限,避免借用学生容器或只读挂载。
@@ -109,48 +171,17 @@ func componentCanWriteDomain(adapter AdapterSpec, target, domainName string) boo
 	return false
 }
 
-// restoreInitCodeIfNeeded 在个性化初始化阶段把已授权代码归档恢复到工作区。
-func (s *Service) restoreInitCodeIfNeeded(ctx context.Context, sb Sandbox, runtime Runtime, initCodeRef string) error {
-	return s.restoreArchiveToWorkspace(ctx, sb, runtime, initCodeRef)
-}
-
-// restoreArchiveToWorkspace 把对象存储中的已校验归档安全解包到沙箱工作区。
-func (s *Service) restoreArchiveToWorkspace(ctx context.Context, sb Sandbox, runtime Runtime, objectRef string) error {
-	return s.restoreArchiveToWorkspaceDir(ctx, sb, runtime, objectRef, ".")
-}
-
-// restoreArchiveToWorkspaceDir 把对象存储中的已校验归档安全解包到沙箱工作区指定子目录。
-func (s *Service) restoreArchiveToWorkspaceDir(ctx context.Context, sb Sandbox, runtime Runtime, objectRef, targetDir string) error {
-	return s.restoreArchiveToWorkspaceDirChecked(ctx, sb, runtime, objectRef, "", targetDir)
-}
-
-// restoreArchiveToWorkspaceDirChecked 校验对象归属、可选哈希和归档安全后恢复到工作区。
-func (s *Service) restoreArchiveToWorkspaceDirChecked(ctx context.Context, sb Sandbox, runtime Runtime, objectRef, expectedHash, targetDir string) error {
+func (s *Service) restoreArchiveToWorkspace(ctx context.Context, sb Sandbox, runtime Runtime, objectRef, expectedHash, targetDir string) error {
+	if sb.TenantID <= 0 {
+		return apperr.ErrSandboxInitObjectRefInvalid
+	}
 	ref, err := storage.ParseObjectRef(objectRef)
 	if err != nil {
 		return apperr.ErrSandboxInitObjectRefInvalid.WithCause(err)
 	}
-	if err := validateInitObjectRef(sb.TenantID, ref, s.objectStorage.BucketCode(), s.objectStorage.BucketAttach()); err != nil {
+	tarball, err := s.readInitArchive(ctx, sb.TenantID, ref, expectedHash)
+	if err != nil {
 		return err
-	}
-	reader, err := s.objectStorage.Get(ctx, ref.Bucket, ref.Key)
-	if err != nil {
-		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
-	}
-	defer logging.CloseContext(ctx, "关闭沙箱初始化归档读取器失败", reader)
-	data, sizeResult, err := upload.ReadBounded(reader, s.cfg.InitArchiveMaxBytes)
-	if err != nil {
-		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
-	}
-	if sizeResult == upload.SizeEmpty || sizeResult == upload.SizeTooLarge {
-		return apperr.ErrSandboxInitArchiveTooLarge
-	}
-	if strings.TrimSpace(expectedHash) != "" && !strings.EqualFold(strings.TrimSpace(expectedHash), pkgcrypto.SHA256Hex(data)) {
-		return apperr.ErrSandboxInitArchiveInvalid
-	}
-	tarball, err := upload.SafeArchiveTar(ref.Key, data, upload.ArchiveLimits{MaxFiles: s.cfg.InitArchiveMaxFiles, MaxUnpackedBytes: s.cfg.InitArchiveMaxUnpackedBytes})
-	if err != nil {
-		return apperr.ErrSandboxInitArchiveInvalid.WithCause(err)
 	}
 	target := runtime.AdapterSpec.WorkspaceDir
 	if strings.TrimSpace(targetDir) != "" && strings.TrimSpace(targetDir) != "." {
@@ -171,8 +202,8 @@ func (s *Service) restoreArchiveToWorkspaceDirChecked(ctx context.Context, sb Sa
 	return nil
 }
 
-// RestoreSandboxArchive 将公开归档恢复到工作区子目录,供上层编排真实代码对局等场景使用。
-func (s *Service) restoreSandboxArchiveContract(ctx context.Context, req contracts.SandboxArchiveRestoreRequest) error {
+// 公开归档只恢复到当前租户的工作区，不承载判题私有材料。
+func (s *Service) RestoreSandboxArchive(ctx context.Context, req contracts.SandboxArchiveRestoreRequest) error {
 	if req.TenantID <= 0 || req.SandboxID <= 0 || !validSourceRef(req.SourceRef) || strings.TrimSpace(req.ObjectRef) == "" {
 		return apperr.ErrSandboxCreateRequestInvalid
 	}
@@ -183,11 +214,14 @@ func (s *Service) restoreSandboxArchiveContract(ctx context.Context, req contrac
 	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
 		return err
 	}
-	return s.restoreArchiveToWorkspaceDirChecked(ctx, sb, runtime, req.ObjectRef, req.ExpectedHash, req.TargetDir)
+	return s.restoreArchiveToWorkspace(ctx, sb, runtime, req.ObjectRef, req.ExpectedHash, req.TargetDir)
 }
 
 // runInitScriptIfNeeded 仅向非学生容器传递脚本原文,不把私有初始化材料写入公开工作区。
 func (s *Service) runInitScriptIfNeeded(ctx context.Context, sb Sandbox, runtime Runtime, initScriptRef string) error {
+	if sb.TenantID <= 0 {
+		return apperr.ErrSandboxInitObjectRefInvalid
+	}
 	target, err := initScriptExecTarget(runtime.AdapterSpec)
 	if err != nil {
 		return err
@@ -196,20 +230,9 @@ func (s *Service) runInitScriptIfNeeded(ctx context.Context, sb Sandbox, runtime
 	if err != nil {
 		return apperr.ErrSandboxInitObjectRefInvalid.WithCause(err)
 	}
-	if err := validateInitObjectRef(sb.TenantID, ref, s.objectStorage.BucketCode(), s.objectStorage.BucketAttach()); err != nil {
+	data, err := s.readInitObject(ctx, sb.TenantID, ref)
+	if err != nil {
 		return err
-	}
-	reader, err := s.objectStorage.Get(ctx, ref.Bucket, ref.Key)
-	if err != nil {
-		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
-	}
-	defer logging.CloseContext(ctx, "关闭沙箱初始化脚本读取器失败", reader)
-	data, sizeResult, err := upload.ReadBounded(reader, s.cfg.InitArchiveMaxBytes)
-	if err != nil {
-		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
-	}
-	if sizeResult == upload.SizeEmpty || sizeResult == upload.SizeTooLarge {
-		return apperr.ErrSandboxInitArchiveTooLarge
 	}
 	runCommand := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.RunScript, runtime.AdapterSpec.WorkspaceDir, runtime.AdapterSpec.WorkspaceDir)
 	if _, _, err := s.orchestrator.Exec(ctx, sb.Namespace, target, runCommand, data, false); err != nil {
@@ -274,17 +297,26 @@ func (s *Service) cleanWorkspaceBeforeAccess(ctx context.Context, sb Sandbox, ru
 	return nil
 }
 
-// validateInitObjectRef 校验初始化对象只来自当前租户的代码或附件桶,防止内部调用误传跨租户对象。
-func validateInitObjectRef(tenantID int64, ref storage.ObjectRef, codeBucket, attachBucket string) error {
-	if tenantID <= 0 {
+// validateInitObjectRef 匹配明确所有者的代码或附件对象；0 仅由平台素材路径使用。
+func validateInitObjectRef(ownerID int64, ref storage.ObjectRef, codeBucket, attachBucket string) error {
+	if ownerID < 0 {
 		return apperr.ErrSandboxInitObjectRefInvalid
 	}
 	if ref.Bucket != codeBucket && ref.Bucket != attachBucket {
 		return apperr.ErrSandboxInitObjectRefInvalid
 	}
-	prefix := ids.Format(tenantID) + "/"
+	prefix := ids.Format(ownerID) + "/"
 	if !strings.HasPrefix(ref.Key, prefix) {
 		return apperr.ErrSandboxInitObjectRefInvalid
 	}
 	return nil
+}
+
+// 缺失工作区实例时交由执行目标校验拒绝，不按运行时顺序回退。
+func workspaceRuntimeForPlan(plan CreateSandboxPlan) Runtime {
+	runtime, ok := plan.RuntimeInstance(plan.WorkspaceRuntimeInstance)
+	if !ok {
+		return Runtime{}
+	}
+	return runtime.Runtime
 }

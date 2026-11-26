@@ -1,5 +1,3 @@
-// 判题契约常量：维护 M3 用户向状态字符串，来源为后端 judge statusText。
-
 export const JUDGE_TASK_STATUS = {
   QUEUED: 'queued',
   JUDGING: 'judging',
@@ -10,11 +8,16 @@ export const JUDGE_TASK_STATUS = {
 
 export type JudgeTaskStatus = (typeof JUDGE_TASK_STATUS)[keyof typeof JUDGE_TASK_STATUS]
 
-/**
- * 判题任务的运维分组:与后端 judge enum.go 的 TaskState* 一一对应。
- * 一个分组覆盖多个状态,故列表筛选与计数用它而不是单个 status
- * (「需要处理」= 失败,由服务端统一计数和筛选)。
- */
+/** 业务结果投影使用 M3 的数值状态，任务列表继续使用字符串状态。 */
+export enum JudgeTaskStatusCode {
+  QUEUED = 1,
+  JUDGING = 2,
+  DONE = 3,
+  FAILED = 4,
+  CANCELLED = 5,
+}
+
+/** 运维筛选按活跃或失败分组，计数由服务端提供。 */
 export const JUDGE_TASK_STATE = {
   ACTIVE: 'active',
   ABNORMAL: 'abnormal',

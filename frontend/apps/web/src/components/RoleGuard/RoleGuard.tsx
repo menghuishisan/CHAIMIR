@@ -12,6 +12,7 @@ import { useAsyncResource } from '../../hooks'
 import {
   clearLoginTokensLocally,
   isPasswordChangeRequired,
+  rememberCurrentEntryPath,
   subscribeToAuthSessionChanges,
 } from '../../utils/authSession'
 import { loginPathForPath } from '../../utils/roleRouting'
@@ -31,6 +32,7 @@ export const RoleGuard: React.FC<RoleGuardProps> = ({ allowedRoles }) => {
     () =>
       subscribeToAuthSessionChanges(() => {
         clearLoginTokensLocally()
+        rememberCurrentEntryPath()
         window.location.replace(loginPathForPath(window.location.pathname))
       }),
     []

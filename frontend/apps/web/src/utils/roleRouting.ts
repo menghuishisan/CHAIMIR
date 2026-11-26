@@ -29,11 +29,6 @@ export function roleRouteForRoles(roles: UserRole[]): RoleRouteConfig | undefine
   return ROLE_ROUTE_PRIORITY.find((config) => roles.includes(config.role))
 }
 
-/** isRoleHomePath 判断路径是否为当前四角色之一的规范默认功能页。 */
-export function isRoleHomePath(path: string): boolean {
-  return ROLE_ROUTE_PRIORITY.some((config) => config.homePath === path)
-}
-
 /**
  * loginPathForPath 按路径所属角色区选择登录入口。
  * 平台管理区回平台通道,学校侧三角色回学校登录页;角色区之外的路径(如全站 404)

@@ -42,9 +42,13 @@ func (s *Service) reconcileJudgerCatalog(ctx context.Context, runtimeCode string
 		if err := ctx.Err(); err != nil {
 			return errors.Join(append(failures, err)...)
 		}
-		// 没有自动停用原因的停用项由管理员控制,后台不重新启用。
-		if !judgerNeedsSandbox(item.Type, item.RuntimeRequired) ||
-			(item.Status == JudgerStatusDisabled && item.ResourceSpec.DisabledReason == "") {
+		// 理论题由系统维护,初始化待测必须执行内置自检;其他停用项仍由管理员控制。
+		builtinTheory := item.Code == contracts.JudgerCodeTheoryQuestion && item.Type == JudgerTypeTheoryQuestion
+		if !builtinTheory && (!judgerNeedsSandbox(item.Type, item.RuntimeRequired) ||
+			(item.Status == JudgerStatusDisabled && item.ResourceSpec.DisabledReason == "")) {
+			continue
+		}
+		if builtinTheory && runtimeCode != "" {
 			continue
 		}
 		composition, ok := judgerComposition(item)
@@ -65,7 +69,15 @@ func (s *Service) reconcileJudger(ctx context.Context, original Judger, composit
 	item := original
 	var executionErr error
 	selftestStatus := JudgerSelftestPending
-	if !valid {
+	if item.Code == contracts.JudgerCodeTheoryQuestion && item.Type == JudgerTypeTheoryQuestion {
+		executionErr = s.executeJudgerSelftest(ctx, item)
+		selftestStatus = JudgerSelftestPassed
+		item.ResourceSpec.DisabledReason = ""
+		if executionErr != nil {
+			selftestStatus = JudgerSelftestFailed
+			item.ResourceSpec.DisabledReason = "理论题判分自检未通过"
+		}
+	} else if !valid {
 		executionErr = apperr.ErrJudgerConfigInvalid
 		item.ResourceSpec.DisabledReason = "判题环境配置不完整"
 	} else {
@@ -80,7 +92,7 @@ func (s *Service) reconcileJudger(ctx context.Context, original Judger, composit
 				return nil
 			}
 			item.ResourceSpec.CompositionSnapshot = snapshot
-			executionErr = s.sandbox.PrepullPlatformComposition(ctx, snapshot.Digest)
+			executionErr = s.sandbox.PrepareCompositions(ctx, []string{snapshot.Digest})
 			if executionErr != nil {
 				item.ResourceSpec.DisabledReason = "判题环境正在分发"
 			} else {
@@ -101,7 +113,10 @@ func (s *Service) reconcileJudger(ctx context.Context, original Judger, composit
 	if reflect.DeepEqual(original.ResourceSpec, item.ResourceSpec) && original.SelftestStatus == selftestStatus && original.Status == status {
 		return executionErr
 	}
-	_, updated, persistErr := s.persistJudgerExecutionState(ctx, original, item.ResourceSpec, selftestStatus, status)
+	_, updated, persistErr := s.persistJudgerExecutionState(ctx, original, item.ResourceSpec, selftestStatus, status, func(ctx context.Context, updated Judger) error {
+		return s.writeSystemAudit(ctx, 0, "judge.catalog.reconcile", "judger", updated.ID,
+			map[string]any{"selftest_status": selftestStatus, "status": status, "composition_digest": item.ResourceSpec.CompositionSnapshot.Digest})
+	})
 	if persistErr != nil {
 		return errors.Join(executionErr, persistErr)
 	}
@@ -109,9 +124,7 @@ func (s *Service) reconcileJudger(ctx context.Context, original Judger, composit
 		// 配置已变化或另一协调者已完成;旧结果不得覆盖当前配置。
 		return executionErr
 	}
-	auditErr := s.writeSystemAudit(ctx, 0, "judge.catalog.reconcile", "judger", item.ID,
-		map[string]any{"selftest_status": selftestStatus, "status": status, "composition_digest": item.ResourceSpec.CompositionSnapshot.Digest})
-	return errors.Join(executionErr, auditErr)
+	return executionErr
 }
 
 // compileJudgerSnapshot 统一编译、补齐私有镜像闭包并登记最终摘要。
@@ -138,12 +151,15 @@ func (s *Service) compileJudgerSnapshot(ctx context.Context, composition contrac
 }
 
 // persistJudgerExecutionState 回写唯一配置版本的状态,未命中表示结果已过期。
-func (s *Service) persistJudgerExecutionState(ctx context.Context, original Judger, resource JudgerResourceSpec, selftestStatus, status int16) (Judger, bool, error) {
+func (s *Service) persistJudgerExecutionState(ctx context.Context, original Judger, resource JudgerResourceSpec, selftestStatus, status int16, writeAudit func(context.Context, Judger) error) (Judger, bool, error) {
 	var out Judger
 	err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
 		out, err = tx.UpdateJudgerExecutionState(ctx, original, resource, selftestStatus, status)
-		return err
+		if err != nil {
+			return err
+		}
+		return writeAudit(ctx, out)
 	})
 	if s.store.IsNoRows(err) {
 		return Judger{}, false, nil

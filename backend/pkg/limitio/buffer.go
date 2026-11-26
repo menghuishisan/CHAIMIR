@@ -1,4 +1,4 @@
-// Package limitio 提供写入阶段即生效的有界内存输出缓冲,防止不可信流耗尽进程内存。
+// Package limitio 限制输出缓冲可接收的字节数。
 package limitio
 
 import (
@@ -36,7 +36,7 @@ func (b *Buffer) Write(data []byte) (int, error) {
 	return b.buffer.Write(data)
 }
 
-// Bytes 返回已在上限内收集的输出。
+// Bytes 返回缓冲区的底层字节切片，有效期截至下次写入。
 func (b *Buffer) Bytes() []byte {
 	return b.buffer.Bytes()
 }

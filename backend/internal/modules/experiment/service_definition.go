@@ -4,12 +4,14 @@ package experiment
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 )
 
 // ListExperiments 查询当前租户实验定义列表。
@@ -54,7 +56,7 @@ func (s *Service) GetExperimentForTeacher(ctx context.Context, experimentID int6
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		item, err = tx.GetExperiment(ctx, id.TenantID, experimentID)
 		if err != nil {
-			return apperr.ErrExperimentNotFound.WithCause(err)
+			return err
 		}
 		return s.ensureTeacherCanManage(ctx, id.AccountID, item)
 	}); err != nil {
@@ -204,11 +206,11 @@ func (s *Service) CreateExperiment(ctx context.Context, req ExperimentRequest) (
 		if err != nil {
 			return err
 		}
-		return s.enqueueExperimentSourceEvent(ctx, tx, item)
+		if err := s.enqueueExperimentSourceEvent(ctx, tx, item); err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.create", auditTargetExperiment, item.ID, map[string]any{"course_id": item.CourseID})
 	}); err != nil {
-		return ExperimentDTO{}, err
-	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.create", auditTargetExperiment, item.ID, map[string]any{"course_id": item.CourseID}); err != nil {
 		return ExperimentDTO{}, err
 	}
 	return experimentDTOFromModel(item), nil
@@ -254,11 +256,14 @@ func (s *Service) UpdateExperiment(ctx context.Context, experimentID int64, req 
 		if err != nil {
 			return err
 		}
-		return s.enqueueExperimentSourceEvent(ctx, tx, item)
+		if err := s.enqueueExperimentSourceEvent(ctx, tx, item); err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.update", auditTargetExperiment, item.ID, map[string]any{"wizard_step": item.WizardStep})
 	}); err != nil {
 		return ExperimentDTO{}, err
 	}
-	return experimentDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.update", auditTargetExperiment, item.ID, map[string]any{"wizard_step": item.WizardStep})
+	return experimentDTOFromModel(item), nil
 }
 
 // ValidateExperiment 执行发布前校验并返回所有阻断和提醒问题。
@@ -308,20 +313,32 @@ func (s *Service) PublishExperiment(ctx context.Context, experimentID int64) (Ex
 	if err := validatePublishResult(result); err != nil {
 		return ExperimentDTO{}, err
 	}
-	if err := s.refreshContentUsageRefs(ctx, item); err != nil {
-		return ExperimentDTO{}, err
+	if len(item.Components.Envs) > 0 {
+		if s.sandbox == nil {
+			return ExperimentDTO{}, apperr.ErrExperimentSandboxUnavailable
+		}
+		digests := make([]string, 0, len(item.Components.Envs))
+		for _, env := range item.Components.Envs {
+			digests = append(digests, env.CompositionSnapshot.Digest)
+		}
+		if err := s.sandbox.PrepareCompositions(ctx, digests); err != nil {
+			return ExperimentDTO{}, apperr.ErrExperimentSandboxUnavailable.WithCause(err)
+		}
 	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		item, err = tx.SetExperimentStatus(ctx, id.TenantID, experimentID, ExperimentStatusPublished)
+		item, err = tx.PublishExperimentIfUnchanged(ctx, id.TenantID, experimentID, item.UpdatedAt)
 		if err != nil {
 			return err
 		}
-		return s.enqueueExperimentSourceEvent(ctx, tx, item)
+		if err := s.refreshContentUsageRefs(ctx, item); err != nil {
+			return err
+		}
+		if err := s.enqueueExperimentSourceEvent(ctx, tx, item); err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.publish", auditTargetExperiment, item.ID, map[string]any{"course_id": item.CourseID})
 	}); err != nil {
-		return ExperimentDTO{}, err
-	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.publish", auditTargetExperiment, item.ID, map[string]any{"course_id": item.CourseID}); err != nil {
 		return ExperimentDTO{}, err
 	}
 	return experimentDTOFromModel(item), nil
@@ -345,15 +362,18 @@ func (s *Service) UnpublishExperiment(ctx context.Context, experimentID int64) (
 		if current.Status != ExperimentStatusPublished {
 			return apperr.ErrExperimentStateInvalid
 		}
-		item, err = tx.SetExperimentStatus(ctx, id.TenantID, experimentID, ExperimentStatusUnpublished)
+		item, err = tx.UnpublishExperiment(ctx, id.TenantID, experimentID)
 		if err != nil {
 			return err
 		}
-		return s.enqueueExperimentSourceEvent(ctx, tx, item)
+		if err := s.enqueueExperimentSourceEvent(ctx, tx, item); err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.unpublish", auditTargetExperiment, item.ID, nil)
 	}); err != nil {
 		return ExperimentDTO{}, err
 	}
-	return experimentDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.unpublish", auditTargetExperiment, item.ID, nil)
+	return experimentDTOFromModel(item), nil
 }
 
 // validateExperimentComponents 校验模板、检查点内容和分值结构。
@@ -403,6 +423,14 @@ func (s *Service) validateExperimentComponents(ctx context.Context, item Experim
 	if s.sim == nil && len(item.Components.Sims) > 0 {
 		add(ValidationLevelError, "仿真服务暂时不可用")
 	}
+	if s.sim != nil {
+		for _, sim := range item.Components.Sims {
+			if err := s.sim.ValidatePackage(ctx, item.TenantID, sim.PackageCode, sim.Version); err != nil {
+				logging.ErrorContext(ctx, "experiment simulation validation failed", apperr.AsAppError(err).LogString(), slog.Int64("experiment_id", item.ID), slog.String("component_id", sim.ID))
+				add(ValidationLevelError, fmt.Sprintf("仿真 %s 引用的场景版本暂时无法运行", sim.ID))
+			}
+		}
+	}
 	if s.judge == nil && len(item.Components.Checkpoints) > 0 {
 		add(ValidationLevelError, "检查点判分服务暂时不可用")
 	}
@@ -416,6 +444,13 @@ func (s *Service) validateExperimentComponents(ctx context.Context, item Experim
 		total += cp.Score
 		if _, err := s.content.GetContentFace(ctx, item.TenantID, contracts.ContentItemRef{ItemCode: cp.ItemCode, ItemVersion: cp.ItemVersion}); err != nil {
 			add(ValidationLevelError, fmt.Sprintf("检查点 %s 引用的题目版本暂时无法使用", cp.ID))
+			continue
+		}
+		if s.judge != nil {
+			if _, err := s.judge.GetJudgeInputRequirements(ctx, item.TenantID, cp.ItemCode, cp.ItemVersion, contracts.JudgeInputContext{SandboxMode: sandboxModeForCheckpoint(cp), AccessProfile: contracts.SandboxAccessExperiment}); err != nil {
+				logging.ErrorContext(ctx, "experiment checkpoint validation failed", apperr.AsAppError(err).LogString(), slog.Int64("experiment_id", item.ID), slog.String("checkpoint_id", cp.ID))
+				add(ValidationLevelError, fmt.Sprintf("检查点 %s 的判分配置暂时无法使用", cp.ID))
+			}
 		}
 	}
 	if len(item.Components.Checkpoints) > 0 && (total < 99.99 || total > 100.01) {

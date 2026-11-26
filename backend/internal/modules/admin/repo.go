@@ -10,6 +10,7 @@ import (
 	"chaimir/internal/modules/admin/internal/sqlcgen"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/tenant"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -20,7 +21,7 @@ type roleReader interface {
 	HasRole(ctx context.Context, accountID int64, role string) (bool, error)
 }
 
-// accountReader 批量解析本校账号姓名(学校配置变更历史的操作人)。
+// accountReader 批量解析本校账号姓名(审计操作人)。
 type accountReader interface {
 	BatchGetAccounts(ctx context.Context, accountIDs []int64) ([]contracts.AccountInfo, error)
 }
@@ -37,13 +38,10 @@ type Store interface {
 
 // TxStore 定义单事务内的 M9 数据访问能力。
 type TxStore interface {
-	ListSystemConfigs(context.Context, int16, int64) ([]ConfigDTO, error)
-	GetSystemConfig(context.Context, int16, int64, string) (ConfigDTO, error)
-	CreateSystemConfig(context.Context, int64, int16, int64, string, map[string]any, int64) (ConfigDTO, error)
-	UpdateSystemConfig(context.Context, int16, int64, string, map[string]any, int64, int32) (ConfigDTO, error)
-	CreateConfigChangeLog(context.Context, int64, int64, int64, map[string]any, map[string]any, int64) (ConfigChangeLogDTO, error)
-	GetConfigChangeLog(context.Context, int64, int64) (ConfigChangeLogDTO, error)
-	ListConfigChangeLogs(context.Context, int64, int, int) ([]ConfigChangeLogDTO, int64, error)
+	ListEvaluationRules(context.Context) ([]AlertRuleDTO, error)
+	EvaluateAlert(context.Context, AlertObservation) error
+	ClaimAlertNotifications(context.Context, int32, int32, int64, time.Time) ([]AlertNotification, error)
+	FinishAlertNotification(context.Context, int64, int64, bool, string) error
 	CreateAlertRule(context.Context, int64, AlertRuleRequest) (AlertRuleDTO, error)
 	ListAlertRules(context.Context, int16, int64) ([]AlertRuleDTO, error)
 	UpdateAlertRule(context.Context, int64, AlertRuleRequest) (AlertRuleDTO, error)
@@ -74,6 +72,11 @@ func (s *store) PlatformTx(ctx context.Context, fn func(context.Context, TxStore
 		return fmt.Errorf("admin store 未初始化")
 	}
 	return s.database.WithAppTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if id, ok := tenant.FromContext(ctx); ok && id.IsPlatform {
+			if _, err := tx.Exec(ctx, "SELECT set_config('app.admin_platform', 'true', true)"); err != nil {
+				return err
+			}
+		}
 		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
 	})
 }
@@ -88,7 +91,7 @@ func (s *store) TenantTx(ctx context.Context, tenantID int64, fn func(context.Co
 	})
 }
 
-// PrivilegedTx 仅用于 M9 后台 worker 跨租户扫描本模块自有导出请求。
+// PrivilegedTx 仅用于 M9 后台 worker 跨租户扫描本模块自有告警和导出请求。
 func (s *store) PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error {
 	if s == nil || s.database == nil {
 		return fmt.Errorf("admin store 未初始化")
@@ -97,6 +100,3 @@ func (s *store) PrivilegedTx(ctx context.Context, fn func(context.Context, TxSto
 		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
 	})
 }
-
-// isNoRows 统一识别未命中错误。
-func isNoRows(err error) bool { return db.IsNoRows(err) }

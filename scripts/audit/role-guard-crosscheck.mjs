@@ -23,27 +23,24 @@ function walk(dir, filter, out = []) {
 // 1) 后端路由 + 守卫
 const matrix = JSON.parse(execFileSync(process.execPath, [join(ROOT, 'scripts/audit/route-matrix.mjs'), '--json'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }))
 
-// 2) SDK 方法 -> (verb, path) 对。verb 与 path 必须取自同一次调用,否则
-// 同路径不同方法(GET /courses 与 POST /courses)会互相污染,产生假阳性。
-const VERB = { get: 'GET', getPaged: 'GET', getAttachment: 'GET', post: 'POST', put: 'PUT', patch: 'PATCH', delete: 'DELETE', upload: 'POST', wsUrl: 'GET', webSocketUrl: 'GET' }
+// SDK 请求的 HTTP 方法和路径从同一次调用提取，支持跨行参数。
+const VERB = { get: 'GET', getPaged: 'GET', getAttachment: 'GET', post: 'POST', postWithoutClientTimeout: 'POST', put: 'PUT', patch: 'PATCH', delete: 'DELETE', upload: 'POST', wsUrl: 'GET', webSocketUrl: 'GET' }
 const sdkFiles = walk(join(ROOT, 'frontend/packages/api-client/src/modules'), (p) => p.endsWith('.ts'))
-const sdkMethod = new Map() // "module.name" -> { module, name, file, line, calls:[{verb,path}] }
+const sdkMethod = new Map()
 for (const f of sdkFiles) {
-  const lines = readFileSync(f, 'utf8').split(/\r?\n/)
-  let cur = null
-  lines.forEach((line, i) => {
-    const dm = /^\s{2}(?:async\s+)?([a-zA-Z_]\w*)\s*(?:<[^>]*>)?\(/.exec(line)
-    if (dm && !['constructor', 'if', 'for', 'while', 'switch', 'return', 'catch'].includes(dm[1])) {
-      cur = { name: dm[1], module: basename(f, '.ts'), file: relative(ROOT, f).replace(/\\/g, '/'), line: i + 1, calls: [] }
-      sdkMethod.set(`${cur.module}.${cur.name}`, cur)
-      return
+  const src = readFileSync(f, 'utf8')
+  const module = basename(f, '.ts')
+  const definitions = [...src.matchAll(/^ {2}(?:async\s+)?([a-zA-Z_]\w*)\s*(?:<[^>]*>)?\(/gm)]
+  for (const [i, definition] of definitions.entries()) {
+    const name = definition[1]
+    if (name === 'constructor') continue
+    const body = src.slice(definition.index, definitions[i + 1]?.index)
+    const calls = []
+    for (const m of body.matchAll(/\.(get|post|postWithoutClientTimeout|put|patch|delete|getPaged|getAttachment|upload|wsUrl|webSocketUrl|sendFormData)(?:<[^>]*>)?\(\s*(?:['"](POST|PATCH)['"]\s*,\s*)?[`'"](\/[^`'"]*)[`'"]/g)) {
+      calls.push({ verb: m[2] ?? VERB[m[1]], path: m[3] })
     }
-    if (!cur) return
-    // this.client.<verb>(<path>, ...) —— verb 与 path 同一行成对取出
-    for (const cm of line.matchAll(/\.(get|post|put|patch|delete|getPaged|getAttachment|upload|wsUrl|webSocketUrl)(?:<[^>]*>)?\(\s*[`'"](\/[^`'"]*)[`'"]/g)) {
-      cur.calls.push({ verb: VERB[cm[1]], path: cm[2] })
-    }
-  })
+    sdkMethod.set(`${module}.${name}`, { calls })
+  }
 }
 
 const normSdk = (p) => p.replace(/\$\{[^}]*\}/g, '{}').replace(/\/+$/, '')

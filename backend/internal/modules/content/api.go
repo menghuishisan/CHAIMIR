@@ -49,12 +49,13 @@ func (a contentAPI) registerTeacherRoutes(g gin.IRouter) {
 	g.DELETE("/items/:item", a.deleteItem)
 	g.GET("/items/:item/versions", a.listVersions)
 	g.POST("/items/:item/new-version", a.newVersion)
-	g.POST("/items/:item/:version/clone", a.cloneItem)
+	g.POST("/items/:item/clone", a.cloneItem)
 	g.POST("/items/:item/share", a.shareItem)
 	g.POST("/items/:item/unshare", a.unshareItem)
 	g.POST("/attachments", a.uploadAttachment)
 	g.POST("/attachments/download-grant", a.attachmentDownloadGrant)
 	g.GET("/shared", a.listShared)
+	g.GET("/shared/:id", a.getSharedFace)
 	g.GET("/categories", a.listCategories)
 	g.POST("/categories", a.createCategory)
 	g.PATCH("/categories/:id", a.updateCategory)
@@ -87,7 +88,11 @@ func (a contentAPI) createItem(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrContentInvalid) {
 		return
 	}
-	out, err := a.svc.CreateItem(c.Request.Context(), req)
+	actor, ok := a.writeActor(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.CreateItem(c.Request.Context(), actor, req)
 	httpx.Write(c, out, err)
 }
 
@@ -111,6 +116,16 @@ func (a contentAPI) getFull(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
+// getSharedFace 按共享库所选内容 ID 读取安全题面。
+func (a contentAPI) getSharedFace(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.GetSharedItemFace(c.Request.Context(), id)
+	httpx.Write(c, out, err)
+}
+
 // updateItem 绑定草稿更新请求。
 func (a contentAPI) updateItem(c *gin.Context) {
 	id, ok := httpx.PathID(c, "item")
@@ -121,7 +136,11 @@ func (a contentAPI) updateItem(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrContentInvalid) {
 		return
 	}
-	out, err := a.svc.UpdateDraftItem(c.Request.Context(), id, req)
+	actor, ok := a.writeActor(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.UpdateDraftItem(c.Request.Context(), actor, id, req)
 	httpx.Write(c, out, err)
 }
 
@@ -131,7 +150,11 @@ func (a contentAPI) publishItem(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.PublishItem(c.Request.Context(), id)
+	actor, ok := a.writeActor(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.PublishItem(c.Request.Context(), actor, id)
 	httpx.Write(c, out, err)
 }
 
@@ -141,7 +164,11 @@ func (a contentAPI) deprecateItem(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.DeprecateItem(c.Request.Context(), id)
+	actor, ok := a.writeActor(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.DeprecateItem(c.Request.Context(), actor, id)
 	httpx.Write(c, out, err)
 }
 
@@ -151,7 +178,11 @@ func (a contentAPI) deleteItem(c *gin.Context) {
 	if !ok {
 		return
 	}
-	httpx.Write(c, struct{}{}, a.svc.DeleteItem(c.Request.Context(), id))
+	actor, ok := a.writeActor(c)
+	if !ok {
+		return
+	}
+	httpx.Write(c, struct{}{}, a.svc.DeleteItem(c.Request.Context(), actor, id))
 }
 
 // listVersions 查询同 code 版本列表。
@@ -166,17 +197,29 @@ func (a contentAPI) newVersion(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrContentVersionInvalid) {
 		return
 	}
-	out, err := a.svc.CreateNewVersion(c.Request.Context(), c.Param("item"), req)
+	actor, ok := a.writeActor(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.CreateNewVersion(c.Request.Context(), actor, c.Param("item"), req)
 	httpx.Write(c, out, err)
 }
 
 // cloneItem 克隆本租户或共享内容。
 func (a contentAPI) cloneItem(c *gin.Context) {
+	id, ok := httpx.PathID(c, "item")
+	if !ok {
+		return
+	}
 	var req CloneItemRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrContentCloneInvalid) {
 		return
 	}
-	out, err := a.svc.CloneItem(c.Request.Context(), c.Param("item"), c.Param("version"), req)
+	actor, ok := a.writeActor(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.CloneItem(c.Request.Context(), actor, id, req)
 	httpx.Write(c, out, err)
 }
 
@@ -186,7 +229,11 @@ func (a contentAPI) shareItem(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.ShareItem(c.Request.Context(), id)
+	actor, ok := a.writeActor(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.ShareItem(c.Request.Context(), actor, id)
 	httpx.Write(c, out, err)
 }
 
@@ -196,7 +243,11 @@ func (a contentAPI) unshareItem(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.UnshareItem(c.Request.Context(), id)
+	actor, ok := a.writeActor(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.UnshareItem(c.Request.Context(), actor, id)
 	httpx.Write(c, out, err)
 }
 
@@ -227,7 +278,11 @@ func (a contentAPI) uploadAttachment(c *gin.Context) {
 		response.Fail(c, apperr.ErrContentAttachmentUploadInvalid)
 		return
 	}
-	out, err := a.svc.UploadAttachment(c.Request.Context(), UploadAttachmentRequest{ResourceID: c.PostForm("resource_id"), FileName: file.Filename, ContentType: file.Header.Get("Content-Type"), Content: data})
+	actor, ok := a.writeActor(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.UploadAttachment(c.Request.Context(), actor, UploadAttachmentRequest{ResourceID: c.PostForm("resource_id"), FileName: file.Filename, ContentType: file.Header.Get("Content-Type"), Content: data})
 	httpx.Write(c, out, err)
 }
 
@@ -237,7 +292,11 @@ func (a contentAPI) attachmentDownloadGrant(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrContentAttachmentInvalid) {
 		return
 	}
-	out, err := a.svc.IssueAttachmentDownloadGrant(c.Request.Context(), req.ResourceID.Int64(), req.ObjectRef)
+	actor, ok := a.writeActor(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.IssueAttachmentDownloadGrant(c.Request.Context(), actor, req.ResourceID.Int64(), req.ObjectRef)
 	httpx.Write(c, out, err)
 }
 
@@ -292,7 +351,11 @@ func (a contentAPI) createCategory(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrContentCategoryInvalid) {
 		return
 	}
-	out, err := a.svc.CreateCategory(c.Request.Context(), req)
+	actor, ok := a.writeActor(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.CreateCategory(c.Request.Context(), actor, req)
 	httpx.Write(c, out, err)
 }
 
@@ -306,7 +369,11 @@ func (a contentAPI) updateCategory(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrContentCategoryInvalid) {
 		return
 	}
-	out, err := a.svc.UpdateCategory(c.Request.Context(), id, req)
+	actor, ok := a.writeActor(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.UpdateCategory(c.Request.Context(), actor, id, req)
 	httpx.Write(c, out, err)
 }
 
@@ -316,7 +383,11 @@ func (a contentAPI) deleteCategory(c *gin.Context) {
 	if !ok {
 		return
 	}
-	httpx.Write(c, struct{}{}, a.svc.DeleteCategory(c.Request.Context(), id))
+	actor, ok := a.writeActor(c)
+	if !ok {
+		return
+	}
+	httpx.Write(c, struct{}{}, a.svc.DeleteCategory(c.Request.Context(), actor, id))
 }
 
 // listPapers 查询试卷分页。
@@ -335,7 +406,11 @@ func (a contentAPI) createPaper(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrPaperInvalid) {
 		return
 	}
-	out, err := a.svc.CreatePaper(c.Request.Context(), req)
+	actor, ok := a.writeActor(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.CreatePaper(c.Request.Context(), actor, req)
 	httpx.Write(c, out, err)
 }
 
@@ -355,7 +430,11 @@ func (a contentAPI) regeneratePaper(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.RegeneratePaper(c.Request.Context(), id)
+	actor, ok := a.writeActor(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.RegeneratePaper(c.Request.Context(), actor, id)
 	httpx.Write(c, out, err)
 }
 
@@ -400,6 +479,19 @@ func currentHTTPIdentity(c *gin.Context) (tenant.Identity, bool) {
 		return tenant.Identity{}, false
 	}
 	return id, true
+}
+
+// writeActor 在租户角色路由授权后解析一次审计主体快照。
+func (a contentAPI) writeActor(c *gin.Context) (auditActorSnapshot, bool) {
+	if _, ok := currentHTTPIdentity(c); !ok {
+		return auditActorSnapshot{}, false
+	}
+	actor, err := resolveAuditActor(c.Request.Context(), a.roles)
+	if err != nil {
+		response.Fail(c, apperr.AsAppError(err))
+		return auditActorSnapshot{}, false
+	}
+	return actor, true
 }
 
 // currentServiceTenantID 读取内部服务租户边界。

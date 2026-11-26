@@ -96,22 +96,25 @@ capabilities:
       chain_id:
         title: 链编号
         type: integer
+        minimum: 1
         x-chaimir-env: infra/CHAINLINK_CHAIN_ID
       gas_price_max_wei:
         title: Gas 价格上限（Wei）
         type: string
-        pattern: '^[0-9]+$'
+        pattern: '^[0-9]*[1-9][0-9]*$'
         x-chaimir-env: infra/CHAINLINK_GAS_PRICE_MAX_WEI
       vrf_gas_limit:
         title: 随机数请求 Gas 上限
         type: integer
         minimum: 1
+        maximum: 4294967295
         x-chaimir-env: infra/CHAINLINK_VRF_GAS_LIMIT
   student_access: private
 infra:
   eco_tags:
     - evm
   resource_spec:
+    volume_source: binding:execution_chain
     components:
       - name: infra
         image_url: "@self"

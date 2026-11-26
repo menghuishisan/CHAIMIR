@@ -206,7 +206,7 @@ func (s *Service) secureSSOConfig(req SSOConfigRequest, stored map[string]any) (
 	if err != nil {
 		return nil, err
 	}
-	protected, err := secretmap.Protect(s.cipher, out, "identity sso config")
+	protected, err := secretmap.Protect(s.cipher, out, nil, "identity sso config")
 	if err != nil {
 		return nil, apperr.ErrIdentitySSOSecretInvalid.WithCause(err)
 	}

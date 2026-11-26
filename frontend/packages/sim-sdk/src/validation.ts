@@ -1,6 +1,19 @@
 // validation 统一校验仿真包声明和教学画面，供 authoring 与 runtime 共同复用。
 
-import type { SimPackage, SimState, TeachingFrame, TreeNode } from './types'
+import type { RuntimeFrame, SimPackage, SimPackageDescriptor, SimState, TeachingFrame, TreeNode } from './types'
+import { isRuntimeFrame as validateRuntimeFrameShape, isSimPackageDescriptor as validateDescriptorShape, isTeachingFrame as validateTeachingFrameShape } from './protocol.generated'
+
+export function isTeachingFrame(value: unknown): value is TeachingFrame {
+  return validateTeachingFrameShape(value)
+}
+
+export function isRuntimeFrame(value: unknown): value is RuntimeFrame {
+  return validateRuntimeFrameShape(value)
+}
+
+export function isSimPackageDescriptor(value: unknown): value is SimPackageDescriptor {
+  return validateDescriptorShape(value)
+}
 
 export interface SimPackageValidationIssue {
   path: string
@@ -18,10 +31,11 @@ const reservedPayloadParams = new Set(['target', 'active', 'phase', 'startX', 's
 /** validateSimPackage 校验仿真包声明、初始状态和首帧是否满足统一运行契约。 */
 export function validateSimPackage<TState extends SimState>(simPackage: SimPackage<TState>): SimPackageValidationResult {
   const issues: SimPackageValidationIssue[] = []
-  validateMeta(simPackage, issues)
+  if (!isSimPackageDescriptor(simPackage)) {
+    return { ok: false, issues: [{ path: 'descriptor', message: '仿真包教学声明不完整，请联系发布者处理。' }] }
+  }
   validateInteractions(simPackage, issues)
   validateNarrative(simPackage, issues)
-  validateCodeTrace(simPackage, issues)
   validateCheckpoints(simPackage, issues)
   validateInitialRender(simPackage, issues)
   return { ok: issues.length === 0, issues }
@@ -48,22 +62,18 @@ export function assertValidTeachingFrame(view: TeachingFrame, limits: SimPackage
 
 /** validateTeachingFrame 返回教学画面的结构和容量问题，供开发期与运行时共用。 */
 export function validateTeachingFrame(
-  view: TeachingFrame,
+  view: unknown,
   limits?: SimPackage['meta']['scaleLimit']
 ): SimPackageValidationIssue[] {
   const issues: SimPackageValidationIssue[] = []
-  if (!view.summary || !view.phase?.id || !view.phase.title || !view.layout?.primary || !view.focus?.primary?.length) {
-    issues.push({ path: 'render', message: '仿真教学画面缺少摘要、阶段、焦点或主视图声明。' })
-  }
-  if (!Array.isArray(view.patterns) || view.patterns.length < 1 || view.patterns.length > 3) {
-    issues.push({ path: 'render.patterns', message: '仿真视图数量必须为 1 到 3 个。' })
-    return issues
+  if (!isTeachingFrame(view)) {
+    return [{ path: 'render', message: '仿真教学画面不完整，请联系发布者处理。' }]
   }
 
   const patternIds = new Set<string>()
   for (const pattern of view.patterns) {
-    if (!pattern.id || patternIds.has(pattern.id)) {
-      issues.push({ path: 'render.patterns', message: '仿真教学画面包含空白或重复的视图编号。' })
+    if (patternIds.has(pattern.id)) {
+      issues.push({ path: 'render.patterns', message: '仿真教学画面包含重复的视图编号。' })
     }
     patternIds.add(pattern.id)
   }
@@ -82,44 +92,20 @@ export function validateTeachingFrame(
   return issues
 }
 
-/** isSimPackageShape 在调用包内函数前完成最小安全形状检查。 */
 function isSimPackageShape(value: unknown): value is SimPackage {
   if (!value || typeof value !== 'object') return false
   const pkg = value as Partial<SimPackage>
   return typeof pkg.initState === 'function'
     && typeof pkg.reducer === 'function'
     && typeof pkg.render === 'function'
-    && Boolean(pkg.meta)
-    && Array.isArray(pkg.interactions)
-    && Array.isArray(pkg.narrative)
-    && Array.isArray(pkg.checkpoints)
     && Boolean(pkg.codeTrace)
 }
 
-/** validateMeta 校验包元数据、教学说明和规模限制。 */
-function validateMeta<TState extends SimState>(simPackage: SimPackage<TState>, issues: SimPackageValidationIssue[]): void {
-  const meta = simPackage.meta
-  if (!meta?.code?.trim() || !meta.name?.trim() || !meta.category?.trim() || !meta.version?.trim() || !meta.summary?.trim()) {
-    issues.push({ path: 'meta', message: '仿真包元数据不完整。' })
-  }
-  if (!Array.isArray(meta?.learningObjectives) || meta.learningObjectives.length === 0) {
-    issues.push({ path: 'meta.learningObjectives', message: '仿真包必须声明教学目标。' })
-  }
-  const limits = meta?.scaleLimit
-  if (!limits || !Number.isSafeInteger(limits.nodes) || !Number.isSafeInteger(limits.maxTick) || !Number.isSafeInteger(limits.maxEvents) || limits.nodes <= 0 || limits.maxTick <= 0 || limits.maxEvents <= 0) {
-    issues.push({ path: 'meta.scaleLimit', message: '必须声明正整数规模上限。' })
-  }
-}
-
-/** validateInteractions 校验交互声明、参数和唯一编号。 */
 function validateInteractions<TState extends SimState>(simPackage: SimPackage<TState>, issues: SimPackageValidationIssue[]): void {
-  if (simPackage.interactions.length === 0) {
-    issues.push({ path: 'interactions', message: '至少声明一个可操作交互。' })
-  }
   const ids = new Set<string>()
   for (const [index, interaction] of simPackage.interactions.entries()) {
-    if (!interaction.id?.trim() || !interaction.kind || !interaction.emits?.trim() || !interaction.label?.trim() || ids.has(interaction.id)) {
-      issues.push({ path: `interactions.${index}`, message: '交互必须包含唯一 id、kind、emits 和 label。' })
+    if (ids.has(interaction.id)) {
+      issues.push({ path: `interactions.${index}`, message: '交互编号不能重复。' })
     }
     ids.add(interaction.id)
     if (interaction.kind === 'select-element' && interaction.target !== 'element') {
@@ -129,7 +115,7 @@ function validateInteractions<TState extends SimState>(simPackage: SimPackage<TS
       issues.push({ path: `interactions.${index}.elementFilter`, message: '元素交互必须声明 elementFilter。' })
     }
     for (const [fieldIndex, field] of (interaction.params ?? []).entries()) {
-      if (!field.name || !field.label || !field.type) {
+      if (!field.name || !field.label) {
         issues.push({ path: `interactions.${index}.params.${fieldIndex}`, message: '交互参数必须包含 name、label 和 type。' })
       }
       if (!payloadKeyPattern.test(field.name) || reservedPayloadParams.has(field.name)) {
@@ -139,44 +125,26 @@ function validateInteractions<TState extends SimState>(simPackage: SimPackage<TS
   }
 }
 
-/** validateNarrative 校验教学叙事步骤及其唯一编号。 */
 function validateNarrative<TState extends SimState>(simPackage: SimPackage<TState>, issues: SimPackageValidationIssue[]): void {
-  if (!simPackage.narrative.length) {
-    issues.push({ path: 'narrative', message: '仿真包必须提供教学叙事步骤。' })
-    return
-  }
   const ids = new Set<string>()
   for (const [index, step] of simPackage.narrative.entries()) {
-    if (!step.id?.trim() || !step.title?.trim() || typeof step.trigger !== 'function' || ids.has(step.id)) {
+    if (typeof step.trigger !== 'function' || ids.has(step.id)) {
       issues.push({ path: `narrative.${index}`, message: '叙事步骤必须包含唯一 id、title 和 trigger。' })
     }
     ids.add(step.id)
   }
 }
 
-/** validateCodeTrace 校验代码追踪源码和行映射。 */
-function validateCodeTrace<TState extends SimState>(simPackage: SimPackage<TState>, issues: SimPackageValidationIssue[]): void {
-  if (!simPackage.codeTrace?.sourceCode || !simPackage.codeTrace.lineMapping.length) {
-    issues.push({ path: 'codeTrace', message: '代码追踪必须包含源码和行映射。' })
-  }
-}
-
-/** validateCheckpoints 校验可判题检查点及其唯一编号。 */
 function validateCheckpoints<TState extends SimState>(simPackage: SimPackage<TState>, issues: SimPackageValidationIssue[]): void {
-  if (!simPackage.checkpoints.length) {
-    issues.push({ path: 'checkpoints', message: '仿真包必须提供至少一个检查点。' })
-    return
-  }
   const ids = new Set<string>()
   for (const [index, checkpoint] of simPackage.checkpoints.entries()) {
-    if (!checkpoint.id?.trim() || !checkpoint.label?.trim() || typeof checkpoint.evaluate !== 'function' || ids.has(checkpoint.id)) {
+    if (typeof checkpoint.evaluate !== 'function' || ids.has(checkpoint.id)) {
       issues.push({ path: `checkpoints.${index}`, message: '检查点必须包含唯一 id、label 和 evaluate。' })
     }
     ids.add(checkpoint.id)
   }
 }
 
-/** validateInitialRender 执行初始渲染并复用统一画面校验。 */
 function validateInitialRender<TState extends SimState>(simPackage: SimPackage<TState>, issues: SimPackageValidationIssue[]): void {
   try {
     const initialState = simPackage.initState({}, 1)
@@ -186,7 +154,6 @@ function validateInitialRender<TState extends SimState>(simPackage: SimPackage<T
   }
 }
 
-/** layoutPatternIds 汇总教学布局显式引用的视图编号。 */
 function layoutPatternIds(view: TeachingFrame): Set<string> {
   return new Set([
     view.layout.primary,
@@ -198,7 +165,6 @@ function layoutPatternIds(view: TeachingFrame): Set<string> {
   ].filter(Boolean))
 }
 
-/** validatePatternLimit 按视图语义校验容量和矩阵结构。 */
 function validatePatternLimit(
   pattern: TeachingFrame['patterns'][number],
   limits: SimPackage['meta']['scaleLimit'],
@@ -238,7 +204,6 @@ function validatePatternLimit(
   }
 }
 
-/** countTreeNodes 递归统计树视图节点数。 */
 function countTreeNodes(node: TreeNode): number {
   return 1 + (node.children ?? []).reduce((total, child) => total + countTreeNodes(child), 0)
 }

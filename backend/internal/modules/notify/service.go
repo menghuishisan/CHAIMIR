@@ -1,36 +1,30 @@
-// notify service 文件实现 M10 统一通知、公告、未读数和实时推送业务编排。
+// 组装通知服务依赖并校验身份。
 package notify
 
 import (
 	"context"
 	"fmt"
-	"log/slog"
-	"strings"
 	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
-	"chaimir/internal/platform/ids"
-	"chaimir/internal/platform/jsonx"
-	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/tenant"
-	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
-	"chaimir/pkg/logging"
 	"chaimir/pkg/snowflake"
 )
 
 // Service 承载 M10 通知业务编排。
 type Service struct {
-	store Store
-	ids   snowflake.Generator
-	redis Cache
-	hub   *ws.Hub
-	roles RoleReader
-	audit audit.Writer
-	cfg   config.NotifyConfig
+	store    Store
+	ids      snowflake.Generator
+	redis    Cache
+	hub      *ws.Hub
+	roles    RoleReader
+	contests contracts.ContestReadService
+	audit    audit.Writer
+	cfg      config.NotifyConfig
 }
 
 // Cache 定义 M10 使用的 Redis 缓存和限频能力。
@@ -48,383 +42,25 @@ type RoleReader interface {
 
 // ServiceDeps 是 M10 服务装配依赖。
 type ServiceDeps struct {
-	Store  Store
-	IDs    snowflake.Generator
-	Redis  Cache
-	Hub    *ws.Hub
-	Roles  RoleReader
-	Audit  audit.Writer
-	Config config.NotifyConfig
-}
-
-// isValidRoleNumber 在 service 边界校验跨模块角色数字契约,保持 rules 层纯净。
-func isValidRoleNumber(role int16) bool {
-	return contracts.RoleCode(role) != "unknown"
+	Store    Store
+	IDs      snowflake.Generator
+	Redis    Cache
+	Hub      *ws.Hub
+	Roles    RoleReader
+	Contests contracts.ContestReadService
+	Audit    audit.Writer
+	Config   config.NotifyConfig
 }
 
 // NewService 构造 M10 服务。
 func NewService(deps ServiceDeps) (*Service, error) {
-	if deps.Store == nil || deps.IDs == nil || deps.Redis == nil || deps.Hub == nil || deps.Roles == nil || deps.Audit == nil {
+	if deps.Store == nil || deps.IDs == nil || deps.Redis == nil || deps.Hub == nil || deps.Roles == nil || deps.Contests == nil || deps.Audit == nil {
 		return nil, fmt.Errorf("notify service 依赖不完整")
 	}
 	if deps.Config.UnreadTTLHours <= 0 || deps.Config.SendRateWindowSeconds <= 0 || deps.Config.SendRateMax <= 0 {
 		return nil, fmt.Errorf("notify service 配置不完整")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, redis: deps.Redis, hub: deps.Hub, roles: deps.Roles, audit: deps.Audit, cfg: deps.Config}, nil
-}
-
-// Inbox 查询当前用户站内信。
-func (s *Service) Inbox(ctx context.Context, isRead *bool, typ string, page, size int) ([]NotificationDTO, int64, pagex.Facets, error) {
-	id, err := currentIdentity(ctx)
-	if err != nil {
-		return nil, 0, nil, err
-	}
-	page, size = pagex.Normalize(page, size)
-	var out []NotificationDTO
-	var total int64
-	var byRead pagex.FacetGroup
-	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		out, total, err = tx.ListNotifications(ctx, id.AccountID, isRead, typ, page, size)
-		if err != nil {
-			return err
-		}
-		// 「全部 / 未读」分段计数:不套用已读筛选
-		byRead, err = tx.CountNotificationsByRead(ctx, id.AccountID, typ)
-		return err
-	})
-	if err != nil {
-		return nil, 0, nil, apperr.ErrNotifyInboxQueryInvalid.WithCause(err)
-	}
-	return out, total, pagex.Facets{"is_read": byRead}, nil
-}
-
-// Unread 查询当前用户未读数。
-func (s *Service) Unread(ctx context.Context) (UnreadDTO, error) {
-	id, err := currentIdentity(ctx)
-	if err != nil {
-		return UnreadDTO{}, err
-	}
-	n, err := s.countUnread(ctx, id.TenantID, id.AccountID)
-	if err != nil {
-		return UnreadDTO{}, apperr.ErrNotifyInboxQueryInvalid.WithCause(err)
-	}
-	return UnreadDTO{Unread: n}, nil
-}
-
-// MarkRead 标记单条站内信已读。
-func (s *Service) MarkRead(ctx context.Context, notificationID int64) (NotificationDTO, error) {
-	id, err := currentIdentity(ctx)
-	if err != nil {
-		return NotificationDTO{}, err
-	}
-	var out NotificationDTO
-	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		out, err = tx.MarkNotificationRead(ctx, notificationID, id.AccountID)
-		return err
-	})
-	if err != nil {
-		return NotificationDTO{}, apperr.ErrNotifyInboxNotFound.WithCause(err)
-	}
-	if err := s.refreshUnread(ctx, id.TenantID, id.AccountID); err != nil {
-		logging.ErrorContext(ctx, "刷新通知未读数失败", err.Error(), slog.Int64("tenant_id", id.TenantID), slog.Int64("account_id", id.AccountID))
-	}
-	return out, nil
-}
-
-// MarkAllRead 标记当前用户全部站内信已读。
-func (s *Service) MarkAllRead(ctx context.Context) error {
-	id, err := currentIdentity(ctx)
-	if err != nil {
-		return err
-	}
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		return tx.MarkAllNotificationsRead(ctx, id.AccountID)
-	}); err != nil {
-		return apperr.ErrNotifyInboxQueryInvalid.WithCause(err)
-	}
-	if err := s.refreshUnread(ctx, id.TenantID, id.AccountID); err != nil {
-		logging.ErrorContext(ctx, "刷新通知未读数失败", err.Error(), slog.Int64("tenant_id", id.TenantID), slog.Int64("account_id", id.AccountID))
-	}
-	return nil
-}
-
-// DeleteNotification 删除当前用户站内信。
-func (s *Service) DeleteNotification(ctx context.Context, notificationID int64) (NotificationDTO, error) {
-	id, err := currentIdentity(ctx)
-	if err != nil {
-		return NotificationDTO{}, err
-	}
-	var out NotificationDTO
-	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		out, err = tx.DeleteNotification(ctx, notificationID, id.AccountID)
-		return err
-	})
-	if err != nil {
-		return NotificationDTO{}, apperr.ErrNotifyInboxNotFound.WithCause(err)
-	}
-	if err := s.refreshUnread(ctx, id.TenantID, id.AccountID); err != nil {
-		logging.ErrorContext(ctx, "刷新通知未读数失败", err.Error(), slog.Int64("tenant_id", id.TenantID), slog.Int64("account_id", id.AccountID))
-	}
-	return out, nil
-}
-
-// ListPreferences 查询当前用户通知偏好。
-func (s *Service) ListPreferences(ctx context.Context) ([]PreferenceDTO, error) {
-	id, err := currentIdentity(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var out []PreferenceDTO
-	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		out, err = tx.ListPreferences(ctx, id.AccountID)
-		return err
-	})
-	return out, err
-}
-
-// UpsertPreference 设置当前用户通知偏好。
-func (s *Service) UpsertPreference(ctx context.Context, req PreferenceRequest) (PreferenceDTO, error) {
-	id, err := currentIdentity(ctx)
-	if err != nil {
-		return PreferenceDTO{}, err
-	}
-	req.Type = strings.TrimSpace(req.Type)
-	if req.Type == "" {
-		return PreferenceDTO{}, apperr.ErrNotifyRequestInvalid
-	}
-	var out PreferenceDTO
-	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		tpl, err := tx.GetNotificationTemplate(ctx, req.Type)
-		if err != nil {
-			return apperr.ErrNotifyTemplateUnavailable.WithCause(err)
-		}
-		if tpl.Force && !req.Enabled {
-			return apperr.ErrNotifyPreferenceLocked
-		}
-		out, err = tx.UpsertPreference(ctx, s.ids.Generate(), id.TenantID, id.AccountID, req.Type, req.Enabled)
-		return err
-	})
-	return out, err
-}
-
-// CreateAnnouncement 发布系统公告。
-func (s *Service) CreateAnnouncement(ctx context.Context, req AnnouncementRequest) (AnnouncementDTO, error) {
-	id, err := currentIdentityAllowPlatform(ctx)
-	if err != nil {
-		return AnnouncementDTO{}, err
-	}
-	if err := validateAnnouncementRequest(req, id.IsPlatform, isValidRoleNumber); err != nil {
-		return AnnouncementDTO{}, err
-	}
-	tenantID := id.TenantID
-	if req.Scope == AnnouncementScopePlatform {
-		tenantID = 0
-	}
-	var out AnnouncementDTO
-	write := func(ctx context.Context, tx TxStore) error {
-		var err error
-		out, err = tx.CreateAnnouncement(ctx, s.ids.Generate(), tenantID, id.AccountID, req)
-		return err
-	}
-	if tenantID == 0 {
-		err = s.store.PlatformTx(ctx, write)
-	} else {
-		err = s.store.TenantTx(ctx, tenantID, write)
-	}
-	if err != nil {
-		return AnnouncementDTO{}, err
-	}
-	if err := s.writeAudit(ctx, tenantID, id.AccountID, auditRoleForIdentity(id), "notify.announcement.publish", auditTargetAnnouncement, out.ID.Int64(), map[string]any{"scope": out.Scope, "tenant_id": out.TenantID.String()}); err != nil {
-		return AnnouncementDTO{}, err
-	}
-	s.broadcastAnnouncement(ctx, out)
-	return out, nil
-}
-
-// ListAnnouncements 查询可见公告分页,并带回范围与本人已读两组计数(当前身份可见的全部公告)。
-func (s *Service) ListAnnouncements(ctx context.Context, page, size int) ([]AnnouncementDTO, int64, int, int, map[string]map[string]int64, error) {
-	id, err := currentIdentityAllowPlatform(ctx)
-	if err != nil {
-		return nil, 0, page, size, nil, err
-	}
-	page, size = pagex.Normalize(page, size)
-	var out []AnnouncementDTO
-	var total int64
-	var facets pagex.Facets
-	if id.IsPlatform {
-		err = s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-			var err error
-			out, total, err = tx.ListAnnouncements(ctx, 0, id.AccountID, []int16{contracts.RoleNumPlatformAdmin}, page, size)
-			if err == nil {
-				facets, err = tx.CountVisibleAnnouncementFacets(ctx, 0, id.AccountID, []int16{contracts.RoleNumPlatformAdmin})
-			}
-			return err
-		})
-		if err != nil {
-			return nil, 0, page, size, nil, err
-		}
-		return out, total, page, size, facets.Map(), nil
-	}
-	roleNumbers, err := s.currentRoleNumbers(ctx, id.AccountID)
-	if err != nil {
-		return nil, 0, page, size, nil, err
-	}
-	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		out, total, err = tx.ListAnnouncements(ctx, id.TenantID, id.AccountID, roleNumbers, page, size)
-		if err == nil {
-			facets, err = tx.CountVisibleAnnouncementFacets(ctx, id.TenantID, id.AccountID, roleNumbers)
-		}
-		return err
-	})
-	if err != nil {
-		return nil, 0, page, size, nil, err
-	}
-	filtered, err := s.filterAnnouncementsByRole(ctx, id.AccountID, out)
-	if err != nil {
-		return nil, 0, page, size, nil, err
-	}
-	return filtered, total, page, size, facets.Map(), nil
-}
-
-// MarkAnnouncementRead 标记公告已读。
-func (s *Service) MarkAnnouncementRead(ctx context.Context, announcementID int64) error {
-	id, err := currentIdentity(ctx)
-	if err != nil {
-		return err
-	}
-	roleNumbers, err := s.currentRoleNumbers(ctx, id.AccountID)
-	if err != nil {
-		return err
-	}
-	return s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		if _, err := tx.GetVisibleAnnouncement(ctx, id.TenantID, id.AccountID, roleNumbers, announcementID); err != nil {
-			return apperr.ErrNotifyAnnouncementNotFound.WithCause(err)
-		}
-		return tx.MarkAnnouncementRead(ctx, s.ids.Generate(), id.TenantID, announcementID, id.AccountID)
-	})
-}
-
-// HandleSubscribe 处理交互式 WebSocket 订阅。
-func (s *Service) HandleSubscribe(ctx context.Context, conn *ws.Conn) error {
-	id, err := currentIdentity(ctx)
-	if err != nil {
-		return err
-	}
-	if err := conn.BindSession(ctx, ws.SessionKey{TenantID: id.TenantID, AccountID: id.AccountID}); err != nil {
-		return apperr.ErrNotifyChannelUnavailable.WithCause(err)
-	}
-	if err := s.hub.Subscribe(conn, personalNotifyTopic(id.TenantID, id.AccountID)); err != nil {
-		return apperr.ErrNotifyChannelUnavailable.WithCause(err)
-	}
-	for {
-		var msg SubscribeMessage
-		if err := conn.ReadJSON(&msg); err != nil {
-			return err
-		}
-		if strings.TrimSpace(msg.Action) != "subscribe" || len(msg.Topics) == 0 {
-			return apperr.ErrNotifySubscribeInvalid
-		}
-		for _, topic := range msg.Topics {
-			if err := AuthorizeTopic(id.TenantID, id.AccountID, topic); err != nil {
-				return err
-			}
-			if err := s.hub.Subscribe(conn, strings.TrimSpace(topic)); err != nil {
-				return apperr.ErrNotifyChannelUnavailable.WithCause(err)
-			}
-		}
-		if err := conn.SendJSON(map[string]any{"type": "subscribed", "topics": msg.Topics}); err != nil {
-			return apperr.ErrNotifyChannelUnavailable.WithCause(err)
-		}
-	}
-}
-
-// CloseSession 关闭指定用户实时连接。
-func (s *Service) CloseSession(ctx context.Context, tenantID, accountID int64) error {
-	return s.hub.CloseSession(ws.SessionKey{TenantID: tenantID, AccountID: accountID})
-}
-
-// broadcastAnnouncement 用租户告警主题提示在线用户刷新公告列表。
-func (s *Service) broadcastAnnouncement(ctx context.Context, ann AnnouncementDTO) {
-	if ann.TenantID <= 0 {
-		return
-	}
-	data, err := jsonx.AnyBytes(map[string]any{"type": "announcement", "announcement_id": ids.Format(ann.ID.Int64()), "scope": ann.Scope}, apperr.ErrNotifyPushFailed)
-	if err != nil {
-		logging.ErrorContext(ctx, "公告实时提醒序列化失败", err.Error(), slog.Int64("tenant_id", ann.TenantID.Int64()), slog.Int64("announcement_id", ann.ID.Int64()))
-		return
-	}
-	s.hub.Broadcast(tenantAlertTopic(ann.TenantID.Int64()), data)
-}
-
-// RunCleanupOnce 执行一次站内信过期清理任务。
-func (s *Service) RunCleanupOnce(ctx context.Context) error {
-	cutoff := timex.Now().Add(-time.Duration(s.cfg.RetentionDays) * 24 * time.Hour)
-	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-		return tx.DeleteExpiredNotifications(ctx, cutoff)
-	})
-}
-
-// checkRateLimit 使用 Redis 窗口计数限制通知发送频率。
-func (s *Service) checkRateLimit(ctx context.Context, tenantID int64, typ string) error {
-	key := fmt.Sprintf("tenant:%s:notify:send:%s", ids.Format(tenantID), strings.ToLower(strings.TrimSpace(typ)))
-	count, err := s.redis.IncrWithTTL(ctx, key, time.Duration(s.cfg.SendRateWindowSeconds)*time.Second)
-	if err != nil {
-		return apperr.ErrNotifySendFailed.WithCause(err)
-	}
-	if count > int64(s.cfg.SendRateMax) {
-		return apperr.ErrNotifyRateLimited
-	}
-	return nil
-}
-
-// refreshUnread 重算未读数并通过统一实时通道推送给用户。
-func (s *Service) refreshUnread(ctx context.Context, tenantID, accountID int64) error {
-	if err := s.redis.Delete(ctx, unreadKey(tenantID, accountID)); err != nil {
-		return err
-	}
-	unread, err := s.countUnread(ctx, tenantID, accountID)
-	if err != nil {
-		return err
-	}
-	data, err := jsonx.AnyBytes(map[string]any{"type": "unread", "unread": unread}, apperr.ErrNotifyInboxQueryInvalid)
-	if err != nil {
-		return err
-	}
-	s.hub.Broadcast(personalNotifyTopic(tenantID, accountID), data)
-	return nil
-}
-
-// countUnread 在租户事务中读取用户未读站内信数量。
-func (s *Service) countUnread(ctx context.Context, tenantID, accountID int64) (int64, error) {
-	key := unreadKey(tenantID, accountID)
-	if unread, ok, err := s.redis.GetInt64(ctx, key); err != nil {
-		return 0, err
-	} else if ok {
-		return unread, nil
-	}
-	var unread int64
-	err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		unread, err = tx.CountUnread(ctx, accountID)
-		return err
-	})
-	if err != nil {
-		return 0, err
-	}
-	if err := s.redis.SetInt64(ctx, key, unread, time.Duration(s.cfg.UnreadTTLHours)*time.Hour); err != nil {
-		return 0, err
-	}
-	return unread, nil
-}
-
-// unreadKey 生成 M10 未读缓存键。
-func unreadKey(tenantID, accountID int64) string {
-	return fmt.Sprintf("tenant:%s:unread:%s", ids.Format(tenantID), ids.Format(accountID))
+	return &Service{store: deps.Store, ids: deps.IDs, redis: deps.Redis, hub: deps.Hub, roles: deps.Roles, contests: deps.Contests, audit: deps.Audit, cfg: deps.Config}, nil
 }
 
 // currentIdentity 读取通知模块要求的租户用户身份。
@@ -446,76 +82,4 @@ func currentIdentityAllowPlatform(ctx context.Context) (tenant.Identity, error) 
 		return tenant.Identity{}, apperr.ErrUnauthorized
 	}
 	return id, nil
-}
-
-// filterAnnouncementsByRole 按指定角色公告的目标角色过滤用户可见列表。
-func (s *Service) filterAnnouncementsByRole(ctx context.Context, accountID int64, items []AnnouncementDTO) ([]AnnouncementDTO, error) {
-	out := make([]AnnouncementDTO, 0, len(items))
-	for _, item := range items {
-		if announcementVisibleForIdentity(item, accountID, nil) {
-			out = append(out, item)
-			continue
-		}
-		allowed := false
-		for _, roleNum := range item.TargetRoles {
-			roleCode := contracts.RoleCode(roleNum)
-			if _, ok := contracts.RoleNumber(roleCode); !ok {
-				continue
-			}
-			has, err := s.roles.HasRole(ctx, accountID, roleCode)
-			if err != nil {
-				return nil, apperr.ErrNotifyAnnouncementNotFound.WithCause(err)
-			}
-			if has {
-				allowed = true
-				break
-			}
-		}
-		if allowed {
-			out = append(out, item)
-		}
-	}
-	return out, nil
-}
-
-// announcementVisibleForIdentity 判断公告是否因发布者身份直接可见。
-// 定向公告通常只展示给目标角色，但发布者必须能在“已发布公告”列表确认自己的发布结果。
-// roleNumbers 为空时仅检查发布者直达规则，角色交集仍由调用方继续校验。
-func announcementVisibleForIdentity(item AnnouncementDTO, accountID int64, roleNumbers []int16) bool {
-	if item.Scope != AnnouncementScopeRoles || item.PublisherID.Int64() == accountID {
-		return true
-	}
-	if len(roleNumbers) == 0 {
-		return false
-	}
-	for _, target := range item.TargetRoles {
-		for _, role := range roleNumbers {
-			if target == role {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// currentRoleNumbers 读取当前用户角色并转成公告查询所需的数字角色集合。
-func (s *Service) currentRoleNumbers(ctx context.Context, accountID int64) ([]int16, error) {
-	candidates := []string{contracts.RoleSchoolAdmin, contracts.RoleTeacher, contracts.RoleStudent}
-	out := make([]int16, 0, len(candidates))
-	for _, role := range candidates {
-		has, err := s.roles.HasRole(ctx, accountID, role)
-		if err != nil {
-			return nil, apperr.ErrNotifyAnnouncementNotFound.WithCause(err)
-		}
-		if !has {
-			continue
-		}
-		if n, ok := contracts.RoleNumber(role); ok {
-			out = append(out, n)
-		}
-	}
-	if len(out) == 0 {
-		out = []int16{-1}
-	}
-	return out, nil
 }

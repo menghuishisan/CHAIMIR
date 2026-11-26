@@ -72,16 +72,31 @@ type ActivationCode struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
-type AlertEvent struct {
-	ID          int64              `json:"id"`
+type AlertEvaluation struct {
 	RuleID      int64              `json:"rule_id"`
-	TenantID    pgtype.Int8        `json:"tenant_id"`
-	Level       int16              `json:"level"`
-	Message     string             `json:"message"`
-	Status      int16              `json:"status"`
-	HandlerID   pgtype.Int8        `json:"handler_id"`
-	TriggeredAt pgtype.Timestamptz `json:"triggered_at"`
-	HandledAt   pgtype.Timestamptz `json:"handled_at"`
+	TenantID    int64              `json:"tenant_id"`
+	Revision    int64              `json:"revision"`
+	ObservedAt  pgtype.Timestamptz `json:"observed_at"`
+	BreachSince pgtype.Timestamptz `json:"breach_since"`
+	Fired       bool               `json:"fired"`
+}
+
+type AlertEvent struct {
+	ID                int64              `json:"id"`
+	RuleID            int64              `json:"rule_id"`
+	TenantID          pgtype.Int8        `json:"tenant_id"`
+	Level             int16              `json:"level"`
+	Message           string             `json:"message"`
+	Status            int16              `json:"status"`
+	HandlerID         pgtype.Int8        `json:"handler_id"`
+	TriggeredAt       pgtype.Timestamptz `json:"triggered_at"`
+	HandledAt         pgtype.Timestamptz `json:"handled_at"`
+	NotifyTraceID     string             `json:"notify_trace_id"`
+	NotifyAttempts    int32              `json:"notify_attempts"`
+	NotifyLeaseToken  int64              `json:"notify_lease_token"`
+	NotifyNextAt      pgtype.Timestamptz `json:"notify_next_at"`
+	NotifyPublishedAt pgtype.Timestamptz `json:"notify_published_at"`
+	NotifyLastError   string             `json:"notify_last_error"`
 }
 
 type AlertRule struct {
@@ -93,6 +108,7 @@ type AlertRule struct {
 	Condition []byte             `json:"condition"`
 	Level     int16              `json:"level"`
 	Enabled   bool               `json:"enabled"`
+	Revision  int64              `json:"revision"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
@@ -272,16 +288,6 @@ type Class struct {
 	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
 }
 
-type ConfigChangeLog struct {
-	ID         int64              `json:"id"`
-	ConfigID   int64              `json:"config_id"`
-	TenantID   pgtype.Int8        `json:"tenant_id"`
-	OldValue   []byte             `json:"old_value"`
-	NewValue   []byte             `json:"new_value"`
-	OperatorID int64              `json:"operator_id"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-}
-
 type ContentBody struct {
 	ItemID          int64              `json:"item_id"`
 	TenantID        int64              `json:"tenant_id"`
@@ -336,25 +342,25 @@ type ContentUsageRef struct {
 }
 
 type Contest struct {
-	ID                int64              `json:"id"`
-	TenantID          int64              `json:"tenant_id"`
-	OrganizerID       int64              `json:"organizer_id"`
-	Name              string             `json:"name"`
-	Mode              int16              `json:"mode"`
-	MatchMode         pgtype.Int2        `json:"match_mode"`
-	TeamMode          int16              `json:"team_mode"`
-	SignupStart       pgtype.Timestamptz `json:"signup_start"`
-	SignupEnd         pgtype.Timestamptz `json:"signup_end"`
-	StartAt           pgtype.Timestamptz `json:"start_at"`
-	EndAt             pgtype.Timestamptz `json:"end_at"`
-	FreezeMinutes     int32              `json:"freeze_minutes"`
-	Rules             []byte             `json:"rules"`
-	Status            int16              `json:"status"`
-	ArchiveLeaseToken string             `json:"archive_lease_token"`
-	ArchiveLeaseUntil pgtype.Timestamptz `json:"archive_lease_until"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
+	ID                       int64              `json:"id"`
+	TenantID                 int64              `json:"tenant_id"`
+	OrganizerID              int64              `json:"organizer_id"`
+	Name                     string             `json:"name"`
+	Mode                     int16              `json:"mode"`
+	MatchMode                pgtype.Int2        `json:"match_mode"`
+	TeamMode                 int16              `json:"team_mode"`
+	SignupStart              pgtype.Timestamptz `json:"signup_start"`
+	SignupEnd                pgtype.Timestamptz `json:"signup_end"`
+	StartAt                  pgtype.Timestamptz `json:"start_at"`
+	EndAt                    pgtype.Timestamptz `json:"end_at"`
+	FreezeMinutes            int32              `json:"freeze_minutes"`
+	Status                   int16              `json:"status"`
+	IsLeaderboardPushPending bool               `json:"is_leaderboard_push_pending"`
+	ArchiveLeaseToken        string             `json:"archive_lease_token"`
+	ArchiveLeaseUntil        pgtype.Timestamptz `json:"archive_lease_until"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt                pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type ContestAccessGrant struct {
@@ -391,7 +397,6 @@ type ContestProblem struct {
 	ItemVersion         string      `json:"item_version"`
 	Score               int32       `json:"score"`
 	DynamicScore        []byte      `json:"dynamic_score"`
-	BattleConfig        []byte      `json:"battle_config"`
 	BattleRule          pgtype.Int2 `json:"battle_rule"`
 	Seq                 int32       `json:"seq"`
 	CompositionDigest   pgtype.Text `json:"composition_digest"`
@@ -399,27 +404,28 @@ type ContestProblem struct {
 }
 
 type Course struct {
-	ID                int64              `json:"id"`
-	TenantID          int64              `json:"tenant_id"`
-	TeacherID         int64              `json:"teacher_id"`
-	Name              string             `json:"name"`
-	Description       string             `json:"description"`
-	Type              int16              `json:"type"`
-	Difficulty        int16              `json:"difficulty"`
-	CoverRef          pgtype.Text        `json:"cover_ref"`
-	Semester          string             `json:"semester"`
-	Credits           pgtype.Numeric     `json:"credits"`
-	GradesLocked      bool               `json:"grades_locked"`
-	GradeLockRevision int64              `json:"grade_lock_revision"`
-	Schedule          []byte             `json:"schedule"`
-	StartAt           pgtype.Timestamptz `json:"start_at"`
-	EndAt             pgtype.Timestamptz `json:"end_at"`
-	InviteCode        string             `json:"invite_code"`
-	Status            int16              `json:"status"`
-	Visibility        int16              `json:"visibility"`
-	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ID                  int64              `json:"id"`
+	TenantID            int64              `json:"tenant_id"`
+	TeacherID           int64              `json:"teacher_id"`
+	Name                string             `json:"name"`
+	Description         string             `json:"description"`
+	Type                int16              `json:"type"`
+	Difficulty          int16              `json:"difficulty"`
+	CoverRef            pgtype.Text        `json:"cover_ref"`
+	Semester            string             `json:"semester"`
+	Credits             pgtype.Numeric     `json:"credits"`
+	GradesLocked        bool               `json:"grades_locked"`
+	GradeLockRevision   int64              `json:"grade_lock_revision"`
+	Schedule            []byte             `json:"schedule"`
+	StartAt             pgtype.Timestamptz `json:"start_at"`
+	EndAt               pgtype.Timestamptz `json:"end_at"`
+	InviteCode          string             `json:"invite_code"`
+	Status              int16              `json:"status"`
+	EndedEventPendingAt pgtype.Timestamptz `json:"ended_event_pending_at"`
+	Visibility          int16              `json:"visibility"`
+	DeletedAt           pgtype.Timestamptz `json:"deleted_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CourseExperimentScore struct {
@@ -837,7 +843,6 @@ type NotificationTemplate struct {
 	Type       string             `json:"type"`
 	TitleTpl   string             `json:"title_tpl"`
 	ContentTpl string             `json:"content_tpl"`
-	Channels   []string           `json:"channels"`
 	Force      bool               `json:"force"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
@@ -939,6 +944,7 @@ type Sandbox struct {
 	SnapshotEnabled     bool               `json:"snapshot_enabled"`
 	CodeStorageKey      string             `json:"code_storage_key"`
 	CodeHash            pgtype.Text        `json:"code_hash"`
+	RecycleSaved        bool               `json:"recycle_saved"`
 	WorkspaceRevision   int64              `json:"workspace_revision"`
 	InitCodeRef         pgtype.Text        `json:"init_code_ref"`
 	InitScriptRef       pgtype.Text        `json:"init_script_ref"`
@@ -949,6 +955,8 @@ type Sandbox struct {
 	KeepAliveUntil      pgtype.Timestamptz `json:"keep_alive_until"`
 	LastActiveAt        pgtype.Timestamptz `json:"last_active_at"`
 	ExpireAt            pgtype.Timestamptz `json:"expire_at"`
+	ResourceLeaseToken  string             `json:"resource_lease_token"`
+	ResourceLeaseUntil  pgtype.Timestamptz `json:"resource_lease_until"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
@@ -988,31 +996,21 @@ type SandboxEvent struct {
 }
 
 type SandboxRecycleOutbox struct {
-	ID             int64              `json:"id"`
-	TenantID       int64              `json:"tenant_id"`
-	SandboxID      int64              `json:"sandbox_id"`
-	SourceRef      string             `json:"source_ref"`
-	ScopeRef       string             `json:"scope_ref"`
-	OwnerAccountID int64              `json:"owner_account_id"`
-	Reason         string             `json:"reason"`
-	TraceID        string             `json:"trace_id"`
-	RecycledAt     pgtype.Timestamptz `json:"recycled_at"`
-	Status         int16              `json:"status"`
-	RetryCount     int32              `json:"retry_count"`
-	LastError      pgtype.Text        `json:"last_error"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	LeaseToken     string             `json:"lease_token"`
-	LeaseUntil     pgtype.Timestamptz `json:"lease_until"`
-}
-
-type SandboxTool struct {
-	ID             int64  `json:"id"`
-	TenantID       int64  `json:"tenant_id"`
-	SandboxID      int64  `json:"sandbox_id"`
-	ToolID         int64  `json:"tool_id"`
-	AccessEndpoint string `json:"access_endpoint"`
-	Status         int16  `json:"status"`
+	ID         int64              `json:"id"`
+	TenantID   int64              `json:"tenant_id"`
+	SandboxID  int64              `json:"sandbox_id"`
+	SourceRef  string             `json:"source_ref"`
+	ScopeRef   string             `json:"scope_ref"`
+	Reason     string             `json:"reason"`
+	TraceID    string             `json:"trace_id"`
+	RecycledAt pgtype.Timestamptz `json:"recycled_at"`
+	Status     int16              `json:"status"`
+	RetryCount int32              `json:"retry_count"`
+	LastError  pgtype.Text        `json:"last_error"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken string             `json:"lease_token"`
+	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
 }
 
 type Semester struct {
@@ -1033,16 +1031,6 @@ type SimActionLog struct {
 	EventType string             `json:"event_type"`
 	Payload   []byte             `json:"payload"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
-}
-
-type SimCheckpoint struct {
-	ID           int64              `json:"id"`
-	TenantID     int64              `json:"tenant_id"`
-	SessionID    int64              `json:"session_id"`
-	CheckpointID string             `json:"checkpoint_id"`
-	Answer       []byte             `json:"answer"`
-	Achieved     bool               `json:"achieved"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
 type SimPackage struct {
@@ -1169,7 +1157,6 @@ type Submission struct {
 	StudentID    int64              `json:"student_id"`
 	AttemptNo    int32              `json:"attempt_no"`
 	ContentRef   []byte             `json:"content_ref"`
-	JudgeTaskRef pgtype.Text        `json:"judge_task_ref"`
 	AutoScore    pgtype.Int4        `json:"auto_score"`
 	ManualScore  pgtype.Int4        `json:"manual_score"`
 	FinalScore   pgtype.Int4        `json:"final_score"`
@@ -1235,17 +1222,6 @@ type SystemAnnouncement struct {
 	PublisherID int64              `json:"publisher_id"`
 	PublishedAt pgtype.Timestamptz `json:"published_at"`
 	ExpireAt    pgtype.Timestamptz `json:"expire_at"`
-}
-
-type SystemConfig struct {
-	ID        int64              `json:"id"`
-	Scope     int16              `json:"scope"`
-	TenantID  pgtype.Int8        `json:"tenant_id"`
-	Key       string             `json:"key"`
-	Value     []byte             `json:"value"`
-	Version   int32              `json:"version"`
-	UpdatedBy int64              `json:"updated_by"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type TeachingGradeEventOutbox struct {
@@ -1406,8 +1382,6 @@ type VulnProblem struct {
 	PrevalidateDetail   []byte             `json:"prevalidate_detail"`
 	CompositionDigest   pgtype.Text        `json:"composition_digest"`
 	CompositionSnapshot []byte             `json:"composition_snapshot"`
-	InitCodeRef         pgtype.Text        `json:"init_code_ref"`
-	InitScriptRef       pgtype.Text        `json:"init_script_ref"`
 	ContentItemCode     pgtype.Text        `json:"content_item_code"`
 	ContentItemVersion  pgtype.Text        `json:"content_item_version"`
 	Status              int16              `json:"status"`

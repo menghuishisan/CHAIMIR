@@ -50,9 +50,10 @@ readiness 使用 `9094` TCP；业务验收还必须请求 `/id`、执行 pin/sta
 ## 初始化材料与运行时注入
 
 - 官方初始化材料由镜像入口在声明的 `/runtime-state/ipfs-cluster` 中生成，不写入镜像层、工作区或仓库。
-- `CHAIMIR_IPFS_CLUSTER_SECRET` 是官方 CRDT `cluster.secret`，必须由平台统一 Secret/KMS 源按 manifest 的 `secrets_required` 注入；缺失、空白或短于 16 字节时严格退出。
-- `CHAIMIR_IPFS_API_URL` 和 `CHAIMIR_IPFS_CLUSTER_TRUSTED_PEERS` 由 CompositionSpec 的配置与 binding 注入；入口会校验 scheme、主机、显式端口和地址族。
+- `CHAIMIR_IPFS_CLUSTER_SECRET` 是官方 CRDT `cluster.secret`，由平台 Secret/KMS 注入为 32 字节的 64 位十六进制值；缺失、首尾空白、非十六进制或长度不符时退出。入口读取后清除该环境键，官方初始化与 daemon 均不继承它。
+- `CHAIMIR_IPFS_API_URL` 和 `CHAIMIR_IPFS_CLUSTER_TRUSTED_PEERS` 由 CompositionSpec 的配置与 binding 注入；入口会校验 HTTP scheme、主机、显式端口和地址族。
 - 持久化边界只有 `runtime-state`，包括 `service.json`、`identity.json`、`peerstore` 和 pin 状态。每个 sandbox/实例使用独立卷，不共享其他租户或实例状态。
+- 配置更新保留原有数字精度，拒绝尾随 JSON 文档。新配置在同目录的 0600 临时文件中编码、同步并关闭后替换旧文件；失败保留旧配置，并报告写入、关闭与清理错误。
 
 ## Secret / KMS
 

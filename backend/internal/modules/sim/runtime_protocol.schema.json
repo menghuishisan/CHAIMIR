@@ -1,0 +1,1518 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "TeachingFrame": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "phase": {
+          "$ref": "#/definitions/FramePhase"
+        },
+        "focus": {
+          "$ref": "#/definitions/FrameFocus"
+        },
+        "layout": {
+          "$ref": "#/definitions/FrameLayout"
+        },
+        "patterns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PatternBinding"
+          },
+          "minItems": 1,
+          "maxItems": 3
+        },
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FrameAnnotation"
+          }
+        }
+      },
+      "required": [
+        "summary",
+        "phase",
+        "focus",
+        "layout",
+        "patterns"
+      ]
+    },
+    "FramePhase": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "intent": {
+          "$ref": "#/definitions/FrameIntent"
+        },
+        "explanation": {
+          "type": "object",
+          "properties": {
+            "what": {
+              "type": "string"
+            },
+            "why": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "what",
+            "why"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "intent",
+        "explanation"
+      ]
+    },
+    "FrameIntent": {
+      "type": "string",
+      "enum": [
+        "observe",
+        "compare",
+        "verify",
+        "debug",
+        "attack",
+        "recover",
+        "replay"
+      ]
+    },
+    "FrameFocus": {
+      "type": "object",
+      "properties": {
+        "primary": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "secondary": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "muted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "primary"
+      ]
+    },
+    "FrameLayout": {
+      "type": "object",
+      "properties": {
+        "primary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "timeline": {
+          "type": "string"
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "trace": {
+          "type": "string"
+        },
+        "checkpoints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "primary"
+      ]
+    },
+    "PatternBinding": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GraphPattern"
+        },
+        {
+          "$ref": "#/definitions/ChainPattern"
+        },
+        {
+          "$ref": "#/definitions/TreePattern"
+        },
+        {
+          "$ref": "#/definitions/MatrixPattern"
+        },
+        {
+          "$ref": "#/definitions/PipelinePattern"
+        },
+        {
+          "$ref": "#/definitions/LanePattern"
+        },
+        {
+          "$ref": "#/definitions/ChartPattern"
+        }
+      ]
+    },
+    "GraphPattern": {
+      "$ref": "#/definitions/PatternBase%3C%22graph%22%2Cstructure-1063888079-4584-4678-1063888079-4560-4680-1063888079-4532-4680-1063888079-0-10013%3E"
+    },
+    "PatternBase<\"graph\",structure-1063888079-4584-4678-1063888079-4560-4680-1063888079-4532-4680-1063888079-0-10013>": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "type": "string",
+          "const": "graph"
+        },
+        "title": {
+          "type": "string"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "layout": {
+              "type": "string",
+              "enum": [
+                "ring",
+                "grid",
+                "layered"
+              ]
+            },
+            "nodes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/GraphNode"
+              }
+            },
+            "edges": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/GraphEdge"
+              }
+            }
+          },
+          "required": [
+            "layout",
+            "nodes",
+            "edges"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "mode",
+        "title",
+        "data"
+      ]
+    },
+    "GraphNode": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "idle",
+            "active",
+            "success",
+            "warning",
+            "danger"
+          ]
+        },
+        "value": {
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/definitions/VisualElementMeta"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "role",
+        "status"
+      ]
+    },
+    "VisualElementMeta": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "entering",
+                "active",
+                "settled",
+                "leaving",
+                "archived"
+              ]
+            },
+            "fromTick": {
+              "type": "number"
+            },
+            "toTick": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "state",
+            "fromTick"
+          ]
+        },
+        "emphasis": {
+          "type": "string",
+          "enum": [
+            "focus",
+            "context",
+            "history",
+            "ghost"
+          ]
+        },
+        "explanation": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "lifecycle",
+        "emphasis"
+      ]
+    },
+    "GraphEdge": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "active",
+            "success",
+            "failed"
+          ]
+        },
+        "process": {
+          "$ref": "#/definitions/ProcessSpan"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/definitions/VisualElementMeta"
+        }
+      },
+      "required": [
+        "id",
+        "from",
+        "to",
+        "label",
+        "status"
+      ]
+    },
+    "ProcessSpan": {
+      "type": "object",
+      "properties": {
+        "startedAt": {
+          "type": "number"
+        },
+        "endedAt": {
+          "type": "number"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "startedAt",
+        "endedAt",
+        "progress"
+      ]
+    },
+    "ChainPattern": {
+      "$ref": "#/definitions/PatternBase%3C%22chain%22%2Cstructure-1063888079-5127-5212-1063888079-5103-5214-1063888079-5075-5214-1063888079-0-10013%3E"
+    },
+    "PatternBase<\"chain\",structure-1063888079-5127-5212-1063888079-5103-5214-1063888079-5075-5214-1063888079-0-10013>": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "type": "string",
+          "const": "chain"
+        },
+        "title": {
+          "type": "string"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "blocks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ChainBlock"
+              }
+            },
+            "forks": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/definitions/ChainBlock"
+                }
+              }
+            },
+            "canonicalTip": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "blocks",
+            "forks"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "mode",
+        "title",
+        "data"
+      ]
+    },
+    "ChainBlock": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "height": {
+          "type": "number"
+        },
+        "hash": {
+          "type": "string"
+        },
+        "parentHash": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "genesis",
+            "pending",
+            "canonical",
+            "orphaned",
+            "attacker"
+          ]
+        },
+        "meta": {
+          "$ref": "#/definitions/VisualElementMeta"
+        }
+      },
+      "required": [
+        "id",
+        "height",
+        "hash",
+        "parentHash",
+        "label",
+        "status"
+      ]
+    },
+    "TreePattern": {
+      "$ref": "#/definitions/PatternBase%3C%22tree%22%2Cstructure-1063888079-5475-5521-1063888079-5455-5522-1063888079-5428-5522-1063888079-0-10013%3E"
+    },
+    "PatternBase<\"tree\",structure-1063888079-5475-5521-1063888079-5455-5522-1063888079-5428-5522-1063888079-0-10013>": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "type": "string",
+          "const": "tree"
+        },
+        "title": {
+          "type": "string"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "$ref": "#/definitions/TreeNode"
+            },
+            "highlightedPath": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "root",
+            "highlightedPath"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "mode",
+        "title",
+        "data"
+      ]
+    },
+    "TreeNode": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "hash": {
+          "type": "string"
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TreeNode"
+          }
+        },
+        "meta": {
+          "$ref": "#/definitions/VisualElementMeta"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "hash"
+      ]
+    },
+    "MatrixPattern": {
+      "$ref": "#/definitions/PatternBase%3C%22matrix%22%2Cstructure-1063888079-5702-5777-1063888079-5677-5779-1063888079-5648-5779-1063888079-0-10013%3E"
+    },
+    "PatternBase<\"matrix\",structure-1063888079-5702-5777-1063888079-5677-5779-1063888079-5648-5779-1063888079-0-10013>": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "type": "string",
+          "const": "matrix"
+        },
+        "title": {
+          "type": "string"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "columns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "cells": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/definitions/MatrixCell"
+                }
+              }
+            }
+          },
+          "required": [
+            "rows",
+            "columns",
+            "cells"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "mode",
+        "title",
+        "data"
+      ]
+    },
+    "MatrixCell": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "empty",
+            "pending",
+            "yes",
+            "no",
+            "fault"
+          ]
+        },
+        "meta": {
+          "$ref": "#/definitions/VisualElementMeta"
+        }
+      },
+      "required": [
+        "label",
+        "status"
+      ]
+    },
+    "PipelinePattern": {
+      "$ref": "#/definitions/PatternBase%3C%22pipeline%22%2Cstructure-1063888079-5968-6019-1063888079-5941-6021-1063888079-5910-6021-1063888079-0-10013%3E"
+    },
+    "PatternBase<\"pipeline\",structure-1063888079-5968-6019-1063888079-5941-6021-1063888079-5910-6021-1063888079-0-10013>": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "type": "string",
+          "const": "pipeline"
+        },
+        "title": {
+          "type": "string"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "steps": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/PipelineStep"
+              }
+            },
+            "currentStepId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "steps",
+            "currentStepId"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "mode",
+        "title",
+        "data"
+      ]
+    },
+    "PipelineStep": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "complete",
+            "failed"
+          ]
+        },
+        "detail": {
+          "type": "string"
+        },
+        "process": {
+          "$ref": "#/definitions/ProcessSpan"
+        },
+        "meta": {
+          "$ref": "#/definitions/VisualElementMeta"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "status",
+        "detail"
+      ]
+    },
+    "LanePattern": {
+      "$ref": "#/definitions/PatternBase%3C%22lane%22%2Cstructure-1063888079-6259-6328-1063888079-6236-6330-1063888079-6209-6330-1063888079-0-10013%3E"
+    },
+    "PatternBase<\"lane\",structure-1063888079-6259-6328-1063888079-6236-6330-1063888079-6209-6330-1063888079-0-10013>": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "type": "string",
+          "const": "lane"
+        },
+        "title": {
+          "type": "string"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "actors": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "messages": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/LaneMessage"
+              }
+            },
+            "currentTime": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "actors",
+            "messages",
+            "currentTime"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "mode",
+        "title",
+        "data"
+      ]
+    },
+    "LaneMessage": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "at": {
+          "type": "number"
+        },
+        "label": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "sent",
+            "delivered",
+            "dropped"
+          ]
+        },
+        "endAt": {
+          "type": "number"
+        },
+        "process": {
+          "$ref": "#/definitions/ProcessSpan"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/definitions/VisualElementMeta"
+        }
+      },
+      "required": [
+        "id",
+        "from",
+        "to",
+        "at",
+        "label",
+        "status"
+      ]
+    },
+    "ChartPattern": {
+      "$ref": "#/definitions/PatternBase%3C%22chart%22%2Cstructure-1063888079-7048-7088-1063888079-7027-7089-1063888079-6999-7089-1063888079-0-10013%3E"
+    },
+    "PatternBase<\"chart\",structure-1063888079-7048-7088-1063888079-7027-7089-1063888079-6999-7089-1063888079-0-10013>": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "type": "string",
+          "const": "chart"
+        },
+        "title": {
+          "type": "string"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "series": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ChartSeries"
+              }
+            },
+            "unit": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "series",
+            "unit"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "mode",
+        "title",
+        "data"
+      ]
+    },
+    "ChartSeries": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ]
+          }
+        }
+      },
+      "required": [
+        "label",
+        "points"
+      ]
+    },
+    "FrameAnnotation": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "tone": {
+          "type": "string",
+          "enum": [
+            "info",
+            "success",
+            "warning",
+            "danger"
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "target",
+        "tone",
+        "text"
+      ]
+    },
+    "SimPackageDescriptor": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/SimMeta"
+        },
+        "interactions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/InteractionDescriptor"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "narrative": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NarrativeStepDescriptor"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "codeTrace": {
+          "$ref": "#/definitions/CodeTraceDef"
+        },
+        "checkpoints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CheckpointDescriptor"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "meta",
+        "interactions",
+        "narrative",
+        "checkpoints"
+      ]
+    },
+    "SimMeta": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "name": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "category": {
+          "$ref": "#/definitions/SimCategory"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "entry": {
+          "type": "string",
+          "description": "entry 是归档内入口模块相对路径,供隔离容器装配;内置包由 registry 按 code 装配故省略。"
+        },
+        "summary": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "learningObjectives": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "scaleLimit": {
+          "type": "object",
+          "properties": {
+            "nodes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "maxTick": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "maxEvents": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            }
+          },
+          "required": [
+            "nodes",
+            "maxTick",
+            "maxEvents"
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "name",
+        "category",
+        "version",
+        "summary",
+        "learningObjectives",
+        "scaleLimit"
+      ]
+    },
+    "SimCategory": {
+      "type": "string",
+      "enum": [
+        "consensus",
+        "cryptography",
+        "network",
+        "data-structure",
+        "contract-security",
+        "transaction-runtime",
+        "cross-chain-system"
+      ]
+    },
+    "InteractionDescriptor": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "kind": {
+          "$ref": "#/definitions/InteractionKind"
+        },
+        "label": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "description": {
+          "type": "string"
+        },
+        "emits": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "params": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FieldDef"
+          }
+        },
+        "target": {
+          "type": "string",
+          "enum": [
+            "global",
+            "element"
+          ]
+        },
+        "elementFilter": {
+          "type": "string"
+        },
+        "labelTag": {
+          "$ref": "#/definitions/InteractionTag"
+        },
+        "cooldownMs": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "description",
+        "emits"
+      ]
+    },
+    "InteractionKind": {
+      "type": "string",
+      "enum": [
+        "button",
+        "slider",
+        "hold",
+        "select-element",
+        "drag",
+        "form"
+      ]
+    },
+    "FieldDef": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "number",
+            "string",
+            "boolean",
+            "select",
+            "range"
+          ]
+        },
+        "default": {
+          "$ref": "#/definitions/JsonValue"
+        },
+        "min": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        },
+        "step": {
+          "type": "number"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/definitions/JsonValue"
+              }
+            },
+            "required": [
+              "label",
+              "value"
+            ]
+          }
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "label",
+        "type",
+        "default"
+      ]
+    },
+    "JsonValue": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonPrimitive"
+        },
+        {
+          "$ref": "#/definitions/JsonObject"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/JsonValue"
+          }
+        }
+      ]
+    },
+    "JsonPrimitive": {
+      "type": [
+        "string",
+        "number",
+        "boolean",
+        "null"
+      ]
+    },
+    "JsonObject": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/JsonValue"
+      }
+    },
+    "InteractionTag": {
+      "type": "string",
+      "enum": [
+        "normal",
+        "recover",
+        "perturb",
+        "attack"
+      ]
+    },
+    "NarrativeStepDescriptor": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "title": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "highlight": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "explain": {
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/definitions/QuestionCheckpoint"
+        },
+        "defaultDurationMs": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "highlight",
+        "explain",
+        "defaultDurationMs"
+      ]
+    },
+    "QuestionCheckpoint": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "answer": {
+          "type": "string"
+        },
+        "checkpointId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt",
+        "options",
+        "answer",
+        "checkpointId"
+      ]
+    },
+    "CodeTraceDef": {
+      "type": "object",
+      "properties": {
+        "sourceCode": {
+          "type": "string",
+          "minLength": 1
+        },
+        "language": {
+          "type": "string",
+          "enum": [
+            "solidity",
+            "rust",
+            "go",
+            "javascript",
+            "pseudocode"
+          ]
+        },
+        "lineMapping": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LineMapping"
+          },
+          "minItems": 1
+        },
+        "variableWatch": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/VariableWatchDef"
+          }
+        }
+      },
+      "required": [
+        "sourceCode",
+        "language",
+        "lineMapping"
+      ]
+    },
+    "LineMapping": {
+      "type": "object",
+      "properties": {
+        "line": {
+          "type": "number"
+        },
+        "triggerCondition": {
+          "type": "string"
+        },
+        "annotation": {
+          "type": "string"
+        },
+        "highlightStyle": {
+          "type": "string",
+          "enum": [
+            "normal",
+            "success",
+            "error"
+          ]
+        }
+      },
+      "required": [
+        "line",
+        "triggerCondition"
+      ]
+    },
+    "VariableWatchDef": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "extract": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "hex",
+            "number",
+            "string",
+            "bool"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "extract"
+      ]
+    },
+    "CheckpointDescriptor": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "label": {
+          "type": "string",
+          "pattern": "\\S"
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ]
+    },
+    "RuntimeFrame": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "$ref": "#/definitions/SimState"
+        },
+        "tick": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "view": {
+          "$ref": "#/definitions/TeachingFrame"
+        },
+        "currentStep": {
+          "$ref": "#/definitions/NarrativeStepDescriptor"
+        },
+        "interactionAvailability": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
+        "checkpointResults": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/CheckpointResult"
+          }
+        }
+      },
+      "required": [
+        "state",
+        "tick",
+        "view",
+        "interactionAvailability",
+        "checkpointResults"
+      ],
+      "description": "执行宿主共享的画面数据；事件历史由各宿主独立持有。"
+    },
+    "SimState": {
+      "type": "object",
+      "properties": {
+        "tick": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "phase": {
+          "type": "string"
+        },
+        "phaseIndex": {
+          "type": "number",
+          "description": "阶段型内置仿真用此索引声明有限流程的终态;非阶段模型可省略。"
+        },
+        "selectedElementId": {
+          "type": "string"
+        },
+        "explanation": {
+          "$ref": "#/definitions/StepExplanation"
+        },
+        "_trace": {
+          "$ref": "#/definitions/TraceInfo"
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "number",
+              "string",
+              "boolean"
+            ]
+          }
+        },
+        "checkpointValues": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/JsonValue"
+          }
+        }
+      },
+      "required": [
+        "tick",
+        "phase",
+        "explanation",
+        "metrics",
+        "checkpointValues"
+      ]
+    },
+    "StepExplanation": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "effect": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "defaultDurationMs": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "title",
+        "effect",
+        "reason",
+        "defaultDurationMs"
+      ]
+    },
+    "TraceInfo": {
+      "type": "object",
+      "properties": {
+        "triggeredLines": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "variables": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/JsonValue"
+          }
+        },
+        "executionPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "triggeredLines",
+        "variables"
+      ]
+    },
+    "CheckpointResult": {
+      "type": "object",
+      "properties": {
+        "achieved": {
+          "type": "boolean"
+        },
+        "answer": {
+          "$ref": "#/definitions/JsonValue"
+        },
+        "explanation": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "achieved",
+        "answer",
+        "explanation"
+      ]
+    }
+  },
+  "$id": "urn:chaimir:sim:runtime"
+}

@@ -21,76 +21,6 @@ if (-not [int]::TryParse($runtimeConfig.DOCKER_RUNTIME_COMMAND_TIMEOUT_SECONDS, 
     throw 'Docker恢复配置无效:命令超时至少10秒,关闭预算不得小于命令预算,启动预算不得小于关闭预算'
 }
 
-# Stop-ProcessTree 在外部命令超时时终止整个进程树，避免 wsl.exe 子进程残留并阻塞后续恢复。
-function Stop-ProcessTree {
-    param([Parameter(Mandatory = $true)][Diagnostics.Process]$Process)
-
-    try {
-        & taskkill.exe /PID $Process.Id /T /F | Out-Null
-    } catch {
-        Write-Host "终止进程树失败，进程可能已退出或当前账户无权限: $($_.Exception.Message)"
-    }
-    try {
-        if (-not $Process.HasExited) { $Process.Kill() }
-    } catch {
-        Write-Host "终止超时进程失败，进程可能已退出或当前账户无权限: $($_.Exception.Message)"
-    }
-}
-
-# Invoke-ProcessWithTimeout 执行外部进程并在超过边界时终止本次探测，避免 WSL 卡死拖住部署入口。
-function Invoke-ProcessWithTimeout {
-    param(
-        [Parameter(Mandatory = $true)][string]$FilePath,
-        [Parameter(Mandatory = $true)][string[]]$Arguments,
-        [int]$TimeoutSeconds = 30
-    )
-
-    $process = New-Object System.Diagnostics.Process
-    $process.StartInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $process.StartInfo.FileName = $FilePath
-    $process.StartInfo.UseShellExecute = $false
-    $process.StartInfo.CreateNoWindow = $true
-    $process.StartInfo.RedirectStandardOutput = $true
-    $process.StartInfo.RedirectStandardError = $true
-    if ([IO.Path]::GetFileName($FilePath) -eq 'wsl.exe') {
-        $process.StartInfo.StandardOutputEncoding = [Text.Encoding]::Unicode
-        $process.StartInfo.StandardErrorEncoding = [Text.Encoding]::Unicode
-    }
-    # Windows PowerShell 5.1 没有 ProcessStartInfo.ArgumentList，使用受控的空格/引号编码。
-    $process.StartInfo.Arguments = [string]::Join(" ", ($Arguments | ForEach-Object {
-        if ($_ -match '[\s"]') {
-            '"' + ($_ -replace '(\\*)"', '$1$1\"') + '"'
-        } else {
-            $_
-        }
-    }))
-
-    try {
-        [void]$process.Start()
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            Stop-ProcessTree -Process $process
-            return [pscustomobject]@{
-                ExitCode = $null
-                TimedOut = $true
-                Stdout = ""
-                Stderr = "进程在 ${TimeoutSeconds}s 内未退出"
-            }
-        }
-        $stdoutTask.Wait()
-        $stderrTask.Wait()
-        return [pscustomobject]@{
-            ExitCode = $process.ExitCode
-            TimedOut = $false
-            Stdout = $stdoutTask.Result
-            Stderr = $stderrTask.Result
-        }
-    } finally {
-        $process.Dispose()
-    }
-}
-
 # Write-Evidence 记录每次探测和恢复动作，便于区分 WSL 故障与 Kubernetes 数据面故障。
 function Write-Evidence {
     param([Parameter(Mandatory = $true)][string]$Message)
@@ -102,10 +32,10 @@ function Write-Evidence {
 
 # Test-RuntimeProbe 验证真实Linux engine API,内部WSL发行版不作为可用引擎的额外重启门禁。
 function Test-RuntimeProbe {
-    $result = Invoke-ProcessWithTimeout -FilePath 'docker.exe' -Arguments @('info','--format','{{.OSType}} {{.ServerVersion}}') -TimeoutSeconds $commandSeconds
-    if ($result.TimedOut -or $result.ExitCode -ne 0) {
+    $result = Invoke-ChaimirProcess -FilePath 'docker.exe' -Arguments @('info','--format','{{.OSType}} {{.ServerVersion}}') -TimeoutSeconds $commandSeconds
+    if ($result.TimedOut -or $result.Code -ne 0) {
         $detail = (($result.Stderr + ' ' + $result.Stdout).Trim() -replace '\s+', ' ')
-        Write-Evidence "docker-api失败(exit=$($result.ExitCode),timeout=$($result.TimedOut)): $detail"
+        Write-Evidence "docker-api失败(exit=$($result.Code),timeout=$($result.TimedOut)): $detail"
         return $false
     }
     if ($result.Stdout.Trim() -notmatch '^linux\s+\S+$') {
@@ -117,8 +47,8 @@ function Test-RuntimeProbe {
 
 # Get-DockerDesktopState 只读取 Docker Desktop 控制面的状态，不访问 WSL，避免正常启动阶段产生额外 WSL 请求。
 function Get-DockerDesktopState {
-    $result = Invoke-ProcessWithTimeout -FilePath "docker.exe" -Arguments @("desktop", "status") -TimeoutSeconds 10
-    if ($result.TimedOut -or $result.ExitCode -ne 0) {
+    $result = Invoke-ChaimirProcess -FilePath "docker.exe" -Arguments @("desktop", "status") -TimeoutSeconds 10
+    if ($result.TimedOut -or $result.Code -ne 0) {
         return $null
     }
     $text = ($result.Stdout + "`n" + $result.Stderr)
@@ -171,8 +101,8 @@ function Restart-WslService {
     $service = Get-CimInstance Win32_Service -Filter "Name='WSLService'"
     if ($null -eq $service) { throw '未找到WSLService,拒绝操作其它服务' }
     if ($service.State -ne 'Stopped') {
-        $stop = Invoke-ProcessWithTimeout -FilePath 'sc.exe' -Arguments @('stop', 'WSLService') -TimeoutSeconds $commandSeconds
-        Write-Evidence "WSLService停止请求 exit=$($stop.ExitCode) timeout=$($stop.TimedOut)"
+        $stop = Invoke-ChaimirProcess -FilePath 'sc.exe' -Arguments @('stop', 'WSLService') -TimeoutSeconds $commandSeconds
+        Write-Evidence "WSLService停止请求 exit=$($stop.Code) timeout=$($stop.TimedOut)"
         $deadline = (Get-Date).AddSeconds($commandSeconds)
         do {
             $service = Get-CimInstance Win32_Service -Filter "Name='WSLService'"
@@ -191,8 +121,8 @@ function Restart-WslService {
             (Get-Service WSLService).WaitForStatus([ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds($commandSeconds))
         }
     }
-    $start = Invoke-ProcessWithTimeout -FilePath 'sc.exe' -Arguments @('start', 'WSLService') -TimeoutSeconds $commandSeconds
-    if ($start.TimedOut -or $start.ExitCode -ne 0) { throw "WSLService启动失败: $($start.Stderr) $($start.Stdout)" }
+    $start = Invoke-ChaimirProcess -FilePath 'sc.exe' -Arguments @('start', 'WSLService') -TimeoutSeconds $commandSeconds
+    if ($start.TimedOut -or $start.Code -ne 0) { throw "WSLService启动失败: $($start.Stderr) $($start.Stdout)" }
     (Get-Service WSLService).WaitForStatus([ServiceProcess.ServiceControllerStatus]::Running, [TimeSpan]::FromSeconds($commandSeconds))
     Write-Evidence 'WSLService已重新启动,继续验证WSL关闭与Docker实际可用性'
 }
@@ -200,8 +130,8 @@ function Restart-WslService {
 # Start-Runtime 让Desktop完成正常启动并核对Linux engine,冷启动无需先重启服务。
 function Start-Runtime {
     Write-Evidence '启动Docker Desktop并等待真实API可用'
-    $start = Invoke-ProcessWithTimeout -FilePath 'docker.exe' -Arguments @('desktop', 'start', '--timeout', [string]$startSeconds) -TimeoutSeconds ($startSeconds + $commandSeconds)
-    if ($start.TimedOut -or $start.ExitCode -ne 0) {
+    $start = Invoke-ChaimirProcess -FilePath 'docker.exe' -Arguments @('desktop', 'start', '--timeout', [string]$startSeconds) -TimeoutSeconds ($startSeconds + $commandSeconds)
+    if ($start.TimedOut -or $start.Code -ne 0) {
         throw "Docker Desktop启动失败: $($start.Stderr) $($start.Stdout)"
     }
     Wait-RuntimeReady -TimeoutSeconds $startSeconds
@@ -238,8 +168,8 @@ function Stop-UnresponsiveDesktop {
 
 # Stop-Desktop 等待官方停止真正完成,卡在stopping时按确切进程身份收敛,避免立即重启的竞态。
 function Stop-Desktop {
-    $stop = Invoke-ProcessWithTimeout -FilePath 'docker.exe' -Arguments @('desktop','stop','--force','--timeout',[string]$shutdownSeconds) -TimeoutSeconds ($shutdownSeconds + $commandSeconds)
-    Write-Evidence "Desktop停止请求 exit=$($stop.ExitCode) timeout=$($stop.TimedOut)"
+    $stop = Invoke-ChaimirProcess -FilePath 'docker.exe' -Arguments @('desktop','stop','--force','--timeout',[string]$shutdownSeconds) -TimeoutSeconds ($shutdownSeconds + $commandSeconds)
+    Write-Evidence "Desktop停止请求 exit=$($stop.Code) timeout=$($stop.TimedOut)"
     $deadline = (Get-Date).AddSeconds($commandSeconds)
     do {
         $state = Get-DockerDesktopState
@@ -256,12 +186,12 @@ function Recover-Runtime {
     Write-Evidence "开始受控 Docker Desktop/WSL 恢复"
     Stop-Desktop
 
-    $shutdown = Invoke-ProcessWithTimeout -FilePath "wsl.exe" -Arguments @("--shutdown") -TimeoutSeconds $shutdownSeconds
-    if ($shutdown.TimedOut -or $shutdown.ExitCode -ne 0) {
+    $shutdown = Invoke-ChaimirProcess -FilePath 'wsl.exe' -OutputEncoding ([Text.Encoding]::Unicode) -Arguments @("--shutdown") -TimeoutSeconds $shutdownSeconds
+    if ($shutdown.TimedOut -or $shutdown.Code -ne 0) {
         Restart-WslService
-        $shutdown = Invoke-ProcessWithTimeout -FilePath "wsl.exe" -Arguments @("--shutdown") -TimeoutSeconds $shutdownSeconds
+        $shutdown = Invoke-ChaimirProcess -FilePath 'wsl.exe' -OutputEncoding ([Text.Encoding]::Unicode) -Arguments @("--shutdown") -TimeoutSeconds $shutdownSeconds
     }
-    if ($shutdown.TimedOut -or $shutdown.ExitCode -ne 0) {
+    if ($shutdown.TimedOut -or $shutdown.Code -ne 0) {
         $detail = (($shutdown.Stderr + " " + $shutdown.Stdout).Trim() -replace "\s+", " ")
         throw "WSL 受控关闭失败: $detail"
     }

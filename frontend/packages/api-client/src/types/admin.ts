@@ -10,44 +10,6 @@ import type {
 import type { AuditActorRole } from '../constants/identity'
 import type { SnowflakeID } from './common'
 
-export interface SystemConfig {
-  id: SnowflakeID
-  scope: AdminScope
-  tenant_id?: SnowflakeID
-  key: string
-  value: Record<string, unknown>
-  version: number
-  updated_by: SnowflakeID
-  updated_at: string
-}
-
-export interface ConfigUpdateRequest {
-  scope: AdminScope
-  tenant_id?: SnowflakeID
-  value: Record<string, unknown>
-  version: number
-  change_log_id?: SnowflakeID
-}
-
-export interface ConfigRollbackRequest {
-  scope: AdminScope
-  tenant_id?: SnowflakeID
-  version: number
-  change_log_id: SnowflakeID
-}
-
-export interface ConfigChangeLog {
-  id: SnowflakeID
-  config_id: SnowflakeID
-  tenant_id?: SnowflakeID
-  old_value: Record<string, unknown>
-  new_value: Record<string, unknown>
-  operator_id: SnowflakeID
-  /** 操作人姓名;账号已移除时省略 */
-  operator_name?: string
-  created_at: string
-}
-
 export interface AlertRule {
   id: SnowflakeID
   scope: AdminScope
@@ -72,6 +34,8 @@ export interface AlertRuleRequest {
 }
 
 export interface AlertEvent {
+  /** 告警列表提供触发时所属规则的当前名称。 */
+  rule_name?: string
   id: SnowflakeID
   rule_id: SnowflakeID
   tenant_id?: SnowflakeID
@@ -100,7 +64,7 @@ export interface BackupRecord {
   size_bytes: number
   status: BackupStatus
   started_at: string
-  finished_at?: string
+  finished_at: string
 }
 
 export interface Dashboard {
@@ -123,7 +87,7 @@ export interface Dashboard {
   generated_at: string
 }
 
-export interface ResourceQuotaSnapshot {
+interface ResourceQuotaSnapshot {
   max_concurrent_sandbox: number
   max_cpu: number
   max_memory_mb: number

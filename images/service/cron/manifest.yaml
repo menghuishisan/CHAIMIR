@@ -20,7 +20,7 @@ source:
 upstream:
   builder: base/go-builder
   builder_version: go1.26.6
-  runtime: middleware/postgres
+  runtime: infra/postgres
   reuse_policy: multi-stage-build
 data_driven: false
 capabilities:

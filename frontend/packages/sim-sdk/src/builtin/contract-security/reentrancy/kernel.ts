@@ -33,13 +33,10 @@ export function reduceReentrancyEvent(state: ReentrancyState, event: SimEvent, _
  */
 function advanceReentrancy(state: ReentrancyState, event: SimEvent): ReentrancyState {
   if (state.phaseIndex >= 2) return state;
-  const phaseIndex = Math.min(reentrancyPhases.length - 1, state.phaseIndex + 1);
+  const phaseIndex = state.phaseIndex + 1;
   const next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: reentrancyPhases[phaseIndex].id };
   if (phaseIndex === 1) return { ...next, calls: next.calls.concat(call('attacker', 'vault', 'withdraw', next.tick, '攻击合约发起合法提款入口。')) };
-  if (phaseIndex === 2) return { ...next, vaultBalance: next.vaultBalance - next.attackerCredit, attackerBalance: next.attackerBalance + next.attackerCredit, calls: next.calls.concat(call('vault', 'attacker', '转账', next.tick, '外部转账早于余额扣减。')) };
-  if (phaseIndex === 3) return reenter(next);
-  if (phaseIndex === 4) return guard(next);
-  return next;
+  return { ...next, vaultBalance: next.vaultBalance - next.attackerCredit, attackerBalance: next.attackerBalance + next.attackerCredit, calls: next.calls.concat(call('vault', 'attacker', '转账', next.tick, '外部转账早于余额扣减。')) };
 }
 
 /**

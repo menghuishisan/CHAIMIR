@@ -1,19 +1,18 @@
-// teaching service_course 文件实现课程、章节、课时和成员业务。
+// 课程查询、基本信息、共享与生命周期管理。
 package teaching
 
 import (
 	"context"
 	"strings"
-	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
-	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
-	"chaimir/internal/platform/response"
+	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
+	"chaimir/pkg/logging"
 )
 
 const inviteCodeLength = 10
@@ -137,18 +136,32 @@ func (s *Service) CreateCourse(ctx context.Context, req CourseRequest) (CourseDT
 		return CourseDTO{}, err
 	}
 	course := Course{ID: courseID, TenantID: id.TenantID, TeacherID: id.AccountID, Name: req.Name, Description: req.Description, Type: req.Type, Difficulty: req.Difficulty, CoverRef: coverRef, Semester: req.Semester, Credits: req.Credits, Schedule: req.Schedule, StartAt: startAt, EndAt: endAt, InviteCode: inviteCode, Status: CourseStatusDraft, Visibility: CourseVisibilityPrivate}
+	var out CourseDTO
+	commitAttempted := false
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		course, err = tx.CreateCourse(ctx, course)
-		return err
+		if err != nil {
+			return err
+		}
+		out, err = courseDTO(course)
+		if err != nil {
+			return err
+		}
+		if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "teaching.course.create", auditTargetCourse, course.ID, map[string]any{"name": course.Name}); err != nil {
+			return err
+		}
+		commitAttempted = true
+		return nil
 	}); err != nil {
-		// 课程没建成,刚搬过来的封面就没有引用者,立即清掉。
-		s.discardCourseCoverObject(ctx, id.TenantID, id.AccountID, coverRef)
+		err = storage.CompensateUpload(ctx, s.cleanupTimeout, err, commitAttempted, func(ctx context.Context) error {
+			return s.discardCourseCoverObject(ctx, id.TenantID, id.AccountID, courseID, coverRef)
+		})
 		return CourseDTO{}, mapCourseError(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "teaching.course.create", auditTargetCourse, course.ID, map[string]any{"name": course.Name}); err != nil {
-		return CourseDTO{}, err
+	if err := s.discardCourseCoverObject(ctx, id.TenantID, id.AccountID, 0, req.CoverRef); err != nil {
+		logging.ErrorContext(ctx, "清理课程封面暂存对象失败", err.Error())
 	}
-	return courseDTO(course)
+	return out, nil
 }
 
 // UpdateCourse 更新课程基础信息。
@@ -161,7 +174,7 @@ func (s *Service) UpdateCourse(ctx context.Context, courseID int64, req CourseRe
 	if err != nil {
 		return CourseDTO{}, err
 	}
-	// 先读一次当前封面:搬对象是 IO,必须在事务外完成,而是否需要搬取决于引用有没有变。
+	// 对象复制在事务外执行；提交时加锁确认封面未被其他编辑替换。
 	var existing Course
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		current, err := tx.GetCourse(ctx, id.TenantID, courseID)
@@ -181,66 +194,51 @@ func (s *Service) UpdateCourse(ctx context.Context, courseID int64, req CourseRe
 		return CourseDTO{}, err
 	}
 	var course Course
+	var out CourseDTO
+	commitAttempted := false
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		current, err := tx.GetCourse(ctx, id.TenantID, courseID)
+		current, err := tx.GetCourseForUpdate(ctx, id.TenantID, courseID)
 		if err != nil {
 			return err
 		}
 		if err := ensureTeacherOwned(current, id.AccountID); err != nil {
 			return err
 		}
+		if current.CoverRef != existing.CoverRef {
+			return apperr.ErrConflict
+		}
 		current.Name, current.Description, current.Type, current.Difficulty, current.CoverRef, current.Semester, current.Credits, current.Schedule, current.StartAt, current.EndAt = req.Name, req.Description, req.Type, req.Difficulty, coverRef, req.Semester, req.Credits, req.Schedule, startAt, endAt
 		course, err = tx.UpdateCourse(ctx, current)
-		return err
+		if err != nil {
+			return err
+		}
+		out, err = courseDTO(course)
+		if err != nil {
+			return err
+		}
+		if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "teaching.course.update", auditTargetCourse, courseID, map[string]any{"name": course.Name}); err != nil {
+			return err
+		}
+		commitAttempted = true
+		return nil
 	}); err != nil {
 		if coverRef != existing.CoverRef {
-			s.discardCourseCoverObject(ctx, id.TenantID, id.AccountID, coverRef)
+			err = storage.CompensateUpload(ctx, s.cleanupTimeout, err, commitAttempted, func(ctx context.Context) error {
+				return s.discardCourseCoverObject(ctx, id.TenantID, id.AccountID, courseID, coverRef)
+			})
 		}
 		return CourseDTO{}, mapCourseError(err)
 	}
 	// 换封面后旧对象没有任何引用者(克隆不继承封面,一个对象只被一门课引用),留着只会堆积。
 	if existing.CoverRef != course.CoverRef {
-		s.discardCourseCoverObject(ctx, id.TenantID, id.AccountID, existing.CoverRef)
-	}
-	return courseDTO(course)
-}
-
-// CloneCourse 克隆本租户课程或共享课程库课程为当前教师的私有草稿。
-func (s *Service) CloneCourse(ctx context.Context, courseID int64, req CloneCourseRequest) (CourseDTO, error) {
-	id, err := currentIdentity(ctx)
-	if err != nil {
-		return CourseDTO{}, err
-	}
-	req.Name = strings.TrimSpace(req.Name)
-	var cloned Course
-	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		source, err := tx.GetCourse(ctx, id.TenantID, courseID)
-		if err != nil {
-			return err
+		if err := s.discardCourseCoverObject(ctx, id.TenantID, id.AccountID, courseID, existing.CoverRef); err != nil {
+			logging.ErrorContext(ctx, "清理已替换课程封面失败", err.Error())
 		}
-		cloned, err = s.cloneCourseGraph(ctx, tx, source, id.TenantID, id.AccountID, req.Name)
-		return err
-	})
-	if err != nil && isNoRows(err) {
-		err = s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-			source, err := tx.GetCloneableCourse(ctx, courseID, id.TenantID)
-			if err != nil {
-				return err
-			}
-			if source.TenantID == id.TenantID {
-				return apperr.ErrTeachingCourseNotFound
-			}
-			cloned, err = s.cloneCourseGraph(ctx, tx, source, id.TenantID, id.AccountID, req.Name)
-			return err
-		})
+		if err := s.discardCourseCoverObject(ctx, id.TenantID, id.AccountID, 0, req.CoverRef); err != nil {
+			logging.ErrorContext(ctx, "清理课程封面暂存对象失败", err.Error())
+		}
 	}
-	if err != nil {
-		return CourseDTO{}, mapCourseError(err)
-	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "teaching.course.clone", auditTargetCourse, cloned.ID, map[string]any{"source_course_id": courseID}); err != nil {
-		return CourseDTO{}, err
-	}
-	return courseDTO(cloned)
+	return out, nil
 }
 
 // PublishCourse 发布课程。
@@ -274,7 +272,7 @@ func (s *Service) setCourseVisibility(ctx context.Context, courseID int64, visib
 	if err != nil {
 		return CourseDTO{}, err
 	}
-	var course Course
+	var out CourseDTO
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		current, err := tx.GetCourse(ctx, id.TenantID, courseID)
 		if err != nil {
@@ -286,18 +284,19 @@ func (s *Service) setCourseVisibility(ctx context.Context, courseID int64, visib
 		if visibility == CourseVisibilityShared && current.Status == CourseStatusDraft {
 			return apperr.ErrTeachingCourseStateInvalid
 		}
-		course, err = tx.SetCourseVisibility(ctx, id.TenantID, courseID, visibility)
-		return err
-	}); err != nil {
-		if isNoRows(err) {
-			return CourseDTO{}, apperr.ErrTeachingCourseNotFound
+		course, err := tx.SetCourseVisibility(ctx, id.TenantID, courseID, visibility)
+		if err != nil {
+			return err
 		}
-		return CourseDTO{}, apperr.AsAppError(err)
+		out, err = courseDTO(course)
+		if err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, action, auditTargetCourse, course.ID, map[string]any{"visibility": visibility})
+	}); err != nil {
+		return CourseDTO{}, mapCourseError(err)
 	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, action, auditTargetCourse, course.ID, map[string]any{"visibility": visibility}); err != nil {
-		return CourseDTO{}, err
-	}
-	return courseDTO(course)
+	return out, nil
 }
 
 // RefreshInviteCode 刷新课程邀请码。
@@ -306,7 +305,7 @@ func (s *Service) RefreshInviteCode(ctx context.Context, courseID int64) (Course
 	if err != nil {
 		return CourseDTO{}, err
 	}
-	var course Course
+	var out CourseDTO
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		current, err := tx.GetCourse(ctx, id.TenantID, courseID)
 		if err != nil {
@@ -319,40 +318,16 @@ func (s *Service) RefreshInviteCode(ctx context.Context, courseID int64) (Course
 		if err != nil {
 			return err
 		}
-		course, err = tx.RefreshCourseInviteCode(ctx, id.TenantID, courseID, inviteCode)
+		course, err := tx.RefreshCourseInviteCode(ctx, id.TenantID, courseID, inviteCode)
+		if err != nil {
+			return err
+		}
+		out, err = courseDTO(course)
 		return err
 	}); err != nil {
 		return CourseDTO{}, mapCourseError(err)
 	}
-	return courseDTO(course)
-}
-
-// AdvanceCourseStatusesOnce 按课程起止时间推进 published/running/ended 状态。
-func (s *Service) AdvanceCourseStatusesOnce(ctx context.Context, now time.Time) error {
-	if now.IsZero() {
-		now = timex.Now()
-	}
-	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-		dueToEnd, err := tx.ListCoursesDueToEnd(ctx, now)
-		if err != nil {
-			return err
-		}
-		for _, course := range dueToEnd {
-			if _, err := tx.SetCourseStatus(ctx, course.TenantID, course.ID, CourseStatusEnded); err != nil {
-				return err
-			}
-		}
-		dueToRun, err := tx.ListCoursesDueToRun(ctx, now)
-		if err != nil {
-			return err
-		}
-		for _, course := range dueToRun {
-			if _, err := tx.SetCourseStatus(ctx, course.TenantID, course.ID, CourseStatusRunning); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	return out, nil
 }
 
 // setCourseStatus 校验负责人后更新课程状态。
@@ -362,8 +337,9 @@ func (s *Service) setCourseStatus(ctx context.Context, courseID int64, status in
 		return CourseDTO{}, err
 	}
 	var course Course
+	var out CourseDTO
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		current, err := tx.GetCourse(ctx, id.TenantID, courseID)
+		current, err := tx.GetCourseForUpdate(ctx, id.TenantID, courseID)
 		if err != nil {
 			return err
 		}
@@ -389,164 +365,18 @@ func (s *Service) setCourseStatus(ctx context.Context, courseID int64, status in
 			}
 		}
 		course, err = tx.SetCourseStatus(ctx, id.TenantID, courseID, status)
-		return err
-	}); err != nil {
-		return CourseDTO{}, mapCourseError(err)
-	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, action, auditTargetCourse, course.ID, map[string]any{"status": status}); err != nil {
-		return CourseDTO{}, err
-	}
-	// 课程结束/归档后课内实验不再有人做,通知 M7 级联回收仍占着沙箱与仿真会话的实例
-	// (M7 需求 D3)。走事件而非同步调用:M6 与 M7 同在第 2 层,同层不得互相依赖。
-	if status == CourseStatusEnded || status == CourseStatusArchived {
-		if err := s.publishCourseEnded(ctx, course, status); err != nil {
-			return CourseDTO{}, err
-		}
-	}
-	return courseDTO(course)
-}
-
-// publishCourseEnded 发布课程结束事件,供 M7 级联回收课内实验实例。
-func (s *Service) publishCourseEnded(ctx context.Context, course Course, status int16) error {
-	payload := contracts.TeachingCourseEndedEvent{
-		TenantID: course.TenantID,
-		TraceID:  response.TraceFromContext(ctx),
-		CourseID: course.ID,
-		Status:   status,
-		EndedAt:  timex.Now(),
-	}
-	if err := s.bus.Publish(ctx, contracts.SubjectTeachingCourseEnded, payload); err != nil {
-		return apperr.ErrTeachingCourseEndedEventPublishFailed.WithCause(err)
-	}
-	return nil
-}
-
-// cloneCourseGraph 在同一个事务中复制课程、章节、课时、作业和作业题目引用。
-func (s *Service) cloneCourseGraph(ctx context.Context, tx TxStore, source Course, targetTenantID, teacherID int64, name string) (Course, error) {
-	if source.TenantID != targetTenantID && source.Visibility != CourseVisibilityShared {
-		return Course{}, apperr.ErrTeachingCourseForbidden
-	}
-	if name == "" {
-		name = source.Name + " 副本"
-	}
-	inviteCode, err := newInviteCode()
-	if err != nil {
-		return Course{}, err
-	}
-	cloned := Course{
-		ID:          s.ids.Generate(),
-		TenantID:    targetTenantID,
-		TeacherID:   teacherID,
-		Name:        name,
-		Description: source.Description,
-		Type:        source.Type,
-		Difficulty:  source.Difficulty,
-		// 克隆不继承封面:封面对象落在原作者的受控前缀下,跨租户克隆时目标租户拿不到投放授权;
-		// 而共用同一对象又会让任一方换封面时删掉另一方仍在用的图。克隆后由新作者自己上传。
-		CoverRef:   "",
-		Semester:   source.Semester,
-		Credits:    source.Credits,
-		Schedule:   nil,
-		StartAt:    source.StartAt,
-		EndAt:      source.EndAt,
-		InviteCode: inviteCode,
-		Status:     CourseStatusDraft,
-		Visibility: CourseVisibilityPrivate,
-	}
-	schedule, err := jsonx.CloneObjectStrict(source.Schedule)
-	if err != nil {
-		return Course{}, err
-	}
-	cloned.Schedule = schedule
-	created, err := tx.CreateCourse(ctx, cloned)
-	if err != nil {
-		return Course{}, err
-	}
-	chapterMap, err := s.cloneChaptersAndLessons(ctx, tx, source, targetTenantID, created.ID)
-	if err != nil {
-		return Course{}, err
-	}
-	if err := s.cloneAssignments(ctx, tx, source, targetTenantID, created.ID, chapterMap); err != nil {
-		return Course{}, err
-	}
-	return created, nil
-}
-
-// cloneChaptersAndLessons 复制课程目录结构并返回源章节到目标章节的映射。
-func (s *Service) cloneChaptersAndLessons(ctx context.Context, tx TxStore, source Course, targetTenantID, targetCourseID int64) (map[int64]int64, error) {
-	sourceChapters, err := tx.ListChapters(ctx, source.TenantID, source.ID)
-	if err != nil {
-		return nil, err
-	}
-	chapterMap := make(map[int64]int64, len(sourceChapters))
-	for _, chapter := range sourceChapters {
-		clonedChapter, err := tx.CreateChapter(ctx, Chapter{ID: s.ids.Generate(), TenantID: targetTenantID, CourseID: targetCourseID, Title: chapter.Title, Sort: chapter.Sort})
-		if err != nil {
-			return nil, err
-		}
-		chapterMap[chapter.ID] = clonedChapter.ID
-		lessons, err := tx.ListLessonsByChapter(ctx, source.TenantID, chapter.ID)
-		if err != nil {
-			return nil, err
-		}
-		for _, lesson := range lessons {
-			contentRef, err := jsonx.CloneObjectStrict(lesson.ContentRef)
-			if err != nil {
-				return nil, err
-			}
-			if _, err := tx.CreateLesson(ctx, Lesson{ID: s.ids.Generate(), TenantID: targetTenantID, ChapterID: clonedChapter.ID, Title: lesson.Title, ContentType: lesson.ContentType, ContentRef: contentRef, Sort: lesson.Sort}); err != nil {
-				return nil, err
-			}
-		}
-	}
-	return chapterMap, nil
-}
-
-// cloneAssignments 复制作业壳和题目引用,不复制任何提交或成绩数据。
-func (s *Service) cloneAssignments(ctx context.Context, tx TxStore, source Course, targetTenantID, targetCourseID int64, chapterMap map[int64]int64) error {
-	// publishedOnly 传 false:克隆要带上草稿作业,克隆结果本身也统一落草稿态
-	for page := 1; ; page++ {
-		assignments, total, err := tx.ListAssignmentsByCourse(ctx, source.TenantID, source.ID, false, page, pagex.MaximumSize())
 		if err != nil {
 			return err
 		}
-		for _, assignment := range assignments {
-			targetChapterID := int64(0)
-			if assignment.ChapterID > 0 {
-				targetChapterID = chapterMap[assignment.ChapterID]
-				if targetChapterID == 0 {
-					return apperr.ErrTeachingAssignmentInvalid
-				}
-			}
-			latePenalty, err := jsonx.CloneObjectStrict(assignment.LatePenalty)
-			if err != nil {
-				return err
-			}
-			clonedAssignment, err := tx.CreateAssignment(ctx, Assignment{ID: s.ids.Generate(), TenantID: targetTenantID, CourseID: targetCourseID, Title: assignment.Title, ChapterID: targetChapterID, DueAt: assignment.DueAt, MaxAttempts: assignment.MaxAttempts, LatePolicy: assignment.LatePolicy, LatePenalty: latePenalty, Status: AssignmentStatusDraft})
-			if err != nil {
-				return err
-			}
-			items, err := tx.ListAssignmentItems(ctx, source.TenantID, assignment.ID)
-			if err != nil {
-				return err
-			}
-			clonedItems := make([]AssignmentItem, 0, len(items))
-			for _, item := range items {
-				clonedItems = append(clonedItems, AssignmentItem{ID: s.ids.Generate(), TenantID: targetTenantID, AssignmentID: clonedAssignment.ID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq})
-			}
-			persistedItems, err := tx.ReplaceAssignmentItems(ctx, targetTenantID, clonedAssignment.ID, clonedItems)
-			if err != nil {
-				return err
-			}
-			if err := s.refreshAssignmentUsageRefs(ctx, targetTenantID, clonedAssignment, persistedItems); err != nil {
-				return err
-			}
+		out, err = courseDTO(course)
+		if err != nil {
+			return err
 		}
-		if int64(page*pagex.MaximumSize()) >= total || len(assignments) == 0 {
-			break
-		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, action, auditTargetCourse, course.ID, map[string]any{"status": status})
+	}); err != nil {
+		return CourseDTO{}, mapCourseError(err)
 	}
-	return nil
+	return out, nil
 }
 
 // newInviteCode 生成短邀请码,随机源失败必须显式返回错误而不是退化为可预测码。

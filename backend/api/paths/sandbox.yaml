@@ -11,6 +11,7 @@
   post:
     tags: [sandbox]
     summary: 只读解析组合依赖与连接候选
+    description: bindings 返回用户向 title。optional 为 true 的连接可不选、不自动授权唯一候选，不拉入依赖；未连接不注入地址或网络权限。multiple 表示允许同一绑定选择多个目标；必需绑定至少选一个，每个目标提交完整 link，多目标地址由编译器编码为排序后的 JSON 字符串数组。
     operationId: sandboxPreviewComposition
     x-chaimir-audience: platform-admin-or-teacher
     security: [{ bearerAuth: [] }]
@@ -124,6 +125,7 @@
     tags: [sandbox]
     summary: 注册工具定义
     operationId: sandboxRegisterTool
+    description: 命令工具和网页工具必须在 resource_spec.components 的每个组件中声明镜像自检命令 prepull_command。
     x-chaimir-audience: platform-admin
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
@@ -132,6 +134,7 @@
   post:
     tags: [sandbox]
     summary: 创建沙箱
+    description: 新创建在事务提交后返回分配中、创建中的受理快照，包含沙箱编号及冻结能力；启动异步推进，通过现有详情和进度观察就绪。重复请求返回已有沙箱的当前状态。
     operationId: sandboxCreateSandbox
     x-chaimir-audience: internal
     x-chaimir-internal: true
@@ -153,7 +156,7 @@
     tags: [sandbox]
     summary: 查询沙箱状态、资源用量和工具入口
     operationId: sandboxGetSandbox
-    description: resource_usage 为完整用量摘要或 null；采样失败与未采样明确为未知，不阻断生命周期和权限读取，也不以零值替代未知。
+    description: resource_usage 为完整用量摘要或 null；采样失败与未采样明确为未知。capabilities 的文件与终端能力只属于工作区实例，chain_operations 是运行时实例到非空操作数组的映射，无链能力返回空对象。
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]

@@ -11,14 +11,15 @@ import (
 type Querier interface {
 	ClaimTransferTask(ctx context.Context, arg ClaimTransferTaskParams) (TransferTask, error)
 	CompleteTransferTask(ctx context.Context, arg CompleteTransferTaskParams) (TransferTask, error)
+	CountFailedTransfers(ctx context.Context, arg CountFailedTransfersParams) (int64, error)
 	CountTransferTasks(ctx context.Context, arg CountTransferTasksParams) (int64, error)
 	// 任务与下载「全部 / 导入 / 导出」分段计数:本人任务,套用状态筛选,不套用类型筛选。
 	CountTransferTasksByChannel(ctx context.Context, arg CountTransferTasksByChannelParams) ([]CountTransferTasksByChannelRow, error)
 	CreateTransferTask(ctx context.Context, arg CreateTransferTaskParams) (TransferTask, error)
-	DeletePendingTransferTask(ctx context.Context, arg DeletePendingTransferTaskParams) error
 	FailTransferTask(ctx context.Context, arg FailTransferTaskParams) (TransferTask, error)
 	GetTransferTask(ctx context.Context, arg GetTransferTaskParams) (TransferTask, error)
 	ListTransferTasks(ctx context.Context, arg ListTransferTasksParams) ([]TransferTask, error)
+	RenewTransferTaskLease(ctx context.Context, arg RenewTransferTaskLeaseParams) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -32,12 +32,14 @@ type Store interface {
 
 // TxStore 定义 M11 单事务数据访问能力。
 type TxStore interface {
+	ReadAlertMetrics(context.Context, contracts.AlertMetricQuery) (map[string]float64, error)
 	CreateLevelConfig(context.Context, int64, int64, LevelConfigRequest) (LevelConfigDTO, error)
 	ListLevelConfigs(context.Context) ([]LevelConfigDTO, error)
 	GetDefaultLevelConfig(context.Context) (LevelConfigDTO, error)
 	LockGradeLevelDefaultScope(context.Context, int64) error
 	ClearDefaultLevelConfigs(context.Context) error
 	UpdateLevelConfig(context.Context, int64, LevelConfigRequest) (LevelConfigDTO, error)
+	UpdateDefaultWarningRules(context.Context, WarningRules) (WarningRules, error)
 	CreateSemester(context.Context, int64, int64, SemesterRequest) (SemesterDTO, error)
 	ListSemesters(context.Context) ([]SemesterDTO, error)
 	GetCurrentSemester(context.Context) (SemesterDTO, error)
@@ -50,6 +52,7 @@ type TxStore interface {
 	GetGradeReview(context.Context, int64) (ReviewDTO, error)
 	GetLatestApprovedReviewByCourse(context.Context, int64) (ReviewDTO, error)
 	GetLatestReviewByCourse(context.Context, int64) (ReviewDTO, error)
+	ListGradePublications(context.Context) ([]gradePublication, error)
 	ApproveGradeReview(context.Context, int64, int64, int64, string) (ReviewDTO, error)
 	RejectGradeReview(context.Context, int64, int64, string) (ReviewDTO, error)
 	UnlockGradeReview(context.Context, int64, int64, string) (ReviewDTO, error)
@@ -67,7 +70,8 @@ type TxStore interface {
 	MarkGradeLockOutboxFailed(context.Context, int64, int64, string, string) (GradeLockOutbox, error)
 	UpsertStudentSemesterGrade(context.Context, int64, int64, int64, int64, float64, float64, float64) (GradeSummaryDTO, error)
 	ListStudentSemesterGrades(context.Context, int64) ([]GradeSummaryDTO, error)
-	ListKnownStudentSemesterGrades(context.Context, int64) ([]GradeSummaryDTO, error)
+	DeleteStudentSemesterGrades(context.Context, int64) error
+	ListGradeWarningStudents(context.Context, int64, int64) ([]int64, error)
 	CreateGradeAppeal(context.Context, int64, int64, int64, AppealRequest) (AppealDTO, error)
 	HasOpenGradeAppeal(context.Context, int64, int64) (bool, error)
 	GetGradeAppeal(context.Context, int64) (AppealDTO, error)

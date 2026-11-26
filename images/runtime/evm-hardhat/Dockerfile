@@ -65,6 +65,7 @@ COPY --from=build /usr/bin/ln /usr/bin/ln
 COPY --from=build /usr/bin/mkdir /usr/bin/mkdir
 COPY --from=build /usr/bin/rm /usr/bin/rm
 COPY --from=build /usr/bin/sleep /usr/bin/sleep
+COPY --from=build /usr/bin/timeout /usr/bin/timeout
 COPY --from=build /lib/x86_64-linux-gnu/libacl.so.1 /lib/x86_64-linux-gnu/libacl.so.1
 COPY --from=build /lib/x86_64-linux-gnu/libattr.so.1 /lib/x86_64-linux-gnu/libattr.so.1
 COPY --from=build /lib/x86_64-linux-gnu/libselinux.so.1 /lib/x86_64-linux-gnu/libselinux.so.1

@@ -1,4 +1,3 @@
-// transfer service 文件负责统一导入导出中心的生产级任务编排。
 package transfer
 
 import (
@@ -7,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/storage"
@@ -25,7 +25,6 @@ type Service struct {
 	files   downloadGrantIssuer
 }
 
-// downloadGrantIssuer 是 transfer 使用统一文件服务所需的最小下载授权能力。
 type downloadGrantIssuer interface {
 	IssueDownloadGrant(storage.IssueDownloadGrantRequest) (string, storage.DownloadGrant, error)
 }
@@ -62,7 +61,7 @@ type TaskDTO struct {
 	Subject             string `json:"subject"`
 	Status              string `json:"status"`
 	ContentType         string `json:"content_type,omitempty"`
-	FileName            string `json:"file_name,omitempty"`
+	FileName            string `json:"file_name"`
 	AttemptCount        int    `json:"attempt_count"`
 	MaxAttempts         int    `json:"max_attempts"`
 	ArtifactSize        int64  `json:"artifact_size,omitempty"`
@@ -115,14 +114,6 @@ func (s *Service) GetTask(ctx context.Context, tenantID, taskID int64) (Task, er
 	return s.store.GetTask(ctx, tenantID, taskID)
 }
 
-// DeletePendingTask 补偿模块私有请求写入失败，仅允许删除从未领取的 pending 任务。
-func (s *Service) DeletePendingTask(ctx context.Context, tenantID, taskID int64) error {
-	if tenantID < 0 || taskID <= 0 {
-		return apperr.ErrTransferTaskInvalid
-	}
-	return s.store.DeletePendingTask(ctx, tenantID, taskID)
-}
-
 // ListTasks 查询当前账号的导入导出任务,返回当前页、总记录数与规范化后的分页参数。
 func (s *Service) ListTasks(ctx context.Context, query TaskListQuery) ([]Task, int64, int, int, pagex.Facets, error) {
 	if query.TenantID < 0 || query.AccountID <= 0 {
@@ -164,6 +155,83 @@ func (s *Service) ClaimTask(ctx context.Context, tenantID, taskID int64) (Task, 
 	return s.store.ClaimTask(ctx, claimed)
 }
 
+// RunWithLease 在模块 worker 处理长任务期间续租,失去租约时取消执行上下文。
+func (s *Service) RunWithLease(ctx context.Context, task Task, run func(context.Context) error) error {
+	if task.TenantID < 0 || task.TaskID <= 0 || task.Status != StatusRunning || strings.TrimSpace(task.LeaseToken) == "" || run == nil {
+		return apperr.ErrTransferTaskInvalid
+	}
+	leaseDuration := s.manager.Config.LeaseDuration
+	if leaseDuration < 3*time.Second {
+		return apperr.ErrTransferTaskInvalid
+	}
+	renewed, err := s.renewTaskLease(ctx, task, leaseDuration)
+	if err != nil {
+		return fmt.Errorf("确认导入导出任务租约失败: %w", err)
+	}
+	if !renewed {
+		return fmt.Errorf("导入导出任务租约已失效")
+	}
+
+	workCtx, cancelWork := context.WithCancel(ctx)
+	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
+	stop := make(chan struct{})
+	heartbeatDone := make(chan struct{})
+	leaseLost := make(chan error, 1)
+	go func() {
+		defer close(heartbeatDone)
+		interval := leaseDuration / 3
+		if interval > 30*time.Second {
+			interval = 30 * time.Second
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-heartbeatCtx.Done():
+				return
+			case <-ticker.C:
+				renewed, err := s.renewTaskLease(heartbeatCtx, task, leaseDuration)
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if err == nil && renewed {
+					continue
+				}
+				if err == nil {
+					err = fmt.Errorf("租约已过期或被其他 worker 接管")
+				}
+				leaseLost <- fmt.Errorf("续租导入导出任务失败: %w", err)
+				cancelWork()
+				return
+			}
+		}
+	}()
+
+	runErr := run(workCtx)
+	close(stop)
+	cancelHeartbeat()
+	<-heartbeatDone
+	cancelWork()
+	select {
+	case err := <-leaseLost:
+		return err
+	default:
+		if runErr != nil {
+			return runErr
+		}
+		return ctx.Err()
+	}
+}
+
+// renewTaskLease 延长仍有效且由当前任务 token 持有的租约。
+func (s *Service) renewTaskLease(ctx context.Context, task Task, leaseDuration time.Duration) (bool, error) {
+	return s.store.RenewTaskLease(ctx, task.TenantID, task.TaskID, task.LeaseToken, timex.Now().Add(leaseDuration))
+}
+
 // CompleteTask 完成已由当前租约领取的任务并登记统一文件服务对象引用。
 func (s *Service) CompleteTask(ctx context.Context, task Task, req CompleteTaskRequest) (Task, error) {
 	if task.TenantID < 0 || task.TaskID <= 0 || task.Status != StatusRunning || strings.TrimSpace(task.LeaseToken) == "" {
@@ -188,7 +256,7 @@ func (s *Service) FailTask(ctx context.Context, task Task, cause error, now time
 	return s.store.FailTask(ctx, failed, task.LeaseToken)
 }
 
-// BuildDownloadGrant 校验任务归属并签发统一文件服务下载授权。
+// BuildDownloadGrant 校验任务归属，并把下载授权绑定到申请账号。
 func (s *Service) BuildDownloadGrant(ctx context.Context, tenantID, taskID, accountID int64, tenantAdmin bool) (DownloadGrantDTO, error) {
 	task, err := s.GetTask(ctx, tenantID, taskID)
 	if err != nil {
@@ -203,7 +271,7 @@ func (s *Service) BuildDownloadGrant(ctx context.Context, tenantID, taskID, acco
 	token, grant, err := s.files.IssueDownloadGrant(storage.IssueDownloadGrantRequest{
 		TenantID:           task.TenantID,
 		ResourceTenantID:   task.TenantID,
-		AccountID:          task.AccountID,
+		AccountID:          accountID,
 		AllowPlatformScope: task.TenantID == 0,
 		ObjectRef:          task.Artifact.ObjectRef,
 		Module:             "transfer",
@@ -265,4 +333,13 @@ func validStatus(status Status) bool {
 	default:
 		return false
 	}
+}
+
+// AlertMetrics 为运维告警读取导入导出最终失败数量。
+func (s *Service) AlertMetrics(ctx context.Context, q contracts.AlertMetricQuery) (map[string]float64, error) {
+	n, err := s.store.CountFailures(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]float64{"transfer.failed_count": float64(n)}, nil
 }

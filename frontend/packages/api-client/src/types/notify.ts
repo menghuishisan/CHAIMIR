@@ -1,5 +1,3 @@
-// ===== M10 Notify 模块 =====
-
 import type { UserRole } from '../constants/identity'
 import type { AnnouncementScope } from '../constants/notify'
 import type { SnowflakeID } from './common'
@@ -18,7 +16,7 @@ export interface Notification {
 export interface NotificationPreference {
   type: string
   enabled: boolean
-  /** 强制类通知不允许关闭（由后端通知模板声明），界面渲染为不可操作并说明原因。 */
+  /** 由服务端声明。强制通知不允许关闭。 */
   force: boolean
 }
 

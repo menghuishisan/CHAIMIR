@@ -79,22 +79,6 @@ capabilities:
         title: 主链配置文件路径
         type: string
         x-chaimir-env: infra/OP_NODE_ROLLUP_L1_CHAIN_CONFIG
-      l1_beacon:
-        title: 主链信标服务地址
-        type: string
-        x-chaimir-env: infra/OP_NODE_L1_BEACON
-      rpc_addr:
-        title: 服务监听地址
-        type: string
-        x-chaimir-env: infra/OP_NODE_RPC_ADDR
-      rpc_port:
-        title: 服务端口
-        type: integer
-        x-chaimir-env: infra/OP_NODE_RPC_PORT
-      p2p_disable:
-        title: 禁用节点互联
-        type: boolean
-        x-chaimir-env: infra/OP_NODE_P2P_DISABLE
       sequencer_enabled:
         title: 启用排序器
         type: boolean
@@ -110,6 +94,7 @@ infra:
   eco_tags:
     - evm
   resource_spec:
+    volume_source: binding:l2_engine
     components:
       - name: infra
         image_url: "@self"

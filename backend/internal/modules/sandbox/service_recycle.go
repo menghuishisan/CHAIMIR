@@ -1,18 +1,22 @@
-// sandbox service_recycle 文件实现空闲、最长生命周期、来源级联和快照到期回收流程。
 package sandbox
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
 )
+
+var errSandboxResourceLeaseLost = errors.New("sandbox resource lease lost")
 
 // RunRecycleOnce 执行一轮回收扫描,供后台调度器和测试复用。
 func (s *Service) RunRecycleOnce(ctx context.Context) error {
@@ -23,10 +27,13 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 	if !ok || batchSize <= 0 {
 		return apperr.ErrSandboxRecycleConfigInvalid
 	}
-	var firstErr error
+	var failures []error
+	if err := s.recoverPendingSandboxStarts(ctx, batchSize); err != nil {
+		failures = append(failures, err)
+	}
 	if err := s.cleanupExpiredRuntimeSelftests(ctx); err != nil {
 		logging.ErrorContext(ctx, "expired runtime selftest cleanup failed", err.Error())
-		firstErr = err
+		failures = append(failures, err)
 	}
 	readyDeadline := timex.Now().Add(-time.Duration(s.cfg.ReadyIdleTimeoutSeconds) * time.Second)
 	var candidates []Sandbox
@@ -41,14 +48,12 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 		}
 		return nil
 	}); err != nil {
-		return err
+		return errors.Join(append(failures, err)...)
 	}
 	for _, candidate := range candidates {
 		if err := s.recycleOne(ctx, candidate, "scheduled"); err != nil {
 			logging.ErrorContext(ctx, "sandbox scheduled recycle failed", err.Error(), slog.Int64("tenant_id", candidate.TenantID), slog.Int64("sandbox_id", candidate.ID))
-			if firstErr == nil {
-				firstErr = err
-			}
+			failures = append(failures, err)
 		}
 	}
 	var snapshots []Sandbox
@@ -60,129 +65,227 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 		}
 		return nil
 	}); err != nil {
-		return err
+		return errors.Join(append(failures, err)...)
 	}
 	for _, snapshot := range snapshots {
-		if err := s.orchestrator.CleanupSnapshotResources(ctx, snapshot); err != nil {
-			wrapped := apperr.ErrSandboxSnapshotCleanupFailed.WithCause(err)
+		if err := s.cleanupExpiredSnapshot(ctx, snapshot); err != nil {
 			logging.ErrorContext(ctx, "sandbox snapshot cleanup failed", err.Error(), slog.Int64("tenant_id", snapshot.TenantID), slog.Int64("sandbox_id", snapshot.ID), slog.String("namespace", snapshot.Namespace))
-			if firstErr == nil {
-				firstErr = wrapped
-			}
-			continue
-		}
-		if err := s.store.TenantTx(ctx, snapshot.TenantID, func(ctx context.Context, tx TxStore) error {
-			if _, err := tx.UpdateSandboxSnapshot(ctx, snapshot.TenantID, snapshot.ID, "", nil, time.Time{}, time.Time{}); err != nil {
-				return apperr.ErrSandboxStatePersistFailed.WithCause(err)
-			}
-			return nil
-		}); err != nil {
-			logging.ErrorContext(ctx, "sandbox snapshot cleanup state update failed", err.Error(), slog.Int64("tenant_id", snapshot.TenantID), slog.Int64("sandbox_id", snapshot.ID))
-			if firstErr == nil {
-				firstErr = err
-			}
+			failures = append(failures, err)
 		}
 	}
-	return firstErr
+	return errors.Join(failures...)
 }
 
-// cleanupExpiredRuntimeSelftests 补偿请求内清理失败的无持久化运行时自检资源。
+func (s *Service) recoverPendingSandboxStarts(ctx context.Context, limit int32) error {
+	deadline := timex.Now().Add(-timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+	var pending []Sandbox
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		pending, err = tx.ListPendingSandboxStarts(ctx, deadline, limit)
+		return err
+	}); err != nil {
+		return apperr.ErrSandboxRecycleScanFailed.WithCause(err)
+	}
+	var failures []error
+	for _, sb := range pending {
+		if sb.Phase != SandboxPhaseInitializing && sb.Status != SandboxStatusCreating {
+			err := fmt.Errorf("暂停操作未在预算内确认完成: %w", context.DeadlineExceeded)
+			failures = append(failures, errors.Join(err, s.queueFailedPause(ctx, sb, err, true)))
+			continue
+		}
+		if sb.Phase == SandboxPhaseInitializing {
+			err := fmt.Errorf("资源操作未在预算内确认完成，不能自动重放: %w", context.DeadlineExceeded)
+			s.markStartupFailed(ctx, sb, "init", err, sb.Status)
+			failures = append(failures, err)
+			continue
+		}
+		plan, err := s.planForExistingSandbox(ctx, sb)
+		if err != nil {
+			s.markStartupFailed(ctx, sb, "start", err, SandboxStatusCreating)
+			failures = append(failures, err)
+			continue
+		}
+		s.scheduleSandboxStart(ctx, plan)
+	}
+	return errors.Join(failures...)
+}
+
+func (s *Service) cleanupExpiredSnapshot(ctx context.Context, snapshot Sandbox) error {
+	leaseDuration := s.resourceLeaseDuration()
+	if leaseDuration <= 0 {
+		return apperr.ErrSandboxRecycleConfigInvalid
+	}
+	var claimed Sandbox
+	var acquired bool
+	if err := s.store.TenantTx(ctx, snapshot.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		claimed, acquired, err = tx.ClaimExpiredSandboxSnapshotCleanup(ctx, snapshot.TenantID, snapshot.ID, leaseDuration)
+		return err
+	}); err != nil {
+		return apperr.ErrSandboxSnapshotCleanupFailed.WithCause(err)
+	}
+	if !acquired {
+		return nil
+	}
+
+	leaseCtx, stopLease := s.maintainResourceLease(ctx, claimed)
+	cleanupCtx, cancelCleanup := context.WithTimeout(leaseCtx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+	err := s.orchestrator.DestroySandboxResources(cleanupCtx, claimed)
+	cancelCleanup()
+	if err != nil {
+		if leaseErr := stopLease(); leaseErr != nil {
+			err = errors.Join(err, leaseErr)
+		}
+		s.markCleanupFailed(ctx, claimed, err)
+		return apperr.ErrSandboxSnapshotCleanupFailed.WithCause(err)
+	}
+	if err := stopLease(); err != nil {
+		s.markCleanupFailed(ctx, claimed, err)
+		return apperr.ErrSandboxSnapshotCleanupFailed.WithCause(err)
+	}
+
+	persistCtx, cancelPersist := asyncPersistenceContext(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+	defer cancelPersist()
+	var completed bool
+	err = s.store.TenantTx(persistCtx, claimed.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		completed, err = tx.CompleteExpiredSandboxSnapshotCleanup(ctx, claimed.TenantID, claimed.ID, claimed.resourceLeaseToken)
+		if err != nil {
+			return err
+		}
+		if !completed {
+			return errSandboxResourceLeaseLost
+		}
+		return nil
+	})
+	if err != nil {
+		s.markCleanupFailed(ctx, claimed, err)
+		return apperr.ErrSandboxSnapshotCleanupFailed.WithCause(err)
+	}
+	return nil
+}
+
 func (s *Service) cleanupExpiredRuntimeSelftests(ctx context.Context) error {
 	if s.cfg.SelftestRecycleTimeoutSeconds <= 0 {
 		return apperr.ErrSandboxSelftestRecycleConfigInvalid
 	}
-	window := timeDurationSeconds(s.cfg.SelftestRecycleTimeoutSeconds)
-	// 请求执行和请求内删除各自持有一个受限窗口；补偿任务必须等两者都过去，
-	// 才能把没有持久化记录的 Namespace 判定为遗留资源。
-	cleanupCtx, cancel := context.WithTimeout(ctx, window)
+	cleanupCtx, cancel := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.SelftestRecycleTimeoutSeconds))
 	defer cancel()
-	return s.orchestrator.CleanupExpiredRuntimeSelftests(cleanupCtx, 2*window)
+	return s.orchestrator.CleanupExpiredRuntimeSelftests(cleanupCtx)
 }
 
-// recycleOne 按保存代码、快照、删除资源、写终态、审计、发布事件的顺序回收单个沙箱。
 func (s *Service) recycleOne(ctx context.Context, sb Sandbox, reason string) error {
-	persistWorkspace := shouldPersistBeforeRecycle(sb)
-	locked, err := s.lockRecycle(ctx, sb)
+	locked, claimed, err := s.lockRecycle(ctx, sb)
 	if err != nil {
 		return err
 	}
+	if !claimed {
+		return nil
+	}
 	sb = locked
+	leaseCtx, stopLease := s.maintainResourceLease(ctx, sb)
+	if err := s.recycleResources(leaseCtx, sb, shouldPersistBeforeRecycle(sb)); err != nil {
+		if leaseErr := stopLease(); leaseErr != nil {
+			err = errors.Join(err, leaseErr)
+		}
+		s.markCleanupFailed(ctx, sb, err)
+		return apperr.ErrSandboxRecycleFailed.WithCause(err)
+	}
+	if err := stopLease(); err != nil {
+		s.markCleanupFailed(ctx, sb, err)
+		return apperr.ErrSandboxRecycleFailed.WithCause(err)
+	}
+	if err := s.completeRecycle(ctx, sb, reason); err != nil {
+		s.markCleanupFailed(ctx, sb, err)
+		return err
+	}
+	s.broadcastProgress(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusDestroyed, response.TraceFromContext(ctx))
+	s.drainSandboxRecycleOutboxBestEffort(ctx)
+	return nil
+}
+
+func (s *Service) recycleResources(ctx context.Context, sb Sandbox, persistWorkspace bool) error {
 	if persistWorkspace {
 		plan, err := s.planForExistingSandbox(ctx, sb)
 		if err != nil {
-			s.markRecycleFailed(ctx, sb, err)
 			return err
 		}
 		recoveryCtx, cancel := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
-		err = s.orchestrator.EnsureWorkspaceAccess(recoveryCtx, plan)
+		err = s.orchestrator.PrepareWorkspaceArchive(recoveryCtx, plan)
 		cancel()
 		if err != nil {
-			wrapped := apperr.ErrSandboxFilePersistFailed.WithCause(err)
-			s.markRecycleFailed(ctx, sb, wrapped)
-			return wrapped
+			return apperr.ErrSandboxFilePersistFailed.WithCause(err)
 		}
-		if _, err := s.saveSandboxFiles(ctx, sb.TenantID, sb.ID); err != nil {
-			s.markRecycleFailed(ctx, sb, err)
+		if err := s.renewSandboxResourceLease(ctx, sb, s.resourceLeaseDuration()); err != nil {
+			return apperr.ErrSandboxRecycleFailed.WithCause(err)
+		}
+		if _, err := s.saveSandboxFiles(ctx, sb); err != nil {
 			return err
 		}
 	}
-	if sb.SnapshotEnabled {
-		retention := time.Until(sb.SnapshotExpireAt)
-		if retention <= 0 {
-			retention = time.Minute
+	if sb.Status != SandboxStatusFailed {
+		if err := s.orchestrator.StopSandboxCompute(ctx, sb); err != nil {
+			return apperr.ErrSandboxRecycleFailed.WithCause(err)
 		}
+	}
+	if sb.SnapshotEnabled && sb.Status != SandboxStatusFailed && sb.Phase != SandboxPhaseAllocating && sb.Phase != SandboxPhaseInitializing && sb.SnapshotExpireAt.After(timex.Now()) {
+		retention := time.Until(sb.SnapshotExpireAt)
 		snapshotCtx, cancel := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
 		plan, err := s.planForExistingSandbox(ctx, sb)
 		if err != nil {
 			cancel()
-			s.markRecycleFailed(ctx, sb, err)
 			return err
 		}
 		result, err := s.orchestrator.CreateSnapshot(snapshotCtx, plan, retention)
 		cancel()
 		if err != nil {
-			s.markRecycleFailed(ctx, sb, err)
 			return apperr.ErrSandboxRecycleFailed.WithCause(err)
 		}
 		if err := s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
-			_, err := tx.UpdateSandboxSnapshot(ctx, sb.TenantID, sb.ID, result.Ref, result.Domains, timex.Now(), sb.SnapshotExpireAt)
+			_, err := tx.UpdateSandboxSnapshot(ctx, sb.TenantID, sb.ID, sb.resourceLeaseToken, result.Ref, result.Domains, timex.Now(), sb.SnapshotExpireAt)
 			return err
 		}); err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
-		if err := s.orchestrator.StopComputeKeepSnapshot(ctx, sb); err != nil {
-			s.markRecycleFailed(ctx, sb, err)
-			return apperr.ErrSandboxRecycleFailed.WithCause(err)
-		}
-	} else if err := s.orchestrator.DestroySandboxResources(ctx, sb); err != nil {
-		s.markRecycleFailed(ctx, sb, err)
-		return apperr.ErrSandboxRecycleFailed.WithCause(err)
+		sb.SnapshotRef = result.Ref
 	}
-	if err := s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
-		if _, err := tx.UpdateSandboxPhaseStatus(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusDestroyed); err != nil {
-			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
-		}
-		detail, err := jsonBytes(map[string]any{"reason": reason})
+	cleanupCtx, cancelCleanup := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+	defer cancelCleanup()
+	var cleanupErr error
+	if sb.SnapshotRef != "" && sb.SnapshotExpireAt.After(timex.Now()) {
+		cleanupErr = s.orchestrator.StopComputeKeepSnapshot(cleanupCtx, sb)
+	} else {
+		cleanupErr = s.orchestrator.DestroySandboxResources(cleanupCtx, sb)
+	}
+	if cleanupErr != nil {
+		return apperr.ErrSandboxRecycleFailed.WithCause(cleanupErr)
+	}
+	return nil
+}
+
+func (s *Service) completeRecycle(ctx context.Context, sb Sandbox, reason string) error {
+	detail, err := jsonBytes(map[string]any{"reason": reason})
+	if err != nil {
+		return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+	}
+	persistCtx, cancel := asyncPersistenceContext(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+	defer cancel()
+	return s.store.TenantTx(persistCtx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
+		completed, err := tx.CompleteSandboxRecycle(ctx, sb.TenantID, sb.ID, sb.resourceLeaseToken)
 		if err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		if !completed {
+			return apperr.ErrSandboxRecycleFailed.WithCause(errSandboxResourceLeaseLost)
 		}
 		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypeRecycle, detail); err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
-		_, err = tx.CreateSandboxRecycleOutbox(ctx, s.ids.Generate(), sb, reason, response.TraceFromContext(ctx), timex.Now())
-		if err != nil {
+		if _, err := tx.CreateSandboxRecycleOutbox(ctx, s.ids.Generate(), sb, reason, response.TraceFromContext(ctx), timex.Now()); err != nil {
 			return apperr.ErrSandboxRecycleEventPublishFailed.WithCause(err)
 		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	s.broadcastProgress(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusDestroyed, response.TraceFromContext(ctx))
-	if err := s.writeSystemAudit(ctx, sb.TenantID, "sandbox.recycle", "sandbox", sb.ID, map[string]any{"reason": reason, "source_ref": sb.SourceRef}); err != nil {
-		return err
-	}
-	s.drainSandboxRecycleOutboxBestEffort(ctx)
-	return nil
+		return s.writeSystemAudit(ctx, sb.TenantID, "sandbox.recycle", "sandbox", sb.ID, map[string]any{"reason": reason, "source_ref": sb.SourceRef})
+	})
 }
 
 // RunSandboxRecycleOutboxOnce 领取并发布沙箱回收事件,供后台任务和事务后补偿调用。
@@ -221,10 +324,9 @@ func (s *Service) RunSandboxRecycleOutboxOnce(ctx context.Context) error {
 	return firstErr
 }
 
-// publishSandboxRecycleOutboxItem 发布单条回收事件并按结果回写 outbox 状态。
 func (s *Service) publishSandboxRecycleOutboxItem(ctx context.Context, item SandboxRecycleOutbox) error {
 	eventCtx := response.WithTrace(ctx, item.TraceID)
-	payload := contracts.SandboxRecycledEvent{TenantID: item.TenantID, TraceID: item.TraceID, SandboxID: item.SandboxID, SourceRef: item.SourceRef, Reason: item.Reason, RecycledAt: item.RecycledAt}
+	payload := contracts.SandboxRecycledEvent{TenantID: item.TenantID, TraceID: item.TraceID, SandboxID: item.SandboxID, SourceRef: item.SourceRef, ScopeRef: item.ScopeRef, Reason: item.Reason, RecycledAt: item.RecycledAt}
 	if err := s.bus.Publish(eventCtx, contracts.SubjectSandboxRecycled, payload); err != nil {
 		s.recordSandboxRecycleOutboxFailure(eventCtx, item, err)
 		return apperr.ErrSandboxRecycleEventPublishFailed.WithCause(err)
@@ -232,7 +334,6 @@ func (s *Service) publishSandboxRecycleOutboxItem(ctx context.Context, item Sand
 	return s.markSandboxRecycleOutboxPublished(eventCtx, item)
 }
 
-// markSandboxRecycleOutboxPublished 用特权事务标记回收事件投递成功。
 func (s *Service) markSandboxRecycleOutboxPublished(ctx context.Context, item SandboxRecycleOutbox) error {
 	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		_, err := tx.MarkSandboxRecycleOutboxPublished(ctx, item.TenantID, item.ID, item.LeaseToken)
@@ -243,7 +344,6 @@ func (s *Service) markSandboxRecycleOutboxPublished(ctx context.Context, item Sa
 	})
 }
 
-// recordSandboxRecycleOutboxFailure 记录回收事件发布失败并等待后台重试。
 func (s *Service) recordSandboxRecycleOutboxFailure(ctx context.Context, item SandboxRecycleOutbox, cause error) {
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		_, err := tx.MarkSandboxRecycleOutboxFailed(ctx, item.TenantID, item.ID, logging.SanitizeError(cause.Error()), item.LeaseToken)
@@ -253,75 +353,177 @@ func (s *Service) recordSandboxRecycleOutboxFailure(ctx context.Context, item Sa
 	}
 }
 
-// drainSandboxRecycleOutboxBestEffort 在请求提交后尽快投递,失败只记录日志并交给后台任务补偿。
 func (s *Service) drainSandboxRecycleOutboxBestEffort(ctx context.Context) {
 	if err := s.RunSandboxRecycleOutboxOnce(ctx); err != nil {
 		logging.ErrorContext(ctx, "sandbox recycle outbox drain failed", err.Error())
 	}
 }
 
-// shouldPersistBeforeRecycle 判断回收前是否必须保存工作区代码。
 func shouldPersistBeforeRecycle(sb Sandbox) bool {
 	if sb.Status == SandboxStatusFailed {
 		return false
 	}
-	// 回收重试时若代码归档引用和哈希都已落库,说明保存步骤已经完成,不再重复解析组合快照。
-	if sb.Status == SandboxStatusRecycling && sb.CodeStorageKey != "" && sb.CodeHash != "" {
+	if sb.Status == SandboxStatusRecycling && sb.recycleSaved {
 		return false
 	}
-	return sb.Phase != SandboxPhaseAllocating || sb.CodeHash != ""
+	return sb.Phase == SandboxPhaseReady || sb.Phase == SandboxPhaseFullyReady
 }
 
-// lockRecycle 在任何资源清理前先把沙箱锁定为 recycling,保证失败后调度器可继续重试。
-func (s *Service) lockRecycle(ctx context.Context, sb Sandbox) (Sandbox, error) {
-	if sb.Status == SandboxStatusRecycling {
-		return sb, nil
+func (s *Service) lockRecycle(ctx context.Context, sb Sandbox) (Sandbox, bool, error) {
+	if sb.Status != SandboxStatusRecycling {
+		if err := validateStateTransition(sb.Status, SandboxStatusRecycling); err != nil {
+			return Sandbox{}, false, err
+		}
 	}
-	if err := validateStateTransition(sb.Status, SandboxStatusRecycling); err != nil {
-		return Sandbox{}, err
+	leaseDuration := s.resourceLeaseDuration()
+	if leaseDuration <= 0 {
+		return Sandbox{}, false, apperr.ErrSandboxRecycleConfigInvalid
 	}
-	var locked Sandbox
+	var claimed Sandbox
+	var acquired bool
+	err := s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		claimed, acquired, err = tx.ClaimSandboxRecycle(ctx, sb.TenantID, sb.ID, sb.Status, leaseDuration)
+		if err != nil {
+			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		}
+		return nil
+	})
+	if err != nil {
+		return Sandbox{}, false, err
+	}
+	return claimed, acquired, nil
+}
+
+func (s *Service) maintainResourceLease(ctx context.Context, sb Sandbox) (context.Context, func() error) {
+	leaseDuration := s.resourceLeaseDuration()
+	interval := leaseDuration / 3
+	if interval <= 0 {
+		interval = leaseDuration
+	}
+	leaseCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	var leaseErr error
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-leaseCtx.Done():
+				return
+			case <-ticker.C:
+				renewCtx, cancelRenew := context.WithTimeout(leaseCtx, leaseDuration)
+				leaseErr = s.renewSandboxResourceLease(renewCtx, sb, leaseDuration)
+				cancelRenew()
+				// 停止循环会取消正在续租的调用，该取消不表示执行权丢失。
+				if errors.Is(leaseErr, context.Canceled) && leaseCtx.Err() != nil {
+					leaseErr = nil
+				}
+				if leaseErr != nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return leaseCtx, func() error {
+		cancel()
+		<-done
+		return leaseErr
+	}
+}
+
+func (s *Service) resourceLeaseDuration() time.Duration {
+	if s.cfg.ExecTimeoutSeconds <= 0 || s.cfg.ReadyTimeoutSeconds <= 0 {
+		return 0
+	}
+	return timeDurationSeconds(s.cfg.ExecTimeoutSeconds) + timeDurationSeconds(s.cfg.ReadyTimeoutSeconds)
+}
+
+func (s *Service) renewSandboxResourceLease(ctx context.Context, sb Sandbox, leaseDuration time.Duration) error {
+	var renewed bool
 	if err := s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		locked, err = tx.UpdateSandboxPhaseStatus(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusRecycling)
-		if err != nil {
-			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
-		}
-		return nil
+		renewed, err = tx.RenewSandboxResourceLease(ctx, sb.TenantID, sb.ID, sb.resourceLeaseToken, leaseDuration)
+		return err
 	}); err != nil {
-		return Sandbox{}, err
+		return err
 	}
-	locked.Namespace = sb.Namespace
-	locked.SourceRef = sb.SourceRef
-	locked.OwnerAccountID = sb.OwnerAccountID
-	locked.SnapshotEnabled = sb.SnapshotEnabled
-	locked.CodeStorageKey = sb.CodeStorageKey
-	locked.CodeHash = sb.CodeHash
-	locked.InitCodeRef = sb.InitCodeRef
-	locked.InitScriptRef = sb.InitScriptRef
-	locked.SnapshotRef = sb.SnapshotRef
-	locked.SnapshotDomains = sb.SnapshotDomains
-	locked.SnapshotExpireAt = sb.SnapshotExpireAt
-	return locked, nil
+	if !renewed {
+		return errSandboxResourceLeaseLost
+	}
+	return nil
 }
 
-// markRecycleFailed 标记回收失败并保留资源,等待下一轮重试或人工处理。
-func (s *Service) markRecycleFailed(ctx context.Context, sb Sandbox, cause error) {
-	if err := s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.UpdateSandboxPhaseStatus(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusRecycling)
-		if err != nil {
-			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+func (s *Service) markCleanupFailed(ctx context.Context, sb Sandbox, cause error) {
+	stage := "recycle"
+	if sb.Status == SandboxStatusDestroyed {
+		stage = "snapshot_cleanup"
+	}
+	detail, err := jsonBytes(map[string]any{"stage": stage, "error": logging.SanitizeError(cause.Error())})
+	if err != nil {
+		logging.ErrorContext(ctx, "sandbox recycle failure detail encode failed", err.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
+		return
+	}
+	persistCtx, cancel := asyncPersistenceContext(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+	defer cancel()
+	var released bool
+	err = s.store.TenantTx(persistCtx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		released, err = tx.ReleaseSandboxResourceLease(ctx, sb.TenantID, sb.ID, sb.resourceLeaseToken)
+		if err != nil || !released {
+			return err
 		}
-		detail, err := jsonBytes(map[string]any{"stage": "recycle", "error": logging.SanitizeError(cause.Error())})
+		return tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypeError, detail)
+	})
+	if err != nil {
+		logging.ErrorContext(persistCtx, "sandbox recycle failure mark failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
+		return
+	}
+	if !released {
+		return
+	}
+	if sb.Status == SandboxStatusRecycling {
+		s.broadcastProgress(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusRecycling, response.TraceFromContext(ctx))
+	}
+}
+
+// RecycleByScopeRef 按生命周期作用域级联回收沙箱。
+func (s *Service) RecycleByScopeRef(ctx context.Context, req contracts.SandboxRecycleRequest) error {
+	if req.TenantID <= 0 || !validSourceRef(req.SourceRef) || !auth.ValidScopeRef(req.ScopeRef) {
+		return apperr.ErrSandboxRecycleRequestInvalid
+	}
+	var items []Sandbox
+	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		items, err = tx.ListSandboxesByScopeRef(ctx, req.TenantID, req.ScopeRef)
 		if err != nil {
-			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+			return apperr.ErrSandboxRecycleScanFailed.WithCause(err)
 		}
-		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypeError, detail); err != nil {
-			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		for i := range items {
+			item := &items[i]
+			if item.Status != SandboxStatusRecycling {
+				if err := validateStateTransition(item.Status, SandboxStatusRecycling); err != nil {
+					return err
+				}
+			}
+			queued, err := tx.QueueSandboxRecycle(ctx, item.TenantID, item.ID, item.Status)
+			if err != nil {
+				return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+			}
+			if !queued {
+				return apperr.ErrSandboxStatePersistFailed
+			}
 		}
 		return nil
 	}); err != nil {
-		logging.ErrorContext(ctx, "sandbox recycle failure mark failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
+		return err
 	}
-	s.broadcastProgress(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusRecycling, response.TraceFromContext(ctx))
+	for _, item := range items {
+		if err := s.recycleOne(ctx, item, req.Reason); err != nil {
+			return err
+		}
+	}
+	return nil
 }

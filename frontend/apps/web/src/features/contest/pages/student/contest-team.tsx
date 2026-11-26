@@ -1,11 +1,7 @@
-// 竞赛队伍卡(竞赛详情右栏「我的队伍」)。设计 §7.2:队名、成员、邀请码复制、锁队状态。
-// 队伍编号来自本人战绩记录(GET /contest/my/contest-records 的 team_id)——
-// 学生侧唯一能取到自己 team_id 的地方(对齐清单 §3.1)。
-// 只有队长能锁队(后端同口径);锁定后不能再加入新成员,故先确认再执行。
-// 成员接口只回账号编号,故按「队长 / 队员」与「我」呈现,内部编号不进界面。
+// 学生竞赛队伍：成员、邀请码分享与队长锁队。
 
-import { useCallback, useState } from 'react'
-import { Copy, Lock } from 'lucide-react'
+import { useState } from 'react'
+import { Copy, Link as LinkIcon, Lock } from 'lucide-react'
 import { TeamStatus, type ContestTeam } from '@chaimir/api-client'
 import {
   Badge,
@@ -35,9 +31,7 @@ export interface ContestTeamCardProps {
   onChanged: () => void
 }
 
-/**
- * ContestTeamCard 展示我的队伍与成员,并提供邀请码分享与锁定。
- */
+/** ContestTeamCard 读取队伍并在操作后刷新成员与状态。 */
 export function ContestTeamCard({ teamId, onChanged }: ContestTeamCardProps) {
   const team = useAsyncResource(() => api.contest.getTeam(teamId), [teamId], () => false)
 
@@ -70,31 +64,34 @@ export function ContestTeamCard({ teamId, onChanged }: ContestTeamCardProps) {
   )
 }
 
-/** TeamDetail 队名与状态、成员、邀请码、锁队 */
+/** TeamDetail 展示成员、分享入队入口并处理队长锁队。 */
 function TeamDetail({ team, onChanged }: { team: ContestTeam; onChanged: () => void }) {
   const { me } = useSession()
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [locking, setLocking] = useState(false)
   const [actionError, setActionError] = useState<string>()
-  const [copied, setCopied] = useState(false)
 
   const locked = team.status === TeamStatus.LOCKED
   const iAmLeader = team.members.some((member) => member.is_leader && member.account_id === me.account.id)
   const members = [...team.members].sort((a, b) => Number(b.is_leader) - Number(a.is_leader))
 
-  /** copyInviteCode 复制邀请码;失败提示与结构化日志由全站剪贴板入口统一处理。 */
-  const copyInviteCode = useCallback(async () => {
+  /** copyInviteCode 复用共享剪贴板入口的提示与错误处理。 */
+  async function copyInviteCode() {
     if (!team.invite_code) return
     setActionError(undefined)
     const ok = await copyText(team.invite_code, { what: '队伍邀请码', operation: 'contest.team.copyInviteCode' })
-    if (ok) {
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 2000)
-    }
-  }, [team.invite_code])
+    if (ok) toast.success('邀请码已复制')
+  }
+
+  /** copyJoinLink 分享同源入队地址，邀请码始终单独传递。 */
+  async function copyJoinLink() {
+    const link = new URL(`/student/contests/${team.contest_id}/join`, window.location.origin).href
+    const ok = await copyText(link, { what: '入队链接', operation: 'contest.team.copyJoinLink' })
+    if (ok) toast.success('入队链接已复制')
+  }
 
   /** lockTeam 锁定队伍:锁定后不能再加入新成员,故先确认。 */
-  const lockTeam = useCallback(async () => {
+  async function lockTeam() {
     setLocking(true)
     setActionError(undefined)
     try {
@@ -107,7 +104,7 @@ function TeamDetail({ team, onChanged }: { team: ContestTeam; onChanged: () => v
     } finally {
       setLocking(false)
     }
-  }, [onChanged, team.id])
+  }
 
   return (
     <div className="mt-2 flex flex-col gap-4">
@@ -127,13 +124,16 @@ function TeamDetail({ team, onChanged }: { team: ContestTeam; onChanged: () => v
 
       {team.invite_code && !locked ? (
         <div className="rounded-md bg-surface-hover p-3">
-          <p className="text-xs text-ink-sub">队伍邀请码,发给队友即可加入</p>
+          <p className="text-xs text-ink-sub">把入队链接和邀请码分别发给队友，登录后即可加入。</p>
           <div className="mt-1 flex items-center justify-between gap-2">
             <span className="font-mono text-md tabular-nums text-ink">{team.invite_code}</span>
-            <Button variant="ghost" size="sm" leftIcon={Copy} onClick={() => void copyInviteCode()}>
-              {copied ? '已复制' : '复制'}
+            <Button variant="ghost" size="sm" leftIcon={Copy} onClick={copyInviteCode}>
+              复制邀请码
             </Button>
           </div>
+          <Button variant="ghost" size="sm" leftIcon={LinkIcon} onClick={copyJoinLink}>
+            复制入队链接
+          </Button>
         </div>
       ) : null}
 

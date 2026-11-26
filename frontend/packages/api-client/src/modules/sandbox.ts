@@ -1,6 +1,3 @@
-// Sandbox API：沙箱管理
-// 对应后端 M2 模块
-
 import { ApiClient, encodePathSegment } from '../client'
 import { API_BASE_PATH } from '../constants'
 import type { IdentityApi } from './identity'
@@ -85,10 +82,10 @@ export class SandboxApi {
   }
 
   /**
-   * 触发运行时接入即测。
+   * 触发运行时接入即测。界面通过 getRuntimeSelftest 查询执行状态。
    */
   async runRuntimeSelftest(runtimeId: string): Promise<SandboxRuntimeSelftestStatus> {
-    return this.client.postBackground(`/sandbox/runtimes/${encodePathSegment(runtimeId)}/selftest`)
+    return this.client.postWithoutClientTimeout(`/sandbox/runtimes/${encodePathSegment(runtimeId)}/selftest`)
   }
 
   /**
@@ -125,14 +122,14 @@ export class SandboxApi {
   }
 
   /**
-   * 触发运行时镜像预拉取。
+   * 触发镜像预拉取。界面通过 getRuntimeImagePrepull 查询执行状态。
    */
   async prepullRuntimeImage(
     runtimeId: string,
     imageId: string,
     compositionDigest: string
   ): Promise<SandboxPrepullStatus> {
-    return this.client.postBackground(
+    return this.client.postWithoutClientTimeout(
       `/sandbox/runtimes/${encodePathSegment(runtimeId)}/images/${encodePathSegment(imageId)}/prepull`,
       { composition_digest: compositionDigest }
     )

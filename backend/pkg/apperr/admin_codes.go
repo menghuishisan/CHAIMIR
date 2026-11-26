@@ -34,12 +34,6 @@ const (
 )
 
 const (
-	// CodeAdminConfigInvalid 表示配置请求不正确。
-	CodeAdminConfigInvalid = "93001"
-	// CodeAdminConfigNotFound 表示配置不存在或不可访问。
-	CodeAdminConfigNotFound = "93002"
-	// CodeAdminConfigConflict 表示配置乐观锁冲突。
-	CodeAdminConfigConflict = "93003"
 	// CodeAdminMonitoringInvalid 表示监控面板配置不符合安全要求。
 	CodeAdminMonitoringInvalid = "93004"
 	// CodeAdminBackupInvalid 表示备份记录请求不正确。
@@ -82,12 +76,6 @@ var (
 	ErrAdminAuditExportObjectWriteFailed = New(CodeAdminAuditExportObjectWriteFailed, "审计导出文件暂时无法保存,请稍后重试")
 	// ErrAdminAuditExportTaskCompleteFailed 表示审计导出任务完成状态保存失败。
 	ErrAdminAuditExportTaskCompleteFailed = New(CodeAdminAuditExportTaskCompleteFailed, "审计导出任务暂时无法完成,请稍后重试")
-	// ErrAdminConfigInvalid 表示配置内容不正确。
-	ErrAdminConfigInvalid = New(CodeAdminConfigInvalid, "配置内容不正确,请检查后重试")
-	// ErrAdminConfigNotFound 表示配置不存在。
-	ErrAdminConfigNotFound = New(CodeAdminConfigNotFound, "配置不存在或已被移除")
-	// ErrAdminConfigConflict 表示配置版本冲突。
-	ErrAdminConfigConflict = New(CodeAdminConfigConflict, "配置已被更新,请刷新后重试")
 	// ErrAdminMonitoringInvalid 表示监控面板配置非法。
 	ErrAdminMonitoringInvalid = New(CodeAdminMonitoringInvalid, "监控面板配置不正确,请联系管理员处理")
 	// ErrAdminBackupInvalid 表示备份记录请求不正确。

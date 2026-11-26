@@ -18,20 +18,23 @@ The Graph subgraph 索引节点镜像。
 
 ## bindings 与 links
 
-- 必需 bindings：[{"name":"chain_rpc","capability":"evm-json-rpc","source_component":"infra","endpoint":"rpc","protocol":"HTTP","required_at_start":true,"config_binding":"env:CHAIMIR_GRAPH_RPC_URL"},{"name":"graph_database","capability":"graph-datastore","source_component":"infra","endpoint":"postgres","protocol":"TCP","required_at_start":true,"config_binding":"env:CHAIMIR_GRAPH_POSTGRES_ADDRESS"},{"name":"content_store","capability":"ipfs-http-api","source_component":"infra","endpoint":"api","protocol":"HTTP","required_at_start":true,"config_binding":"env:CHAIMIR_GRAPH_IPFS_ADDRESS"}]。
-- 必需 links：无；本镜像不声明跨组件 link。
+- 三个必需连接分别提供链 RPC、索引数据库与 IPFS，目标由教师显式选择并随组合冻结。RPC 提供者可以是链节点或已声明同一能力的 RPC 网关，均不共享其账本卷。
 - binding 的 endpoint、协议、配置键和启动前置以 manifest 为准；缺失、重复、错误能力或错误 provider 均拒绝编排。
+- 数据库绑定只接收 `主机:端口`，端口范围 1–65535；链 RPC 和 IPFS 绑定须为无内嵌凭据和片段、带显式有效端口的 HTTP(S) URL。
+- 网络名称、数据库名和账户参数可替换清单默认值；数据库配置须与所选提供者一致。
 
 ## 端口与服务
 
 - graphql：8000/TCP，暴露边界 proxy，用途：GraphQL query API。
 - admin：8020/TCP，暴露边界 internal，用途：Subgraph deploy API。
-- CompositionSpec services：[{"name":"infra-thegraph-graphql","component":"infra","ports":[{"name":"graphql","port":8000,"target_port":"graphql","protocol":"TCP"}]},{"name":"infra-thegraph-admin","component":"infra","ports":[{"name":"admin","port":8020,"target_port":"admin","protocol":"TCP"}]}]
+- index-status：8030/TCP，暴露边界 internal，用途：索引进度、健康与错误查询。
+- 三个端点分别声明 ClusterIP Service；admin 与 index-status 不直接向学生或公网开放，只经已授权的显式连接访问。
 - 组件：infra。
 
 ## command / args 语义
 
 - 镜像默认 ENTRYPOINT：["/usr/local/bin/chaimir-thegraph-entrypoint"]；manifest 未覆盖组件 command/args，使用该入口语义。
+- 入口校验绑定后替换 `POSTGRES_URL`、`ETHEREUM_RPC` 与 `IPFS`，不追加重复环境键；原生参数按 argv 传递。
 
 ## 初始化材料与运行时注入
 
@@ -44,11 +47,14 @@ The Graph subgraph 索引节点镜像。
 - Secret 环境键：POSTGRES_PASSWORD, GRAPH_POI_ACCESS_TOKEN。
 - 必需材料映射：[{"component":"infra","env":"POSTGRES_PASSWORD","secret_key":"PG_PASSWORD","source":"deploy/config/chaimir.env","runtime_value":"secret-or-kms"},{"component":"infra","env":"GRAPH_POI_ACCESS_TOKEN","secret_key":"GRAPH_POI_ACCESS_TOKEN","source":"deploy/config/secret.env","runtime_value":"secret-or-kms"}]
 - Secret 只来自平台 Secret/KMS 运行时注入，不能写入 Dockerfile、manifest、README、镜像层或测试输出。
+- 数据库密码由标准库转义后写入原生连接 URL，完整保留空白与特殊字符，不在错误中回显。
+- 原生 URL 生成后清除 `POSTGRES_PASSWORD` 环境键；POI token 仅保留原生键的一份值。
+- 数据库连接要求 TLS；证书由提供者经平台受控来源注入。
 
 ## 持久化与隔离边界
 
-- 持久化目录：由组件 mount_domains 决定；未声明持久化数据时不得自行落盘。
-- 组件挂载与文件系统：[{"name":"infra","mount_domains":["runtime-state"],"writable_mount_domains":["runtime-state"],"read_only_root_filesystem":false,"mount_workspace":false}]
+- `volume_source: self` 将组件的 runtime-state 与链账本隔离。索引数据写入所绑定的 PostgreSQL，内容经 IPFS 获取；不挂载链节点的私有状态或工作区。
+
 ## 安全边界
 
 - 安全声明：{"run_as_non_root":true,"read_only_root_filesystem":false,"allow_privilege_escalation":false,"privileged":false,"host_network":false,"automount_service_account_token":false,"drop_capabilities":["ALL"],"network_policy":"deny-all"}
@@ -70,3 +76,4 @@ The Graph subgraph 索引节点镜像。
 - 先按 digest lock 启动合法 CompositionSpec，核对 command/args、bindings、links、材料和 Secret 投影，再执行 manifest selftest。
 - selftest 只证明镜像布局和声明入口正确；协议、链、存储、索引、签名或跨镜像能力必须追加真实 provider 联动、正向业务、错误输入拒绝、重启/持久化（若声明）和清理证据。
 - 未执行或只完成探活的项目不得标记为业务通过。
+- 使用真实 RPC、PostgreSQL 与 IPFS 部署 subgraph，查询 `index-status` 的进度及错误，触发链上事件并用 GraphQL 验证结果；另验证 RPC 网关提供者、重启恢复与未授权访问拒绝。

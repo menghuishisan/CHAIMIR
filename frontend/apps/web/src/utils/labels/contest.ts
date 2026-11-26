@@ -35,6 +35,11 @@ export function contestStatusLabel(status: ContestStatus): string {
   return CONTEST_STATUS_LABELS[status]
 }
 
+/** 正式状态的筛选值与文案；页面仅裁剪角色不可见的状态。 */
+export const CONTEST_STATUS_OPTIONS = Object.values(ContestStatus)
+  .filter((status): status is ContestStatus => typeof status === 'number')
+  .map((status) => ({ value: String(status), label: contestStatusLabel(status) }))
+
 const CONTEST_MODE_LABELS: Record<ContestMode, string> = {
   [ContestMode.SOLVE]: '解题赛',
   [ContestMode.BATTLE]: '对抗赛',
@@ -221,21 +226,4 @@ const VULN_ASSERT_OP_LABELS = {
 /** vulnAssertOpLabel 返回断言判定方式文案。 */
 export function vulnAssertOpLabel(op: keyof typeof VULN_ASSERT_OP_LABELS): string {
   return VULN_ASSERT_OP_LABELS[op]
-}
-
-
-/**
- * 回放归档里链操作的用户向名称。
- * 取值来自 M3 runChainStep 的封闭集(deploy/tx/reset),归档解析已把集外操作滤掉;
- * 这里仍给未登记值一个中性名,保证界面不出现裸英文 op。
- */
-const BATTLE_CHAIN_OP_LABELS: Record<string, string> = {
-  [VULN_CHAIN_OPERATION.DEPLOY]: '部署合约',
-  [VULN_CHAIN_OPERATION.TX]: '发起交易',
-  [VULN_CHAIN_OPERATION.RESET]: '重置链状态',
-}
-
-/** battleChainOpLabel 返回链操作文案。 */
-export function battleChainOpLabel(op: string): string {
-  return BATTLE_CHAIN_OP_LABELS[op] ?? '链上操作'
 }

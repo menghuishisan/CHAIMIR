@@ -30,9 +30,6 @@ upstream:
     - image: docker.io/library/alpine
       digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
       role: runtime-state-stage
-  build_base_arg: GO_BUILDER_IMAGE
-  build_base_image: registry.chaimir.io/base/go-builder
-  build_base_digest: sha256:46d92c9696e24102dd211235153b05362a58a9f3d2068a5384f8dde7c1bccfac
   reuse_policy: thin-wrapper
 data_driven: true
 env_keys:
@@ -75,14 +72,17 @@ capabilities:
       network_name:
         title: 网络名称
         type: string
+        pattern: '^[A-Za-z0-9_-]+$'
         x-chaimir-env: infra/CHAIMIR_GRAPH_NETWORK
       postgres_database:
         title: 数据库名称
         type: string
+        pattern: '^[A-Za-z0-9_-]+$'
         x-chaimir-env: infra/CHAIMIR_GRAPH_POSTGRES_DB
       postgres_user:
         title: 数据库账户
         type: string
+        pattern: '^[A-Za-z0-9_.-]+$'
         x-chaimir-env: infra/CHAIMIR_GRAPH_POSTGRES_USER
   student_access: private
 infra:
@@ -114,6 +114,7 @@ infra:
     - indexer
     - subgraph
   resource_spec:
+    volume_source: self
     components:
       - name: infra
         image_url: "@self"
@@ -132,6 +133,10 @@ infra:
           - name: admin
             container_port: 8020
             service_port: 8020
+            protocol: TCP
+          - name: index-status
+            container_port: 8030
+            service_port: 8030
             protocol: TCP
         resources:
           requests:
@@ -166,6 +171,13 @@ infra:
             port: 8020
             target_port: admin
             protocol: TCP
+      - name: infra-thegraph-index-status
+        component: infra
+        ports:
+          - name: index-status
+            port: 8030
+            target_port: index-status
+            protocol: TCP
 ports:
   - name: graphql
     container_port: 8000
@@ -177,6 +189,11 @@ ports:
     protocol: TCP
     expose: internal
     purpose: Subgraph deploy API
+  - name: index-status
+    container_port: 8030
+    protocol: TCP
+    expose: internal
+    purpose: Subgraph indexing status API
 security:
   run_as_non_root: true
   read_only_root_filesystem: false

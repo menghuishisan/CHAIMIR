@@ -27,15 +27,19 @@ RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}";
         -ldflags="-s -w -X github.com/smartcontractkit/chainlink/v2/core/static.Version=2.61.0-chaimir -X github.com/smartcontractkit/chainlink/v2/core/static.VersionTag=2.61.0-chaimir -X github.com/smartcontractkit/chainlink/v2/core/static.Sha=${CHAINLINK_COMMIT}" \
         -o /out/chainlink .
 
+COPY entrypoint.go /src/chainlink/chaimir-entrypoint/main.go
+WORKDIR /src/chainlink/chaimir-entrypoint
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/chaimir-chainlink-entrypoint .
+
 FROM smartcontract/chainlink:2.61.0@sha256:25e67bd3488958e6308772b56d10f117c667a47ecd1df3a68034c56ca77e811e
 USER root
 COPY --chmod=0755 --from=builder /out/chainlink /usr/local/bin/chainlink
 RUN rm -f /usr/local/bin/chainlink-* /usr/local/bin/aptos /usr/local/bin/consensus /usr/local/bin/cron /usr/local/bin/evm /usr/local/bin/http_action /usr/local/bin/http_trigger /usr/local/bin/log-event-trigger /usr/local/bin/readcontract /usr/local/bin/solana /usr/local/bin/confidential-http /usr/local/bin/confidential-workflows /usr/local/bin/stellar \
     && (getent group 1000 >/dev/null || groupadd --gid 1000 chaimir) \
     && (id -u 1000 >/dev/null 2>&1 || useradd --uid 1000 --gid 1000 --home-dir /workspace --create-home --shell /usr/sbin/nologin chaimir) \
-    && mkdir -p /chainlink /workspace \
-    && chown -R 1000:1000 /chainlink /workspace
-COPY --chmod=0755 entrypoint.sh /usr/local/bin/chaimir-chainlink-entrypoint
+    && mkdir -p /workspace \
+    && chown -R 1000:1000 /workspace
+COPY --chmod=0755 --from=builder /out/chaimir-chainlink-entrypoint /usr/local/bin/chaimir-chainlink-entrypoint
 COPY --chmod=0755 healthcheck.sh /usr/local/bin/chaimir-chainlink-healthcheck
 USER 1000:1000
 WORKDIR /workspace

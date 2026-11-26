@@ -1,12 +1,8 @@
-// 平台「平台审计」:全平台范围的审计查询(设计 §7.7),平台自己的操作与各校的操作都在这里。
-// 每条记录标出所属学校(学校名按页取完解析,平台自己的操作标「平台」);平台管理员的操作带姓名(服务端解析),
-// 各校的操作人只显示身份:平台不跨校读取学校人员姓名,核对具体是谁要到该校的审计日志按人筛选。
-// 工具条可按学校筛选(只对平台身份生效,写进地址);不选为全平台,含平台自己的操作。
+// 平台审计按学校筛选；学校人员仅显示身份，不跨校读取姓名。
 
 import { useMemo } from 'react'
 import {
   PAGINATION_MAX_SIZE,
-  TenantStatus,
   type AuditLogEntry,
   type Tenant,
 } from '@chaimir/api-client'
@@ -14,9 +10,7 @@ import { Badge, Select, Skeleton } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { useAsyncResource } from '../../../../hooks'
 import { collectAllPages } from '../../../../utils/allPages'
-import { tenantStatusLabel } from '../../../../utils/labels/identity'
 import { auditActorRoleLabel, auditTargetTypeLabel } from '../../../../utils/labels/admin'
-import type { AuditDetailLookups } from '../../auditDetail'
 import { AUDIT_ALL, AuditLogPage, type AuditTargetOption } from '../../components/AuditLogPage'
 
 /** 平台审计里常见的对象类型(平台端能产生的操作在前,各校的常见操作在后) */
@@ -25,7 +19,6 @@ const TARGET_TYPES = [
   'identity.tenant_application',
   'identity.platform_admin',
   'identity.platform_auth_session',
-  'system_config',
   'alert_rule',
   'alert_event',
   'runtime',
@@ -48,19 +41,6 @@ const TARGET_OPTIONS: readonly AuditTargetOption[] = TARGET_TYPES.map((value) =>
   value,
   label: auditTargetTypeLabel(value),
 }))
-
-/** 学校状态的取值,用于把「更新学校状态」记录里的状态换成文字 */
-const TENANT_STATUSES = new Set<number>(
-  Object.values(TenantStatus).filter((value) => typeof value === 'number')
-)
-
-/** 详情里的附加项:平台端只解析学校状态;学生等人名在平台端读不到,不展示 */
-const DETAIL_LOOKUPS: AuditDetailLookups = {
-  status: (value) =>
-    typeof value === 'number' && TENANT_STATUSES.has(value)
-      ? tenantStatusLabel(value as TenantStatus)
-      : undefined,
-}
 
 /** PlatformAuditPage 全平台审计:按动作、对象、时间筛选,每条标出所属学校 */
 export default function PlatformAuditPage() {
@@ -128,7 +108,6 @@ export default function PlatformAuditPage() {
           ? `${entry.actor_name}(${auditActorRoleLabel(entry.actor_role)})`
           : auditActorRoleLabel(entry.actor_role)
       }
-      detailLookups={DETAIL_LOOKUPS}
       schoolFilter={{
         render: (value, onChange) => (
           <Select

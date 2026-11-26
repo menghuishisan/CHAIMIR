@@ -1,18 +1,11 @@
-// 漏洞题录入表单(漏洞题工坊页内)。设计 §7.4:字段多且分段,用右侧大抽屉(宽 880px、整高、底部固定操作条)。
-//
-// draft_body 的键不是自由的:后端预验证按 init_steps(初始化)、positive_steps(攻击 PoC)、
-// assertions(判定断言)三个数组执行链上操作,故表单按这三段渲染结构化编辑器,
-// 题面部分(说明 / 合约源码 / 分叉区块)随固化原样进 M5 题目正文。
-//
-// 断言至少要有一条:后端 checkVulnAssertions 在断言为空时直接判失败
-// (没有断言就无法判断漏洞是否真的被利用),故这里也要求至少一条。
+// 按服务端草稿恢复漏洞题编辑，暂存初始化、攻击、断言和运行环境。
 
-import { useCallback, useId, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { useId } from 'react'
+import { Bug, Plus, Trash2 } from 'lucide-react'
 import {
-  VulnLevel,
   VulnRuntimeMode,
-  type VulnProblemImportRequest,
+  VulnProblemStatus,
+  type VulnProblem,
   type VulnSource,
 } from '@chaimir/api-client'
 import {
@@ -36,14 +29,20 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { useFormValidation } from '../../../../hooks/useFormValidation'
+import { useAsyncResource } from '../../../../hooks'
+import { ResourceState } from '../../../../components/ResourceState'
+import { UnsavedChangesGuard } from '../../../../components/UnsavedChangesGuard'
+import { CompositionDeclarationFields } from '../../../sandbox/components/CompositionDeclarationFields'
 import {
   vulnAssertOpLabel,
   vulnChainOpLabel,
   vulnLevelLabel,
   vulnRuntimeModeLabel,
 } from '../../../../utils/labels/contest'
-import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { parseVulnJSONValue } from '../../vulnerabilityContract'
+import { useVulnProblemDraft } from '../../useVulnProblemDraft'
+import { VulnPrevalidateModal } from './vuln-prevalidate'
+import { type ChainStep, type AssertionDraft, type VulnProblemFields, vulnProblemFields } from '../../vulnProblemDraft'
 import {
   VULN_ASSERT_OPS,
   VULN_CHAIN_OPS,
@@ -52,64 +51,50 @@ import {
   type VulnAssertOp,
   type VulnChainOp,
 } from '../../options'
-import {
-  VULN_ASSERTION_FIELDS,
-  VULN_CHAIN_STEP_FIELDS,
-  VULN_DRAFT_BODY_FIELDS,
-} from '../../vulnerabilityContract'
-
-/** ChainStep 是一条链上步骤的编辑态。 */
-interface ChainStep {
-  op: VulnChainOp
-  payload: string
-}
-
-/** AssertionDraft 是一条断言的编辑态。 */
-interface AssertionDraft {
-  label: string
-  target: string
-  field: string
-  op: VulnAssertOp
-  value: string
-  expectedLabel: string
-  hint: string
-}
-
 export interface VulnProblemFormModalProps {
+  problemId: string
   sources: VulnSource[]
   onClose: () => void
   onSaved: () => void
 }
 
-/**
- * VulnProblemFormModal 手工录入一条漏洞题草稿。
- */
-export function VulnProblemFormModal({ sources, onClose, onSaved }: VulnProblemFormModalProps) {
+/** 先读取服务端草稿；加载失败时不以本机内容开启编辑。 */
+export function VulnProblemFormModal(props: VulnProblemFormModalProps) {
+  const resource = useAsyncResource(async () => {
+    const problem = await api.contest.getVulnProblem(props.problemId)
+    vulnProblemFields(problem)
+    return problem
+  }, [props.problemId])
+  if (resource.status !== 'success' || !resource.data) return (
+    <Drawer open onOpenChange={(open) => !open && props.onClose()}>
+      <DrawerContent size="wide">
+        <DrawerHeader><DrawerTitle>编辑漏洞题</DrawerTitle><DrawerDescription>继续编辑前需读取已保存的草稿。</DrawerDescription></DrawerHeader>
+        <DrawerBody><ResourceState resource={resource} emptyIcon={Bug} emptyTitle="没有找到漏洞题" emptyDescription="请返回工坊重新选择。">{() => null}</ResourceState></DrawerBody>
+      </DrawerContent>
+    </Drawer>
+  )
+  if (resource.data.status !== VulnProblemStatus.DRAFT) return (
+    <VulnPrevalidateModal problem={resource.data} onClose={props.onClose} onDone={props.onSaved} />
+  )
+  return <VulnProblemForm key={props.problemId} {...props} problem={resource.data} />
+}
+
+/** 编辑完整服务端草稿，半成品自动暂存，关闭前等待当前写回。 */
+function VulnProblemForm({ problem, sources, onClose, onSaved }: VulnProblemFormModalProps & { problem: VulnProblem }) {
   const fieldId = useId()
-
-  const [title, setTitle] = useState('')
-  const [judgerCode, setJudgerCode] = useState('')
-  const [maxScore, setMaxScore] = useState('100')
-  const [sourceId, setSourceId] = useState<string>('')
-  const [externalRef, setExternalRef] = useState('')
-  const [level, setLevel] = useState(String(VulnLevel.A))
-  const [runtimeMode, setRuntimeMode] = useState(String(VulnRuntimeMode.ISOLATED))
-  const [description, setDescription] = useState('')
-  const [contractSource, setContractSource] = useState('')
-  const [forkBlock, setForkBlock] = useState('')
-  const [initSteps, setInitSteps] = useState<ChainStep[]>([])
-  const [positiveSteps, setPositiveSteps] = useState<ChainStep[]>([])
-  const [assertions, setAssertions] = useState<AssertionDraft[]>([emptyAssertion()])
-
-  const [formError, setFormError] = useState<string>()
-  const [submitting, setSubmitting] = useState(false)
-
+  const draft = useVulnProblemDraft(problem)
+  const { title, judgerCode, maxScore, sourceId, externalRef, level, runtimeMode, description, contractSource, forkBlock, initSteps, positiveSteps, assertions, declaration } = draft.fields
+  // 同一编辑入口负责记录未同步输入，避免各字段分别维护保存逻辑。
+  function change<K extends keyof VulnProblemFields>(key: K) {
+    return (value: VulnProblemFields[K]) => draft.update({ [key]: value })
+  }
+  const setTitle = change('title'), setJudgerCode = change('judgerCode'), setMaxScore = change('maxScore')
+  const setSourceId = change('sourceId'), setExternalRef = change('externalRef'), setLevel = change('level')
+  const setRuntimeMode = change('runtimeMode'), setDescription = change('description'), setContractSource = change('contractSource')
+  const setForkBlock = change('forkBlock'), setInitSteps = change('initSteps'), setPositiveSteps = change('positiveSteps'), setAssertions = change('assertions')
   const isForked = Number(runtimeMode) === VulnRuntimeMode.FORKED
-
-  /** validate 校验必填项与 JSON 参数可解析性。 */
-  const { errors, validate } = useFormValidation(useCallback(() => {
-    const next: Record<string, string | null> = {
-      title: title.trim() === '' ? '请输入漏洞题标题' : title.trim().length > 255 ? '标题不能超过 255 个字' : null,
+  const errors: Record<string, string | null> = {
+      title: title.trim() === '' ? '请输入漏洞题标题' : [...title.trim()].length > 255 ? '标题不能超过 255 个字' : null,
       judgerCode: judgerCode.trim() === '' ? '请输入平台已注册的判题器编码' : null,
       maxScore: !Number.isInteger(Number(maxScore)) || Number(maxScore) <= 0 ? '满分必须是正整数' : null,
       description: description.trim() === '' ? '请写下漏洞说明,学生要知道这道题在考什么' : null,
@@ -117,88 +102,47 @@ export function VulnProblemFormModal({ sources, onClose, onSaved }: VulnProblemF
         isForked && (forkBlock.trim() === '' || !Number.isFinite(Number(forkBlock)))
           ? '主网分叉复现需要锁定一个区块高度'
           : null,
-      assertions: assertions.some((item) => item.target.trim() === '')
-        ? '每条断言都要填查询目标'
+      assertions: assertions.length === 0 ? '至少保留一条判定断言'
+        : assertions.some((item) => item.target.trim() === '' || assertionValueError(item))
+          ? '请检查每条断言的查询目标和期望值' : null,
+      steps: [...initSteps, ...positiveSteps].some((step) => !isValidStep(step))
+        ? '有步骤的信息不完整或格式不正确，请检查查询目标和参数'
         : null,
-      steps: [...initSteps, ...positiveSteps].some((step) => !isValidPayload(step))
-        ? '有步骤的参数格式不正确,请检查内容后重填'
-        : null,
-    }
-    return next
-  }, [assertions, description, forkBlock, initSteps, isForked, judgerCode, maxScore, positiveSteps, title]))
+  }
 
-  const submit = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      if (!validate()) return
+  // 手动保存与自动保存共用队列，失败时继续保留输入。
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (await draft.save()) toast.success('草稿已保存')
+  }
 
-      // draft_body 按后端读取的键组装:三段链上流程 + 题面部分
-      const payload: VulnProblemImportRequest = {
-        source_id: sourceId || undefined,
-        external_ref: externalRef.trim() || undefined,
-        title: title.trim(),
-        level: Number(level) as VulnLevel,
-        runtime_mode: Number(runtimeMode) as VulnRuntimeMode,
-        draft_body: {
-          [VULN_DRAFT_BODY_FIELDS.description]: description.trim(),
-          ...(contractSource.trim() !== ''
-            ? { [VULN_DRAFT_BODY_FIELDS.contractSource]: contractSource }
-            : {}),
-          ...(isForked ? { [VULN_DRAFT_BODY_FIELDS.forkBlock]: Number(forkBlock) } : {}),
-          [VULN_DRAFT_BODY_FIELDS.initSteps]: initSteps.map(stepToPayload),
-          [VULN_DRAFT_BODY_FIELDS.positiveSteps]: positiveSteps.map(stepToPayload),
-          [VULN_DRAFT_BODY_FIELDS.assertions]: assertions.map(assertionToPayload),
-          judge_config: {
-            judger_code: judgerCode.trim(),
-            max_score: Number(maxScore),
-            expectation: {},
-          },
-        },
-      }
-
-      setFormError(undefined)
-      setSubmitting(true)
-      try {
-        await api.contest.importVulnProblem(payload)
-        toast.success('漏洞题草稿已录入,接下来做预验证')
-        onSaved()
-      } catch (error) {
-        setFormError(userFacingErrorMessage(error, '录入没有成功,请检查填写内容后重试。'))
-      } finally {
-        setSubmitting(false)
-      }
-    },
-    [
-      assertions,
-      contractSource,
-      description,
-      externalRef,
-      forkBlock,
-      initSteps,
-      isForked,
-      judgerCode,
-      maxScore,
-      level,
-      onSaved,
-      positiveSteps,
-      runtimeMode,
-      sourceId,
-      title,
-      validate,
-    ],
-  )
+  async function close() {
+    if (await draft.save()) { onSaved(); onClose() }
+  }
 
   return (
-    <Drawer open onOpenChange={(open) => !open && onClose()}>
+    <Drawer open onOpenChange={(open) => !open && void close()}>
+      <UnsavedChangesGuard when={draft.dirty} description="尚未同步的编辑仅保留在本机，保存后可在其他设备继续。" onSave={draft.save} />
       <DrawerContent size="wide">
         <DrawerHeader>
-          <DrawerTitle>录入漏洞题</DrawerTitle>
+          <DrawerTitle>编辑漏洞题</DrawerTitle>
           <DrawerDescription>
-            填好初始化、攻击步骤与判定断言后做预验证:正向要打通、反向要不误判,双向通过才能固化进题库。
+            编辑会自动保存，未填完也可暂存。修改后需要重新预验证，通过后才能固化到题库。
           </DrawerDescription>
         </DrawerHeader>
         <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
           <DrawerBody className="flex flex-col gap-4">
+            <p role="status" className="text-sm text-ink-sub">{draft.status === 'saved' ? '已保存到服务器' : draft.status === 'saving' ? '正在保存' : '还有编辑尚未同步到服务器'}</p>
+            {draft.error ? <Callout tone="danger">{draft.error}</Callout> : null}
+            {draft.cacheError ? <Callout tone="warning">{draft.cacheError}</Callout> : null}
+            {draft.status === 'conflict' ? <Callout tone="warning" title="草稿已有更新">
+              <p>当前输入已保留。覆盖将用当前输入替换服务器最新草稿；使用服务器内容将丢弃本机未同步的修改。</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button variant="outline" onClick={() => void draft.resolveConflict(true)}>用当前输入覆盖服务器草稿</Button>
+                <Button variant="outline" onClick={() => void draft.resolveConflict(false)}>使用服务器内容</Button>
+              </div>
+            </Callout> : null}
+            <fieldset disabled={draft.status === 'conflict'} className="flex min-w-0 flex-col gap-4">
             <FormField label="标题" htmlFor={`${fieldId}-title`} required error={errors.title}>
               <Input
                 id={`${fieldId}-title`}
@@ -222,12 +166,12 @@ export function VulnProblemFormModal({ sources, onClose, onSaved }: VulnProblemF
                 <Select
                   id={`${fieldId}-source`}
                   options={[
-                    { value: '', label: '不归属任何来源' },
+                    { value: 'none', label: '不归属任何来源' },
                     ...sources.map((source) => ({ value: source.id, label: source.name })),
                   ]}
-                  value={sourceId}
+                  value={sourceId || 'none'}
                   placeholder="不归属任何来源"
-                  onValueChange={setSourceId}
+                  onValueChange={(value) => setSourceId(value === 'none' ? '' : value)}
                 />
               </FormField>
               <FormField
@@ -336,16 +280,19 @@ export function VulnProblemFormModal({ sources, onClose, onSaved }: VulnProblemF
 
             <AssertionEditor assertions={assertions} error={errors.assertions} onChange={setAssertions} />
 
+            <CompositionDeclarationFields idPrefix={`${fieldId}-composition`} value={declaration} onChange={change('declaration')} toolsHelper="选择预验证需要的运行环境和工具，未选完也可暂存。" />
+
             {errors.steps ? <Callout tone="danger">{errors.steps}</Callout> : null}
-            {formError ? <Callout tone="danger">{formError}</Callout> : null}
+            </fieldset>
           </DrawerBody>
           <DrawerFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
-              取消
+            <Button type="button" variant="outline" onClick={() => void close()}>
+              保存并关闭
             </Button>
-            <Button type="submit" variant="primary" loading={submitting}>
+            <Button type="submit" variant="primary" loading={draft.status === 'saving'} disabled={draft.status === 'conflict'}>
               保存草稿
             </Button>
+            {draft.dirty ? <Button type="button" variant="ghost" onClick={() => { onSaved(); onClose() }}>稍后继续</Button> : null}
           </DrawerFooter>
         </form>
       </DrawerContent>
@@ -360,11 +307,7 @@ interface ChainStepEditorProps {
   onChange: (steps: ChainStep[]) => void
 }
 
-/**
- * ChainStepEditor 编辑一组链上步骤。
- * 参数是链能力的入参(合约字节码、调用数据等),形状由运行时适配器决定,
- * 故这里保留 JSON 参数输入 —— 但操作类型是封闭枚举,从下拉里选。
- */
+// 部署与交易参数由运行时适配器定义，保留 JSON 输入。
 function ChainStepEditor({ title, description, steps, onChange }: ChainStepEditorProps) {
   const fieldId = useId()
 
@@ -379,7 +322,7 @@ function ChainStepEditor({ title, description, steps, onChange }: ChainStepEdito
           variant="outline"
           size="sm"
           leftIcon={Plus}
-          onClick={() => onChange([...steps, { op: VULN_CHAIN_OPS[0], payload: '{}' }])}
+          onClick={() => onChange([...steps, { runtimeInstance: '', op: VULN_CHAIN_OPS[0], payload: '{}', target: '' }])}
         >
           添加步骤
         </Button>
@@ -388,7 +331,6 @@ function ChainStepEditor({ title, description, steps, onChange }: ChainStepEdito
       {steps.length === 0 ? (
         <p className="text-sm text-ink-sub">没有步骤。这一段可以留空。</p>
       ) : (
-        // 井内的并列条目用分隔线区分,不再各自画盒(规范 §6.5.1)
         <div className="flex flex-col divide-y divide-line">
           {steps.map((step, index) => (
             <div key={index} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
@@ -412,7 +354,14 @@ function ChainStepEditor({ title, description, steps, onChange }: ChainStepEdito
                   onClick={() => onChange(steps.filter((_, i) => i !== index))}
                 />
               </div>
-              {step.op === 'reset' || step.op === 'query' ? (
+              <FormField label="目标链" htmlFor={`${fieldId}-runtime-${index}`} className="mb-0" helper="填写编排中的链实例名称；留空使用工作区所属链">
+                <Input id={`${fieldId}-runtime-${index}`} value={step.runtimeInstance} onChange={(event) => onChange(steps.map((item, i) => i === index ? { ...item, runtimeInstance: event.target.value } : item))} />
+              </FormField>
+              {step.op === 'query' ? (
+                <FormField label="查询目标" htmlFor={`${fieldId}-target-${index}`} required className="mb-0" helper="填写要查询的合约、账户或链上对象" error={step.target.trim() === '' ? '请填写查询目标' : null}>
+                  <Input id={`${fieldId}-target-${index}`} value={step.target} onChange={(event) => onChange(steps.map((item, i) => i === index ? { ...item, target: event.target.value } : item))} />
+                </FormField>
+              ) : step.op === 'reset' ? (
                 <p className="text-xs text-ink-sub">这个操作不需要参数。</p>
               ) : (
                 <FormField
@@ -420,14 +369,14 @@ function ChainStepEditor({ title, description, steps, onChange }: ChainStepEdito
                   htmlFor={`${fieldId}-payload-${index}`}
                   className="mb-0"
                   helper="这一步需要传入的参数,格式由所选运行环境决定"
-                  error={isValidPayload(step) ? undefined : '参数格式不正确,请按示例填写'}
+                  error={isValidStep(step) ? undefined : '参数格式不正确,请按示例填写'}
                 >
                   <Textarea
                     id={`${fieldId}-payload-${index}`}
                     value={step.payload}
                     rows={3}
                     className="font-mono text-xs"
-                    invalid={!isValidPayload(step)}
+                    invalid={!isValidStep(step)}
                     onChange={(event) =>
                       onChange(
                         steps.map((item, i) => (i === index ? { ...item, payload: event.target.value } : item)),
@@ -450,10 +399,6 @@ interface AssertionEditorProps {
   onChange: (assertions: AssertionDraft[]) => void
 }
 
-/**
- * AssertionEditor 编辑判定断言。
- * 断言决定"漏洞是否真的被利用":正向验证要全部通过,反向验证要全部不通过。
- */
 function AssertionEditor({ assertions, error, onChange }: AssertionEditorProps) {
   const fieldId = useId()
 
@@ -496,6 +441,10 @@ function AssertionEditor({ assertions, error, onChange }: AssertionEditorProps) 
                   onClick={() => onChange(assertions.filter((_, i) => i !== index))}
                 />
               </div>
+
+              <FormField label="目标链" htmlFor={`${fieldId}-runtime-${index}`} className="mb-0" helper="填写编排中的链实例名称；留空使用工作区所属链">
+                <Input id={`${fieldId}-runtime-${index}`} value={assertion.runtimeInstance} onChange={(event) => patch(onChange, assertions, index, { runtimeInstance: event.target.value })} />
+              </FormField>
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <FormField
@@ -555,11 +504,13 @@ function AssertionEditor({ assertions, error, onChange }: AssertionEditorProps) 
                   label="期望值"
                   htmlFor={`${fieldId}-value-${index}`}
                   className="mb-0"
-                  helper={assertion.op === 'exists' ? '这种判定不需要期望值' : '与查询结果比对的值'}
+                  helper={assertion.op === 'exists' ? '这种判定不需要期望值' : '按 JSON 填写，文本加双引号；也可填数字、true、null、数组或对象'}
+                  error={assertionValueError(assertion)}
                 >
-                  <Input
+                  <Textarea
                     id={`${fieldId}-value-${index}`}
                     value={assertion.value}
+                    rows={2}
                     disabled={assertion.op === 'exists'}
                     onChange={(event) => patch(onChange, assertions, index, { value: event.target.value })}
                   />
@@ -605,9 +556,9 @@ function AssertionEditor({ assertions, error, onChange }: AssertionEditorProps) 
   )
 }
 
-/** emptyAssertion 给出一条空断言的初始编辑态。 */
 function emptyAssertion(): AssertionDraft {
   return {
+    runtimeInstance: '',
     label: '',
     target: '',
     field: '',
@@ -618,7 +569,6 @@ function emptyAssertion(): AssertionDraft {
   }
 }
 
-/** patch 局部更新第 index 条断言。 */
 function patch(
   onChange: (assertions: AssertionDraft[]) => void,
   assertions: AssertionDraft[],
@@ -628,39 +578,23 @@ function patch(
   onChange(assertions.map((item, i) => (i === index ? { ...item, ...next } : item)))
 }
 
-/** isValidPayload 判断步骤参数是否是合法 JSON 对象;无参数的操作恒为真。 */
-function isValidPayload(step: ChainStep): boolean {
-  if (step.op === 'reset' || step.op === 'query') return true
+function isValidStep(step: ChainStep): boolean {
+  if (step.op === 'query') return step.target.trim() !== ''
+  if (step.op === 'reset') return true
   try {
-    const parsed: unknown = JSON.parse(step.payload)
+    const parsed = parseVulnJSONValue(step.payload)
     return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
   } catch {
     return false
   }
 }
 
-/** stepToPayload 把步骤编辑态转成后端读取的形状。 */
-function stepToPayload(step: ChainStep): Record<string, unknown> {
-  if (step.op === 'reset' || step.op === 'query') {
-    return { [VULN_CHAIN_STEP_FIELDS.op]: step.op }
-  }
-  return {
-    [VULN_CHAIN_STEP_FIELDS.op]: step.op,
-    [VULN_CHAIN_STEP_FIELDS.payload]: JSON.parse(step.payload) as Record<string, unknown>,
-  }
-}
-
-/** assertionToPayload 把断言编辑态转成后端 chainassert 读取的形状。 */
-function assertionToPayload(assertion: AssertionDraft): Record<string, unknown> {
-  return {
-    [VULN_ASSERTION_FIELDS.label]: assertion.label.trim() || assertion.target.trim(),
-    [VULN_ASSERTION_FIELDS.target]: assertion.target.trim(),
-    ...(assertion.field.trim() !== '' ? { [VULN_ASSERTION_FIELDS.field]: assertion.field.trim() } : {}),
-    [VULN_ASSERTION_FIELDS.op]: assertion.op,
-    ...(assertion.op === 'exists' ? {} : { [VULN_ASSERTION_FIELDS.value]: assertion.value }),
-    ...(assertion.expectedLabel.trim() !== ''
-      ? { [VULN_ASSERTION_FIELDS.expectedLabel]: assertion.expectedLabel.trim() }
-      : {}),
-    ...(assertion.hint.trim() !== '' ? { [VULN_ASSERTION_FIELDS.hint]: assertion.hint.trim() } : {}),
+function assertionValueError(assertion: AssertionDraft): string | null {
+  if (assertion.op === 'exists') return null
+  try {
+    parseVulnJSONValue(assertion.value)
+    return null
+  } catch {
+    return '请填写有效的期望值，文本需加双引号，数字不能超出范围'
   }
 }

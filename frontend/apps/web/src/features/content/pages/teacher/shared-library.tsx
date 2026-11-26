@@ -1,10 +1,4 @@
-// 共享资源库页(教师侧栏,/teacher/shared)。设计 §7.4:
-// 标签「题目 / 课程」+ 搜索与筛选(都写进地址);卡片网格;整卡打开预览抽屉(题目显示题面,课程显示简介),
-// 抽屉底部「克隆到本校」;克隆成功后在抽屉里给「去编辑」链接,留在资源库里可以继续挑。
-// 「克隆得到的是独立副本」的说明写在克隆确认弹窗里,页面上不常驻。
-//
-// 克隆是唯一的复用方式:跨校不能直接引用他校题目(否则他校改题会影响本校作业),
-// 也不能读他校题目的答案 —— 题面接口已剥离答案与判题配置;预览只显示登记过的题面字段(contentFace)。
+// 浏览共享题目与课程；按内容 ID 预览安全题面并克隆为本校独立草稿。
 
 import { useCallback, useState } from 'react'
 import { Link } from 'react-router'
@@ -51,7 +45,11 @@ import { useAsyncResource, usePagedResource, useUrlState } from '../../../../hoo
 import { facetCount, facetSum } from '../../../../utils/facets'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatDateTime, formatRelativeOccurrence } from '../../../../utils/formatters'
-import { contentAuthorTypeLabel, contentDifficultyLabel, contentTypeLabel } from '../../../../utils/labels/content'
+import {
+  contentAuthorTypeLabel,
+  contentDifficultyLabel,
+  contentTypeLabel,
+} from '../../../../utils/labels/content'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { SharedCourseLibrary } from '../../../teaching/components/SharedCourseLibrary'
 import { contentFaceSections } from '../../contentFace'
@@ -114,7 +112,13 @@ interface SharedQuestionLibraryProps {
 }
 
 /** SharedQuestionLibrary 共享题目:题型分段 + 搜索 + 卡片网格,整卡打开题面预览抽屉 */
-function SharedQuestionLibrary({ type, keyword, onTypeChange, onSearch, onClear }: SharedQuestionLibraryProps) {
+function SharedQuestionLibrary({
+  type,
+  keyword,
+  onTypeChange,
+  onSearch,
+  onClear,
+}: SharedQuestionLibraryProps) {
   const [previewTarget, setPreviewTarget] = useState<ContentItem>()
   const shared = usePagedResource<ContentItem>(
     (params) =>
@@ -124,11 +128,12 @@ function SharedQuestionLibrary({ type, keyword, onTypeChange, onSearch, onClear 
         ...params,
       }),
     [keyword, type],
-    { urlPageKey: 'page', pageSize: CARD_PAGE_SIZE },
+    { urlPageKey: 'page', pageSize: CARD_PAGE_SIZE }
   )
   const filtered = type !== 'all' || keyword !== ''
   // 题型分段的数字取列表接口的 facets(套用搜索,不套用题型筛选)
-  const facets = shared.status === 'success' || shared.status === 'empty' ? shared.data?.facets : undefined
+  const facets =
+    shared.status === 'success' || shared.status === 'empty' ? shared.data?.facets : undefined
 
   return (
     <>
@@ -137,13 +142,22 @@ function SharedQuestionLibrary({ type, keyword, onTypeChange, onSearch, onClear 
           aria-label="按题型筛选"
           options={[
             { value: 'all', label: '全部', count: facetSum(facets, 'type') },
-            ...CONTENT_TYPES.map((value) => ({ value: String(value), label: contentTypeLabel(value), count: facetCount(facets, 'type', value) })),
+            ...CONTENT_TYPES.map((value) => ({
+              value: String(value),
+              label: contentTypeLabel(value),
+              count: facetCount(facets, 'type', value),
+            })),
           ]}
           value={type}
           onValueChange={onTypeChange}
           className="max-w-full overflow-x-auto"
         />
-        <SearchBox label="搜索共享题目" placeholder="搜索题目名" value={keyword} onSearch={onSearch} />
+        <SearchBox
+          label="搜索共享题目"
+          placeholder="搜索题目名"
+          value={keyword}
+          onSearch={onSearch}
+        />
       </div>
 
       {shared.status === 'error' ? (
@@ -155,9 +169,13 @@ function SharedQuestionLibrary({ type, keyword, onTypeChange, onSearch, onClear 
       ) : shared.status === 'empty' ? (
         <div className="flex flex-col items-center rounded-lg bg-surface px-6 py-14 text-center shadow-xs">
           <Icon icon={Share2} size="lg" className="text-ink-faint" />
-          <p className="mt-3 text-md font-semibold text-ink">{filtered ? '没有匹配的共享题目' : '共享资源库还是空的'}</p>
+          <p className="mt-3 text-md font-semibold text-ink">
+            {filtered ? '没有匹配的共享题目' : '共享资源库还是空的'}
+          </p>
           <p className="mt-1.5 text-sm text-ink-sub">
-            {filtered ? '换个条件再试,或清空筛选查看全部。' : '其他学校把题目共享到资源库后会显示在这里。'}
+            {filtered
+              ? '换个条件再试,或清空筛选查看全部。'
+              : '其他学校把题目共享到资源库后会显示在这里。'}
           </p>
           {filtered ? (
             <Button variant="outline" className="mt-5" onClick={onClear}>
@@ -177,12 +195,23 @@ function SharedQuestionLibrary({ type, keyword, onTypeChange, onSearch, onClear 
             ))}
           </ul>
           <div className="mt-6">
-            <Pagination page={shared.page} pageSize={shared.pageSize} total={shared.total} onPageChange={shared.setPage} />
+            <Pagination
+              page={shared.page}
+              pageSize={shared.pageSize}
+              total={shared.total}
+              onPageChange={shared.setPage}
+            />
           </div>
         </>
       )}
 
-      {previewTarget ? <SharedQuestionDrawer item={previewTarget} onClose={() => setPreviewTarget(undefined)} /> : null}
+      {previewTarget ? (
+        <SharedQuestionDrawer
+          key={previewTarget.id}
+          item={previewTarget}
+          onClose={() => setPreviewTarget(undefined)}
+        />
+      ) : null}
     </>
   )
 }
@@ -192,7 +221,11 @@ function SharedQuestionCard({ item, onOpen }: { item: ContentItem; onOpen: () =>
   return (
     <Card interactive className="flex h-full flex-col gap-2 p-5">
       <div className="flex items-start justify-between gap-3">
-        <button type="button" onClick={onOpen} className="card-link line-clamp-2 text-left text-lg font-bold text-ink">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="card-link line-clamp-2 text-left text-lg font-bold text-ink"
+        >
           {item.title}
         </button>
         <Badge tone="neutral" className="shrink-0">
@@ -201,7 +234,9 @@ function SharedQuestionCard({ item, onOpen }: { item: ContentItem; onOpen: () =>
       </div>
       <p className="text-sm text-ink-sub">{contentDifficultyLabel(item.difficulty)}</p>
       {item.knowledge_points.length > 0 ? (
-        <p className="line-clamp-1 text-sm text-ink-sub">{item.knowledge_points.slice(0, 4).join(' · ')}</p>
+        <p className="line-clamp-1 text-sm text-ink-sub">
+          {item.knowledge_points.slice(0, 4).join(' · ')}
+        </p>
       ) : null}
       <p className="mt-auto pt-3 text-sm text-ink-sub" title={formatDateTime(item.updated_at)}>
         {contentAuthorTypeLabel(item.author_type)} · {formatRelativeOccurrence(item.updated_at)}更新
@@ -218,7 +253,11 @@ function SharedQuestionCard({ item, onOpen }: { item: ContentItem; onOpen: () =>
 function SharedQuestionDrawer({ item, onClose }: { item: ContentItem; onClose: () => void }) {
   const [cloneOpen, setCloneOpen] = useState(false)
   const [cloned, setCloned] = useState<{ code: string; version: string }>()
-  const face = useAsyncResource(() => api.content.getItemFace(item.code, item.version), [item.code, item.version], () => false)
+  const face = useAsyncResource(
+    () => api.content.getSharedItemFace(item.id),
+    [item.id],
+    () => false
+  )
 
   return (
     <Drawer open onOpenChange={(open) => !open && onClose()}>
@@ -226,7 +265,8 @@ function SharedQuestionDrawer({ item, onClose }: { item: ContentItem; onClose: (
         <DrawerHeader>
           <DrawerTitle>{item.title}</DrawerTitle>
           <DrawerDescription>
-            {contentTypeLabel(item.type)} · {contentDifficultyLabel(item.difficulty)} · {contentAuthorTypeLabel(item.author_type)}。
+            {contentTypeLabel(item.type)} · {contentDifficultyLabel(item.difficulty)} ·{' '}
+            {contentAuthorTypeLabel(item.author_type)}。
             答案与判题配置不在共享范围内,这里只显示题面。
           </DrawerDescription>
         </DrawerHeader>
@@ -235,7 +275,10 @@ function SharedQuestionDrawer({ item, onClose }: { item: ContentItem; onClose: (
             <Callout tone="success" title="已克隆到本校题库">
               <p>
                 短名 {cloned.code},版本 {cloned.version},是一份草稿。{' '}
-                <Link to={`/teacher/questions?q=${encodeURIComponent(cloned.code)}`} className="font-medium text-primary underline-offset-2 hover:underline">
+                <Link
+                  to={`/teacher/questions?q=${encodeURIComponent(cloned.code)}`}
+                  className="font-medium text-primary underline-offset-2 hover:underline"
+                >
                   去编辑
                 </Link>
               </p>
@@ -250,7 +293,9 @@ function SharedQuestionDrawer({ item, onClose }: { item: ContentItem; onClose: (
           >
             {(data) => {
               const sections = contentFaceSections(data.body)
-              const attachments = Array.isArray(data.body.attachments) ? data.body.attachments.length : 0
+              const attachments = Array.isArray(data.body.attachments)
+                ? data.body.attachments.length
+                : 0
               return (
                 <>
                   {data.knowledge_points.length > 0 ? (
@@ -291,7 +336,9 @@ function SharedQuestionDrawer({ item, onClose }: { item: ContentItem; onClose: (
                     ))
                   )}
                   {attachments > 0 ? (
-                    <p className="text-sm text-ink-sub">带 {attachments} 个附件,克隆到本校后可以下载。</p>
+                    <p className="text-sm text-ink-sub">
+                      带 {attachments} 个附件,克隆到本校后可以下载。
+                    </p>
                   ) : null}
                 </>
               )
@@ -362,7 +409,7 @@ function CloneSharedModal({ item, onClose, onCloned }: CloneSharedModalProps) {
     setFormError(undefined)
     setWorking(true)
     try {
-      await api.content.cloneItem(item.code, item.version, { new_code: code, new_version: version })
+      await api.content.cloneItem(item.id, { new_code: code, new_version: version })
       toast.success('已克隆到本校题库')
       onCloned({ code, version })
     } catch (error) {
@@ -370,7 +417,7 @@ function CloneSharedModal({ item, onClose, onCloned }: CloneSharedModalProps) {
     } finally {
       setWorking(false)
     }
-  }, [item.code, item.version, newCode, newVersion, onCloned, validate, working])
+  }, [item.id, newCode, newVersion, onCloned, validate, working])
 
   return (
     <Modal open onOpenChange={(open) => !open && !working && onClose()}>
@@ -384,7 +431,12 @@ function CloneSharedModal({ item, onClose, onCloned }: CloneSharedModalProps) {
         <ModalBody className="flex flex-col gap-4">
           <p className="text-base font-medium text-ink">{item.title}</p>
           <div className="grid gap-4 sm:grid-cols-2">
-            <FormField label="本校题目短名" htmlFor="shared-clone-code" required error={errors.code}>
+            <FormField
+              label="本校题目短名"
+              htmlFor="shared-clone-code"
+              required
+              error={errors.code}
+            >
               <Input
                 id="shared-clone-code"
                 value={newCode}
@@ -393,7 +445,12 @@ function CloneSharedModal({ item, onClose, onCloned }: CloneSharedModalProps) {
                 onChange={(event) => setNewCode(event.target.value)}
               />
             </FormField>
-            <FormField label="版本号" htmlFor="shared-clone-version" required error={errors.version}>
+            <FormField
+              label="版本号"
+              htmlFor="shared-clone-version"
+              required
+              error={errors.version}
+            >
               <Input
                 id="shared-clone-version"
                 value={newVersion}

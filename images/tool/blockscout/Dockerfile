@@ -18,11 +18,15 @@ ENV ELIXIR_MAKE_CACHE_DIR=/tmp/evision-cache
 
 USER root
 WORKDIR /app
+COPY database-url.patch /tmp/chaimir-database-url.patch
 ADD ${BLOCKSCOUT_SOURCE_URL} /tmp/blockscout-source.tar.gz
 RUN echo "${BLOCKSCOUT_SOURCE_SHA256}  /tmp/blockscout-source.tar.gz" | sha256sum -c - \
     && apk --no-cache --update add alpine-sdk gmp-dev automake libtool inotify-tools autoconf python3 file gcompat libstdc++ curl ca-certificates git make bash \
     && tar -xzf /tmp/blockscout-source.tar.gz -C /app --strip-components=1 \
     && rm -f /tmp/blockscout-source.tar.gz \
+    && git apply --check /tmp/chaimir-database-url.patch \
+    && git apply /tmp/chaimir-database-url.patch \
+    && rm -f /tmp/chaimir-database-url.patch \
     && sed -i \
         -e '/{BlocksIndexedCounter, name: BlocksIndexedCounter},/d' \
         -e '/{InternalTransactionsIndexedCounter, name: InternalTransactionsIndexedCounter},/d' \

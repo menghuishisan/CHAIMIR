@@ -32,8 +32,6 @@ const (
 	// CodeSimBackendComputeUnavailable 表示隔离执行不可用或已达租户并发上限。
 	// 两种情况对使用者是同一件事(现在跑不了、稍后再试),技术原因只进日志。
 	CodeSimBackendComputeUnavailable = "42005"
-	// CodeSimCheckpointInvalid 表示检查点上报内容非法。
-	CodeSimCheckpointInvalid = "42006"
 	// CodeSimShareCodeInvalid 表示分享码不存在、撤销或过期。
 	CodeSimShareCodeInvalid = "42007"
 	// CodeSimSessionDataCorrupt 表示仿真会话或操作持久化数据异常。
@@ -88,8 +86,6 @@ var (
 	ErrSimActionSeqInvalid = New(CodeSimActionSeqInvalid, "操作记录顺序异常,请刷新后重试")
 	// ErrSimBackendComputeUnavailable 表示仿真计算服务暂不可用。
 	ErrSimBackendComputeUnavailable = New(CodeSimBackendComputeUnavailable, "仿真计算服务暂不可用")
-	// ErrSimCheckpointInvalid 表示检查点结果不完整。
-	ErrSimCheckpointInvalid = New(CodeSimCheckpointInvalid, "检查点结果不完整,请重新提交")
 	// ErrSimShareCodeInvalid 表示分享内容不存在或已失效。
 	ErrSimShareCodeInvalid = New(CodeSimShareCodeInvalid, "分享内容不存在或已失效")
 	// ErrSimSessionDataCorrupt 表示仿真会话数据异常。

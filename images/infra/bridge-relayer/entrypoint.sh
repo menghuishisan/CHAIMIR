@@ -15,6 +15,7 @@ if [ ! -f "$HYP_BASE_CONFIG" ]; then
 fi
 mkdir -p "$HYP_DB"
 /usr/local/bin/chaimir-hyperlane-config
+unset HYP_DEFAULTSIGNER_KEY
 export CONFIG_FILES=/tmp/chaimir-hyperlane/merged-config.json
 
 if [ "$#" -eq 0 ]; then

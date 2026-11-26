@@ -1,10 +1,4 @@
-// 实验工具(平台侧栏,/platform-admin/sandbox-tools)。设计 §7.6:
-// 页头 +「登记工具」;分段按类别(学生工具 / 基础设施 / 全部,带数字,写进地址);
-// 列表行显示名称、类型、是否可部署、生态,不可部署的直接写原因;整行打开工具大抽屉(详情与修改同一处)。
-// 不再使用的工具只停用不删除(抽屉里说明)。指标条、平铺全部属性的卡片和常驻说明卡去掉。
-// 工具接口一次返回全部(不分页),计数在本页完成。
-
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Package, Plus } from 'lucide-react'
 import {
   SANDBOX_COMPONENT_CATEGORY,
@@ -31,7 +25,6 @@ import {
 import { toolStatusTone } from '../../statusPresentation'
 import { ToolFormModal } from './tool-form'
 
-/** 地址参数:category 分段(默认学生工具) */
 const TOOLS_QUERY = {
   category: { defaultValue: 'tool', allowed: ['tool', 'infra', 'all'] },
 } as const
@@ -42,7 +35,6 @@ const CATEGORY_SEGMENTS = [
   { value: 'all', label: '全部' },
 ] as const
 
-/** PlatformSandboxToolsPage 工具清单:按类别分诊,整行打开详情与修改 */
 export default function PlatformSandboxToolsPage() {
   const [query, setQuery] = useUrlState(TOOLS_QUERY)
   const [target, setTarget] = useState<{ tool?: SandboxToolDefinition }>()
@@ -51,7 +43,7 @@ export default function PlatformSandboxToolsPage() {
     [],
     (list) => list.length === 0
   )
-  const all = useMemo(() => tools.data ?? [], [tools.data])
+  const all = tools.data ?? []
 
   const counts: Record<string, number> = {
     tool: all.filter((item) => item.category === SANDBOX_COMPONENT_CATEGORY.TOOL).length,
@@ -128,7 +120,6 @@ export default function PlatformSandboxToolsPage() {
   )
 }
 
-/** ToolRow 一个工具:名称;类型 · 短码 · 生态,不可部署的写原因;右侧状态 */
 function ToolRow({ tool, onOpen }: { tool: SandboxToolDefinition; onOpen: () => void }) {
   const reason = tool.resource_spec.disabled_reason
   const deployable = !reason && tool.status === ToolStatus.AVAILABLE

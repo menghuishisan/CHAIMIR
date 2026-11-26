@@ -22,23 +22,6 @@ $scriptPath = $PSCommandPath
 $powerShellPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 
-# Stop-ProcessTree 在外部命令超时时终止整个进程树，避免探测子进程长期残留。
-function Stop-ProcessTree {
-    param([Parameter(Mandatory = $true)][Diagnostics.Process]$Process)
-
-    try {
-        & taskkill.exe /PID $Process.Id /T /F | Out-Null
-        if ($LASTEXITCODE -ne 0) { Write-WatcherLog "终止超时进程树返回$LASTEXITCODE,继续核对进程是否已退出" }
-    } catch {
-        Write-WatcherLog "终止进程树失败，进程可能已退出或当前账户无权限: $($_.Exception.Message)"
-    }
-    try {
-        if (-not $Process.HasExited) { $Process.Kill() }
-    } catch {
-        Write-WatcherLog "终止超时进程失败，进程可能已退出或当前账户无权限: $($_.Exception.Message)"
-    }
-}
-
 # Write-WatcherLog 保存探测阶段、状态变化和实际恢复结果,不记录凭据或业务正文。
 function Write-WatcherLog {
     param([Parameter(Mandatory = $true)][string]$Message)
@@ -48,49 +31,11 @@ function Write-WatcherLog {
     if ($Action -ne 'Watch') { Write-Host $line }
 }
 
-# Invoke-ProcessWithTimeout 有界执行基础设施命令并回收超时进程树。
-function Invoke-ProcessWithTimeout {
-    param(
-        [Parameter(Mandatory = $true)][string]$FilePath,
-        [Parameter(Mandatory = $true)][string[]]$Arguments,
-        [int]$TimeoutSeconds = 30
-    )
-    $process = New-Object System.Diagnostics.Process
-    $process.StartInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $process.StartInfo.FileName = $FilePath
-    $process.StartInfo.UseShellExecute = $false
-    $process.StartInfo.CreateNoWindow = $true
-    $process.StartInfo.RedirectStandardOutput = $true
-    $process.StartInfo.RedirectStandardError = $true
-    $process.StartInfo.Arguments = [string]::Join(" ", ($Arguments | ForEach-Object {
-        if ($_ -match '[\s"]') { '"' + ($_ -replace '(\\*)"', '$1$1\"') + '"' } else { $_ }
-    }))
-    try {
-        [void]$process.Start()
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            Stop-ProcessTree -Process $process
-            return [pscustomobject]@{ ExitCode = $null; TimedOut = $true; Stdout = ""; Stderr = "timeout" }
-        }
-        $stdoutTask.Wait()
-        $stderrTask.Wait()
-        return [pscustomobject]@{
-            ExitCode = $process.ExitCode
-            TimedOut = $false
-            Stdout = $stdoutTask.Result
-            Stderr = $stderrTask.Result
-        }
-    } finally {
-        $process.Dispose()
-    }
-}
-
 # Test-DockerReady 确认本轮 Docker API 可响应,不复用历史状态文件。
 function Test-DockerReady {
-    $result = Invoke-ProcessWithTimeout -FilePath "docker.exe" -Arguments @("info", "--format", "{{.ServerVersion}}") -TimeoutSeconds 30
+    $result = Invoke-ChaimirProcess -FilePath "docker.exe" -Arguments @("info", "--format", "{{.ServerVersion}}") -TimeoutSeconds 30
     if ($result.TimedOut) { throw 'Docker API 探测超时' }
-    if ($result.ExitCode -ne 0) { throw "Docker API 探测失败(exit=$($result.ExitCode)): $($result.Stderr.Trim())" }
+    if ($result.Code -ne 0) { throw "Docker API 探测失败(exit=$($result.Code)): $($result.Stderr.Trim())" }
     return ($result.Stdout.Trim() -match '^\S+$')
 }
 
@@ -104,11 +49,11 @@ function Get-NodeRuntimeNetworkState {
     if ($NodeNames.Count -eq 0) { throw '节点列表为空,无法检查运行时网络控制' }
     foreach ($nodeName in $NodeNames) {
         if ($nodeName -notmatch '^[a-z0-9][a-z0-9.-]*$') { throw '节点容器名称无效' }
-        $probe = Invoke-ProcessWithTimeout -FilePath 'docker.exe' -Arguments @(
+        $probe = Invoke-ChaimirProcess -FilePath 'docker.exe' -Arguments @(
             'exec', '--user', '0', $nodeName, 'ps', '-eLo', 'stat=,wchan:40=,comm='
         ) -TimeoutSeconds $TimeoutSeconds
-        if ($probe.TimedOut -or $probe.ExitCode -ne 0) {
-            return [pscustomobject]@{ Ready = $false; RecoverRuntime = [bool]$probe.TimedOut; Samples = @($nodeName); Error = "节点 $nodeName 的运行时状态读取失败(exit=$($probe.ExitCode),timeout=$($probe.TimedOut))" }
+        if ($probe.TimedOut -or $probe.Code -ne 0) {
+            return [pscustomobject]@{ Ready = $false; RecoverRuntime = [bool]$probe.TimedOut; Samples = @($nodeName); Error = "节点 $nodeName 的运行时状态读取失败(exit=$($probe.Code),timeout=$($probe.TimedOut))" }
         }
         $threads = @($probe.Stdout -split '\r?\n' | ForEach-Object {
             if ($_ -match '^\s*(\S+)\s+(\S+)\s+(\S+)\s*$') {
@@ -134,22 +79,22 @@ function Get-NodeRuntimeNetworkState {
 # Test-ExternalEdgeReady 检查外部 Nginx 的 EndpointSlice 是否仍指向当前控制平面地址。
 # Docker 重启后 Kind 节点 IP 可能变化;节点和 Cilium Pod 即使已 Ready,旧地址仍会让入口返回 502。
 function Test-ExternalEdgeReady {
-    $nodeResult = Invoke-ProcessWithTimeout -FilePath "docker.exe" -Arguments @(
+    $nodeResult = Invoke-ChaimirProcess -FilePath "docker.exe" -Arguments @(
         "inspect", $controlPlaneContainer, "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"
     ) -TimeoutSeconds 30
     if ($nodeResult.TimedOut) { throw '外部入口控制平面地址探测超时' }
-    if ($nodeResult.ExitCode -ne 0) { throw "外部入口控制平面地址探测失败: $($nodeResult.Stderr.Trim())" }
+    if ($nodeResult.Code -ne 0) { throw "外部入口控制平面地址探测失败: $($nodeResult.Stderr.Trim())" }
     $nodeIP = $nodeResult.Stdout.Trim()
     if ($nodeIP -notmatch '^([0-9]{1,3}\.){3}[0-9]{1,3}$') {
         return $false
     }
 
-    $endpointResult = Invoke-ProcessWithTimeout -FilePath "kubectl.exe" -Arguments @(
+    $endpointResult = Invoke-ChaimirProcess -FilePath "kubectl.exe" -Arguments @(
         "--context", $dependencyContext, "-n", $edgeNamespace, "get", "endpointslice", $edgeEndpointSlice,
         "-o", "jsonpath={.endpoints[0].addresses[0]} {.endpoints[0].conditions.ready} {.ports[0].port}"
     ) -TimeoutSeconds 30
     if ($endpointResult.TimedOut) { throw '外部入口 EndpointSlice 探测超时' }
-    if ($endpointResult.ExitCode -ne 0) { throw "外部入口 EndpointSlice 探测失败: $($endpointResult.Stderr.Trim())" }
+    if ($endpointResult.Code -ne 0) { throw "外部入口 EndpointSlice 探测失败: $($endpointResult.Stderr.Trim())" }
     $parts = @($endpointResult.Stdout.Trim() -split '\s+')
     return ($parts.Count -eq 3 -and $parts[0] -eq $nodeIP -and $parts[1] -eq 'true' -and $parts[2] -eq '30443')
 }
@@ -157,11 +102,11 @@ function Test-ExternalEdgeReady {
 # Read-ClusterJson 显式保留只读 kubectl 探测的超时、退出失败和 JSON 解析错误。
 function Read-ClusterJson {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
-    $result = Invoke-ProcessWithTimeout -FilePath "kubectl.exe" -Arguments (
+    $result = Invoke-ChaimirProcess -FilePath "kubectl.exe" -Arguments (
         @("--context", $clusterContext, "--request-timeout=30s") + $Arguments + @("-o", "json")
     ) -TimeoutSeconds 30
     if ($result.TimedOut) { throw "kubectl 探测超时: $($Arguments -join ' ')" }
-    if ($result.ExitCode -ne 0) { throw "kubectl 探测失败(exit=$($result.ExitCode)): $($result.Stderr.Trim())" }
+    if ($result.Code -ne 0) { throw "kubectl 探测失败(exit=$($result.Code)): $($result.Stderr.Trim())" }
     return ($result.Stdout | ConvertFrom-Json)
 }
 
@@ -286,11 +231,11 @@ function Get-WatcherHealth {
             return $health
         }
         $health.failure_stage = 'https'
-        $https = Invoke-ProcessWithTimeout -FilePath 'curl.exe' -Arguments @(
+        $https = Invoke-ChaimirProcess -FilePath 'curl.exe' -Arguments @(
             '--fail', '--silent', '--show-error', '--connect-timeout', [string]$commandSeconds, '--max-time', [string]$commandSeconds,
             '--cacert', (Join-Path $deployRoot 'config\chaimir-tls\tls.crt'), ($appOrigin.TrimEnd('/') + '/healthz')
         ) -TimeoutSeconds ($commandSeconds * 2)
-        $health.https_ready = -not $https.TimedOut -and $https.ExitCode -eq 0
+        $health.https_ready = -not $https.TimedOut -and $https.Code -eq 0
         if (-not $health.https_ready) {
             $health.repair_reason = 'https_unavailable'
             $health.error = $https.Stderr.Trim()
@@ -338,30 +283,30 @@ function Restore-Environment {
     if ($RecoverRuntime) { $runtimeAction = 'Recover' }
     Write-WatcherLog "健康门禁未通过,执行原Docker/WSL入口 action=$runtimeAction" | Out-Null
     $runtimeBudget = $startSeconds * 3 + $shutdownSeconds * 2 + $commandSeconds * 6
-    $runtime = Invoke-ProcessWithTimeout -FilePath $powerShellPath -Arguments @(
+    $runtime = Invoke-ChaimirProcess -FilePath $powerShellPath -Arguments @(
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'docker-runtime.ps1'), '-Action', $runtimeAction
     ) -TimeoutSeconds $runtimeBudget
-    if ($runtime.TimedOut -or $runtime.ExitCode -ne 0) {
+    if ($runtime.TimedOut -or $runtime.Code -ne 0) {
         Write-WatcherLog "Docker/WSL恢复未完成: $($runtime.Stderr.Trim()) $($runtime.Stdout.Trim())" | Out-Null
-        return [pscustomobject]@{ stage = 'docker'; exit_code = $runtime.ExitCode; timed_out = $runtime.TimedOut; completed_at = (Get-Date).ToUniversalTime().ToString('o') }
+        return [pscustomobject]@{ stage = 'docker'; exit_code = $runtime.Code; timed_out = $runtime.TimedOut; completed_at = (Get-Date).ToUniversalTime().ToString('o') }
     }
     if (Test-Path -LiteralPath $suspendPath) {
         Write-WatcherLog '操作员已暂停自动恢复,本次不启动集群' | Out-Null
         return [pscustomobject]@{ stage = 'suspended'; exit_code = $null; timed_out = $false; completed_at = (Get-Date).ToUniversalTime().ToString('o') }
     }
     Write-WatcherLog "健康门禁未通过,开始执行正式 Cilium 集群恢复" | Out-Null
-    $result = Invoke-ProcessWithTimeout -FilePath $powerShellPath -Arguments @(
+    $result = Invoke-ChaimirProcess -FilePath $powerShellPath -Arguments @(
         "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $deployRoot "scripts\cilium-cluster.ps1"), "-Action", "Start"
     ) -TimeoutSeconds 900
     if ($result.TimedOut) {
         Write-WatcherLog "Cilium 恢复超时(900s),冷却后重新探测并按需重试" | Out-Null
-    } elseif ($result.ExitCode -ne 0) {
+    } elseif ($result.Code -ne 0) {
         $detail = (($result.Stderr + " " + $result.Stdout).Trim() -replace "\s+", " ")
-        Write-WatcherLog "Cilium 恢复失败(exit=$($result.ExitCode)): $detail" | Out-Null
+        Write-WatcherLog "Cilium 恢复失败(exit=$($result.Code)): $detail" | Out-Null
     } else {
         Write-WatcherLog "Cilium 恢复进程完成,继续核对全部健康门禁" | Out-Null
     }
-    return [pscustomobject]@{ stage = 'cluster'; exit_code = $result.ExitCode; timed_out = $result.TimedOut; completed_at = (Get-Date).ToUniversalTime().ToString('o') }
+    return [pscustomobject]@{ stage = 'cluster'; exit_code = $result.Code; timed_out = $result.TimedOut; completed_at = (Get-Date).ToUniversalTime().ToString('o') }
 }
 
 # Install-Watcher 受控更新当前用户单实例任务,补齐周期唤醒/失败重启并立即启动。

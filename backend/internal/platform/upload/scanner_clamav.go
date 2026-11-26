@@ -1,4 +1,3 @@
-// upload 提供基于 ClamAV clamd INSTREAM 协议的统一病毒扫描适配器。
 package upload
 
 import (
@@ -6,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -58,15 +58,23 @@ func (s *ClamAVScanner) Scan(ctx context.Context, req ScanRequest) (result ScanR
 	if err != nil {
 		return ScanResult{}, fmt.Errorf("连接 ClamAV 失败: %w", err)
 	}
+	// DialContext 只负责建连；取消请求还必须中断已建立连接上的读写。
+	closed := make(chan error, 1)
+	stop := context.AfterFunc(scanCtx, func() { closed <- conn.Close() })
 	defer func() {
-		if closeErr := conn.Close(); closeErr != nil && err == nil {
-			err = fmt.Errorf("关闭 ClamAV 连接失败: %w", closeErr)
+		var closeErr error
+		if stop() {
+			closeErr = conn.Close()
+		} else {
+			closeErr = <-closed
+		}
+		if cause := scanCtx.Err(); cause != nil {
+			err = errors.Join(err, fmt.Errorf("ClamAV 扫描已取消: %w", cause))
+		}
+		if closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("关闭 ClamAV 连接失败: %w", closeErr))
 		}
 	}()
-	if err := conn.SetDeadline(time.Now().Add(effectiveTimeout(req.Timeout, s.timeout))); err != nil {
-		return ScanResult{}, fmt.Errorf("设置 ClamAV 超时失败: %w", err)
-	}
-
 	// 第一步:按 clamd 协议发送 INSTREAM 命令和长度分块,避免一次性拼巨大内存。
 	if _, err := io.WriteString(conn, "zINSTREAM\x00"); err != nil {
 		return ScanResult{}, fmt.Errorf("发送 ClamAV 指令失败: %w", err)
@@ -107,7 +115,6 @@ func (s *ClamAVScanner) Scan(ctx context.Context, req ScanRequest) (result ScanR
 	return parseClamAVResponse(line)
 }
 
-// readClamAVResponse 读取带 NUL 结尾的扫描结果并限制协议响应大小,避免扫描服务异常输出耗尽内存。
 func readClamAVResponse(reader *bufio.Reader) (string, error) {
 	var response []byte
 	for {
@@ -125,26 +132,28 @@ func readClamAVResponse(reader *bufio.Reader) (string, error) {
 	}
 }
 
-// parseClamAVResponse 把 clamd 原始响应解析成平台统一扫描结果。
 func parseClamAVResponse(raw string) (ScanResult, error) {
 	line := strings.TrimSpace(strings.TrimSuffix(raw, "\x00"))
+	result, ok := strings.CutPrefix(line, "stream: ")
+	if !ok {
+		return ScanResult{}, fmt.Errorf("ClamAV 返回无法识别的结果: %s", line)
+	}
 	switch {
-	case strings.HasSuffix(line, "OK"):
+	case result == "OK":
 		return ScanResult{Verdict: VerdictClean}, nil
-	case strings.Contains(line, "FOUND"):
-		signature := strings.TrimSpace(strings.TrimSuffix(strings.SplitN(line, "FOUND", 2)[0], ":"))
-		if idx := strings.LastIndex(signature, ":"); idx >= 0 {
-			signature = strings.TrimSpace(signature[idx+1:])
+	case strings.HasSuffix(result, " FOUND"):
+		signature := strings.TrimSpace(strings.TrimSuffix(result, " FOUND"))
+		if signature == "" {
+			return ScanResult{}, fmt.Errorf("ClamAV 病毒特征为空")
 		}
 		return ScanResult{Verdict: VerdictInfected, Signature: signature}, nil
-	case strings.Contains(line, "ERROR"):
+	case strings.HasSuffix(result, " ERROR"):
 		return ScanResult{}, fmt.Errorf("ClamAV 扫描失败: %s", line)
 	default:
 		return ScanResult{}, fmt.Errorf("ClamAV 返回无法识别的结果: %s", line)
 	}
 }
 
-// effectiveTimeout 优先使用请求级超时,否则回退到扫描器默认超时。
 func effectiveTimeout(requestTimeout, defaultTimeout time.Duration) time.Duration {
 	if requestTimeout > 0 {
 		return requestTimeout

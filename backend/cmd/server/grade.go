@@ -21,20 +21,21 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GradeModuleDeps 汇总组合根装配 M11 需要的基础设施和跨模块契约。
+// GradeModuleDeps 是 M11 装配所需的依赖。
 type GradeModuleDeps struct {
-	Router      gin.IRouter
-	Database    *db.DB
-	IDs         snowflake.Generator
-	Audit       audit.Writer
-	Teaching    contracts.TeachingReadService
-	EventBus    eventbus.Bus
-	Redis       *redis.Client
-	Storage     *storage.Storage
-	FileService storage.Service
-	Config      config.GradeConfig
-	Auth        *auth.Manager
-	Roles       contracts.IdentityService
+	CleanupTimeout time.Duration
+	Router         gin.IRouter
+	Database       *db.DB
+	IDs            snowflake.Generator
+	Audit          audit.Writer
+	Teaching       contracts.TeachingReadService
+	EventBus       eventbus.Bus
+	Redis          *redis.Client
+	Storage        *storage.Storage
+	FileService    storage.Service
+	Config         config.GradeConfig
+	Auth           *auth.Manager
+	Roles          contracts.IdentityService
 }
 
 // RegisterGradeModule 构造成绩中心 store/service,注册路由、事件订阅和 outbox worker。
@@ -50,16 +51,17 @@ func RegisterGradeModule(ctx context.Context, deps GradeModuleDeps) (*grade.Serv
 	}
 	store := grade.NewStore(deps.Database)
 	svc, err := grade.NewService(grade.ServiceDeps{
-		Store:       store,
-		IDs:         deps.IDs,
-		Audit:       deps.Audit,
-		Roles:       deps.Roles,
-		Teaching:    deps.Teaching,
-		Bus:         deps.EventBus,
-		Cache:       deps.Redis,
-		Storage:     deps.Storage,
-		FileService: deps.FileService,
-		Config:      deps.Config,
+		CleanupTimeout: deps.CleanupTimeout,
+		Store:          store,
+		IDs:            deps.IDs,
+		Audit:          deps.Audit,
+		Roles:          deps.Roles,
+		Teaching:       deps.Teaching,
+		Bus:            deps.EventBus,
+		Cache:          deps.Redis,
+		Storage:        deps.Storage,
+		FileService:    deps.FileService,
+		Config:         deps.Config,
 	})
 	if err != nil {
 		return nil, err
@@ -70,25 +72,14 @@ func RegisterGradeModule(ctx context.Context, deps GradeModuleDeps) (*grade.Serv
 	if _, err := grade.SubscribeEvents(deps.EventBus, svc); err != nil {
 		return nil, err
 	}
-	task, err := gradeOutboxTask(deps.Config, svc)
-	if err != nil {
+	if err := background.Start(ctx,
+		background.Task{
+			Name:     "grade.outbox",
+			Interval: time.Duration(deps.Config.LockOutboxPollMs) * time.Millisecond,
+			Run:      svc.RunOutboxesOnce,
+		},
+	); err != nil {
 		return nil, err
 	}
-	go background.Run(ctx, task)
 	return svc, nil
-}
-
-// gradeOutboxTask 把 M11 成绩锁与预警事件投递接入统一后台任务运行器。
-func gradeOutboxTask(cfg config.GradeConfig, svc *grade.Service) (background.Task, error) {
-	if svc == nil {
-		return background.Task{}, fmt.Errorf("grade outbox worker 缺少 service")
-	}
-	if cfg.LockOutboxPollMs <= 0 {
-		return background.Task{}, fmt.Errorf("GRADE_LOCK_OUTBOX_POLL_INTERVAL_MS 必须大于 0")
-	}
-	return background.Task{
-		Name:     "grade.outbox",
-		Interval: time.Duration(cfg.LockOutboxPollMs) * time.Millisecond,
-		Run:      svc.RunOutboxesOnce,
-	}, nil
 }

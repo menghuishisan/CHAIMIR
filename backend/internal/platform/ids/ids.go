@@ -1,4 +1,4 @@
-// ids 统一雪花 ID 在后端内部 int64 与公开字符串契约之间的边界处理。
+// Package ids 负责内部整数 ID 与公开十进制字符串之间的转换。
 package ids
 
 import (
@@ -26,7 +26,7 @@ func Parse(v string) (int64, bool) {
 		}
 	}
 	id, err := strconv.ParseInt(v, 10, 64)
-	if err != nil || id <= 0 {
+	if err != nil {
 		return 0, false
 	}
 	return id, true
@@ -59,12 +59,7 @@ func (id *ID) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &value); err != nil {
 		return fmt.Errorf("雪花 ID 必须使用 JSON 字符串: %w", err)
 	}
-	parsed, ok := Parse(value)
-	if !ok {
-		return fmt.Errorf("雪花 ID 必须为规范十进制正整数字符串")
-	}
-	*id = ID(parsed)
-	return nil
+	return id.UnmarshalText([]byte(value))
 }
 
 // MarshalText 为查询参数和结构化日志提供规范十进制表示。

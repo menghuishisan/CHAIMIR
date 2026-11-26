@@ -1,7 +1,7 @@
 // 作业管理(课程详情页内区块)。
 // 作业创建与编辑在课程内容区使用同一表单,选题时切换为完整分页列表。
 // 题目从 M5 题库选取(按 item_code + item_version 锁版本),不让教师手填题目编号 ——
-// 旧前端「编辑多题作业静默丢弃第 2 题及以后」正是把题目当单值处理造成的。
+// 作业题目按数组整体编辑和提交,每道题都保留顺序与配置。
 
 import { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'

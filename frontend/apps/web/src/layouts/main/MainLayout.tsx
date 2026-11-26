@@ -67,17 +67,8 @@ export function MainLayout({ config }: MainLayoutProps) {
 
   const [collapsed, setCollapsed] = useState(readSidebarCollapsed)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [drawerLocationKey, setDrawerLocationKey] = useState<string>()
   const [declared, setDeclared] = useState<PageLocationItem[] | null>(null)
-
-  /** 回到桌面宽度时关闭抽屉:否则抽屉遮罩会盖在已常驻的侧栏上 */
-  useEffect(() => {
-    if (isDesktop) setDrawerOpen(false)
-  }, [isDesktop])
-
-  /** 路由切换后关闭抽屉:窄屏点导航即离开当前页,抽屉必须让位 */
-  useEffect(() => {
-    setDrawerOpen(false)
-  }, [location.pathname])
 
   // 记住每个路径最近一次的查询串(筛选、搜索、页码):从详情页经顶栏点回列表时,视图还在(规范 §6.2)。
   // 只在内存里、只在本角色区内有效,刷新后由地址本身承担。
@@ -94,19 +85,22 @@ export function MainLayout({ config }: MainLayoutProps) {
   const navItems = useMemo(() => config.groups.flatMap((group) => group.items), [config.groups])
   const trail = useMemo(
     () => resolvePageTrail(navItems, location.pathname, declared),
-    [declared, location.pathname, navItems],
+    [declared, location.pathname, navItems]
   )
 
-  /** 浏览器标题随当前位置变化;离开日常页外框时还原 */
-  useEffect(() => {
-    document.title = pageTitle(trail)
-  }, [trail])
+  /** 浏览器标题随当前位置变化,离开外框时恢复进入前的标题。 */
   useEffect(() => {
     const original = document.title
+    document.title = pageTitle(trail)
     return () => {
       document.title = original
     }
-  }, [])
+  }, [trail])
+
+  const openDrawer = useCallback(() => {
+    setDrawerLocationKey(location.key)
+    setDrawerOpen(true)
+  }, [location.key])
 
   const toggleCollapsed = useCallback(() => {
     setCollapsed((previous) => {
@@ -139,7 +133,10 @@ export function MainLayout({ config }: MainLayoutProps) {
           </div>
         ) : (
           // 抽屉侧栏(<lg):Radix Dialog 提供遮罩(z-drawer)、Esc 与焦点陷阱;品牌在抽屉顶部
-          <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
+          <Drawer
+            open={!isDesktop && drawerOpen && drawerLocationKey === location.key}
+            onOpenChange={setDrawerOpen}
+          >
             <DrawerContent side="left" tone="dark" className="max-w-64 p-0">
               <DrawerTitle className="sr-only">主导航</DrawerTitle>
               <AppSidebar config={config} />
@@ -152,7 +149,7 @@ export function MainLayout({ config }: MainLayoutProps) {
           <header
             className={cn(
               'z-sticky flex shrink-0 items-center gap-2 bg-substrate',
-              isDesktop ? 'pl-9 pr-4' : 'px-3',
+              isDesktop ? 'pl-9 pr-4' : 'px-3'
             )}
             style={{ height: 'var(--topnav-h)' }}
           >
@@ -161,7 +158,7 @@ export function MainLayout({ config }: MainLayoutProps) {
                 variant="on-dark"
                 icon={MenuIcon}
                 aria-label="打开主导航"
-                onClick={() => setDrawerOpen(true)}
+                onClick={openDrawer}
                 className="border-transparent"
               />
             ) : null}
@@ -171,7 +168,9 @@ export function MainLayout({ config }: MainLayoutProps) {
             <div className="flex shrink-0 items-center gap-1">
               <TaskCenterButton tasksPath={tasksPath} />
               {/* 铃铛只在有站内信收件箱的端出现:归属由该区导航配置声明(见 navigation.ts) */}
-              {config.hasNotificationInbox ? <NotificationBell allPath={notificationsPath} /> : null}
+              {config.hasNotificationInbox ? (
+                <NotificationBell allPath={notificationsPath} />
+              ) : null}
               <UserMenu profilePath={profilePath} loginPath={config.loginPath} />
             </div>
           </header>

@@ -2,9 +2,9 @@
 package admin
 
 const (
-	// ScopeGlobal 表示平台级配置或统计。
+	// ScopeGlobal 表示平台级告警规则或统计。
 	ScopeGlobal int16 = 1
-	// ScopeTenant 表示租户级配置或统计。
+	// ScopeTenant 表示租户级告警规则或统计。
 	ScopeTenant int16 = 2
 )
 
@@ -34,10 +34,8 @@ const (
 )
 
 const (
-	// BackupStatusRunning 表示备份任务已记录并等待运维/CronJob 执行。
-	BackupStatusRunning int16 = 1
 	// BackupStatusSucceeded 表示备份任务成功。
-	BackupStatusSucceeded int16 = 2
+	BackupStatusSucceeded int16 = 1
 	// BackupStatusFailed 表示备份任务失败。
-	BackupStatusFailed int16 = 3
+	BackupStatusFailed int16 = 2
 )

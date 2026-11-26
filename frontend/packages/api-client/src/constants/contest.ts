@@ -1,5 +1,3 @@
-// 竞赛契约常量：维护前端需要与后端 contest 模块枚举编号对齐的值。
-
 export enum ContestMode {
   SOLVE = 1,
   BATTLE = 2,

@@ -1,4 +1,4 @@
-// httpx 提供 HTTP handler 层的无业务通用辅助。
+// Package httpx 提供 HTTP 参数绑定、响应和代理辅助。
 package httpx
 
 import (
@@ -22,15 +22,13 @@ import (
 	"chaimir/pkg/apperr"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 )
 
-// AuditContextMiddleware 把请求 IP 和 trace_id 注入 context,供业务成功后统一构造审计条目。
+// AuditContextMiddleware 记录客户端 IP，供审计条目使用。
 func AuditContextMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		ctx := audit.WithRequestContext(c.Request.Context(), audit.RequestContext{
-			IP:      c.ClientIP(),
-			TraceID: response.TraceFromGin(c),
-		})
+		ctx := audit.WithRequestIP(c.Request.Context(), c.ClientIP())
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}
@@ -77,30 +75,16 @@ func RateLimitMiddleware(counter *platformredis.Client, keyPrefix string, max in
 	}
 }
 
-// BindJSON 是 handler 层统一请求绑定入口,失败时只返回用户向 bad request 文案。
+// BindJSON 绑定请求体，失败时写出统一的参数错误响应。
 func BindJSON(c *gin.Context, dst any) bool {
-	if err := c.ShouldBindJSON(dst); err != nil {
-		response.Fail(c, apperr.ErrRequestBodyInvalid.WithCause(err))
-		return false
-	}
-	return true
+	return BindJSONWithError(c, dst, nil)
 }
 
-// BindJSONWithError 在统一绑定流程中使用调用方指定的稳定错误模板。
+// BindJSONWithError 严格解析单个 JSON 请求并执行字段校验，失败时使用指定的业务错误模板。
 func BindJSONWithError(c *gin.Context, dst any, bindErr *apperr.Error) bool {
-	if err := c.ShouldBindJSON(dst); err != nil {
-		if bindErr == nil {
-			response.Fail(c, apperr.ErrRequestBodyInvalid.WithCause(err))
-			return false
-		}
-		response.Fail(c, bindErr.WithCause(err))
-		return false
+	if c.Request.Body == nil {
+		return failJSONBinding(c, bindErr, io.EOF)
 	}
-	return true
-}
-
-// BindJSONKnownFieldsWithError 复用严格 JSON 解析,拒绝请求体中未声明的字段和额外值。
-func BindJSONKnownFieldsWithError(c *gin.Context, dst any, bindErr *apperr.Error) bool {
 	raw, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		return failJSONBinding(c, bindErr, err)
@@ -111,14 +95,15 @@ func BindJSONKnownFieldsWithError(c *gin.Context, dst any, bindErr *apperr.Error
 	if err := jsonx.DecodeStrictKnownFields(raw, dst); err != nil {
 		return failJSONBinding(c, bindErr, err)
 	}
+	if err := binding.Validator.ValidateStruct(dst); err != nil {
+		return failJSONBinding(c, bindErr, err)
+	}
 	return true
 }
 
-// failJSONBinding 返回稳定的用户向错误,保留原始解析错误供日志定位。
 func failJSONBinding(c *gin.Context, bindErr *apperr.Error, err error) bool {
 	if bindErr == nil {
-		response.Fail(c, apperr.ErrRequestBodyInvalid.WithCause(err))
-		return false
+		bindErr = apperr.ErrRequestBodyInvalid
 	}
 	response.Fail(c, bindErr.WithCause(err))
 	return false
@@ -335,11 +320,7 @@ func safeAttachmentName(fileName string) string {
 
 // cleanProxyPath 将路由通配路径转换为上游服务的绝对路径。
 func cleanProxyPath(proxyPath string) string {
-	path := strings.TrimSpace(proxyPath)
-	if path == "" || path == "/" {
-		return "/"
-	}
-	return "/" + strings.TrimPrefix(path, "/")
+	return "/" + strings.TrimPrefix(proxyPath, "/")
 }
 
 // cleanProxyPrefix 规范化浏览器可见的代理前缀,防止重写时出现双斜杠。

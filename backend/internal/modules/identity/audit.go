@@ -35,7 +35,21 @@ func (w *AuditWriter) Write(ctx context.Context, e platformaudit.Entry) error {
 		})
 	}
 	if e.TenantID > 0 {
+		joined, err := w.store.TenantTxIfPresent(ctx, e.TenantID, write)
+		if err != nil {
+			return err
+		}
+		if joined {
+			return nil
+		}
 		return w.store.TenantTx(ctx, e.TenantID, write)
+	}
+	joined, err := w.store.PlatformTxIfPresent(ctx, write)
+	if err != nil {
+		return err
+	}
+	if joined {
+		return nil
 	}
 	return w.store.PlatformTx(ctx, write)
 }

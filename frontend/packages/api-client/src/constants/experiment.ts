@@ -1,25 +1,14 @@
-// 实验契约常量：维护前端需要与后端 experiment 模块枚举编号对齐的值。
-
-/**
- * 实验协作模式与后端 experiment 模块保持一致。
- */
 export enum ExperimentCollabMode {
   SOLO = 1,
   GROUP = 2,
 }
 
-/**
- * 实验发布状态与后端 experiment 模块保持一致。
- */
 export enum ExperimentStatus {
   DRAFT = 1,
   PUBLISHED = 2,
   UNPUBLISHED = 3,
 }
 
-/**
- * 实验实例运行状态与后端 experiment 模块保持一致。
- */
 export enum ExperimentInstanceStatus {
   CREATING = 1,
   RUNNING = 2,
@@ -27,12 +16,10 @@ export enum ExperimentInstanceStatus {
   FINISHED = 4,
   RECYCLED = 5,
   ERROR = 6,
+  // 底层沙箱已回收，继续实验时需重建。
   RELEASED = 7,
 }
 
-/**
- * 实验报告状态与后端 experiment 模块保持一致。
- */
 export enum ExperimentReportStatus {
   SUBMITTED = 1,
   GRADED = 2,
@@ -48,9 +35,6 @@ export const EXPERIMENT_INSTANCE_ERROR_CODES = {
   ACCESS_DENIED: '72004',
 } as const
 
-/**
- * 实验阶段状态与后端 experiment service_stage.go 输出保持一致。
- */
 export const EXPERIMENT_STAGE_STATUS = {
   LOCKED: 'locked',
   AVAILABLE: 'available',
@@ -60,9 +44,6 @@ export const EXPERIMENT_STAGE_STATUS = {
 export type ExperimentStageStatus =
   (typeof EXPERIMENT_STAGE_STATUS)[keyof typeof EXPERIMENT_STAGE_STATUS]
 
-/**
- * 实验发布校验问题等级与后端 experiment enum.go 保持一致。
- */
 export const EXPERIMENT_VALIDATION_LEVEL = {
   ERROR: 'error',
   WARNING: 'warning',
