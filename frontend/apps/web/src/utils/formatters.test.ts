@@ -3,13 +3,25 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   fileKindLabel,
+  formatCalendarDate,
   formatDateRange,
   formatDateTimeSeconds,
   formatRelativeDeadline,
   formatRelativeOccurrence,
+  formatTime,
 } from './formatters.ts'
 
 const now = new Date(2026, 10, 10, 15, 0)
+
+test('自然日保持学期和统计所属日期，不接受时间戳或不存在的日期', () => {
+  assert.equal(formatCalendarDate('2026-09-01'), '2026/09/01')
+  assert.equal(formatCalendarDate('2027-01-16'), '2027/01/16')
+  assert.equal(formatCalendarDate('2026-11-27'), '2026/11/27')
+  assert.equal(formatCalendarDate('2024-02-29'), '2024/02/29')
+  for (const value of ['2026-02-30', '2026-11-27T01:00:00Z', '', 'not-a-date']) {
+    assert.equal(formatCalendarDate(value), '时间未知')
+  }
+})
 
 /** at 用本地时间构造接口返回的那种 ISO 时间串。 */
 function at(year: number, month: number, day: number, hour: number, minute: number, second = 0): string {
@@ -66,4 +78,12 @@ test('精确到秒的完整时间(审计、日志类页面用)', () => {
   assert.equal(formatDateTimeSeconds(at(2026, 10, 10, 9, 5, 7)), '2026/11/10 09:05:07')
   assert.equal(formatDateTimeSeconds(at(2026, 10, 10, 0, 0, 3)), '2026/11/10 00:00:03')
   assert.equal(formatDateTimeSeconds('not a time'), '时间未知')
+})
+
+test('事件轴、截止与发生时间统一使用00到23点的原生时刻格式', () => {
+  const midnight = at(2026, 10, 10, 0, 0)
+  assert.equal(formatTime(midnight), '00:00')
+  assert.equal(formatRelativeDeadline(midnight, new Date(2026, 10, 9, 12)).text, '明天 00:00 截止')
+  assert.equal(formatRelativeOccurrence(midnight, new Date(2026, 10, 11, 12)), '昨天 00:00')
+  assert.equal(formatTime('invalid'), '—')
 })

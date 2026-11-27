@@ -1,8 +1,5 @@
 // 成绩配置页(校管侧栏,/school-admin/grade-settings)。
 //
-// 三件配置同页分 Tab(对齐清单 §3.3:等级规则、学期、预警规则应做成配置页内 Tab):
-// 等级映射决定百分制怎么换算成等级与绩点,学期决定成绩的归档区间,预警规则决定何时触发学业预警。
-//
 // 等级映射是有序区间:每条规则声明「不低于某分即为某等级」,后端按 min 降序匹配。
 // 故表单要求按分数从高到低,并在保存前校验区间不重叠、覆盖到 0 分。
 
@@ -50,7 +47,7 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useActiveAnchor, useAsyncResource } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
-import { formatDate, formatGpa } from '../../../../utils/formatters'
+import { formatCalendarDate, formatGpa } from '../../../../utils/formatters'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
 /** 三个分组的锚点(左侧目录与外部链接共用,如学业预警页的「调整预警规则」) */
@@ -494,7 +491,7 @@ function SemestersSection() {
       header: '开始',
       render: (semester) => (
         <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDate(semester.start_date)}
+          {formatCalendarDate(semester.start_date)}
         </span>
       ),
     },
@@ -503,7 +500,7 @@ function SemestersSection() {
       header: '结束',
       render: (semester) => (
         <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDate(semester.end_date)}
+          {formatCalendarDate(semester.end_date)}
         </span>
       ),
     },
@@ -543,7 +540,7 @@ function SemestersSection() {
                 // <md 换行卡(§6.4.1 规则 3):学期名一行、起止区间一行
                 mobileCard={(item) => ({
                   title: item.name,
-                  meta: `${formatDate(item.start_date)} — ${formatDate(item.end_date)}`,
+                  meta: `${formatCalendarDate(item.start_date)} — ${formatCalendarDate(item.end_date)}`,
                   badge: item.is_current ? <Badge tone="jade">当前学期</Badge> : undefined,
                 })}
               />

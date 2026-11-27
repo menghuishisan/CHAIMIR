@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/timex"
@@ -127,27 +128,27 @@ func businessTopicTenantID(topic string) int64 {
 }
 
 // validateSendRequest 校验内部通知发送请求。
-func validateSendRequest(req SendRequest) (SendRequest, error) {
+func validateSendRequest(req contracts.NotifySendRequest) (contracts.NotifySendRequest, error) {
 	req.RequestID = strings.TrimSpace(req.RequestID)
 	req.Type = strings.TrimSpace(req.Type)
 	req.Link = strings.TrimSpace(req.Link)
 	if req.TenantID <= 0 || req.Type == "" || len(req.Receivers) == 0 {
-		return SendRequest{}, apperr.ErrNotifyRequestInvalid
+		return contracts.NotifySendRequest{}, apperr.ErrNotifyRequestInvalid
 	}
 	if req.RequestID != "" && !auth.ValidSourceRef(req.RequestID) {
-		return SendRequest{}, apperr.ErrNotifyRequestInvalid
+		return contracts.NotifySendRequest{}, apperr.ErrNotifyRequestInvalid
 	}
 	if req.Link != "" && !linkPattern.MatchString(req.Link) {
-		return SendRequest{}, apperr.ErrNotifyRequestInvalid
+		return contracts.NotifySendRequest{}, apperr.ErrNotifyRequestInvalid
 	}
 	if req.Params == nil {
 		req.Params = map[string]string{}
 	}
 	seen := map[int64]struct{}{}
-	out := req.Receivers[:0]
+	out := make([]int64, 0, len(req.Receivers))
 	for _, id := range req.Receivers {
 		if id <= 0 {
-			return SendRequest{}, apperr.ErrNotifyRequestInvalid
+			return contracts.NotifySendRequest{}, apperr.ErrNotifyRequestInvalid
 		}
 		if _, ok := seen[id]; ok {
 			continue

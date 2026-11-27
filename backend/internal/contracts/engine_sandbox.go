@@ -417,10 +417,8 @@ type SandboxService interface {
 	SandboxReadService
 	// CompileSandboxComposition 校验声明、展开依赖并返回不可变快照。
 	CompileSandboxComposition(ctx context.Context, tenantID int64, spec SandboxCompositionSpec) (SandboxCompositionSnapshot, error)
-	// CompilePlatformSandboxComposition 供平台治理面编译不属于任一租户的不可变组合快照。
-	CompilePlatformSandboxComposition(ctx context.Context, spec SandboxCompositionSpec) (SandboxCompositionSnapshot, error)
-	// ReplacePlatformSandboxCompositionSnapshot 用最终私有组合快照替换编译过程产生的基础快照。
-	ReplacePlatformSandboxCompositionSnapshot(ctx context.Context, previousDigests []string, snapshot SandboxCompositionSnapshot) error
+	// CompilePlatformSandboxComposition 将平台私有 sidecar 一并编译，原子登记完整组合快照。
+	CompilePlatformSandboxComposition(ctx context.Context, spec SandboxCompositionSpec, privateSidecars []SandboxPrivateSidecarSpec) (SandboxCompositionSnapshot, error)
 	// PrepareCompositions 为冻结组合摘要准备完整镜像闭包,供发布、预验证和判题启动前共用。
 	PrepareCompositions(ctx context.Context, compositionDigests []string) error
 	// ValidateSandboxTemplate 校验业务模块保存/发布的沙箱模板能解析到可调度运行时、镜像和工具,但不创建资源。
@@ -446,7 +444,7 @@ type SandboxService interface {
 	ChainDeployForPrincipal(ctx context.Context, access SandboxPrincipalRequest, runtimeInstance string, payload map[string]any) (map[string]any, error)
 	ChainSendTxForPrincipal(ctx context.Context, access SandboxPrincipalRequest, runtimeInstance string, payload map[string]any) (map[string]any, error)
 	ChainQueryForPrincipal(ctx context.Context, access SandboxPrincipalRequest, runtimeInstance, target string) (map[string]any, error)
-	// UpdateSandboxAuthorizedAccounts 原子替换共享账号集合,供实验编组变更同步权限。
+	// UpdateSandboxAuthorizedAccounts 与同租户调用方事务原子替换共享账号，提交后再关闭撤权连接。
 	UpdateSandboxAuthorizedAccounts(ctx context.Context, req SandboxAuthorizedAccountsRequest) error
 	// GetSandboxWorkspaceArchive 查询已保存工作区的服务端对象引用,供实例重建时恢复。
 	GetSandboxWorkspaceArchive(ctx context.Context, tenantID, sandboxID int64) (string, error)

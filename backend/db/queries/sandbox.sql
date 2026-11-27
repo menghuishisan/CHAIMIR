@@ -117,10 +117,6 @@ SET snapshot = EXCLUDED.snapshot,
     status = 1,
     updated_at = now();
 
--- name: DeleteCompositionSnapshot :exec
-DELETE FROM sandbox_composition
-WHERE composition_digest = $1 AND status = 1;
-
 -- name: DisableRuntimeImage :one
 UPDATE runtime_image
 SET status = 2
@@ -146,7 +142,7 @@ SET status = 4, attempt_id = EXCLUDED.attempt_id, daemonset_name = '', image_clo
 RETURNING id, runtime_image_id, composition_digest, status, attempt_id, daemonset_name, image_closure,
           desired_nodes, ready_nodes, detail, started_at, completed_at, created_at, updated_at;
 
--- name: FinishCompositionPrepull :one
+-- name: UpdateCompositionPrepull :one
 UPDATE sandbox_composition_prepull
 SET status = sqlc.arg(status)::smallint, daemonset_name = sqlc.arg(daemonset_name)::text, desired_nodes = sqlc.arg(desired_nodes)::int, ready_nodes = sqlc.arg(ready_nodes)::int, detail = sqlc.arg(detail),
     completed_at = CASE WHEN sqlc.arg(status)::smallint = 2 OR sqlc.arg(status)::smallint = 3 THEN now() ELSE NULL END, updated_at = now()

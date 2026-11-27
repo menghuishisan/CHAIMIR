@@ -51,8 +51,8 @@ type Orchestrator interface {
 	ExecStream(ctx context.Context, namespace, container string, command []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, tty bool, sizes terminal.SizeQueue) error
 	// ResetSandboxRuntime 清空目标账本并重注入材料，保留工作区和其他实例数据。
 	ResetSandboxRuntime(ctx context.Context, plan CreateSandboxPlan, runtimeInstance string, archives []RuntimeInitArchive) error
-	// PrepullImage 创建或更新预拉取 DaemonSet 并等待工作负载镜像集合在真实节点 Ready。
-	PrepullImage(ctx context.Context, image RuntimeImage, compositionDigest string, specs []PrepullImageSpec) (PrepullResult, error)
+	// PrepullImage 等待完整镜像闭包就绪；进度变化时同步回报，回报失败中止本轮。
+	PrepullImage(ctx context.Context, image RuntimeImage, compositionDigest string, specs []PrepullImageSpec, progress func(PrepullResult) error) (PrepullResult, error)
 	// DeletePrepullDaemonSet 删除镜像预拉取 DaemonSet,用于镜像停用或删除闭环。
 	DeletePrepullDaemonSet(ctx context.Context, image RuntimeImage) error
 	// ToolReady 校验 Web 工具容器已达到可代理状态。
@@ -243,7 +243,7 @@ func (s *Service) CreateSandbox(ctx context.Context, req contracts.SandboxCreate
 	if err := s.validateSnapshotCapability(ctx, input.SnapshotEnabled); err != nil {
 		return contracts.SandboxInfo{}, err
 	}
-	var plan CreateSandboxPlan
+	var created Sandbox
 	var accepted contracts.SandboxInfo
 	var existingID int64
 	if err := s.store.TenantTx(ctx, input.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -278,8 +278,7 @@ func (s *Service) CreateSandbox(ctx context.Context, req contracts.SandboxCreate
 		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), input.TenantID, sb.ID, EventTypeCreate, detail); err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
-		plan = resolved.Plan
-		plan.Sandbox = sb
+		created = sb
 		accepted, err = s.sandboxInfo(ctx, sb)
 		if err != nil {
 			return err
@@ -294,8 +293,8 @@ func (s *Service) CreateSandbox(ctx context.Context, req contracts.SandboxCreate
 	if existingID > 0 {
 		return s.GetSandbox(ctx, input.TenantID, existingID)
 	}
-	s.scheduleSandboxStart(ctx, plan)
-	s.broadcastProgress(ctx, input.TenantID, plan.Sandbox.ID, SandboxPhaseAllocating, SandboxStatusCreating, response.TraceFromContext(ctx))
+	s.scheduleSandboxStart(ctx, created.TenantID, created.ID)
+	s.broadcastProgress(ctx, input.TenantID, created.ID, SandboxPhaseAllocating, SandboxStatusCreating, response.TraceFromContext(ctx))
 	return accepted, nil
 }
 
@@ -330,7 +329,7 @@ func (s *Service) UpdateSandboxAuthorizedAccounts(ctx context.Context, req contr
 		return apperr.ErrSandboxContractRequestInvalid
 	}
 	var revoked []int64
-	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
+	return s.store.AuthorizationTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
 		sb, err := tx.GetSandboxForUpdate(ctx, req.TenantID, req.SandboxID)
 		if err != nil {
 			return apperr.ErrSandboxNotFound.WithCause(err)
@@ -356,22 +355,21 @@ func (s *Service) UpdateSandboxAuthorizedAccounts(ctx context.Context, req contr
 		}
 		_, err = tx.UpdateSandboxAuthorizedAccounts(ctx, req.TenantID, req.SandboxID, accountIDs)
 		return err
-	}); err != nil {
-		return err
-	}
-	var closeErrs []error
-	if err := publishSandboxSessionsRevoked(ctx, s.bus, req.TenantID, req.SandboxID, revoked); err != nil {
-		closeErrs = append(closeErrs, fmt.Errorf("广播沙箱成员连接撤权失败: %w", err))
-	}
-	for _, accountID := range revoked {
-		if err := s.closeSandboxSessions(req.TenantID, accountID, req.SandboxID); err != nil {
-			closeErrs = append(closeErrs, fmt.Errorf("关闭已撤销沙箱成员连接失败: tenant_id=%d sandbox_id=%d account_id=%d: %w", req.TenantID, req.SandboxID, accountID, err))
+	}, func(ctx context.Context) error {
+		var closeErrs []error
+		if err := publishSandboxSessionsRevoked(ctx, s.bus, req.TenantID, req.SandboxID, revoked); err != nil {
+			closeErrs = append(closeErrs, fmt.Errorf("广播沙箱成员连接撤权失败: %w", err))
 		}
-	}
-	if err := errors.Join(closeErrs...); err != nil {
-		return apperr.ErrSandboxToolProxyUnavailable.WithCause(err)
-	}
-	return nil
+		for _, accountID := range revoked {
+			if err := s.closeSandboxSessions(req.TenantID, accountID, req.SandboxID); err != nil {
+				closeErrs = append(closeErrs, fmt.Errorf("关闭已撤销沙箱成员连接失败: tenant_id=%d sandbox_id=%d account_id=%d: %w", req.TenantID, req.SandboxID, accountID, err))
+			}
+		}
+		if err := errors.Join(closeErrs...); err != nil {
+			return apperr.ErrSandboxToolProxyUnavailable.WithCause(err)
+		}
+		return nil
+	})
 }
 
 // isBattleMatchSourceRef 识别 M8 单场对局的稳定来源键,其余来源不施加单例限制。
@@ -541,79 +539,102 @@ func (s *Service) loadPreparedSnapshotPlan(ctx context.Context, tx TxStore, snap
 
 // 预拉取允许接入中状态；创建、恢复和平台能力自检还须通过运行时接入自检。
 func (s *Service) loadSnapshotPlan(ctx context.Context, tx TxStore, snapshot contracts.SandboxCompositionSnapshot, requireSelftest bool) (CreateSandboxPlan, error) {
-	runtimePlans := make([]RuntimePlan, 0, len(snapshot.Runtimes))
+	plan, err := compositionPlanFromSnapshot(snapshot)
+	if err != nil {
+		return CreateSandboxPlan{}, err
+	}
 	runtimeAdapters := make(map[string]AdapterSpec, len(snapshot.Runtimes))
-	for _, frozen := range snapshot.Runtimes {
-		runtime, err := tx.GetRuntimeByID(ctx, frozen.RuntimeID)
+	for index := range plan.Runtimes {
+		frozen := &plan.Runtimes[index]
+		runtime, err := tx.GetRuntimeByID(ctx, frozen.Runtime.ID)
 		if err != nil {
 			return CreateSandboxPlan{}, apperr.ErrSandboxRuntimeNotFound.WithCause(err)
 		}
-		if runtime.Code != frozen.Code || runtime.PluginRef != frozen.PluginRef || !canPrepareRuntime(runtime.Status) ||
+		if runtime.Code != frozen.Runtime.Code || runtime.PluginRef != frozen.Runtime.PluginRef || !canPrepareRuntime(runtime.Status) ||
 			(requireSelftest && (runtime.Status != RuntimeStatusAvailable || runtime.SelftestStatus != RuntimeSelftestPassed)) {
-			return CreateSandboxPlan{}, apperr.ErrSandboxRuntimeUnavailable.WithCause(fmt.Errorf("冻结运行时门禁拒绝: runtime_id=%d instance=%s code=%s frozen_code=%s status=%d selftest_status=%d", runtime.ID, frozen.InstanceCode, runtime.Code, frozen.Code, runtime.Status, runtime.SelftestStatus))
+			return CreateSandboxPlan{}, apperr.ErrSandboxRuntimeUnavailable.WithCause(fmt.Errorf("冻结运行时门禁拒绝: runtime_id=%d instance=%s code=%s frozen_code=%s status=%d selftest_status=%d", runtime.ID, frozen.InstanceCode, runtime.Code, frozen.Runtime.Code, runtime.Status, runtime.SelftestStatus))
 		}
-		var adapter AdapterSpec
-		if err := jsonx.DecodeStrictKnownFields(frozen.AdapterSpec, &adapter); err != nil {
-			return CreateSandboxPlan{}, apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
-		}
-		if _, err := initScriptExecTarget(adapter); err != nil {
+		if _, err := initScriptExecTarget(frozen.Runtime.AdapterSpec); err != nil {
 			return CreateSandboxPlan{}, apperr.ErrSandboxRuntimeUnavailable.WithCause(err)
 		}
-		runtime.AdapterSpec = MaterializeRuntimeTopology(frozen.InstanceCode, adapter)
-		runtime.AdapterLevel, runtime.CapabilityImpl, runtime.PluginRef = frozen.AdapterLevel, frozen.CapabilityImpl, frozen.PluginRef
-		image, err := tx.GetRuntimeImageByID(ctx, frozen.RuntimeID, frozen.ImageID)
+		runtime.AdapterSpec = frozen.Runtime.AdapterSpec
+		runtime.AdapterLevel, runtime.CapabilityImpl, runtime.PluginRef = frozen.Runtime.AdapterLevel, frozen.Runtime.CapabilityImpl, frozen.Runtime.PluginRef
+		image, err := tx.GetRuntimeImageByID(ctx, frozen.Runtime.ID, frozen.Image.ID)
 		if err != nil {
 			return CreateSandboxPlan{}, apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
 		}
-		if image.RuntimeID != frozen.RuntimeID || image.ImageURL != frozen.ImageURL || image.Version != frozen.ImageVersion || image.Status != RuntimeImageStatusAvailable {
+		if image.RuntimeID != frozen.Runtime.ID || image.ImageURL != frozen.Image.ImageURL || image.Version != frozen.Image.Version || image.Status != RuntimeImageStatusAvailable {
 			return CreateSandboxPlan{}, apperr.ErrSandboxRuntimeUnavailable.WithCause(fmt.Errorf("镜像与冻结声明不一致或已停用: runtime_id=%d image_id=%d composition_digest=%s status=%d", runtime.ID, image.ID, snapshot.Digest, image.Status))
 		}
-		runtimePlans = append(runtimePlans, RuntimePlan{InstanceCode: frozen.InstanceCode, Runtime: runtime, Image: image})
+		frozen.Runtime, frozen.Image = runtime, image
 		runtimeAdapters[frozen.InstanceCode] = runtime.AdapterSpec
 	}
-	if len(runtimePlans) == 0 {
-		return CreateSandboxPlan{}, apperr.ErrSandboxRuntimeUnavailable
-	}
-	tools := make([]Tool, 0, len(snapshot.Components))
 	toolByCode := make(map[string]Tool, len(snapshot.Components))
-	for _, component := range snapshot.Components {
-		tool, err := tx.GetToolByCode(ctx, component.Code)
+	for index := range plan.Tools {
+		frozen := &plan.Tools[index]
+		tool, err := tx.GetToolByCode(ctx, frozen.Code)
 		if err != nil {
 			return CreateSandboxPlan{}, apperr.ErrSandboxToolNotFound.WithCause(err)
 		}
-		if tool.ID != component.ComponentID || tool.Status != ToolStatusAvailable {
+		if tool.ID != frozen.ID || tool.Status != ToolStatusAvailable {
 			return CreateSandboxPlan{}, apperr.ErrSandboxToolIncompatible
 		}
-		spec, err := toolResourceSpecFromJSON(component.ResourceSpec)
-		if err != nil {
-			return CreateSandboxPlan{}, apperr.ErrSandboxToolIncompatible.WithCause(err)
-		}
-		tool.ResourceSpec, tool.Kind, tool.Category = spec, component.Kind, component.Category
-		tools = append(tools, tool)
-		toolByCode[component.Code] = tool
+		tool.ResourceSpec, tool.Kind, tool.Category = frozen.ResourceSpec, frozen.Kind, frozen.Category
+		*frozen = tool
+		toolByCode[tool.Code] = tool
 	}
-	if err := validateNetworkRulesForRuntimes(runtimeAdapters, toolByCode); err != nil {
+	if err := validateCompositionNetworkRules(runtimeAdapters, toolByCode); err != nil {
 		return CreateSandboxPlan{}, err
 	}
-	for _, tool := range tools {
-		if err := validateToolNetworkRulesForComposition(tool, runtimeAdapters, toolByCode); err != nil {
-			return CreateSandboxPlan{}, apperr.ErrSandboxToolIncompatible.WithCause(err)
-		}
-	}
-	privateSidecars := privateSidecarsFromContract(snapshot.PrivateSidecars)
-	if err := validatePrivateSidecars(privateSidecars, s.cfg, adapterSpecForPrivateSidecarValidation(runtimePlans)); err != nil {
+	if err := validatePrivateSidecars(plan.PrivateSidecars, s.cfg, adapterSpecForPrivateSidecarValidation(plan.Runtimes)); err != nil {
 		return CreateSandboxPlan{}, err
 	}
-	for _, runtimePlan := range runtimePlans {
-		if err := validatePlanImagesCurrentlyAdmitted(s.cfg, runtimePlan.Runtime, runtimePlan.Image, tools, privateSidecars); err != nil {
+	for _, runtimePlan := range plan.Runtimes {
+		if err := validatePlanImagesCurrentlyAdmitted(s.cfg, runtimePlan.Runtime, runtimePlan.Image, plan.Tools, plan.PrivateSidecars); err != nil {
 			return CreateSandboxPlan{}, err
 		}
 	}
-	plan := CreateSandboxPlan{WorkspaceRuntimeInstance: snapshot.Spec.WorkspaceRuntimeInstance, InitChainSteps: snapshot.Spec.InitChainSteps, Runtimes: runtimePlans, Tools: tools, PrivateSidecars: privateSidecars}
 	if _, err := servicesForPlan(plan); err != nil {
 		return CreateSandboxPlan{}, apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
 	}
 	return plan, nil
+}
+
+func compositionPlanFromSnapshot(snapshot contracts.SandboxCompositionSnapshot) (CreateSandboxPlan, error) {
+	plan := CreateSandboxPlan{
+		WorkspaceRuntimeInstance: snapshot.Spec.WorkspaceRuntimeInstance,
+		InitChainSteps:           snapshot.Spec.InitChainSteps,
+		PrivateSidecars:          privateSidecarsFromContract(snapshot.PrivateSidecars),
+	}
+	for _, frozen := range snapshot.Runtimes {
+		runtime, image, err := runtimeFromSnapshot(frozen)
+		if err != nil {
+			return CreateSandboxPlan{}, apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
+		}
+		plan.Runtimes = append(plan.Runtimes, RuntimePlan{InstanceCode: frozen.InstanceCode, Runtime: runtime, Image: image})
+	}
+	if len(plan.Runtimes) == 0 {
+		return CreateSandboxPlan{}, apperr.ErrSandboxRuntimeUnavailable
+	}
+	for _, frozen := range snapshot.Components {
+		spec, err := toolResourceSpecFromJSON(frozen.ResourceSpec)
+		if err != nil {
+			return CreateSandboxPlan{}, apperr.ErrSandboxToolIncompatible.WithCause(err)
+		}
+		plan.Tools = append(plan.Tools, Tool{ID: frozen.ComponentID, Code: frozen.Code, Kind: frozen.Kind, Category: frozen.Category, ResourceSpec: spec})
+	}
+	return plan, nil
+}
+
+// cleanupPlanForSandbox 只解析原资源，不授予当前目录的创建或执行权限。
+func cleanupPlanForSandbox(sb Sandbox) (CreateSandboxPlan, error) {
+	snapshot, err := verifiedCompositionSnapshot(sb)
+	if err != nil {
+		return CreateSandboxPlan{}, apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
+	}
+	plan, err := compositionPlanFromSnapshot(snapshot)
+	plan.Sandbox = sb
+	return plan, err
 }
 
 // Stats 返回租户级沙箱资源统计。
@@ -825,6 +846,10 @@ func runtimeSnapshotForInstance(snapshot contracts.SandboxCompositionSnapshot, i
 	if !found || frozen.RuntimeID <= 0 || frozen.ImageID <= 0 || strings.TrimSpace(frozen.Code) == "" {
 		return Runtime{}, RuntimeImage{}, fmt.Errorf("运行时实例未包含在快照中或身份不完整")
 	}
+	return runtimeFromSnapshot(frozen)
+}
+
+func runtimeFromSnapshot(frozen contracts.CompiledRuntimeSnapshot) (Runtime, RuntimeImage, error) {
 	var adapter AdapterSpec
 	if err := jsonx.DecodeStrictKnownFields(frozen.AdapterSpec, &adapter); err != nil {
 		return Runtime{}, RuntimeImage{}, err

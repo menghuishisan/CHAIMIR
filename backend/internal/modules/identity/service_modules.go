@@ -73,11 +73,11 @@ func (s *Service) RequireTenantModules(ctx context.Context, tenantID int64, modu
 
 // EnabledTenantModules 只暴露模块集合，不向调用方返回可变租户配置或敏感字段。
 func (s *Service) EnabledTenantModules(ctx context.Context, tenantID int64) ([]string, error) {
-	if tenantID <= 0 {
+	if !tenantAllowedForDeployment(tenantID, s.deploy) {
 		return nil, apperr.ErrForbidden
 	}
 	var current Tenant
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+	if err := s.tenantReadTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		row, err := tx.GetTenantByID(ctx, tenantID)
 		if err != nil {
 			return err

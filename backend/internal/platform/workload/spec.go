@@ -1,4 +1,3 @@
-// workload spec 文件定义跨引擎复用的运行期工作负载声明结构。
 package workload
 
 // EnvVarSpec 描述允许注入容器的非敏感字面量环境变量。
@@ -77,10 +76,11 @@ type PodSpec struct {
 	Containers     []ComponentSpec   `json:"containers"`
 }
 
-// NetworkPortRef 描述网络策略放行的目标端口,优先使用端口名称。
+// NetworkPortRef 优先按目标端口名称解析；冻结时保存实际端口号与 TCP/UDP 协议。
 type NetworkPortRef struct {
-	Name string `json:"name"`
-	Port int32  `json:"port"`
+	Name     string `json:"name"`
+	Port     int32  `json:"port"`
+	Protocol string `json:"protocol,omitempty"`
 }
 
 // NetworkRuleSpec 描述同一工作负载内组件或 Pod 之间显式允许的网络访问。

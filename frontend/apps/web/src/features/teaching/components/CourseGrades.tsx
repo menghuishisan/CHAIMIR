@@ -59,7 +59,7 @@ function memberTitle(member: MemberName): string {
 }
 
 /**
- * CourseGrades 承载权重配置、成绩计算、调分与导出;成绩汇总按 M6 契约一次读取完整数组。
+ * CourseGrades 承载权重配置、成绩计算、调分与导出。
  */
 export function CourseGrades({ courseId }: CourseGradesProps) {
   const [weightOpen, setWeightOpen] = useState(false)
@@ -68,6 +68,7 @@ export function CourseGrades({ courseId }: CourseGradesProps) {
   const [actionError, setActionError] = useState<string>()
 
   const weights = useAsyncResource(() => api.teaching.listGradeWeights(courseId), [courseId], (value) => value.length === 0)
+  const weightsReady = weights.status === 'success' || weights.status === 'empty'
   const grades = usePagedResource<TeachingCourseGrade>((params) => api.teaching.listGrades(courseId, params), [courseId])
   // 成绩记录只回学生编号:用本课成员列表换成姓名与学号,已退课的显示「已退课学生」
   const names = useCourseMemberNames([courseId])
@@ -102,6 +103,16 @@ export function CourseGrades({ courseId }: CourseGradesProps) {
     () => (weights.data ?? []).reduce((sum, item) => sum + item.weight, 0),
     [weights.data],
   )
+
+  function gradeAction(grade: TeachingCourseGrade) {
+    return grade.is_locked ? (
+      <Badge tone="neutral">已锁定</Badge>
+    ) : (
+      <Button variant="ghost" size="sm" leftIcon={Pencil} onClick={() => setOverrideTarget(grade)}>
+        调分
+      </Button>
+    )
+  }
 
   const columns: TableColumn<TeachingCourseGrade>[] = [
     {
@@ -146,14 +157,7 @@ export function CourseGrades({ courseId }: CourseGradesProps) {
       key: 'actions',
       header: '操作',
       align: 'right',
-      render: (grade) =>
-        grade.is_locked ? (
-          <Badge tone="neutral">已锁定</Badge>
-        ) : (
-          <Button variant="ghost" size="sm" leftIcon={Pencil} onClick={() => setOverrideTarget(grade)}>
-            调分
-          </Button>
-        ),
+      render: gradeAction,
     },
   ]
 
@@ -163,7 +167,7 @@ export function CourseGrades({ courseId }: CourseGradesProps) {
         title="成绩权重"
         description="设置作业、实验与考试在总评里的占比,合计需要等于 100%。"
         actions={
-          <Button variant="outline" leftIcon={Percent} onClick={() => setWeightOpen(true)}>
+          <Button variant="outline" leftIcon={Percent} disabled={!weightsReady} onClick={() => setWeightOpen(true)}>
             配置权重
           </Button>
         }
@@ -201,7 +205,7 @@ export function CourseGrades({ courseId }: CourseGradesProps) {
 
       <PageSection
         title="全班成绩"
-        description={`共 ${grades.data?.total ?? 0} 名学生。调分只影响总评,不改变各项得分。`}
+        description={`共 ${grades.total ?? '—'} 名学生。调分只影响总评,不改变各项得分。`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" leftIcon={Calculator} loading={working} onClick={() => void computeGrades()}>
@@ -250,6 +254,7 @@ export function CourseGrades({ courseId }: CourseGradesProps) {
                         总评 {formatScore(grade.final_total)}
                       </span>
                     ),
+                    action: gradeAction(grade),
                   })}
                 />
               )}
@@ -258,10 +263,10 @@ export function CourseGrades({ courseId }: CourseGradesProps) {
         </div>
       </PageSection>
 
-      {weightOpen ? (
+      {weightOpen && weightsReady && weights.data !== null ? (
         <WeightFormModal
           courseId={courseId}
-          current={weights.data ?? []}
+          current={weights.data}
           onClose={() => setWeightOpen(false)}
           onSaved={() => {
             setWeightOpen(false)
@@ -507,7 +512,7 @@ function OverrideGradeModal({ courseId, grade, onClose, onSaved }: OverrideGrade
   }, [courseId, grade.student_id, onSaved, total, validate, working])
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
+    <Modal open onOpenChange={(open) => !open && !working && onClose()}>
       <ModalContent size="sm">
         <ModalHeader>
           <ModalTitle>人工调整总评</ModalTitle>
@@ -526,6 +531,7 @@ function OverrideGradeModal({ courseId, grade, onClose, onSaved }: OverrideGrade
               min="0"
               max="100"
               step="0.5"
+              disabled={working}
               value={total}
               invalid={Boolean(errors.total)}
               onBlur={() => validate(['total'])}
@@ -535,7 +541,7 @@ function OverrideGradeModal({ courseId, grade, onClose, onSaved }: OverrideGrade
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
         </ModalBody>
         <ModalFooter>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" disabled={working} onClick={onClose}>
             取消
           </Button>
           <Button variant="primary" loading={working} onClick={() => void submit()}>

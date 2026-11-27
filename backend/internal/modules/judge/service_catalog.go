@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"reflect"
 	"strings"
 
 	"chaimir/internal/contracts"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/jsonvalue"
 	"chaimir/pkg/logging"
 )
 
@@ -110,7 +110,7 @@ func (s *Service) reconcileJudger(ctx context.Context, original Judger, composit
 	if executionErr == nil {
 		status = JudgerStatusAvailable
 	}
-	if reflect.DeepEqual(original.ResourceSpec, item.ResourceSpec) && original.SelftestStatus == selftestStatus && original.Status == status {
+	if jsonvalue.Equal(original.ResourceSpec, item.ResourceSpec) && original.SelftestStatus == selftestStatus && original.Status == status {
 		return executionErr
 	}
 	_, updated, persistErr := s.persistJudgerExecutionState(ctx, original, item.ResourceSpec, selftestStatus, status, func(ctx context.Context, updated Judger) error {
@@ -129,25 +129,7 @@ func (s *Service) reconcileJudger(ctx context.Context, original Judger, composit
 
 // compileJudgerSnapshot 统一编译、补齐私有镜像闭包并登记最终摘要。
 func (s *Service) compileJudgerSnapshot(ctx context.Context, composition contracts.SandboxCompositionSpec, resource JudgerResourceSpec) (contracts.SandboxCompositionSnapshot, error) {
-	snapshot, err := s.sandbox.CompilePlatformSandboxComposition(ctx, composition)
-	if err != nil {
-		return contracts.SandboxCompositionSnapshot{}, err
-	}
-	baseDigest := snapshot.Digest
-	snapshot.PrivateSidecars = privateSidecarsForSandbox(resource.ExecutionSidecars)
-	if err := contracts.AppendPrivateSidecarImageClosure(&snapshot); err != nil {
-		return contracts.SandboxCompositionSnapshot{}, err
-	}
-	digest, err := contracts.CanonicalSnapshotDigest(snapshot)
-	if err != nil {
-		return contracts.SandboxCompositionSnapshot{}, err
-	}
-	snapshot.Digest = digest
-	// 仅移除本次编译中间摘要,已冻结旧版本仍可被在途任务引用。
-	if err := s.sandbox.ReplacePlatformSandboxCompositionSnapshot(ctx, []string{baseDigest}, snapshot); err != nil {
-		return contracts.SandboxCompositionSnapshot{}, err
-	}
-	return snapshot, nil
+	return s.sandbox.CompilePlatformSandboxComposition(ctx, composition, privateSidecarsForSandbox(resource.ExecutionSidecars))
 }
 
 // persistJudgerExecutionState 回写唯一配置版本的状态,未命中表示结果已过期。

@@ -2012,7 +2012,8 @@ func (q *Queries) RetryJudgeTask(ctx context.Context, arg RetryJudgeTaskParams) 
 const updateJudgerExecutionState = `-- name: UpdateJudgerExecutionState :one
 UPDATE judger
 SET resource_spec = $1,
-    selftest_status = $2, status = $3, updated_at = clock_timestamp()
+    selftest_status = $2, status = $3,
+    updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
 WHERE id = $4 AND updated_at = $5::timestamptz
 RETURNING id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, status, created_at, updated_at
 `
@@ -2117,7 +2118,7 @@ SET name = EXCLUDED.name,
     resource_spec = EXCLUDED.resource_spec,
     selftest_status = EXCLUDED.selftest_status,
     status = EXCLUDED.status,
-    updated_at = now()
+    updated_at = GREATEST(clock_timestamp(), judger.updated_at + interval '1 microsecond')
 RETURNING id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, status, created_at, updated_at
 `
 

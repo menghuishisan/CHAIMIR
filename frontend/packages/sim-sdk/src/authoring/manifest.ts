@@ -104,7 +104,7 @@ export function defineSimPackage<TState extends SimState>(simPackage: SimPackage
  * createSimPackageManifest 生成上传审核使用的 sim-package.json 结构,不包含 reducer 等可执行函数。
  *
  * entry 是归档内入口模块相对路径,由作者在打包时给出(隔离容器据此装配,见
- * docs/04-仿真可视化引擎/03-可视化SDK与交互协议.md §1)。内置包由平台 registry 按 code 装配,
+ * docs/04-仿真可视化引擎/08-可视化SDK与交互协议.md §1)。内置包由平台 registry 按 code 装配,
  * 不需要 entry,故该参数可省略。
  */
 export function createSimPackageManifest<TState extends SimState>(

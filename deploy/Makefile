@@ -187,26 +187,34 @@ registry-runtime-dns: context-check ## 确认 Cilium 节点已配置 canonical H
 registry-pull-secret-bootstrap: context-check ## 在签名准入前创建静态命名空间并同步工作负载 pull 凭据
 	kubectl apply -f base/namespaces/namespaces.yaml
 	kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
-	@auth_dir="$$(sed -n 's/^SUPPLY_CHAIN_DOCKER_CONFIG_HOST_DIR=//p' "$(SUPPLY_CHAIN_CONFIG)")"; \
+	@set -euo pipefail; auth_dir="$$(sed -n 's/^SUPPLY_CHAIN_DOCKER_CONFIG_HOST_DIR=//p' "$(SUPPLY_CHAIN_CONFIG)")"; \
 	auth_file="$$auth_dir/config.json"; \
 	test -f "$$auth_file" || { echo "缺少 $$auth_file;请先完成 Harbor robot 凭据校验"; exit 1; }; \
 	for namespace in external-secrets chaimir-system chaimir-data chaimir-prepull; do \
 		kubectl -n $$namespace create secret generic chaimir-harbor-pull \
 			--from-file=.dockerconfigjson="$$auth_file" \
 			--type=kubernetes.io/dockerconfigjson \
-			--dry-run=client -o yaml | kubectl apply -f -; \
+			--dry-run=client -o yaml | { \
+				if [ "$$namespace" = chaimir-prepull ]; then \
+					kubectl label --local -f - app=chaimir module=sandbox chaimir.io/managed-by=chaimir-backend chaimir.io/purpose=image-pull -o yaml; \
+				else cat; fi; \
+			} | kubectl apply -f -; \
 	done
 
 .PHONY: registry-pull-secret-sync
 registry-pull-secret-sync: registry-runtime-dns harbor-projects-ensure apply-acceptance ## 同步唯一 Harbor pull 凭据并刷新签名准入控制器
-	@auth_dir="$$(sed -n 's/^SUPPLY_CHAIN_DOCKER_CONFIG_HOST_DIR=//p' "$(SUPPLY_CHAIN_CONFIG)")"; \
+	@set -euo pipefail; auth_dir="$$(sed -n 's/^SUPPLY_CHAIN_DOCKER_CONFIG_HOST_DIR=//p' "$(SUPPLY_CHAIN_CONFIG)")"; \
 	auth_file="$$auth_dir/config.json"; \
 	test -f "$$auth_file" || { echo "缺少 $$auth_file;请先完成 Harbor robot 凭据校验"; exit 1; }; \
 	for namespace in cosign-system chaimir-system chaimir-data chaimir-prepull; do \
 		kubectl -n $$namespace create secret generic chaimir-harbor-pull \
 			--from-file=.dockerconfigjson="$$auth_file" \
 			--type=kubernetes.io/dockerconfigjson \
-			--dry-run=client -o yaml | kubectl apply -f -; \
+			--dry-run=client -o yaml | { \
+				if [ "$$namespace" = chaimir-prepull ]; then \
+					kubectl label --local -f - app=chaimir module=sandbox chaimir.io/managed-by=chaimir-backend chaimir.io/purpose=image-pull -o yaml; \
+				else cat; fi; \
+			} | kubectl apply -f -; \
 	done
 	kubectl -n cosign-system rollout restart deployment/policy-controller-webhook
 	kubectl -n cosign-system rollout status deployment/policy-controller-webhook --timeout=180s

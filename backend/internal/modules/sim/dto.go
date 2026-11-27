@@ -30,7 +30,6 @@ type CreateSessionRequest struct {
 	InitParams           map[string]any `json:"init_params"`
 	OwnerAccountID       ids.ID         `json:"owner_account_id"`
 	AuthorizedAccountIDs []ids.ID       `json:"authorized_account_ids"`
-	SourceRef            string         `json:"source_ref"`
 	ScopeRef             string         `json:"scope_ref"`
 }
 
@@ -43,9 +42,8 @@ type ReportActionRequest struct {
 }
 
 type RecycleRequest struct {
-	SourceRef string `json:"source_ref"`
-	ScopeRef  string `json:"scope_ref"`
-	Reason    string `json:"reason"`
+	ScopeRef string `json:"scope_ref"`
+	Reason   string `json:"reason"`
 }
 
 // CreateShareRequest 是用户创建分享码时提交的可选过期时间。

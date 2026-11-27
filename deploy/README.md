@@ -3,8 +3,7 @@
 Chaimir 区块链「教学·实验·竞赛」平台的部署清单。双形态:SaaS 公网多租户 + 学校私有化。
 编排用 **Kustomize**(base + overlays),依据 `docs/总-部署架构设计.md` 与 `docs/总-镜像与容器设计.md`。
 
-> 注:应用镜像(chaimir/backend|frontend|migrate|cron)为逻辑占位,由目录2(backend)/目录3(images)
-> 构建产出后经 overlay 的 `images:` 覆盖生效。本目录提供的是完整运行底座。
+> 更新：2026-11-27。应用镜像由正式供应链晋升到 `images/image-digests.lock`，同步至 `base/` 或资源所属 component；overlay 继承引用。缺少已验证 digest 时阻断部署。
 
 ## 目录结构
 
@@ -30,7 +29,7 @@ deploy/
 │   ├── networkpolicy/       静态命名空间 deny-all + 精确放行;动态沙箱 deny-all 模板
 │   └── cronjobs/            每日备份;业务生命周期清理由各模块后台任务负责
 ├── clusters/cilium-kind/    无默认 CNI Kind 配置、生产同版 Cilium values 与验收入口
-├── components/middleware/   PG16/Redis7/NATS2.10/S3 对象存储 单实例(overlay 按需 include)
+├── components/middleware/   PostgreSQL/Redis/NATS/S3 对象存储 单实例(overlay 按需 include)
 ├── overlays/
 │   ├── acceptance/          生产安全基线 + 单实例测试数据组件 + Harbor digest 镜像
 │   ├── staging/             SaaS 形态,中间件外接,main 自动部署
@@ -46,9 +45,7 @@ Chaimir 平台自身的 Kubernetes 资源统一维护在 `base/` + `overlays/` +
 不维护平台 Helm chart,避免同一批 Deployment/Service/RBAC/NetworkPolicy 同时存在 Kustomize
 与 Helm 两套模板。
 
-`deploy/charts/` 不是必需目录。仅当引入第三方 Kubernetes 组件且需要固定官方 Helm chart
-的 values 或安装说明时创建,例如 ingress-nginx、Harbor、External Secrets、Sigstore
-policy-controller、Prometheus Adapter。该目录不得放 Chaimir 平台自身模板。
+`deploy/charts/` 保存第三方 Kubernetes 组件的固定官方 chart 配置、必要补丁和安装说明；该目录不得放 Chaimir 平台自身模板。
 
 ingress-nginx 使用 `charts/ingress-nginx/values.yaml` 保存生产安全基线,由容器化 Helm
 按 `config/chaimir.env` 中固定的官方 chart 版本安装。控制器镜像 digest 只能从
@@ -104,7 +101,7 @@ Sigstore policy-controller 的 webhook 控制器会在运行期维护 CA 与 `na
 
 节点重启改变地址时,组件等待流程先按当前 Node 地址修复派生 CiliumEndpoint,再等待 Cilium 组件与节点就绪。签名控制器的旧端点会使受保护 Pod 状态更新超时并阻塞 kubelet 状态队列,因此不能把端点修复安排在组件等待之后。完整安装与日常恢复复用这一顺序。
 
-签名准入启用后,部署入口先应用静态 namespace,再把唯一 Harbor robot `dockerconfigjson` 以固定名称 `chaimir-harbor-pull` 同步到 `chaimir-system`、`chaimir-data` 与 `chaimir-prepull`,最后才提交受保护工作负载。policy-controller 的 `signaturePullSecrets` 从工作负载所在 namespace 读取该 Secret;不得把凭据同步放到工作负载创建之后。
+签名准入启用后,部署入口先应用静态 namespace,再把唯一 Harbor robot `dockerconfigjson` 以固定名称 `chaimir-harbor-pull` 同步到 `chaimir-system`、`chaimir-data` 与 `chaimir-prepull`,最后才提交受保护工作负载。policy-controller 的 `signaturePullSecrets` 从工作负载所在 namespace 读取该 Secret;不得把凭据同步放到工作负载创建之后。`chaimir-prepull` 中的目标凭据由部署生成时同时写入 `app=chaimir`、`module=sandbox`、`chaimir.io/managed-by=chaimir-backend`、`chaimir.io/purpose=image-pull`，与后端轮换使用同一归属契约；缺少归属的同名 Secret 不由后端接管。
 
 所有运行位置执行同一套生产 Cilium 安全基线。`kind-chaimir-cilium` 从无默认 CNI 状态创建并运行完整平台、数据中间件、gVisor 和动态沙箱;不得让 `docker-desktop` 的 Kindnet 集群继续运行 Chaimir 业务。迁移期间该旧集群只提供外部 Harbor,项目脚本会删除其中的旧 Chaimir 测试命名空间。工作区直跑后端或前端不作为平台启动方式。若 Kind 节点继承的宿主代理指向回环地址,集群引导只在节点 containerd 服务层把代理主机改写为 `host.docker.internal`,避免把节点自身误当成宿主;同时由 CoreDNS 将 canonical Harbor 域名解析到同一宿主网关并通过临时 Pod 实测。Kubernetes 业务清单、镜像 digest 和安全策略不因此改变。
 
@@ -132,21 +129,11 @@ Windows验收宿主在用户级`.wslconfig`的`[wsl2]`固定`localhostForwarding
 
 Docker Desktop 重启不会删除 Kind 节点 `/var` Docker volume 或 Harbor PVC,因此同一 digest 的 Harbor 数据和节点 containerd 缓存会保留。集群入口把项目 Kind 节点的 Docker restart policy 固定为 `unless-stopped`,并会主动启动仍存在但已停止的节点;若节点容器地址在重启后变化,入口按 Pod 的 `spec.nodeName` 关联当前 Node 的唯一 `InternalIP`,只删除节点归属失效的派生 `CiliumEndpoint`,等待当前 Agent 以新地址重新发布,不重建业务 Pod 或清空镜像缓存。Pod 的 `status.hostIP` 可能滞留旧地址,端点识别与恢复等待均不以它作为地址权威。恢复验收从当前 `CiliumNode` 读取全部主机地址与健康端点地址,由每个 Kind 节点主动探测完整地址矩阵,不等待仍可能保留重启前结果的 Cilium 后台健康缓存。Docker 恢复后执行 `make dev-start` 即可恢复网站;只有镜像、配置或数据库源码变化时才执行 `make dev-refresh`。应用滚动完成后,刷新入口会按当前控制器和 Pod 引用精确清理未使用的 Kustomize 哈希 ConfigMap/Secret,不保留旧配置副本。不得执行 `make cilium-cluster-down`、删除 Harbor PVC、删除 Kind 节点 volume 或带 volume 的全局 Docker prune,否则相应集群数据或镜像缓存会被明确删除并需要重新拉取。
 
-Windows 重启并登录后，由 `Chaimir.DockerRuntimeWatcher` 自动恢复 Docker Desktop/WSL、现有 Kind 节点、Cilium 派生端点和外层 HTTPS 的当前上游。任务用当前用户的交互会话和最高可用权限运行，登录与周期触发、失败重启、IgnoreNew 及恢复互斥保证持续运行。安装需要一次 UAC 授权；后续恢复不再弹出提权窗口。Docker Desktop 是当前用户的应用，因此无人登录的系统启动不声明可用。
-
-Windows 宿主资源预算应固定为可同时承载依赖集群、业务集群和顺序镜像构建的值，不能依赖每次启动手工调整。当前16物理核/32线程、约16GB内存的验收机采用WSL 8处理器/8GB内存/4GB swap及gradual页缓存回收；原4处理器/6GB实测持续内存stall，不把资源压力本身断言为此前WSLService挂死的唯一原因。修改后须重新启动WSL，并复核实际CPU/内存、压力指标、控制面、Cilium、准入和业务入口。
-
-唯一 `docker-runtime.ps1` 先等待正常启动并核对真实Linux engine API；不进入Docker内部WSL发行版执行额外健康探测。确认引擎不可用或监护持续确认节点网络控制阻塞后进入有界恢复：官方 `docker desktop stop --force`，等待停止收敛，再执行 `wsl --shutdown`。若Desktop持续stopping，仅结束当前用户且安装路径已核对的Desktop进程；WSL关闭无响应时重启 `WSLService`，服务停止超时仅结束身份核对过的当前 `wslservice.exe`。随后启动Desktop并重读真实API。不删除发行版、VHD、卷或镜像；健康路径不重启Docker，正常启动不迁移或seed。
-
-`make docker-runtime-watcher-install` 通过 UAC 安装并立即启动同一任务。配置统一读取 `config/chaimir.env` 的 `DOCKER_RUNTIME_*` 键，示例同步 `backend/.env.example`。监护对 Docker 不可用和集群异常均记录持续时间并按配置恢复，CEP 明确陈旧立即恢复；恢复冷却后重新核对 Node、关键系统 Pod、CEP 与当前 edge EndpointSlice。CEP 检查复用共享实现，关联 Pod.spec.nodeName 与当前 Node InternalIP。
-
-每轮在Node Ready判断前有界读取当前Kind节点的进程状态/等待点，识别核心守护进程D状态等待RTNL及节点执行失败/超时。此时不能报告集群健康；持续RTNL阻塞或节点执行超时复用原运行时Recover与集群Start，普通执行拒绝/缺进程/未就绪仍走原Ensure及Start，不创建第二套恢复入口、不循环删Pod或清数据。探测只读`ps`元数据，不创建网络命名空间或发netlink查询。门禁通过仍不等于备份、动态沙箱或整机重启已通过，详细判定与恢复规则见`docs/总-部署架构设计.md`。
-
-`dev-stop` 暂停自动恢复后停止节点，`dev-start` 恢复自动恢复；部署维护可使用 watcher 的 Suspend/Resume，避免维护时被自动启动。安装不打断正在进行的恢复。状态与日志位于 `.tmp/docker-runtime/watcher.state.json` 和 `watcher.log`，分别记录权限、暂停状态、Docker/集群/入口、CEP 计数和最后恢复结果；任务 Running 和恢复退出0均不代替当前健康与真实 HTTPS 功能验收。
+Windows 自动恢复、资源配置、节点探测与运行时恢复边界统一见[部署规范](../docs/总-部署架构设计.md#cilium-统一部署与验收基线)。安装入口为 `make docker-runtime-watcher-install`；`dev-stop` 暂停监护后停止节点，`dev-start` 恢复监护。维护时使用 watcher 的 Suspend/Resume，避免维护操作触发自动启动。
 
 上述目标都是前台一次性运维命令,完成后会返回 PowerShell 提示符,网站继续由 Docker/Kubernetes 托管,不需要保持终端命令运行。执行中可用 `Ctrl+C` 停止等待;已经提交给 Kubernetes 的幂等变更不会自动回滚,重新执行同一目标即可继续收敛。需要停止网站时使用 `make dev-stop`,不要用全局 Docker 清理命令。
 
-M2 运行时预拉取不拉取 `images/image-digests.lock` 的全部镜像。平台管理员针对一个运行时触发预拉取时,M2 只把该运行时主镜像、其基础设施组件和兼容可用工具组成的默认工作负载集合拉到每个可调度沙箱节点,并执行镜像自检;成功 DaemonSet 常驻以便新节点自动补拉。现有节点重启且 `/var` volume 未删除时,`imagePullPolicy=IfNotPresent` 会复用 digest 缓存。
+M2 按已编译组合快照的完整镜像闭包预拉取并执行声明自检，包括显式选择和依赖展开的组件。范围不包含目录中的全部镜像，也不按运行时或生态标签加入默认工具。成功 DaemonSet 常驻以供新节点补拉；精确准入与失效规则见[沙箱架构](../docs/02-沙箱引擎/07-架构设计.md#211-镜像预拉取闭环)。
 
 集群级入口:
 
@@ -172,8 +159,7 @@ M2 快照能力分为两层:通用 `VolumeSnapshot` CRD/snapshot-controller 与�
 
 将 `www.chaimir.io` 指向 `127.0.0.1`(hosts)后,前端经 `https://www.chaimir.io` 访问,并信任 `config/chaimir-tls/tls.crt`。首次环境使用 `dev-up`;Docker 重启或此前执行过 `dev-stop` 时使用 `dev-start`;只有镜像、配置或数据库源码变化后才使用 `dev-refresh`。三个入口共用同一 Cilium 集群、生产安全基线和 acceptance overlay,不存在本地 CNI 或应用清单分叉。
 
-> 应用镜像就绪前(目录2/3 未产出),backend/frontend/migrate Pod 会处于 ImagePull 待命 —— 属预期。
-> 镜像必须由统一供应链直接推送 Harbor、按 digest 回拉并通过门禁,再由 `image-metadata-promotion` 晋升到权威锁及资源所属的 base/component;不得导入 `:dev` tag 绕过该流程。
+镜像必须由统一供应链直接推送 Harbor、按 digest 回拉并通过门禁，再晋升到权威锁及资源所属的 base/component；ImagePull 失败须定位并修正，不作为可交付状态。
 
 ### 本地代码变更的选择性镜像刷新
 

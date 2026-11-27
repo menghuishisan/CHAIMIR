@@ -2,7 +2,7 @@
 
 > 本文是仿真包作者的开发契约 SSOT:仿真包怎么写、SDK 怎么用、交互怎么声明。
 > 面向第三方/教师扩展开发者。
-> 最后更新:2026-08-25
+> 最后更新:2026-11-27
 
 ---
 
@@ -16,33 +16,20 @@
 经 k8s exec stdin 推入受限计算 Pod,容器内校验 sha256 后按 `meta.entry` 装配。
 对作者而言执行位置是透明的 —— 下述协议与内置包完全一致,不为"跑在哪"写第二套实现。
 
-```typescript
-interface SimPackage {
-  meta: SimMeta;
-  initState: (params, seed) => State;        // 构造初始状态
-  reducer: (state, event, tick) => State;    // 纯函数,确定性演化
-  interactions: InteractionDef[];            // 声明式交互
-  render: (state) => TeachingFrame;          // 声明当前教学画面
-  narrative: NarrativeStep[];                // 教学叙事
-  codeTrace: CodeTraceDef;                   // 代码追踪配置
-  checkpoints: CheckpointDef[];              // 判题检查点
-}
+运行契约由 SDK 的[公开类型](../../frontend/packages/sim-sdk/src/types.ts)定义，入口导出 `SimPackage`、`SimMeta`、`SimState`、`SimEvent`、`ReducerContext`、`InteractionDef`、`TeachingFrame` 等类型。本文件维护语义、安全与教学约束，不复制完整类型定义。
 
-interface SimMeta {
-  code: string;            // 唯一标识(命名空间前缀防冲突,由服务端按登录账号强制)
-  name: string;
-  category: string;        // 领域分类(仅用于检索/配色)
-  version: string;         // semver
-  entry: string;           // 归档内入口模块相对路径,供隔离容器装配(扩展包必填)
-  scaleLimit: { nodes: number; maxTick: number; maxEvents: number };  // 性能边界
-}
-```
+一个包包含：
+
+- `meta`：稳定编码、名称、分类、版本、简介、学习目标与规模上限；扩展包还须有真实归档入口。
+- `initState(params, seed)` 与 `reducer(state, event, context)`：构造初始状态并确定性演化；随机数使用 `context.random`。
+- `interactions`：交互声明；`render(state)`：返回教学画面。
+- `narrative`、`codeTrace` 与 `checkpoints`：教学叙事、代码追踪和可评测的检查点。自由探索可以不触发叙事，但包描述须满足统一协议的完整性要求。
 
 `compute` 不由作者声明:执行位置按代码来源派生(内置=浏览器、教师/第三方=隔离容器),
 提交表单与 manifest 都不含该字段。作者写一次协议,平台决定在哪跑。
 
 **硬约束**:
-- `reducer` 必须纯函数:`reducer(s,e,t)` 同输入必同输出,禁用 `Date.now()`/`Math.random()`(随机走种子 PRNG)。
+- `reducer` 必须纯函数:`reducer(state,event,context)` 同输入必同输出,禁用 `Date.now()`/`Math.random()`(随机走种子 PRNG)。
   隔离预览会同 seed 跑两遍逐帧比对,不纯即拒绝上架。
 - `render` 只能返回 `TeachingFrame` 纯数据,不得自行操作 DOM、Canvas、网络或浏览器全局状态。
   容器内无 DOM、无网络出口,这些调用会直接失败。
@@ -107,16 +94,16 @@ interface SimMeta {
   标签决定按钮配色与攻击类的就地二次确认(§3.3),认不出的标签会让扩展包的破坏性操作画成普通推进色。
 - `render.protocol` 必须是 `teaching-frame`。
 - `render.patterns` 必须是 1~3 个封闭模式声明,每项必须有稳定 `id` 和 `mode`,`mode` 只能取 `graph|chain|tree|matrix|pipeline|lane|chart`。
-- `render.patterns[].roles` 只能用于审核该模式可承担的教学区域,取值为 `primary|evidence|timeline|metrics|trace|checkpoints`,不得再使用旧版区域字段。
+- `render.patterns[].roles` 只能用于审核该模式可承担的教学区域,取值为 `primary|evidence|timeline|metrics|trace|checkpoints`,不得在模式数据中另行声明区域布局。
 - `codeTrace` 使用 camelCase,与前端 TypeScript 协议一致;数据库字段 `code_trace` 只存不含源码正文的审核摘要。
-- `checkpoints` 必须声明检查点 ID 与名称,隔离预览和后续 `/sessions/{id}/checkpoints` 上报均以这些锚点派生结果。
+- `checkpoints` 必须声明检查点 ID 与名称,隔离预览及运行快照中的 `checkpoint_results` 均以这些锚点派生结果；不另设检查点上报接口。
 - manifest JSON 拒绝未知字段和尾随内容,避免同一协议出现兼容别名或灰色扩展。
 
 ### 1.2 官方前端 SDK 使用入口
 
 前端官方 SDK 包为 `@chaimir/sim-sdk`,开发者新增仿真包必须从公开 API 开始,不得复制内置包、Worker 或渲染器实现。主入口导出:
 
-- `SimPackage`、`SimState`、`SimEvent`、`TeachingFrame`、`VisualPattern` 等协议类型。
+- `SimPackage`、`SimState`、`SimEvent`、`TeachingFrame`、`PatternBinding` 等协议类型。
 - `defineSimPackage(simPackage)`:定义仿真包并执行开发期协议校验。
 - `createDeveloperTemplate(code)`:生成最小完整模板。
 - `validateSimPackage(simPackage)`:上传前检查协议完整性。
@@ -142,42 +129,7 @@ interface SimMeta {
 
 ### 1.3 `codeTrace` 代码追踪协议
 
-仿真包可选声明 `codeTrace`,把"可视化现象 ↔ 代码逻辑"建立因果锚点(需求见 `01-需求规格.md` §1)。协议类型与 `SimPackage` 同一定义:
-
-```typescript
-interface CodeTraceDef {
-  sourceCode: string;         // 源代码(Solidity/Rust/Go/JavaScript/伪代码)
-  language: "solidity" | "rust" | "go" | "javascript" | "pseudocode";
-  lineMapping: LineMapping[]; // 行号 → 状态条件映射
-  variableWatch?: VariableWatchDef[];
-}
-
-interface LineMapping {
-  line: number;               // 代码行号(1-based)
-  triggerCondition: string;   // 触发条件表达式(对仿真状态的求值)
-  annotation?: string;        // 该行的教学注释
-  highlightStyle?: "normal" | "success" | "error";
-}
-
-interface VariableWatchDef {
-  name: string;               // 变量名(展示用)
-  extract: string;            // 从状态提取的表达式
-  format?: "hex" | "number" | "string" | "bool";
-}
-```
-
-`reducer` 返回的状态需携带 `_trace` 字段,运行时读取后在代码面板高亮对应行并展示变量监视:
-
-```typescript
-interface State {
-  // ... 仿真自定义字段
-  _trace?: {
-    triggeredLines: number[];            // 当前触发的代码行
-    variables: Record<string, any>;      // 当前变量值
-    executionPath?: string;              // 可选:执行路径描述
-  };
-}
-```
+`codeTrace` 将可视化现象与教学代码建立单向关联。配置使用公开 `CodeTraceDef`、`LineMapping` 与 `VariableWatchDef`：源码和语言、从 1 开始的行映射、触发条件、注释及变量提取。运行状态的可选 `_trace` 使用 `TraceInfo`，携带本帧触发行号、JSON 变量值及执行路径。类型见[公开协议](../../frontend/packages/sim-sdk/src/types.ts)。
 
 - 前端运行时自动读取 `state._trace`:高亮 `triggeredLines` 中的行、展示 `variables` 的值、按 `lineMapping` 显示教学注释。
 - 设计边界(只允许单向映射):状态 → 代码行高亮、变量监视、教学注释;**禁止**代码行 → 状态的反向修改(这不是调试器)、禁止断点/单步执行、禁止修改源码后重新执行。
@@ -188,48 +140,17 @@ interface State {
 
 ## 2. 状态与事件
 
-```typescript
-type State = Record<string, any>;   // 仿真自定义结构
+状态以 `SimState` 为基础，包含 tick、阶段、步骤解释、指标和检查点值，包可扩展自己的算法数据。事件使用 `SimEvent`，包含 `type`、`source`、`atTick`、`seq`、JSON `payload` 和可选目标元素；来源为 `tick`、`user` 或 `system`。运行时负责分配时间与序号。
 
-interface SimEvent {
-  type: string;            // 事件类型(与 InteractionDef.emits 对应)
-  payload?: any;           // 参数值
-  target?: string;         // 作用的元素 id(target=element 时)
-  source: "tick" | "user"; // 来源
-}
-```
-
-- tick 推进自动产生 `{type:"tick", source:"tick"}`。
-- 用户交互产生 `{type, payload, target, source:"user"}`。
-- reducer 统一消费,产出新状态。
+`reducer` 接收 `ReducerContext` 中的种子、tick、序号和确定性随机数。tick 推进、用户交互和系统事件共用该入口；同种子、参数与事件序列必须得到相同状态。持久化及隔离流的字段投影由[会话接口](03-接口设计.md#32-上报操作-用户)定义，不把传输字段直接当作 SDK 运行类型。
 
 ---
 
 ## 3. 交互声明协议(核心)
 
-```typescript
-interface InteractionDef {
-  id: string;
-  kind: "button" | "slider" | "hold" | "select-element" | "drag" | "form";
-  label: string;
-  emits: string;                 // 触发后注入的事件 type
-  params?: FieldDef[];           // 参数字段
-  target?: "global" | "element"; // 默认 global
-  element_filter?: string;       // target=element 时,可选元素类型过滤
-  available_when?: Condition;    // 可用条件(状态/阶段表达式)
-  label_tag?: "normal" | "recover" | "perturb" | "attack";  // 仅视觉(配色)
-  cooldown_ms?: number;
-}
+SDK 运行类型使用 `InteractionDef`：`id/kind/label/description/emits` 定义交互，`params` 使用 `FieldDef` 描述字段标签、类型、默认值、范围、选项和必填约束；`target` 与 `elementFilter` 约束目标，`availableWhen(state)` 判定当前是否可用，`labelTag` 与 `cooldownMs` 定义视觉标签和冷却。
 
-interface FieldDef {
-  name: string;
-  type: "number" | "string" | "boolean" | "select" | "range";
-  default?: any;
-  min?: number; max?: number; step?: number;   // number/range
-  options?: { label: string; value: any }[];   // select
-  required?: boolean;
-}
-```
+上传 manifest 由 `createSimPackageManifest` 导出，使用 `element_filter`、`label_tag`、`cooldown_ms` 等归档字段，不携带可执行函数。运行包不得照抄 manifest 字段名，也不维护别名兼容；具体序列化结构见[manifest 导出入口](../../frontend/packages/sim-sdk/src/authoring/manifest.ts)。
 
 ### 3.1 kind → 控件映射(平台自动渲染)
 
@@ -276,68 +197,25 @@ interface FieldDef {
 
 ---
 
-## 4. 可视化模式(替代旧版图元 SDK)
+## 4. 可视化模式
 
-> 详见 07-架构设计.md §5。作者**不写渲染代码**,只把状态映射到平台提供的封闭模式集(7 种),由模式引擎负责布局/绘制/动画。两条红线:① 封闭模式集 + 评审闸门(无自定义渲染器后门);② 作者只给语义数据。
+> 架构职责见[架构设计](07-架构设计.md#5-teachingframe-教学画面协议核心)。字段和语义由本节统一定义。作者**不写渲染代码**,只把状态映射到平台提供的封闭模式集(7 种),由模式引擎负责布局/绘制/动画。两条红线:① 封闭模式集 + 评审闸门(无自定义渲染器后门);② 作者只给语义数据。
 
 ### 4.1 封闭模式集(7 种,平台维护)
 
 | 模式 | key | 输入语义数据 | 引擎负责 |
 | --- | --- | --- | --- |
-| 图网络 | `graph` | nodes[]、edges/消息事件、layout(ring/force/grid) | 节点布局、消息飞线动画、状态着色 |
+| 图网络 | `graph` | 节点、连线与 ring/grid/layered 布局 | 节点布局、消息飞线动画、状态着色 |
 | 链式 | `chain` | blocks[]、分叉关系、最长链标记 | 块序列排布、分叉绘制、高亮 |
 | 树形 | `tree` | 树节点、验证路径 | 树布局、路径高亮、构建动画 |
 | 矩阵 | `matrix` | cells[][]、值/状态 | 网格、单元着色、变化闪烁 |
 | 流水线 | `pipeline` | steps[]、当前步、数据值 | 分步流动、寄存器变化动画 |
-| 时序泳道 | `lane` | stages[]、current、各方消息 | 阶段进度、消息时序 |
-| 图表 | `chart` | 数据序列、类型(line/bar/pie) | 坐标轴、曲线、动态更新 |
+| 时序泳道 | `lane` | 参与者、带时间的消息与当前时间 | 阶段进度、消息时序 |
+| 图表 | `chart` | 带横纵坐标点的数值序列与单位 | 坐标轴、曲线、动态更新 |
 
 ### 4.2 TeachingFrame 映射(作者声明,非绘制)
 
-```typescript
-interface TeachingFrame {
-  summary: string;
-  phase: FramePhase;
-  focus: FrameFocus;
-  layout: FrameLayout;
-  patterns: VisualPattern[];    // 一个教学画面组合 1~3 个封闭模式
-  annotations?: FrameAnnotation[];
-}
-
-interface FramePhase {
-  id: string;
-  title: string;
-  intent: "observe" | "compare" | "verify" | "debug" | "attack" | "recover" | "replay";
-  // 只有两段(前端规范 §7.2 B):focus 已用舞台高亮指出该看哪个元素,
-  // 再写一段「看哪里」只是复述状态摘要。
-  explanation: {
-    what: string;
-    why: string;
-  };
-}
-
-interface FrameFocus {
-  primary: string[];
-  secondary?: string[];
-  muted?: string[];
-}
-
-interface FrameLayout {
-  primary: string;
-  evidence?: string[];
-  timeline?: string;
-  metrics?: string[];
-  trace?: string;
-  checkpoints?: string[];
-}
-
-interface VisualPattern {
-  id: string;
-  mode: "graph"|"chain"|"tree"|"matrix"|"pipeline"|"lane"|"chart";
-  title: string;
-  data: PatternData;      // 把仿真状态映射为该模式的语义数据
-}
-```
+`TeachingFrame` 包含 `summary`、`phase`、`focus`、`layout`、1–3 个 `patterns` 和可选 `annotations`。阶段通过 `what/why` 解释发生了什么及意义，`focus` 指明主次和淡化对象；布局引用画面内的模式 ID。模式使用 `PatternBinding` 的判别联合，各模式有自己的完整数据结构，不以 `unknown` 或空对象替代。类型与结构上限由[公开协议](../../frontend/packages/sim-sdk/src/types.ts)及其生成 schema 定义。
 
 作者只实现 `render(state)` 中的状态到教学语义映射,**绝不接触坐标/canvas/DOM**。`layout.primary` 必须指向 `patterns` 中存在的模式 ID;右侧证据、时间线、指标等也只能引用同一帧内的模式 ID。
 
@@ -347,20 +225,7 @@ interface VisualPattern {
 
 封闭模式内部的节点、边、区块、树节点、矩阵单元、流水线步骤、泳道消息都可以携带统一 `meta`:
 
-```typescript
-interface VisualElementMeta {
-  id: string;
-  label: string;
-  role?: string;
-  lifecycle: {
-    state: "entering" | "active" | "settled" | "leaving" | "archived";
-    fromTick: number;
-    toTick?: number;
-  };
-  emphasis: "focus" | "context" | "history" | "ghost";
-  explanation?: string;
-}
-```
+元素元数据使用 `VisualElementMeta`：稳定 `id/label/role`、带起止 tick 的生命周期、视觉权重与可选解释。生命周期为 `entering/active/settled/leaving/archived`，权重为 `focus/context/history/ghost`，平台统一解释。
 
 规则:
 
@@ -373,29 +238,15 @@ interface VisualElementMeta {
 
 - 仿真作者**不能自带渲染器**。现有 7 种模式无法表达的全新隐喻(罕见),提交**平台级模式评审**。
 - 评审通过 → 新模式进入封闭集,成为**所有仿真的公共资产**,后续复用。
-- 这是与旧版"L3 自定义渲染器敞开后门"的根本区别:扩展加固主干,而非分裂枝杈。
+- 扩展只组合平台已有模式，不开放任意自定义渲染器。
 
 ---
 
 ## 5. 教学叙事协议
 
-```typescript
-interface NarrativeStep {
-  id: string;
-  trigger: { at_tick?: number; on_state?: Condition; on_event?: string };
-  highlight?: string[];      // 高亮状态元素 id
-  explain?: string;          // 解说"为什么"
-  question?: {
-    prompt: string;
-    options?: string[];      // 选择题;无则开放预测
-    answer?: any;            // 揭晓答案(供 M3 检查点)
-    checkpoint_id?: string;  // M3 判分锚点
-  };
-}
-```
+运行包使用 `NarrativeStep`，以 `trigger(state, event?)` 函数判定触发，提供标题、高亮、解释、默认时长及可选问题。问题的提示、选项、答案与 `checkpointId` 由 `QuestionCheckpoint` 定义；检查点评测仍由 `CheckpointDef.evaluate` 返回明确结果。
 
-- 叙事按 trigger 推进;`question` 结果可上报 M3 作为仿真检查点判分。
-- 叙事与仿真解耦,同仿真可挂多套叙事。
+归档与运行描述只携带可序列化的叙事字段，触发函数留在执行入口中。叙事与状态机解耦，同一仿真可挂不同叙事；设问结果可供 M3 读取检查点判分，不把叙事描述当作已完成结果。
 
 ---
 
@@ -408,69 +259,19 @@ interface NarrativeStep {
 
 ---
 
-## 7. 仿真包示例(PoW + 51% 攻击,节选)
+## 7. 开发模板与归档清单
+
+以下通过公开 API 创建模板并导出上传清单。作者须用真实算法替换模板的状态、交互、叙事、代码追踪、检查点和教学画面，再按 §1.2 打包：
 
 ```typescript
-const PoWSim: SimPackage = {
-  meta: { code: "teacher_1001__pow-mining", name: "PoW 挖矿与51%攻击",
-          category: "consensus", version: "1.0.0", entry: "dist/index.mjs",
-          scaleLimit: { nodes: 50, maxTick: 5000, maxEvents: 10000 } },
-  initState: (p, seed) => ({ miners: mkMiners(p.minerCount, seed), chain: [genesis], ... }),
-  reducer: (s, e, t) => {
-    switch (e.type) {
-      case "tick": return mineStep(s);
-      case "set-hashrate": return setHashrate(s, e.target, e.payload.value);
-      case "launch-51": return forkAttack(s, e.payload);
-      ...
-    }
-  },
-  interactions: [
-    { id: "hashrate", kind: "slider", label: "调矿工算力", emits: "set-hashrate",
-      target: "element", element_filter: "miner",
-      params: [{ name: "value", type: "range", min: 0, max: 100, default: 30 }] },
-    { id: "attack51", kind: "button", label: "发起51%攻击", emits: "launch-51",
-      label_tag: "attack",
-      params: [{ name: "blocks", type: "number", default: 6 }] },
-  ],
-  render: (s) => ({
-    summary: `当前高度 ${s.height},主链候选 ${s.mainChainTip}`,
-    phase: {
-      id: s.attackActive ? "fork-race" : "honest-mining",
-      title: s.attackActive ? "分叉竞争" : "诚实出块",
-      intent: s.attackActive ? "attack" : "observe",
-      explanation: {
-        what: s.attackActive ? "攻击者私链正在追赶公开链。" : "矿工按算力竞争新区块。",
-        why: "最长链选择决定节点最终接受哪条历史。"
-      }
-    },
-    focus: {
-      primary: [s.mainChainTip, s.attackerTip].filter(Boolean),
-      secondary: s.miners.filter(m => m.active).map(m => m.id),
-      muted: s.gossip.filter(msg => msg.settled).map(msg => msg.id)
-    },
-    layout: {
-      primary: "pow-chain",
-      evidence: ["pow-network"],
-      metrics: ["pow-hashrate"]
-    },
-    patterns: [
-      { id: "pow-chain", mode: "chain", title: "主链与攻击分叉",
-        data: { blocks: s.chain, forks: s.forks, canonicalTip: s.mainChainTip } },
-      { id: "pow-network", mode: "graph", title: "矿工传播网络",
-        data: { layout: "ring", nodes: s.miners, edges: s.gossip } },
-      { id: "pow-hashrate", mode: "chart", title: "算力占比趋势",
-        data: { series: s.hashrateSeries, unit: "%" } }
-    ]
-  }),
-  narrative: [
-    { id: "s1", trigger: { at_tick: 0 }, explain: "正常情况下最长链由诚实算力主导" },
-    { id: "s2", trigger: { on_event: "launch-51" },
-      question: { prompt: "攻击者算力超50%后,双花能否成功?", options: ["能","不能"], answer: "能",
-                  checkpoint_id: "cp-51-success" } },
-  ],
-};
+import { createDeveloperTemplate, createSimPackageManifest } from "@chaimir/sim-sdk";
 
----
+const simPackage = createDeveloperTemplate("teacher_1001__pow-mining", "dist/index.mjs");
+export const manifest = createSimPackageManifest(simPackage, "dist/index.mjs");
+export default simPackage;
+```
+
+`manifest` 序列化为归档根的 `sim-package.json`，ESM 默认导出打包到 `dist/index.mjs`。模板与导出器共用公开校验，不在文档维护另一套可执行包。完整模板见[authoring/templates.ts](../../frontend/packages/sim-sdk/src/authoring/templates.ts)，教学算法参考本文标准库入口。
 
 ## 8. 内置仿真包标准库
 
@@ -495,12 +296,7 @@ const PoWSim: SimPackage = {
 
 内置标准库当前固定为 **7 类共 41 个** 仿真包。新增、替换或下架内置包时,必须同步更新本表、`frontend/packages/sim-sdk/src/builtin/catalog.ts` 和对应分类 `index.ts`,并重新通过 `@chaimir/sim-sdk` 构建、lint 与 41 包协议审查。
 
-**改完必须重跑清单导出**:内置包要能在生产被检索到,得先进 `sim_package` 表。入库清单由
-`node scripts/codegen/export-sim-builtin-catalog.mjs` 从本目录的 `package.ts` 求值导出为
-`backend/internal/modules/sim/builtin_catalog.json`,后端 `go:embed` 后在 `migrate-and-seed`
-阶段幂等入库(流程与三条硬约束见 05-业务流程与状态机.md §4.1)。产物已提交入库,
-`scripts/audit/sim-catalog-drift.mjs` 校验它与源码一致 —— 漏跑脚本会让新包在生产取不到,
-而 `interactions` 漂移会让学生的合法操作被后端白名单拒绝。
+内置包通过 `sim_package` 目录供业务检索。入库清单由 `node scripts/codegen/export-sim-builtin-catalog.mjs` 从 `frontend/packages/sim-sdk/src/builtin/` 下的包入口求值，生成 `backend/internal/modules/sim/builtin_catalog.json`；后端嵌入后在 `migrate-and-seed` 阶段幂等同步。流程见[业务流程](05-业务流程与状态机.md#41-平台内置包不走审核流程部署期入库)。源码或交互声明变更时重新导出，`scripts/audit/sim-catalog-drift.mjs` 校验产物与源码一致；未同步的交互不能进入操作白名单。
 
 | 分类 | code | 名称 | 前端实现入口 |
 | --- | --- | --- | --- |
@@ -569,7 +365,7 @@ const PoWSim: SimPackage = {
 
 禁止:
 
-- 旧版跨画布 owner 共享状态。
+- 跨画布 owner 共享状态。
 - 运行时跨阶段实时通信。
 - 仿真包直接操作主页面 DOM、Token、网络或对象存储。
 - 为内置包单独开后门,使其绕过第三方包必须遵守的协议。
@@ -585,4 +381,6 @@ const PoWSim: SimPackage = {
 - `focus.primary` 必须对应当前阶段核心对象,例如 PBFT 的当前消息、PoW 的竞争链尖、Merkle 的证明路径、EVM 的活跃栈帧。
 - `muted` 与元素 `meta.lifecycle` 必须用于历史淡化和离场,避免可视化过程不断叠加。
 - 同一分类内可以共享模式组合,但每个算法必须有自己的过程表达和知识点焦点,不得只套通用模板。
-```
+- 正在发生的消息、投票、区块和证明路径使用 `active/focus`，已完成且仍有教学价值的对象使用 `settled/history`，不再参与当前判断的对象使用 `archived/ghost`。
+
+完成状态必须来自算法实际完成条件，摘要、检查点和流程进度保持一致。例如 Gas 计量在指令执行、退款计算和费用结算全部完成后才达成结算检查点；终态流程标记完成且进度 100%。回退至退款阶段或重置后撤销完成状态，预算不足的失败路径不能判为成功。

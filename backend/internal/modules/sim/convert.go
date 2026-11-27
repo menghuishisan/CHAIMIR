@@ -10,6 +10,14 @@ import (
 	"chaimir/pkg/apperr"
 )
 
+func contractCreateFromDTO(req CreateSessionRequest, tenantID int64, sourceRef string) contracts.SimCreateSessionRequest {
+	accountIDs := make([]int64, len(req.AuthorizedAccountIDs))
+	for i, id := range req.AuthorizedAccountIDs {
+		accountIDs[i] = id.Int64()
+	}
+	return contracts.SimCreateSessionRequest{TenantID: tenantID, PackageCode: req.PackageCode, Version: req.Version, Seed: req.Seed, InitParams: req.InitParams, OwnerAccountID: req.OwnerAccountID.Int64(), AuthorizedAccountIDs: accountIDs, SourceRef: sourceRef, ScopeRef: req.ScopeRef}
+}
+
 // packageToResponse 转换仿真包为公开 HTTP DTO。
 func packageToResponse(pkg Package) (SimPackageResponse, error) {
 	compute, err := computeText(pkg.Compute)

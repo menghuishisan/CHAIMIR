@@ -27,7 +27,7 @@ import (
 const builtinCatalogFile = "builtin_catalog.json"
 
 // builtinBundleRefPrefix 是内置包的逻辑装配来源,不是对象存储地址。
-// 内置包内核由 sim-sdk 在 Worker 内装配(见 docs/04-仿真可视化引擎/05-接口设计.md),
+// 内置包内核由 sim-sdk 在 Worker 内装配(见 docs/04-仿真可视化引擎/03-接口设计.md),
 // 因此这里只登记"从哪装配",运行授权也只回 builtin_code 而不签下载令牌。
 const builtinBundleRefPrefix = "builtin://sim-sdk/"
 

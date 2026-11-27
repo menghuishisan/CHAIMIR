@@ -29,7 +29,35 @@
     operationId: simSubmitPackage
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/MultipartBody" }
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - code
+              - version
+              - name
+              - category
+              - scale_limit
+              - bundle
+            properties:
+              code:
+                type: string
+              version:
+                type: string
+              name:
+                type: string
+              category:
+                type: string
+              scale_limit:
+                type: string
+                description: JSON 编码的规模上限对象，包含 nodes、max_tick、max_events。
+              bundle:
+                type: string
+                format: binary
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sim/packages/{key}:
   patch:
@@ -39,7 +67,35 @@
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/KeyPath" }]
-    requestBody: { $ref: "#/components/requestBodies/MultipartBody" }
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - code
+              - version
+              - name
+              - category
+              - scale_limit
+              - bundle
+            properties:
+              code:
+                type: string
+              version:
+                type: string
+              name:
+                type: string
+              category:
+                type: string
+              scale_limit:
+                type: string
+                description: JSON 编码的规模上限对象，包含 nodes、max_tick、max_events。
+              bundle:
+                type: string
+                format: binary
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sim/packages/{key}/versions:
   get:
@@ -94,7 +150,7 @@
     operationId: simApproveReview
     x-chaimir-audience: platform-admin
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: ticket, in: query, required: true, schema: { type: string }, description: 通过 /api/v1/auth/ws-ticket 换取的短时路径绑定连接票据 }]
+    parameters: [{$ref: '#/components/parameters/IDPath'}]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sim/reviews/{id}/reject:
   post:
@@ -104,7 +160,18 @@
     x-chaimir-audience: platform-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - comment
+            properties:
+              comment:
+                type: string
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sim/internal/sessions:
   post:
@@ -114,7 +181,36 @@
     x-chaimir-audience: internal
     x-chaimir-internal: true
     security: [{ serviceAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - package_code
+              - version
+              - owner_account_id
+              - scope_ref
+            properties:
+              package_code:
+                type: string
+              version:
+                type: string
+              seed:
+                type: integer
+              init_params:
+                type: object
+                additionalProperties: true
+              owner_account_id:
+                $ref: "#/components/schemas/SnowflakeID"
+              authorized_account_ids:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SnowflakeID"
+              scope_ref:
+                type: string
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sim/internal/sessions/recycle:
   post:
@@ -124,7 +220,20 @@
     x-chaimir-audience: internal
     x-chaimir-internal: true
     security: [{ serviceAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - scope_ref
+            properties:
+              scope_ref:
+                type: string
+              reason:
+                type: string
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sim/internal/sessions/{id}:
   delete:
@@ -145,7 +254,26 @@
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - seq
+              - event_type
+            properties:
+              seq:
+                type: integer
+              at_tick:
+                type: integer
+              event_type:
+                type: string
+              payload:
+                type: object
+                additionalProperties: true
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sim/sessions/{id}/replay:
   get:
@@ -165,6 +293,17 @@
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              expire_at:
+                type: string
+                format: date-time
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sim/sessions/{id}/stream:
   get:
@@ -175,5 +314,5 @@
     x-chaimir-audience: user
     x-chaimir-websocket: true
     security: [{ wsTicketAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    parameters: [{$ref: '#/components/parameters/IDPath'}, {name: ticket, in: query, required: true, schema: {type: string}, description: 通过 /api/v1/auth/ws-ticket 换取的短时路径绑定连接票据}]
     responses: { "101": { description: WebSocket 升级成功 }, default: { $ref: "#/components/responses/Error" } }

@@ -1,0 +1,123 @@
+schema_version: 1
+category: runtime
+name: evm-history
+image: runtime/evm-history
+labels:
+  app.kubernetes.io/name: evm-history
+  app.kubernetes.io/component: runtime
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: runtime
+  chaimir.io/image: runtime/evm-history
+  chaimir.io/data-driven: "true"
+  chaimir.io/student-access: "false"
+  chaimir.io/sensitivity: student-runtime
+  chaimir.io/scope: sandbox
+  chaimir.io/source: platform-built
+description: 完整不可变 Ethereum 历史状态只读提供者。
+source:
+  type: platform-built
+upstream:
+  source_repository: https://github.com/ethereum/go-ethereum
+  version: v1.17.4
+  source_sha256: 80b4dee3b89ea40bedc808132befd605208089fdb8fde7981fc3c530596d3a9e
+  reuse_policy: source-build
+data_driven: true
+env_keys:
+  config:
+    - CHAIMIR_RUNTIME_RPC_PORT
+    - CHAIMIR_EVM_HISTORY_BLOCK_NUMBER
+    - CHAIMIR_EVM_HISTORY_BLOCK_HASH
+    - CHAIMIR_EVM_HISTORY_STATE_ROOT
+    - CHAIMIR_EVM_HISTORY_CHAIN_ID
+  secret: []
+capabilities:
+  provides:
+    - evm-history-state
+  requires: []
+  conflicts: []
+  cardinality: many
+  placement: sandbox
+  config_schema:
+    type: object
+    additionalProperties: false
+    required: [history_block_number, history_block_hash, history_state_root, history_chain_id]
+    properties:
+      history_block_number:
+        title: 固定历史区块号
+        type: string
+        pattern: '^(0|[1-9][0-9]{0,18})$'
+        x-chaimir-env: runtime/CHAIMIR_EVM_HISTORY_BLOCK_NUMBER
+      history_block_hash:
+        title: 固定历史区块哈希
+        type: string
+        pattern: '^0x[0-9a-f]{64}$'
+        x-chaimir-env: runtime/CHAIMIR_EVM_HISTORY_BLOCK_HASH
+      history_state_root:
+        title: 固定历史状态根
+        type: string
+        pattern: '^0x[0-9a-f]{64}$'
+        x-chaimir-env: runtime/CHAIMIR_EVM_HISTORY_STATE_ROOT
+      history_chain_id:
+        title: 历史链编号
+        type: string
+        pattern: '^[1-9][0-9]{0,77}$'
+        x-chaimir-env: runtime/CHAIMIR_EVM_HISTORY_CHAIN_ID
+  student_access: private
+runtime:
+  eco: evm
+  adapter_level: 1
+  workload:
+    env:
+      - name: CHAIMIR_RUNTIME_RPC_PORT
+        value: "8545"
+    readiness_probe:
+      type: tcp
+      port: rpc
+      period_seconds: 2
+      failure_threshold: 30
+ports:
+  - name: rpc
+    container_port: 8545
+    protocol: TCP
+    expose: internal
+    purpose: 固定历史状态只读 JSON-RPC
+rpc_exposure:
+  bind_all_interfaces: true
+  reason: 仅由 M2 显式私有连接与沙箱网络策略放行。
+  allowed_apis:
+    - eth
+  required_controls:
+    - network_policy_deny_all
+    - m2_port_allowlist
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+student_access:
+  enabled: false
+  shell: none
+  allowed_mounts: []
+resources:
+  cpu_request: 250m
+  cpu_limit: "2"
+  memory_request: 512Mi
+  memory_limit: 2Gi
+  ephemeral_storage_limit: 4Gi
+build:
+  context: images/runtime/evm-history
+  dockerfile: Dockerfile
+selftest:
+  commands:
+    - name: history-identity
+      command: [chaimir-evm-history, --check]
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest: true

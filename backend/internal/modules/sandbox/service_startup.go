@@ -14,16 +14,16 @@ import (
 	"chaimir/pkg/logging"
 )
 
-func (s *Service) scheduleSandboxStart(ctx context.Context, plan CreateSandboxPlan) {
+func (s *Service) scheduleSandboxStart(ctx context.Context, tenantID, sandboxID int64) {
 	traceCtx := context.WithoutCancel(ctx)
 	go func() {
-		if err := s.startSandbox(traceCtx, plan); err != nil {
-			logging.ErrorContext(traceCtx, "sandbox startup failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", plan.Sandbox.TenantID), slog.Int64("sandbox_id", plan.Sandbox.ID))
+		if err := s.startSandbox(traceCtx, tenantID, sandboxID); err != nil {
+			logging.ErrorContext(traceCtx, "sandbox startup failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", tenantID), slog.Int64("sandbox_id", sandboxID))
 		}
 	}()
 }
 
-func (s *Service) startSandbox(ctx context.Context, plan CreateSandboxPlan) (failure error) {
+func (s *Service) startSandbox(ctx context.Context, tenantID, sandboxID int64) (failure error) {
 	if s.resourceLeaseDuration() <= 0 {
 		return apperr.ErrSandboxRecycleConfigInvalid
 	}
@@ -31,9 +31,9 @@ func (s *Service) startSandbox(ctx context.Context, plan CreateSandboxPlan) (fai
 	defer cancel()
 	var current Sandbox
 	var acquired bool
-	if err := s.store.TenantTx(ctx, plan.Sandbox.TenantID, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		current, acquired, err = tx.ClaimSandboxResources(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxStatusCreating, s.resourceLeaseDuration())
+		current, acquired, err = tx.ClaimSandboxResources(ctx, tenantID, sandboxID, SandboxStatusCreating, s.resourceLeaseDuration())
 		return err
 	}); err != nil {
 		return apperr.ErrSandboxStatePersistFailed.WithCause(err)
@@ -42,13 +42,18 @@ func (s *Service) startSandbox(ctx context.Context, plan CreateSandboxPlan) (fai
 		// 重复后台任务只退出；同步恢复入口另外核对当前可执行状态。
 		return nil
 	}
-	plan.Sandbox = current
+	plan := CreateSandboxPlan{Sandbox: current}
 	stage := "start"
 	defer func() {
 		if failure != nil {
 			s.markStartupFailed(ctx, plan.Sandbox, stage, failure)
 		}
 	}()
+	prepared, err := s.planForExistingSandbox(ctx, current)
+	if err != nil {
+		return err
+	}
+	plan = prepared
 	needsInitialization := sandboxNeedsInitialization(plan)
 	var archives []RuntimeInitArchive
 	if needsInitialization {

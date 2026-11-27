@@ -54,17 +54,6 @@ func platformRuntimeImageVersion(code string) string {
 	return imageVersionFromURL(url)
 }
 
-// acceptanceToolDefinition 是 manifest 转换阶段的规范化工具定义。
-type acceptanceToolDefinition struct {
-	ID           int64
-	Code         string
-	Name         string
-	Kind         int16
-	EcoTags      []string
-	ResourceSpec map[string]any
-	Status       int16
-}
-
 type toolManifest struct {
 	SchemaVersion      int                         `json:"schema_version"`
 	Category           string                      `json:"category"`
@@ -140,22 +129,9 @@ func (c *manifestCapabilities) UnmarshalJSON(data []byte) error {
 		*c = manifestCapabilities{Provides: provides}
 		return nil
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(trimmed, &fields); err != nil {
-		return fmt.Errorf("capabilities 对象格式无效: %w", err)
-	}
-	allowed := map[string]struct{}{
-		"provides": {}, "requires": {}, "conflicts": {}, "cardinality": {},
-		"placement": {}, "config_schema": {}, "student_access": {},
-	}
-	for key := range fields {
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("capabilities 包含未知字段 %s", key)
-		}
-	}
 	type plain manifestCapabilities
 	var value plain
-	if err := json.Unmarshal(trimmed, &value); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(trimmed, &value); err != nil {
 		return fmt.Errorf("capabilities 字段格式无效: %w", err)
 	}
 	*c = manifestCapabilities(value)
@@ -213,26 +189,6 @@ type toolManifestResources struct {
 type toolManifestSelftestCommand struct {
 	Name    string   `json:"name"`
 	Command []string `json:"command"`
-}
-
-// toolDefinitionFromManifest 把工具 manifest 转换为 M2 工具资源规格。
-func toolDefinitionFromManifest(manifest toolManifest) (acceptanceToolDefinition, error) {
-	imageURL, err := verifiedImageURL(manifest.Image)
-	if err != nil {
-		return acceptanceToolDefinition{}, err
-	}
-	kind, err := toolKindFromManifest(manifest.Tool.Kind)
-	if err != nil {
-		return acceptanceToolDefinition{}, err
-	}
-	spec, err := toolResourceSpecFromManifest(manifest, imageURL, kind)
-	if err != nil {
-		return acceptanceToolDefinition{}, err
-	}
-	return acceptanceToolDefinition{
-		ID: platformCatalogToolID(manifest.Name), Code: manifest.Name, Name: manifestDisplayName(manifest),
-		Kind: kind, EcoTags: manifest.Tool.EcoTags, ResourceSpec: spec, Status: toolStatusFromManifest(manifest),
-	}, nil
 }
 
 // readToolManifest 严格读取单个工具 manifest。
@@ -589,7 +545,7 @@ func referencedImageSelftest(image, category, name string) (map[string]any, erro
 		Image    string         `json:"image"`
 		Selftest map[string]any `json:"selftest"`
 	}
-	if err := json.Unmarshal(data, &manifest); err != nil {
+	if err := jsonx.DecodeStrict(data, &manifest); err != nil {
 		return nil, fmt.Errorf("解析镜像清单 %s 的标识和自检声明失败: %w", image, err)
 	}
 	if manifest.Category != category || manifest.Name != name || manifest.Image != image {

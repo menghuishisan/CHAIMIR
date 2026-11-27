@@ -64,7 +64,7 @@ type Querier interface {
 	UpdateSimPackageStatus(ctx context.Context, arg UpdateSimPackageStatusParams) (SimPackage, error)
 	UpdateSimSessionAuthorizedAccounts(ctx context.Context, arg UpdateSimSessionAuthorizedAccountsParams) (SimSession, error)
 	// 平台内置仿真包按 (code, version) 幂等入库。
-	// 内置包不来自教师上传,而是平台随版本交付的标准库(见 docs/04-仿真可视化引擎/09-内置仿真包标准库.md),
+	// 内置包不来自教师上传,而是平台随版本交付的标准库(见 docs/04-仿真可视化引擎/08-可视化SDK与交互协议.md §8),
 	// 故直接落 author_type=1、compute=1(浏览器执行)、status=3(已上架):它不经审核流程,
 	// 审核针对的是外部提交的包;entry/backend_adapter 恒为 NULL —— 内置包由 sim-sdk registry 按 code 装配。
 	// 重跑部署 seed 时按 code+version 覆盖协议字段,不新建行、不改 created_at。

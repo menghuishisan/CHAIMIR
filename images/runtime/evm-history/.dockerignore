@@ -1,0 +1,6 @@
+*
+!Dockerfile
+!snapshot/
+!snapshot/snapshot.json
+!snapshot/chaindata/
+!snapshot/chaindata/**

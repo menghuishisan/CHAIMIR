@@ -44,6 +44,11 @@ upstream:
 data_driven: true
 env_keys:
   config:
+    - CHAIMIR_EVM_FORK_RPC_URL
+    - CHAIMIR_EVM_FORK_BLOCK_NUMBER
+    - CHAIMIR_EVM_FORK_BLOCK_HASH
+    - CHAIMIR_EVM_FORK_STATE_ROOT
+    - CHAIMIR_EVM_FORK_CHAIN_ID
     - CHAIMIR_CHAIN_RPC_URL
     - CHAIMIR_RUNTIME_RPC_PORT
     - CHAIMIR_CHAIN_STATE_DIR
@@ -66,7 +71,35 @@ capabilities:
   conflicts: []
   cardinality: one
   placement: sandbox
-  config_schema: {}
+  config_schema:
+    type: object
+    additionalProperties: false
+    dependentRequired:
+      fork_block_number: [fork_block_hash, fork_state_root, fork_chain_id]
+      fork_block_hash: [fork_block_number, fork_state_root, fork_chain_id]
+      fork_state_root: [fork_block_number, fork_block_hash, fork_chain_id]
+      fork_chain_id: [fork_block_number, fork_block_hash, fork_state_root]
+    properties:
+      fork_block_number:
+        title: 固定历史区块号
+        type: string
+        pattern: '^(0|[1-9][0-9]{0,18})$'
+        x-chaimir-env: runtime/CHAIMIR_EVM_FORK_BLOCK_NUMBER
+      fork_block_hash:
+        title: 固定历史区块哈希
+        type: string
+        pattern: '^0x[0-9a-f]{64}$'
+        x-chaimir-env: runtime/CHAIMIR_EVM_FORK_BLOCK_HASH
+      fork_state_root:
+        title: 固定历史状态根
+        type: string
+        pattern: '^0x[0-9a-f]{64}$'
+        x-chaimir-env: runtime/CHAIMIR_EVM_FORK_STATE_ROOT
+      fork_chain_id:
+        title: 历史链编号
+        type: string
+        pattern: '^[1-9][0-9]{0,77}$'
+        x-chaimir-env: runtime/CHAIMIR_EVM_FORK_CHAIN_ID
   student_access: private
 runtime:
   eco: evm

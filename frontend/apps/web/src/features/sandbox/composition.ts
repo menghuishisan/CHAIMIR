@@ -45,7 +45,8 @@ export interface RuntimeDeclaration {
 export function reconcileRuntimeNames(previous: RuntimeDeclaration[], next: RuntimeDeclaration[]) {
   const renames = new Map<string, string>()
   const names = next.map((runtime) => runtime.instanceCode.trim())
-  const complete = names.every(Boolean) && new Set(names).size === names.length
+  const complete = next.every((runtime, index) => names[index] !== '' && runtime.instanceCode === names[index])
+    && new Set(names).size === names.length
   const runtimes = next.map((runtime) => {
     const before = previous.find((item) => item.clientId === runtime.clientId)
     const from = before?.pendingInstanceCode || before?.instanceCode.trim() || before?.originalInstanceCode
@@ -184,16 +185,18 @@ export function compositionDeclarationError(
 export function compositionSelectionError(declaration: CompositionDeclaration): string | undefined {
 	if (declaration.runtimes.length === 0) return '请至少添加一个运行时实例'
 	if (declaration.workspaceRuntimeInstance.trim() === '') return '请选择工作区运行时实例'
+	if (declaration.workspaceRuntimeInstance !== declaration.workspaceRuntimeInstance.trim()) return '工作区实例名称不能包含首尾空白'
 	const aliases = new Set<string>()
 	let workspaceRuntimeDeclared = false
 	for (const runtime of declaration.runtimes) {
 		if (runtime.instanceCode.trim() === '') return '请填写运行时实例名称'
-		const instanceCode = runtime.instanceCode.trim()
+		const instanceCode = runtime.instanceCode
+		if (instanceCode !== instanceCode.trim()) return '运行时实例名称不能包含首尾空白'
 		if (aliases.has(instanceCode)) return '运行时实例名称不能重复'
 		aliases.add(instanceCode)
-		if (instanceCode === declaration.workspaceRuntimeInstance.trim()) workspaceRuntimeDeclared = true
-		if (runtime.runtimeCode === '') return '请选择运行时'
-		if (runtime.imageVersion === '') return '请选择镜像版本,发布后按这个版本固定下来'
+		if (instanceCode === declaration.workspaceRuntimeInstance) workspaceRuntimeDeclared = true
+		if (runtime.runtimeCode.trim() === '' || runtime.runtimeCode !== runtime.runtimeCode.trim()) return '请选择有效的运行时'
+		if (runtime.imageVersion.trim() === '' || runtime.imageVersion !== runtime.imageVersion.trim()) return '请选择有效的镜像版本,发布后按这个版本固定下来'
 	}
 	if (!workspaceRuntimeDeclared) return '工作区运行时实例必须来自已声明的运行时'
 	return undefined

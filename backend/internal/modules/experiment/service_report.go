@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"mime"
 	"path"
 	"path/filepath"
 	"strings"
@@ -146,6 +148,7 @@ func (s *Service) SubmitReport(ctx context.Context, instanceID int64, req Report
 	if previousContentRef != "" && previousContentRef != plan.ObjectRef {
 		s.deletePreviousReportObject(ctx, id.TenantID, instanceID, id.AccountID, previousContentRef)
 	}
+	s.publishInstanceChanged(ctx, id.TenantID, instanceID)
 	return reportDTOFromModel(report, profiles), nil
 }
 
@@ -180,7 +183,14 @@ func normalizedReportContentType(fileName, declared string, content []byte) (str
 	default:
 		return "", errors.New("实验报告文件类型不受支持")
 	}
-	declared = strings.ToLower(strings.TrimSpace(strings.SplitN(declared, ";", 2)[0]))
+	declared = strings.TrimSpace(declared)
+	if declared != "" {
+		mediaType, _, err := mime.ParseMediaType(declared)
+		if err != nil {
+			return "", fmt.Errorf("实验报告声明类型非法: %w", err)
+		}
+		declared = mediaType
+	}
 	if declared != "" && declared != "application/octet-stream" && declared != expected {
 		return "", errors.New("实验报告声明类型与扩展名不一致")
 	}
@@ -423,5 +433,6 @@ func (s *Service) GradeReport(ctx context.Context, reportID int64, req GradeRepo
 	if shouldPublish {
 		s.drainExperimentEventOutboxBestEffort(ctx)
 	}
+	s.publishInstanceChanged(ctx, id.TenantID, report.InstanceID)
 	return reportDTOFromModel(report, profiles), nil
 }

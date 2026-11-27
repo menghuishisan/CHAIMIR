@@ -47,7 +47,6 @@ type sandboxAPI struct {
 	authn *auth.Manager
 }
 
-// registerPlatformRoutes 注册运行时、镜像和工具管理接口。
 func (a sandboxAPI) registerPlatformRoutes(g gin.IRouter) {
 	g.GET("/runtimes", a.listRuntimes)
 	g.GET("/runtimes/:id", a.getRuntime)
@@ -64,7 +63,6 @@ func (a sandboxAPI) registerPlatformRoutes(g gin.IRouter) {
 	g.POST("/tools", a.registerTool)
 }
 
-// getRuntime 按 ID 返回单个运行时的公开管理投影。
 func (a sandboxAPI) getRuntime(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -85,7 +83,6 @@ func (a sandboxAPI) registerCatalogRoutes(g gin.IRouter) {
 	g.POST("/catalog/composition-preview", a.previewComposition)
 }
 
-// previewComposition 读取目录中的连接候选,不发布组合或创建任何执行资源。
 func (a sandboxAPI) previewComposition(c *gin.Context) {
 	var req CompositionPreviewRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxCreateRequestInvalid) {
@@ -95,7 +92,6 @@ func (a sandboxAPI) previewComposition(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// orchestrationCatalog 返回可编排的运行时(含可用镜像版本)与工具目录。
 func (a sandboxAPI) orchestrationCatalog(c *gin.Context) {
 	runtimes, tools, err := a.svc.ListOrchestrationCatalog(c.Request.Context())
 	if err != nil {
@@ -105,7 +101,6 @@ func (a sandboxAPI) orchestrationCatalog(c *gin.Context) {
 	httpx.Write(c, orchestrationCatalogResponse(runtimes, tools), nil)
 }
 
-// runRuntimeSelftest 触发运行时接入即测。
 func (a sandboxAPI) runRuntimeSelftest(c *gin.Context) {
 	runtimeID, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -115,7 +110,6 @@ func (a sandboxAPI) runRuntimeSelftest(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// getRuntimeSelftest 查询运行时接入即测结果。
 func (a sandboxAPI) getRuntimeSelftest(c *gin.Context) {
 	runtimeID, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -125,7 +119,6 @@ func (a sandboxAPI) getRuntimeSelftest(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// registerInternalRoutes 注册内部服务签名保护的生命周期接口。
 func (a sandboxAPI) registerInternalRoutes(g gin.IRouter) {
 	g.POST("/sandboxes", a.createSandbox)
 	g.POST("/sandboxes/recycle", a.recycleByScopeRef)
@@ -135,14 +128,12 @@ func (a sandboxAPI) registerInternalRoutes(g gin.IRouter) {
 	g.POST("/sandboxes/:id/chain/reset", a.chainReset)
 }
 
-// registerChainRoutes 注册链能力入口,同一路径同时服务内部业务回调和用户工作台。
 func (a sandboxAPI) registerChainRoutes(g gin.IRouter) {
 	g.POST("/sandboxes/:id/chain/deploy", a.chainDeploy)
 	g.POST("/sandboxes/:id/chain/tx", a.chainSendTx)
 	g.GET("/sandboxes/:id/chain/query", a.chainQuery)
 }
 
-// registerUserRoutes 注册用户侧沙箱查询、文件和进度接口。
 func (a sandboxAPI) registerUserRoutes(g gin.IRouter) {
 	g.GET("/sandboxes/:id", a.getSandbox)
 	g.GET("/sandboxes/:id/files", a.getFiles)
@@ -162,13 +153,11 @@ func (a sandboxAPI) registerToolProxyRoutes(g gin.IRouter) {
 	g.Match([]string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodHead, http.MethodOptions}, "/sandboxes/:id/tools/:tool_code/*proxy_path", a.toolProxy)
 }
 
-// registerQuotaRoutes 注册配额查询和调整接口。
 func (a sandboxAPI) registerQuotaRoutes(g gin.IRouter, authn *auth.Manager, roles contracts.IdentityService) {
 	g.GET("/quota", authn.Middleware(), auth.RequirePlatformOrAnyRole(roles, contracts.RoleSchoolAdmin), a.quotaStats)
 	g.PATCH("/quota", authn.Middleware(), auth.RequirePlatformOrAnyRole(roles, contracts.RoleSchoolAdmin), a.upsertQuota)
 }
 
-// listRuntimes 返回运行时列表。
 func (a sandboxAPI) listRuntimes(c *gin.Context) {
 	out, availableImages, err := a.svc.ListRuntimes(c.Request.Context())
 	responses, convertErr := runtimeResponsesFromModels(out, availableImages)
@@ -178,7 +167,6 @@ func (a sandboxAPI) listRuntimes(c *gin.Context) {
 	httpx.Write(c, responses, err)
 }
 
-// registerRuntime 绑定运行时注册或更新请求。
 func (a sandboxAPI) registerRuntime(c *gin.Context) {
 	var req RuntimeRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxRuntimeCreateInvalid) {
@@ -192,7 +180,6 @@ func (a sandboxAPI) registerRuntime(c *gin.Context) {
 	httpx.Write(c, response, err)
 }
 
-// updateRuntime 绑定运行时更新请求并校验路径 ID。
 func (a sandboxAPI) updateRuntime(c *gin.Context) {
 	runtimeID, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -210,7 +197,6 @@ func (a sandboxAPI) updateRuntime(c *gin.Context) {
 	httpx.Write(c, response, err)
 }
 
-// registerRuntimeImage 绑定运行时镜像登记请求。
 func (a sandboxAPI) registerRuntimeImage(c *gin.Context) {
 	runtimeID, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -224,7 +210,6 @@ func (a sandboxAPI) registerRuntimeImage(c *gin.Context) {
 	httpx.Write(c, runtimeImageResponseFromModel(out), err)
 }
 
-// listRuntimeImages 返回指定运行时的镜像版本。
 func (a sandboxAPI) listRuntimeImages(c *gin.Context) {
 	runtimeID, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -234,7 +219,6 @@ func (a sandboxAPI) listRuntimeImages(c *gin.Context) {
 	httpx.Write(c, runtimeImageResponsesFromModels(out), err)
 }
 
-// disableRuntimeImage 绑定镜像停用请求,停用前由 service 清理预拉取 DaemonSet。
 func (a sandboxAPI) disableRuntimeImage(c *gin.Context) {
 	runtimeID, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -248,7 +232,6 @@ func (a sandboxAPI) disableRuntimeImage(c *gin.Context) {
 	httpx.Write(c, runtimeImageResponseFromModel(out), err)
 }
 
-// prepullRuntimeImage 触发镜像预拉取。
 func (a sandboxAPI) prepullRuntimeImage(c *gin.Context) {
 	runtimeID, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -266,7 +249,6 @@ func (a sandboxAPI) prepullRuntimeImage(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// getRuntimeImagePrepull 查询镜像预拉取闭环状态。
 func (a sandboxAPI) getRuntimeImagePrepull(c *gin.Context) {
 	runtimeID, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -280,7 +262,6 @@ func (a sandboxAPI) getRuntimeImagePrepull(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// listTools 返回平台工具列表。
 func (a sandboxAPI) listTools(c *gin.Context) {
 	out, err := a.svc.ListTools(c.Request.Context())
 	responses, convertErr := toolResponsesFromModels(out)
@@ -290,7 +271,6 @@ func (a sandboxAPI) listTools(c *gin.Context) {
 	httpx.Write(c, responses, err)
 }
 
-// registerTool 绑定工具注册请求。
 func (a sandboxAPI) registerTool(c *gin.Context) {
 	var req ToolRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxToolCreateInvalid) {
@@ -304,27 +284,23 @@ func (a sandboxAPI) registerTool(c *gin.Context) {
 	httpx.Write(c, response, err)
 }
 
-// createSandbox 绑定内部创建沙箱请求。
 func (a sandboxAPI) createSandbox(c *gin.Context) {
 	var req CreateSandboxRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxCreateRequestInvalid) {
 		return
 	}
-	req.TenantID = ids.ID(serviceTenantID(c))
-	if req.TenantID <= 0 {
-		response.Fail(c, apperr.ErrServiceUnauthorized)
+	tenantID, ok := currentServiceTenantID(c)
+	if !ok {
 		return
 	}
 	sourceRef, ok := serviceSourceRef(c)
 	if !ok {
 		return
 	}
-	req.SourceRef = sourceRef
-	out, err := a.svc.CreateSandbox(c.Request.Context(), contractCreateFromDTO(req))
+	out, err := a.svc.CreateSandbox(c.Request.Context(), contractCreateFromDTO(req, tenantID, sourceRef))
 	httpx.Write(c, out, err)
 }
 
-// getSandbox 查询当前用户自己的沙箱。
 func (a sandboxAPI) getSandbox(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -342,7 +318,6 @@ func (a sandboxAPI) getSandbox(c *gin.Context) {
 	httpx.Write(c, sandboxResponseFromInfo(out), nil)
 }
 
-// pauseSandbox 绑定内部暂停请求。
 func (a sandboxAPI) pauseSandbox(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -359,7 +334,6 @@ func (a sandboxAPI) pauseSandbox(c *gin.Context) {
 	httpx.Write(c, struct{}{}, a.svc.PauseSandbox(c.Request.Context(), contracts.SandboxControlRequest{TenantID: tenantID, SandboxID: id, SourceRef: sourceRef}))
 }
 
-// resumeSandbox 绑定内部恢复请求。
 func (a sandboxAPI) resumeSandbox(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -376,7 +350,6 @@ func (a sandboxAPI) resumeSandbox(c *gin.Context) {
 	httpx.Write(c, struct{}{}, a.svc.ResumeSandbox(c.Request.Context(), contracts.SandboxControlRequest{TenantID: tenantID, SandboxID: id, SourceRef: sourceRef}))
 }
 
-// destroySandbox 绑定内部销毁请求。
 func (a sandboxAPI) destroySandbox(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -393,26 +366,22 @@ func (a sandboxAPI) destroySandbox(c *gin.Context) {
 	httpx.Write(c, struct{}{}, a.svc.DestroySandbox(c.Request.Context(), contracts.SandboxControlRequest{TenantID: tenantID, SandboxID: id, SourceRef: sourceRef}))
 }
 
-// recycleByScopeRef 绑定来源作用域级联回收请求。
 func (a sandboxAPI) recycleByScopeRef(c *gin.Context) {
 	var req RecycleRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxRecycleRequestInvalid) {
 		return
 	}
-	req.TenantID = ids.ID(serviceTenantID(c))
-	if req.TenantID <= 0 {
-		response.Fail(c, apperr.ErrServiceUnauthorized)
+	tenantID, ok := currentServiceTenantID(c)
+	if !ok {
 		return
 	}
 	sourceRef, ok := serviceSourceRef(c)
 	if !ok {
 		return
 	}
-	req.SourceRef = sourceRef
-	httpx.Write(c, struct{}{}, a.svc.RecycleByScopeRef(c.Request.Context(), contracts.SandboxRecycleRequest{TenantID: req.TenantID.Int64(), SourceRef: req.SourceRef, ScopeRef: req.ScopeRef, Reason: req.Reason}))
+	httpx.Write(c, struct{}{}, a.svc.RecycleByScopeRef(c.Request.Context(), contracts.SandboxRecycleRequest{TenantID: tenantID, SourceRef: sourceRef, ScopeRef: req.ScopeRef, Reason: req.Reason}))
 }
 
-// getFiles 绑定工作区文件读取或目录列表请求。
 func (a sandboxAPI) getFiles(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -431,7 +400,6 @@ func (a sandboxAPI) getFiles(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// writeFile 绑定工作区文件写入请求。
 func (a sandboxAPI) writeFile(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -454,7 +422,6 @@ func (a sandboxAPI) writeFile(c *gin.Context) {
 	}{WorkspaceRevision: revision}, err)
 }
 
-// saveFiles 绑定立即持久化工作区请求。
 func (a sandboxAPI) saveFiles(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -575,7 +542,6 @@ func (a sandboxAPI) prepareToolBrowserAccess(c *gin.Context, externalPrefix stri
 	return false
 }
 
-// runCommandTool 执行命令类工具的一次受控命令。
 func (a sandboxAPI) runCommandTool(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -593,7 +559,6 @@ func (a sandboxAPI) runCommandTool(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// chainDeploy 绑定链部署请求。
 func (a sandboxAPI) chainDeploy(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -617,7 +582,6 @@ func (a sandboxAPI) chainDeploy(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// chainSendTx 绑定链交易请求。
 func (a sandboxAPI) chainSendTx(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -641,7 +605,6 @@ func (a sandboxAPI) chainSendTx(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// chainQuery 绑定链查询请求。
 func (a sandboxAPI) chainQuery(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -661,7 +624,6 @@ func (a sandboxAPI) chainQuery(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// chainReset 绑定链重置请求。
 func (a sandboxAPI) chainReset(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
@@ -690,7 +652,6 @@ func (a sandboxAPI) quotaStats(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// upsertQuota 绑定配额调整请求。
 func (a sandboxAPI) upsertQuota(c *gin.Context) {
 	var req QuotaRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxQuotaUpdateInvalid) {

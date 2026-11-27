@@ -2,6 +2,8 @@
 
 从固定版本的 go-ethereum 官方源码构建教学私链运行时。启动参数、端口、Secret、资源与供应链约束以 manifest 和 Dockerfile 为准，学生不直接进入运行时 shell。
 
+同源构建还提供 `chaimir-evm-history`，只用于派生的 `runtime/evm-history` 镜像读取完整历史状态；本镜像仍由 Geth dev 入口承担原生交易动作，不宣称自身携带历史数据。
+
 原生适配器接受一份 JSON 对象：`deploy` 发送字节码；`tx` 接受目标、调用数据、金额及节点可用账户；`query` 支持链编号、最新区块、余额和合约字节码。文本字段不强转其他类型，没有可用账户时拒绝未签名交易。
 
 教学钱包签名使用独立载荷 `{"raw_transaction":"0x..."}`，仅接受非空完整十六进制字节，不混入其他字段。复用 `eth_sendRawTransaction` 和已有回执等待，原样广播、不读取平台签名账户、不重签。

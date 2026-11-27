@@ -88,6 +88,11 @@ func (s *Service) prepareRuntimeInitArchives(ctx context.Context, sb Sandbox, ru
 	if sb.TenantID < 0 {
 		return nil, apperr.ErrSandboxInitObjectRefInvalid
 	}
+	type archiveSource struct {
+		ref  storage.ObjectRef
+		hash string
+	}
+	prepared := make(map[archiveSource][]byte)
 	var archives []RuntimeInitArchive
 	for _, runtime := range runtimes {
 		if err := validateInitAssets(runtime.Runtime.AdapterSpec); err != nil {
@@ -103,9 +108,14 @@ func (s *Service) prepareRuntimeInitArchives(ctx context.Context, sb Sandbox, ru
 			if strings.HasPrefix(ref.Key, "0/") {
 				ownerID = 0
 			}
-			tarball, err := s.readInitArchive(ctx, ownerID, ref, asset.ExpectedSHA256)
-			if err != nil {
-				return nil, err
+			source := archiveSource{ref: ref, hash: strings.ToLower(strings.TrimSpace(asset.ExpectedSHA256))}
+			tarball, exists := prepared[source]
+			if !exists {
+				tarball, err = s.readInitArchive(ctx, ownerID, ref, asset.ExpectedSHA256)
+				if err != nil {
+					return nil, err
+				}
+				prepared[source] = tarball
 			}
 			archives = append(archives, RuntimeInitArchive{RuntimeInstance: runtime.InstanceCode, TargetDomain: asset.TargetDomain, Tarball: tarball})
 		}

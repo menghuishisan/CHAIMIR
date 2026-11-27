@@ -114,6 +114,7 @@ func (s *Service) JudgeCheckpoint(ctx context.Context, instanceID int64, checkpo
 		return CheckpointDTO{}, errors.Join(err, s.judge.CancelJudgeTask(cleanupCtx, id.TenantID, task.TaskID))
 	}
 	result.JudgeStatus = task.Status
+	s.publishInstanceChanged(ctx, inst.TenantID, inst.ID)
 	return checkpointDTOFromModel(result), nil
 }
 
@@ -188,6 +189,7 @@ func (s *Service) recordCheckpointJudgement(ctx context.Context, tenantID, taskI
 		return nil
 	}
 	shouldPublish := false
+	checkpointChanged := false
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		inst, err := tx.GetInstanceForUpdate(ctx, tenantID, submission.instanceID)
 		if err != nil {
@@ -232,6 +234,7 @@ func (s *Service) recordCheckpointJudgement(ctx context.Context, tenantID, taskI
 		if _, err = tx.UpsertCheckpoint(ctx, checkpointWithJudgeTask(result, task, maxScore)); err != nil {
 			return err
 		}
+		checkpointChanged = true
 		if inst.Status != InstanceStatusFinished && inst.Status != InstanceStatusRecycled {
 			return nil
 		}
@@ -250,6 +253,9 @@ func (s *Service) recordCheckpointJudgement(ctx context.Context, tenantID, taskI
 	}
 	if shouldPublish {
 		s.drainExperimentEventOutboxBestEffort(ctx)
+	}
+	if checkpointChanged {
+		s.publishInstanceChanged(ctx, tenantID, submission.instanceID)
 	}
 	return nil
 }

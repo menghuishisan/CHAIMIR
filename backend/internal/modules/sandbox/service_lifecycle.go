@@ -62,7 +62,7 @@ func (s *Service) PauseSandbox(ctx context.Context, req contracts.SandboxControl
 		resultErr = errors.Join(resultErr, s.queueFailedPause(ctx, sb, resultErr, false))
 	}()
 	ctx = leaseCtx
-	plan, err := s.planForExistingSandbox(ctx, sb)
+	plan, err := cleanupPlanForSandbox(sb)
 	if err != nil {
 		return err
 	}
@@ -286,7 +286,7 @@ func (s *Service) resumeRetainedSandbox(ctx context.Context, sb Sandbox) error {
 	if !started {
 		return apperr.ErrSandboxStateInvalid
 	}
-	if err := s.startSandbox(ctx, plan); err != nil {
+	if err := s.startSandbox(ctx, sb.TenantID, sb.ID); err != nil {
 		return err
 	}
 	if err := s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {

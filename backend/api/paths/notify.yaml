@@ -61,7 +61,20 @@
     operationId: notifyUpsertPreference
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - type
+            properties:
+              type:
+                type: string
+              enabled:
+                type: boolean
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/notify/announcements:
   get:
@@ -110,7 +123,34 @@
     x-chaimir-audience: internal
     x-chaimir-internal: true
     security: [{ serviceAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - tenant_id
+              - type
+              - receivers
+            properties:
+              request_id:
+                type: string
+              tenant_id:
+                $ref: "#/components/schemas/SnowflakeID"
+              type:
+                type: string
+              receivers:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SnowflakeID"
+              params:
+                type: object
+                additionalProperties:
+                  type: string
+              link:
+                type: string
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/notify/internal/push:
   post:
@@ -120,5 +160,22 @@
     x-chaimir-audience: internal
     x-chaimir-internal: true
     security: [{ serviceAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - tenant_id
+              - topic
+              - payload
+            properties:
+              tenant_id:
+                $ref: "#/components/schemas/SnowflakeID"
+              topic:
+                type: string
+              payload:
+                description: 任意有效 JSON 负载，原样嵌入 topic 信封。
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

@@ -296,7 +296,7 @@ func TestToolControlPlanePortsFollowDeclaredRoutes(t *testing.T) {
 
 func TestRetainedPVCDoesNotNeedSnapshotDataSource(t *testing.T) {
 	existing := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "workspace", Namespace: "sandbox-test", Labels: map[string]string{"chaimir.io/sandbox-id": "123"}},
+		ObjectMeta: metav1.ObjectMeta{Name: "workspace", Namespace: "sandbox-test", UID: "retained-claim", Labels: map[string]string{"chaimir.io/sandbox-id": "123"}},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 			Resources:   corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")}},
@@ -363,7 +363,7 @@ func TestWorkspacePVCRecoveryPreservesVolumeContents(t *testing.T) {
 			for _, name := range []string{"workspace", material} {
 				if !slices.Contains(tt.missing, name) {
 					retained = append(retained, &corev1.PersistentVolumeClaim{
-						ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: plan.Sandbox.Namespace, Labels: map[string]string{
+						ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: plan.Sandbox.Namespace, UID: "retained-claim", Labels: map[string]string{
 							"app": "chaimir", "module": "sandbox", "chaimir.io/sandbox-id": "123", "chaimir.io/volume": name,
 						}},
 						Spec: corev1.PersistentVolumeClaimSpec{
@@ -374,6 +374,14 @@ func TestWorkspacePVCRecoveryPreservesVolumeContents(t *testing.T) {
 				}
 			}
 			client := fake.NewSimpleClientset(retained...)
+			client.PrependReactor("create", "persistentvolumeclaims", func(action clienttesting.Action) (bool, runtime.Object, error) {
+				claim := action.(clienttesting.CreateAction).GetObject().(*corev1.PersistentVolumeClaim).DeepCopy()
+				claim.UID = "created-claim"
+				if err := client.Tracker().Create(corev1.SchemeGroupVersion.WithResource("persistentvolumeclaims"), claim, claim.Namespace); err != nil {
+					return true, nil, err
+				}
+				return true, claim, nil
+			})
 			o := &K8sOrchestrator{cfg: config.SandboxConfig{WorkspaceStorage: "1Gi"}}
 			if err := o.applyWorkspacePVC(context.Background(), client, plan); (err != nil) != tt.wantError {
 				t.Fatalf("missing volume recovery: err=%v wantError=%v", err, tt.wantError)
@@ -608,10 +616,10 @@ func TestSandboxPVCConsumersCanStartInDeclaredOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	var created []string
-	if err := createPodsInStartupOrder(plan, pods, func(pod *corev1.Pod) error {
+	if _, err := createPodsInStartupOrder(plan, pods, func(pod *corev1.Pod) (*corev1.Pod, error) {
 		created = append(created, pod.Name)
-		return nil
-	}, func([]string) error { return nil }); err != nil {
+		return pod, nil
+	}, func([]*corev1.Pod) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if created[0] != toolComponentPodName("editor", "editor") {
@@ -663,9 +671,9 @@ func TestInitializationWaitsOnlyForCreatedPods(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range runtimePodNames(plan, pods) {
-		if !slices.ContainsFunc(pods, func(pod *corev1.Pod) bool { return pod.Name == name }) {
-			t.Errorf("初始化等待了未创建的 Pod %s", name)
+	for _, waiting := range runtimePods(plan, pods) {
+		if !slices.Contains(pods, waiting) {
+			t.Errorf("初始化等待了未创建的 Pod %s", waiting.Name)
 		}
 	}
 }
@@ -690,14 +698,14 @@ func TestInitializationStartsTransitiveRuntimeDependencies(t *testing.T) {
 		t.Fatal(err)
 	}
 	var created []string
-	err = createPodsInStartupOrder(plan, pods, func(pod *corev1.Pod) error {
+	_, err = createPodsInStartupOrder(plan, pods, func(pod *corev1.Pod) (*corev1.Pod, error) {
 		created = append(created, pod.Name)
 		if pod.Name == "chain-node" && !slices.Contains(created, toolComponentPodName("gateway", "gateway")) {
-			return errors.New("链先于必需的网关启动")
+			return nil, errors.New("链先于必需的网关启动")
 		}
-		return nil
-	}, func(names []string) error {
-		if slices.Contains(names, toolComponentPodName("gateway", "gateway")) && !slices.Contains(created, toolComponentPodName("database", "database")) {
+		return pod, nil
+	}, func(waiting []*corev1.Pod) error {
+		if slices.ContainsFunc(waiting, func(pod *corev1.Pod) bool { return pod.Name == toolComponentPodName("gateway", "gateway") }) && !slices.Contains(created, toolComponentPodName("database", "database")) {
 			return errors.New("网关先于必需的数据库启动")
 		}
 		return nil
@@ -829,6 +837,7 @@ func TestSelftestCleanupRespectsItsPersistedDeadline(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			ns := namespaceObject("sbx-selftest-123", Sandbox{ID: 123})
+			ns.UID, ns.ResourceVersion = "selftest-123", "1"
 			ns.CreationTimestamp = metav1.NewTime(now.Add(-time.Hour))
 			ns.Annotations = map[string]string{"chaimir.io/selftest-cleanup-after": tt.deadline}
 			if tt.change != nil {
@@ -922,6 +931,12 @@ func TestRuntimeResetDoesNotRecreateOtherChains(t *testing.T) {
 	var deleted, created []string
 	o := testSnapshotOrchestrator(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/namespaces/sandbox-123") {
+			ns := namespaceObject("sandbox-123", Sandbox{ID: 123, TenantID: 456})
+			ns.TypeMeta = metav1.TypeMeta{Kind: "Namespace", APIVersion: "v1"}
+			json.NewEncoder(w).Encode(ns)
+			return
+		}
 		name := filepath.Base(r.URL.Path)
 		var obj any
 		switch r.Method {
@@ -941,6 +956,7 @@ func TestRuntimeResetDoesNotRecreateOtherChains(t *testing.T) {
 				return
 			}
 			created = append(created, pod.Name)
+			pod.UID = "created-pod"
 			pod.Status = corev1.PodStatus{Phase: corev1.PodRunning, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}
 			pods[pod.Name] = &pod
 			obj = &pod
@@ -973,6 +989,7 @@ func TestRuntimeResetDoesNotRecreateOtherChains(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, pod := range initial {
+		pod.UID = "original-pod"
 		pods[pod.Name] = pod
 	}
 	other := pods["other-sandbox"]
@@ -1009,6 +1026,12 @@ func TestRuntimeResetReplacesOnlyTargetLedgerPVC(t *testing.T) {
 	var deletedClaims, createdClaims []string
 	o := testSnapshotOrchestrator(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/namespaces/"+plan.Sandbox.Namespace) {
+			ns := namespaceObject(plan.Sandbox.Namespace, plan.Sandbox)
+			ns.TypeMeta = metav1.TypeMeta{Kind: "Namespace", APIVersion: "v1"}
+			json.NewEncoder(w).Encode(ns)
+			return
+		}
 		name := filepath.Base(r.URL.Path)
 		isClaim := strings.Contains(r.URL.Path, "/persistentvolumeclaims")
 		var obj any
@@ -1043,6 +1066,7 @@ func TestRuntimeResetReplacesOnlyTargetLedgerPVC(t *testing.T) {
 				if claim.Spec.DataSource != nil || claim.Spec.DataSourceRef != nil {
 					t.Error("reset restored the old ledger snapshot")
 				}
+				claim.UID = "created-claim"
 				createdClaims = append(createdClaims, claim.Name)
 				claims[claim.Name], obj = &claim, &claim
 			} else {
@@ -1051,6 +1075,7 @@ func TestRuntimeResetReplacesOnlyTargetLedgerPVC(t *testing.T) {
 					t.Error(err)
 					return
 				}
+				pod.UID = "created-pod"
 				pod.Status = corev1.PodStatus{Phase: corev1.PodRunning, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}
 				pods[pod.Name], obj = &pod, &pod
 			}
@@ -1081,11 +1106,12 @@ func TestRuntimeResetReplacesOnlyTargetLedgerPVC(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, pod := range initial {
+		pod.UID = "original-pod"
 		pods[pod.Name] = pod
 	}
 	for _, domain := range persistentVolumeDomains(plan) {
 		name := domain.claimName()
-		claims[name] = &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: plan.Sandbox.Namespace, Labels: map[string]string{
+		claims[name] = &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: plan.Sandbox.Namespace, UID: "original-claim", Labels: map[string]string{
 			"app": "chaimir", "module": "sandbox", "chaimir.io/sandbox-id": fmt.Sprint(plan.Sandbox.ID), "chaimir.io/volume": name,
 		}}}
 	}
@@ -1117,6 +1143,12 @@ func TestRuntimeResetRejectsUnsafeResourcesBeforeDeletion(t *testing.T) {
 			mutations := 0
 			o := testSnapshotOrchestrator(t, func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
+				if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/namespaces/"+plan.Sandbox.Namespace) {
+					ns := namespaceObject(plan.Sandbox.Namespace, plan.Sandbox)
+					ns.TypeMeta = metav1.TypeMeta{Kind: "Namespace", APIVersion: "v1"}
+					json.NewEncoder(w).Encode(ns)
+					return
+				}
 				if r.Method != http.MethodGet {
 					mutations++
 					w.WriteHeader(http.StatusForbidden)
@@ -1244,6 +1276,7 @@ func TestRuntimeAssetWritesFinishBeforeStagingPodCleanup(t *testing.T) {
 			var actions []string
 			cs.PrependReactor("create", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
 				pod := action.(clienttesting.CreateAction).GetObject().(*corev1.Pod)
+				pod.UID = "original-assets"
 				actions = append(actions, "create:"+pod.Name)
 				pod.Status = corev1.PodStatus{Phase: corev1.PodRunning, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}
 				return false, nil, nil
@@ -1315,13 +1348,16 @@ func TestRuntimeResetRejectsInvalidPlanBeforeDeletion(t *testing.T) {
 func TestPodReadinessReportsFailureBehindPendingPod(t *testing.T) {
 	plan := volumePodPlan()
 	client := fake.NewSimpleClientset(
-		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "chain-node", Namespace: plan.Sandbox.Namespace}},
-		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "chain-workspace", Namespace: plan.Sandbox.Namespace}, Status: corev1.PodStatus{Phase: corev1.PodFailed, Reason: "fixture_failed"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "chain-node", Namespace: plan.Sandbox.Namespace, UID: "pending"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "chain-workspace", Namespace: plan.Sandbox.Namespace, UID: "failed"}, Status: corev1.PodStatus{Phase: corev1.PodFailed, Reason: "fixture_failed"}},
 	)
 	o := &K8sOrchestrator{cfg: config.SandboxConfig{ReadyPollIntervalSeconds: 1}}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	err := o.waitPodsReady(ctx, client, plan.Sandbox.Namespace, []string{"chain-node", "chain-workspace"})
+	err := o.waitPodsReady(ctx, client, []*corev1.Pod{
+		{ObjectMeta: metav1.ObjectMeta{Name: "chain-node", Namespace: plan.Sandbox.Namespace, UID: "pending"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "chain-workspace", Namespace: plan.Sandbox.Namespace, UID: "failed"}},
+	})
 	if err == nil || errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "chain-workspace") || !strings.Contains(err.Error(), "fixture_failed") {
 		t.Fatalf("pending Pod concealed another Pod's terminal failure: %v", err)
 	}

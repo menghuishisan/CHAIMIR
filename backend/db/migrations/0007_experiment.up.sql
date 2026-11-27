@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS experiment (
     collab_mode SMALLINT NOT NULL CHECK (collab_mode IN (1, 2)),
     group_config JSONB,
     require_report BOOLEAN NOT NULL DEFAULT false,
-    wizard_step SMALLINT NOT NULL DEFAULT 1 CHECK (wizard_step BETWEEN 1 AND 6),
+    wizard_step SMALLINT NOT NULL DEFAULT 1 CHECK (wizard_step BETWEEN 1 AND 4),
     status SMALLINT NOT NULL CHECK (status IN (1, 2, 3)),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

@@ -22,6 +22,7 @@ import (
 // Store 定义 service 所需的 sandbox 持久化能力,不暴露 sqlc 行类型。
 type Store interface {
 	CloneTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
+	AuthorizationTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error, notify func(context.Context) error) error
 	PlatformTx(ctx context.Context, fn func(context.Context, TxStore) error) error
 	TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
 	PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error
@@ -47,10 +48,9 @@ type TxStore interface {
 	CreateRuntimeImage(ctx context.Context, id, runtimeID int64, req RuntimeImageRequest) (RuntimeImage, error)
 	GetCompositionSnapshot(ctx context.Context, compositionDigest string) ([]byte, error)
 	UpsertCompositionSnapshot(ctx context.Context, compositionDigest string, snapshot []byte) error
-	DeleteCompositionSnapshot(ctx context.Context, compositionDigest string) error
 	GetCompositionPrepullForUpdate(ctx context.Context, runtimeImageID int64, compositionDigest string) (CompositionPrepull, error)
 	StartCompositionPrepull(ctx context.Context, id, runtimeImageID int64, compositionDigest, attemptID string, imageClosure, detail []byte) (CompositionPrepull, error)
-	FinishCompositionPrepull(ctx context.Context, runtimeImageID int64, compositionDigest, attemptID string, status int16, daemonsetName string, desiredNodes, readyNodes int32, detail []byte) (CompositionPrepull, error)
+	UpdateCompositionPrepull(ctx context.Context, runtimeImageID int64, compositionDigest, attemptID string, status int16, daemonsetName string, desiredNodes, readyNodes int32, detail []byte) (CompositionPrepull, error)
 	InvalidateCompositionPrepullByRuntime(ctx context.Context, runtimeID int64, detail []byte) error
 	DeleteCompositionPrepullByRuntimeImage(ctx context.Context, runtimeImageID int64) error
 	DisableRuntimeImage(ctx context.Context, runtimeID, imageID int64) (RuntimeImage, error)
@@ -169,6 +169,16 @@ func (s *store) TenantTx(ctx context.Context, tenantID int64, fn func(context.Co
 	return s.database.WithTenantTxID(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
 	})
+}
+
+// AuthorizationTx 只为共享授权写入借用调用方事务，连接撤权延后到持有者成功提交。
+func (s *store) AuthorizationTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error, notify func(context.Context) error) error {
+	if s == nil || s.database == nil {
+		return fmt.Errorf("sandbox store 未初始化")
+	}
+	return s.database.WithTenantMutationTxID(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
+	}, notify)
 }
 
 // PrivilegedTx 用于后台回收扫描本模块租户表候选,不得作为普通业务路径使用。
@@ -389,11 +399,6 @@ func (s *txStore) UpsertCompositionSnapshot(ctx context.Context, compositionDige
 	})
 }
 
-// DeleteCompositionSnapshot 删除被最终快照替代的组合摘要。
-func (s *txStore) DeleteCompositionSnapshot(ctx context.Context, compositionDigest string) error {
-	return s.q.DeleteCompositionSnapshot(ctx, compositionDigest)
-}
-
 // GetCompositionPrepullForUpdate 锁定某个组合摘要的预拉取证明。
 func (s *txStore) GetCompositionPrepullForUpdate(ctx context.Context, runtimeImageID int64, compositionDigest string) (CompositionPrepull, error) {
 	row, err := s.q.GetCompositionPrepullForUpdate(ctx, sqlcgen.GetCompositionPrepullForUpdateParams{RuntimeImageID: runtimeImageID, CompositionDigest: compositionDigest})
@@ -415,9 +420,9 @@ func (s *txStore) StartCompositionPrepull(ctx context.Context, id, runtimeImageI
 	return compositionPrepullFromRow(row), nil
 }
 
-// FinishCompositionPrepull 仅允许同一次预拉取尝试写回最终节点状态。
-func (s *txStore) FinishCompositionPrepull(ctx context.Context, runtimeImageID int64, compositionDigest, attemptID string, status int16, daemonsetName string, desiredNodes, readyNodes int32, detail []byte) (CompositionPrepull, error) {
-	row, err := s.q.FinishCompositionPrepull(ctx, sqlcgen.FinishCompositionPrepullParams{
+// UpdateCompositionPrepull 仅允许当前进行中的同次尝试写回进度或终态。
+func (s *txStore) UpdateCompositionPrepull(ctx context.Context, runtimeImageID int64, compositionDigest, attemptID string, status int16, daemonsetName string, desiredNodes, readyNodes int32, detail []byte) (CompositionPrepull, error) {
+	row, err := s.q.UpdateCompositionPrepull(ctx, sqlcgen.UpdateCompositionPrepullParams{
 		RuntimeImageID: runtimeImageID, CompositionDigest: compositionDigest, AttemptID: attemptID,
 		Status: status, DaemonsetName: daemonsetName, DesiredNodes: desiredNodes, ReadyNodes: readyNodes, Detail: detail,
 	})

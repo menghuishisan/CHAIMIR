@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -468,15 +469,10 @@ func platformManifestSelftestCommand(raw map[string]any) ([]string, error) {
 	if len(commands) == 0 {
 		return nil, nil
 	}
-	out := make([]string, 0, len(commands[0].Command))
-	for _, part := range commands[0].Command {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			return nil, fmt.Errorf("selftest.commands 首条命令包含空参数")
-		}
-		out = append(out, part)
+	if !workload.ValidCommand(commands[0].Command) {
+		return nil, fmt.Errorf("selftest.commands 首条命令无效")
 	}
-	return out, nil
+	return slices.Clone(commands[0].Command), nil
 }
 
 // secretEnvFromManifest 将 manifest 的密钥需求转换为受控 SecretKeyRef 声明。
@@ -586,22 +582,9 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 				return fmt.Errorf("读取判题器 %s 运行时状态失败: %w", m.Name, readyErr)
 			}
 			if ready {
-				snapshot, compileErr := sandbox.CompilePlatformSandboxComposition(ctx, store, composition)
+				snapshot, compileErr := sandbox.CompilePlatformSandboxComposition(ctx, store, composition, platformPrivateSidecars(execution.ExecutionSidecars))
 				if compileErr != nil {
 					return fmt.Errorf("编译判题器 %s 组合快照失败: %w", m.Name, compileErr)
-				}
-				baseDigest := snapshot.Digest
-				snapshot.PrivateSidecars = platformPrivateSidecars(execution.ExecutionSidecars)
-				if err := contracts.AppendPrivateSidecarImageClosure(&snapshot); err != nil {
-					return fmt.Errorf("补齐判题器 %s 私有 sidecar 镜像闭包失败: %w", m.Name, err)
-				}
-				digest, digestErr := contracts.CanonicalSnapshotDigest(snapshot)
-				if digestErr != nil {
-					return fmt.Errorf("计算判题器 %s 私有 sidecar 组合摘要失败: %w", m.Name, digestErr)
-				}
-				snapshot.Digest = digest
-				if replaceErr := sandbox.ReplacePlatformSandboxCompositionSnapshot(ctx, store, []string{baseDigest}, snapshot); replaceErr != nil {
-					return fmt.Errorf("登记判题器 %s 最终组合快照失败: %w", m.Name, replaceErr)
 				}
 				execution.CompositionSnapshot = snapshot
 				execution.DisabledReason = "判题器等待平台自检"
@@ -635,7 +618,7 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 		return fmt.Errorf("读取链上断言运行时状态失败: %w", err)
 	}
 	if ready {
-		snapshot, compileErr := sandbox.CompilePlatformSandboxComposition(ctx, store, onchainComposition)
+		snapshot, compileErr := sandbox.CompilePlatformSandboxComposition(ctx, store, onchainComposition, nil)
 		if compileErr != nil {
 			return fmt.Errorf("编译链上断言组合快照失败: %w", compileErr)
 		}

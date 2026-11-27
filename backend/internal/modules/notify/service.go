@@ -17,14 +17,15 @@ import (
 
 // Service 承载 M10 通知业务编排。
 type Service struct {
-	store    Store
-	ids      snowflake.Generator
-	redis    Cache
-	hub      *ws.Hub
-	roles    RoleReader
-	contests contracts.ContestReadService
-	audit    audit.Writer
-	cfg      config.NotifyConfig
+	store       Store
+	ids         snowflake.Generator
+	redis       Cache
+	hub         *ws.Hub
+	roles       RoleReader
+	contests    contracts.ContestReadService
+	experiments contracts.ExperimentProgressReadService
+	audit       audit.Writer
+	cfg         config.NotifyConfig
 }
 
 // Cache 定义 M10 使用的 Redis 缓存和限频能力。
@@ -42,25 +43,26 @@ type RoleReader interface {
 
 // ServiceDeps 是 M10 服务装配依赖。
 type ServiceDeps struct {
-	Store    Store
-	IDs      snowflake.Generator
-	Redis    Cache
-	Hub      *ws.Hub
-	Roles    RoleReader
-	Contests contracts.ContestReadService
-	Audit    audit.Writer
-	Config   config.NotifyConfig
+	Store       Store
+	IDs         snowflake.Generator
+	Redis       Cache
+	Hub         *ws.Hub
+	Roles       RoleReader
+	Contests    contracts.ContestReadService
+	Experiments contracts.ExperimentProgressReadService
+	Audit       audit.Writer
+	Config      config.NotifyConfig
 }
 
 // NewService 构造 M10 服务。
 func NewService(deps ServiceDeps) (*Service, error) {
-	if deps.Store == nil || deps.IDs == nil || deps.Redis == nil || deps.Hub == nil || deps.Roles == nil || deps.Contests == nil || deps.Audit == nil {
+	if deps.Store == nil || deps.IDs == nil || deps.Redis == nil || deps.Hub == nil || deps.Roles == nil || deps.Contests == nil || deps.Experiments == nil || deps.Audit == nil {
 		return nil, fmt.Errorf("notify service 依赖不完整")
 	}
 	if deps.Config.UnreadTTLHours <= 0 || deps.Config.SendRateWindowSeconds <= 0 || deps.Config.SendRateMax <= 0 {
 		return nil, fmt.Errorf("notify service 配置不完整")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, redis: deps.Redis, hub: deps.Hub, roles: deps.Roles, contests: deps.Contests, audit: deps.Audit, cfg: deps.Config}, nil
+	return &Service{store: deps.Store, ids: deps.IDs, redis: deps.Redis, hub: deps.Hub, roles: deps.Roles, contests: deps.Contests, experiments: deps.Experiments, audit: deps.Audit, cfg: deps.Config}, nil
 }
 
 // currentIdentity 读取通知模块要求的租户用户身份。

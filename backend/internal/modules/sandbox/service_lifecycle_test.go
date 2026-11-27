@@ -87,27 +87,28 @@ func TestStartupCreatesWholeComponentBeforeWaiting(t *testing.T) {
 			}
 			created, ready := map[string]bool{}, map[string]bool{}
 			failure := errors.New("dependency failed")
-			err = createPodsInStartupOrder(plan, pods, func(pod *corev1.Pod) error {
+			_, err = createPodsInStartupOrder(plan, pods, func(pod *corev1.Pod) (*corev1.Pod, error) {
 				if mode == "create-failure" && pod.Name == "chain-worker" {
-					return failure
+					return nil, failure
 				}
 				if mode != "no-dependencies" && strings.HasPrefix(pod.Name, "tool-editor-") {
 					for _, name := range []string{"chain-node", "chain-worker", "chain-workspace"} {
 						if !ready[name] {
-							return fmt.Errorf("consumer started before provider %s was ready", name)
+							return nil, fmt.Errorf("consumer started before provider %s was ready", name)
 						}
 					}
 				}
 				created[pod.Name] = true
-				return nil
-			}, func(names []string) error {
+				return pod, nil
+			}, func(waiting []*corev1.Pod) error {
 				if mode == "no-dependencies" {
 					return errors.New("independent component was forced to wait")
 				}
 				if mode == "provider-failure" {
 					return failure
 				}
-				for _, name := range names {
+				for _, pod := range waiting {
+					name := pod.Name
 					if strings.Contains(name, "analyzer") {
 						return errors.New("unrelated command tool blocks startup")
 					}

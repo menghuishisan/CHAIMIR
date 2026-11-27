@@ -1,32 +1,27 @@
-# gvisor 组件:沙箱强制隔离运行时
+# gVisor 沙箱运行时
 
-不可信沙箱 Pod(运行学生代码/工具)强制在 gVisor(runsc)隔离运行时中执行:后端对沙箱运行时/工具 Pod 注入 `runtimeClassName`(取自必填配置 `SANDBOX_RUNTIME_CLASS`,默认 `gvisor`),`gvisor-runtimeclass.yaml` 声明对应 `RuntimeClass/gvisor`(handler=`runsc`)。
+> 更新：2026-11-27。
 
-`RuntimeClass` 只是"引用名 → containerd 运行时处理器"的映射。**要真正生效,沙箱节点必须先装 runsc 并在 containerd 注册 `runsc` 处理器。** runsc 是节点/集群前置运行时(与 CNI、containerd 同类),不作为 `images/` 工作负载镜像治理。不同集群提供者只改变安装方式,不改变隔离与验收标准:
+运行不可信学生代码和工具的 Pod 必须使用已验证的隔离运行时。后端必填配置 `SANDBOX_RUNTIME_CLASS` 指定 RuntimeClass 名；本仓库部署基线使用 `gvisor`，handler 为 `runsc`，不是后端缺配置时的默认值。
 
-## 云厂商节点池
+## 节点前置
 
-- **GKE**:节点池加 `--sandbox type=gvisor`。
-- **阿里云 ACK / 腾讯 TKE / 华为 CCE**:创建"安全沙箱/gVisor 运行时"节点池,节点选择器对齐 `SANDBOX_NODE_SELECTOR`。
-- **AWS EKS / Azure AKS / 自建 kubeadm**:按 https://gvisor.dev/docs/user_guide/install/ 在沙箱节点装 `runsc` 与 `containerd-shim-runsc-v1`,在 containerd 注册 `runsc` 运行时后重启;建议烘进节点镜像。
-- 装好节点后 `kubectl apply -k deploy/components/gvisor` 装入 RuntimeClass。
+RuntimeClass 只映射运行时处理器。沙箱节点须安装 runsc 与匹配的 containerd shim，并在 containerd 注册 handler；安装与节点生命周期由部署层负责，不作为业务工作负载镜像。托管节点池须按提供者官方方式安装，并核验实际 handler、调度标签和隔离行为；名为“安全沙箱”的产品不能直接视为 gVisor。
 
-## 自管 Kind 节点
-
-项目用固定 GCS 对象版本下载 runsc 与 shim,分别校验源文件中固定的 SHA512 后再分发到节点并注册 containerd:
+自管 Kind 节点使用项目固定 GCS 对象版本和 SHA512 校验的安装入口：
 
 ```sh
 cd deploy
-make gvisor-up         # 下载固定对象 → 校验 SHA512 → 分发到各节点 → 注册 runsc → apply RuntimeClass
-make gvisor-check      # 校验 RuntimeClass 就绪并起一个 gVisor 测试 Pod 验证内核隔离
+make gvisor-up
+make gvisor-check
 ```
 
-Kind 节点是容器,节点重建后由完整集群入口重新执行 `make gvisor-up`;这只是节点生命周期差异,不允许回退到共享宿主机内核。
+节点重建后重新执行安装与检查。没有 handler 或 RuntimeClass 时不能承接沙箱负载；后端缺配置则启动失败，不回退到共享宿主机内核的默认运行时。
 
-## 缺失时的行为(fail-closed)
+## 资源限制与验收
 
-集群未装 runsc / 无 `RuntimeClass/gvisor` 时,沙箱 Pod 会一直 Pending、后端 `SANDBOX_RUNTIME_CLASS` 缺失则启动失败。这是有意的安全前置,不提供共享内核回退。
+隔离验收核对实际 RuntimeClass、节点 handler 和 Pod 内 gVisor 标识。`make gvisor-check` 的隔离探针不代表资源防滥用已通过。
 
-## 验证要点
+每个沙箱节点须用 kubelet 原生 `podPidsLimit` 设置 Pod 进程上限并配置节点 PID 预留；使用运行时支持的原生 rlimit 约束文件描述符。明确记录实际配置值，在真实 gVisor Pod 中验证进程/线程与 fd 耗尽受限、节点保留可用性、非法出网被拒及测试资源回收。配置存在和内核隔离标识不能代替超限行为验证。
 
-`make gvisor-check` 起的测试 Pod 内 `dmesg` 应含 gVisor 标识;建议把它连同"沙箱内 fork 炸弹受限、出网被拒"两条断言纳入部署冒烟(见 `docs/总-验收标准.md`)fail-closed 门禁。
+安全要求见[M2 安全设计](../../../docs/02-沙箱引擎/06-安全设计.md#3-资源限制与防滥用)，部署职责见[部署架构](../../../docs/总-部署架构设计.md)，上线条件见[验收标准](../../../docs/总-验收标准.md)。

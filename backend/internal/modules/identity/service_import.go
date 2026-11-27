@@ -126,7 +126,8 @@ type importRow struct {
 	BaseIdentity    int16   `json:"base_identity"`
 	EnrollmentYear  int16   `json:"enrollment_year,omitempty"`
 	Title           string  `json:"title,omitempty"`
-	InitialPassword string  `json:"initial_password,omitempty"`
+	InitialPassword string  `json:"-"`
+	PasswordHash    string  `json:"password_hash,omitempty"`
 	Error           string  `json:"error,omitempty"`
 }
 
@@ -197,23 +198,25 @@ func (s *Service) CommitAccountImport(ctx context.Context, req ImportCommitReque
 		if err := jsonx.DecodeStrictKnownFields(preview.Rows, &rows); err != nil {
 			return fmt.Errorf("解析导入预览失败: %w", err)
 		}
+		currentTenant, err := tx.GetTenantByID(ctx, id.TenantID)
+		if err != nil {
+			return err
+		}
+		if !currentTenant.EnableActivationCode {
+			for _, row := range rows {
+				if row.Error == "" && strings.TrimSpace(row.PasswordHash) == "" {
+					return apperr.ErrIdentityActivationDisabled
+				}
+			}
+		}
 		success, failed := int32(0), int32(0)
 		for _, row := range rows {
 			if row.Error != "" {
 				failed++
 				continue
 			}
-			// 每行在同一事务中创建账号、角色和档案,避免导入成功但身份信息不完整。
-			passwordHash := ""
-			mustChange := false
-			if strings.TrimSpace(row.InitialPassword) != "" {
-				hash, err := crypto.HashPassword(row.InitialPassword)
-				if err != nil {
-					return err
-				}
-				passwordHash = hash
-				mustChange = true
-			}
+			passwordHash := row.PasswordHash
+			mustChange := passwordHash != ""
 			phoneEnc, phoneHash, err := s.protectPhone(row.Phone)
 			if err != nil {
 				return err
@@ -223,41 +226,54 @@ func (s *Service) CommitAccountImport(ctx context.Context, req ImportCommitReque
 				return err
 			}
 			accountID := s.ids.Generate()
-			_, err = tx.CreateAccount(ctx, CreateAccountInput{
-				ID:            accountID,
-				TenantID:      id.TenantID,
-				PhoneEnc:      phoneEnc,
-				PhoneHash:     phoneHash,
-				PasswordHash:  passwordHash,
-				Name:          row.Name,
-				BaseIdentity:  row.BaseIdentity,
-				Status:        AccountStatusPending,
-				MustChangePwd: mustChange,
-				Roles:         []RoleCreateInput{{ID: s.ids.Generate(), Role: role}},
-				Profile:       &CreateProfileInput{No: row.No, OrgID: row.OrgID.Int64(), EnrollmentYear: row.EnrollmentYear, Title: row.Title},
+			var activation *ImportActivationCodeDTO
+			rowErr, transactionErr := tx.ImportRowTx(ctx, func(ctx context.Context, rowTx TxStore) error {
+				_, err := rowTx.CreateAccount(ctx, CreateAccountInput{
+					ID:            accountID,
+					TenantID:      id.TenantID,
+					PhoneEnc:      phoneEnc,
+					PhoneHash:     phoneHash,
+					PasswordHash:  passwordHash,
+					Name:          row.Name,
+					BaseIdentity:  row.BaseIdentity,
+					Status:        AccountStatusPending,
+					MustChangePwd: mustChange,
+					Roles:         []RoleCreateInput{{ID: s.ids.Generate(), Role: role}},
+					Profile:       &CreateProfileInput{No: row.No, OrgID: row.OrgID.Int64(), EnrollmentYear: row.EnrollmentYear, Title: row.Title},
+				})
+				if err != nil {
+					return err
+				}
+				if passwordHash == "" {
+					code, err := crypto.RandomToken(16)
+					if err != nil {
+						return err
+					}
+					hash, err := s.hashSecret(code)
+					if err != nil {
+						return err
+					}
+					if _, err := rowTx.CreateActivationCode(ctx, CreateActivationInput{ID: s.ids.Generate(), TenantID: id.TenantID, AccountID: accountID, CodeHash: hash, ExpireAt: s.activationExpireAt(), CreatedBy: id.AccountID}); err != nil {
+						return err
+					}
+					// 激活码明文只在本次响应返回,落库只保存哈希,后续无法从数据库恢复明文。
+					activation = &ImportActivationCodeDTO{AccountID: ids.ID(accountID), No: row.No, Name: row.Name, ActivationCode: code}
+				}
+				return nil
 			})
-			if err != nil {
+			if transactionErr != nil {
+				return transactionErr
+			}
+			if rowErr != nil {
 				failed++
 				if idx := row.Line - 2; idx >= 0 && idx < len(rows) {
 					rows[idx].Error = "账号写入失败,请检查是否与现有账号冲突"
 				}
-				logging.ErrorContext(ctx, "账号导入行写入失败", err.Error(), slog.Int64("tenant_id", id.TenantID), slog.Int("line", row.Line))
+				logging.ErrorContext(ctx, "账号导入行写入失败", rowErr.Error(), slog.Int64("tenant_id", id.TenantID), slog.Int("line", row.Line))
 				continue
 			}
-			if strings.TrimSpace(row.InitialPassword) == "" {
-				code, err := crypto.RandomToken(16)
-				if err != nil {
-					return err
-				}
-				hash, err := s.hashSecret(code)
-				if err != nil {
-					return err
-				}
-				if _, err := tx.CreateActivationCode(ctx, CreateActivationInput{ID: s.ids.Generate(), TenantID: id.TenantID, AccountID: accountID, CodeHash: hash, ExpireAt: s.activationExpireAt(), CreatedBy: id.AccountID}); err != nil {
-					return err
-				}
-				// 激活码明文只在本次响应返回,落库只保存哈希,后续无法从数据库恢复明文。
-				activationCodes = append(activationCodes, ImportActivationCodeDTO{AccountID: ids.ID(accountID), No: row.No, Name: row.Name, ActivationCode: code})
+			if activation != nil {
+				activationCodes = append(activationCodes, *activation)
 			}
 			success++
 		}
@@ -265,7 +281,11 @@ func (s *Service) CommitAccountImport(ctx context.Context, req ImportCommitReque
 		if err := tx.MarkImportPreviewSubmitted(ctx, id.TenantID, id.AccountID, req.PreviewID.Int64()); err != nil {
 			return err
 		}
-		errorDetail, err := jsonx.AnyBytes(rows, apperr.ErrInternal)
+		results := make([]ImportRowResult, len(rows))
+		for i, row := range rows {
+			results[i] = ImportRowResult{Line: row.Line, Error: row.Error}
+		}
+		errorDetail, err := jsonx.AnyBytes(results, apperr.ErrInternal)
 		if err != nil {
 			return err
 		}
@@ -358,11 +378,12 @@ func (s *Service) applyAccountImportOpeningRules(ctx context.Context, tenantID i
 		return apperr.ErrInternal.WithCause(err)
 	}
 	for i := range rows {
+		password := strings.TrimSpace(rows[i].InitialPassword)
+		rows[i].InitialPassword = ""
 		if rows[i].Error != "" {
 			continue
 		}
 		// 密码强度和激活码开关在数据库校验后执行,避免无效组织行继续暴露更多无关错误。
-		password := strings.TrimSpace(rows[i].InitialPassword)
 		if password == "" {
 			if !current.EnableActivationCode {
 				rows[i].Error = "请填写初始密码"
@@ -373,7 +394,13 @@ func (s *Service) applyAccountImportOpeningRules(ctx context.Context, tenantID i
 		if err := ValidatePassword(password); err != nil {
 			rows[i].Error = "初始密码强度不足"
 			results[i].Error = rows[i].Error
+			continue
 		}
+		hash, err := crypto.HashPassword(password)
+		if err != nil {
+			return apperr.ErrInternal.WithCause(err)
+		}
+		rows[i].PasswordHash = hash
 	}
 	return nil
 }

@@ -5,7 +5,7 @@
 > 多租户 SaaS + 学校私有化双形态，Go 模块化单体（11 模块强边界）+ React 四端前端 + K8s 沙箱。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-00ADD8?logo=go)](https://go.dev/)
 [![React](https://img.shields.io/badge/React-19+-61DAFB?logo=react)](https://react.dev/)
 
 ---
@@ -14,7 +14,7 @@
 
 Chaimir 是一个面向高等教育的区块链教学平台，集成了**课程学习、实验仿真、竞赛对抗**三大核心场景。
 
-平台采用「业务薄、引擎厚」的架构设计，所有可扩展能力（链环境、判题器、仿真引擎、赛制）均支持插件化扩展。同时提供完整的多租户隔离机制与 K8s 沙箱执行环境，支持 SaaS 与学校私有化两种部署形态。
+平台采用「业务薄、引擎厚」的架构设计，链环境、判题器和仿真包按各自契约扩展；竞赛采用已实现的解题赛与对抗赛，新赛制须同时闭合执行、计分与回放流程。同时提供完整的多租户隔离机制与 K8s 沙箱执行环境，支持 SaaS 与学校私有化两种部署形态。
 
 项目强调工程化与可维护性，拥有严格的模块边界、事件驱动架构、审计与通知统一处理机制，以及覆盖前后端的详细设计规范。
 
@@ -61,10 +61,9 @@ Chaimir 支持两种部署形态：
 
 ### 环境要求
 
-- Go 1.25+
-- Node.js 24.x + pnpm 9+
-- PostgreSQL 14+
-- Docker & Kubernetes（推荐，用于完整沙箱环境）
+- Go：使用 [go.mod](backend/go.mod) 声明的语言与 toolchain 版本。
+- Node.js 与 pnpm：遵循 [package.json](frontend/package.json) 的 engines 和 packageManager；安装依赖使用锁文件。
+- 完整运行环境：Docker、Kubernetes 和固定版本的中间件，准备步骤见 [部署指南](deploy/README.md)。
 
 ### 后端
 
@@ -79,7 +78,7 @@ go test ./...
 
 ```bash
 cd frontend
-pnpm install
+pnpm install --frozen-lockfile
 pnpm build
 pnpm lint
 pnpm type-check
@@ -100,22 +99,16 @@ make dev-up
 
 ## CI/CD
 
-GitHub Actions 采用路径触发：
-
-- `backend.yml`：后端变更后执行静态检查、测试、镜像构建、Trivy 扫描、Cosign 签名与 Harbor 推送。
-- `frontend.yml`：前端变更后使用 pnpm 执行 lint、type-check、build，并在 main 推送时构建前端镜像。
-- `images.yml`：镜像目录变更后按 manifest 构建、扫描、签名并生成 digest 锁。
-- `deploy.yml`：backend workflow 在 main 成功完成并产出同 SHA 后端镜像后，自动部署 staging；`v*` tag 经 GitHub Environment 审批后部署 prod-saas。
-
-README、docs 或仅前端资源变更不会直接创建 staging Deployment。staging 只消费已经通过后端流水线构建、扫描、签名并推送到 Harbor 的后端镜像。
+后端、前端与通用镜像流水线按真实输入分别构建，完成扫描、SBOM、签名和验证后，由 `image-metadata-promotion` 通过 PR 晋升不可变 digest。权威锁合入 `main` 后部署 staging；`v*` 发布提交读取同一权威锁，经 GitHub Environment 审批部署 prod-saas。入口、凭据和网络前置见 [部署指南](deploy/README.md#cicd)。
 
 ---
 
 ## 文档
 
-本项目采用**文档驱动开发**，所有设计决策、接口契约、数据模型均以 `docs/` 下的正式文档为唯一真相源。
+本项目采用**文档驱动开发**，已确认的设计、业务语义与工程约束由 `docs/` 正式文档维护；公开类型、OpenAPI、迁移和镜像 manifest 按所属契约维护机器声明，文档引用其来源并解释业务约束，不复制第二套机器清单。
 
 - [开发规范](docs/总-开发规范与要求.md)
+- [文档治理](docs/文档治理规范.md)
 - [平台总体蓝图](docs/00-平台总体蓝图.md)
 - [总-技术选型](docs/总-技术选型.md)
 - [总-工程目录设计](docs/总-工程目录设计.md)

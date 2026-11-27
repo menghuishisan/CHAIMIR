@@ -1,17 +1,20 @@
-// sim rules 文件定义 M4 纯输入校验、状态机和审核规则,不访问 repo/db/contracts。
+// sim rules 文件定义 M4 纯输入校验、状态机和审核规则,不访问数据库或外部服务。
 package sim
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
+	"chaimir/pkg/jsonvalue"
 	"chaimir/pkg/privacy"
 )
 
@@ -138,12 +141,9 @@ func validatePackageRequest(req SubmitPackageRequest, authorID int64) (map[strin
 }
 
 // validateCreateSession 校验内部会话创建请求。
-func validateCreateSession(req CreateSessionRequest, tenantID int64) error {
-	if tenantID <= 0 || !simCodePattern.MatchString(strings.TrimSpace(req.PackageCode)) || !semverPattern.MatchString(strings.TrimSpace(req.Version)) || req.OwnerAccountID <= 0 || !auth.ValidSourceRef(req.SourceRef) || !auth.ValidScopeRef(req.ScopeRef) {
+func validateCreateSession(req contracts.SimCreateSessionRequest) error {
+	if req.TenantID <= 0 || !simCodePattern.MatchString(strings.TrimSpace(req.PackageCode)) || !semverPattern.MatchString(strings.TrimSpace(req.Version)) || req.OwnerAccountID <= 0 || !auth.ValidSourceRef(req.SourceRef) || !auth.ValidScopeRef(req.ScopeRef) {
 		return apperr.ErrSimSessionInvalid
-	}
-	if req.InitParams == nil {
-		req.InitParams = map[string]any{}
 	}
 	return nil
 }
@@ -243,7 +243,7 @@ func actionEqual(existing Action, req ReportActionRequest) (bool, error) {
 	if existing.Seq != req.Seq || existing.AtTick != req.AtTick || existing.EventType != strings.TrimSpace(req.EventType) {
 		return false, nil
 	}
-	return jsonx.Equal(existing.Payload, req.Payload), nil
+	return jsonvalue.Equal(existing.Payload, req.Payload), nil
 }
 
 // validateActionAgainstSchema 按包内交互白名单校验用户操作,拒绝未声明事件和多余字段。
@@ -378,7 +378,7 @@ func publicValue(value any) (any, bool) {
 	switch v := value.(type) {
 	case nil:
 		return nil, true
-	case bool, float64, int, int32, int64:
+	case bool, float64, int, int32, int64, json.Number:
 		return v, true
 	case string:
 		if len(v) > maxPublicStringLength {

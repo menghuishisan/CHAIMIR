@@ -166,7 +166,7 @@ type SandboxRef struct {
 
 // SimSessionRef 保存 M7 对 M4 仿真会话的稳定引用。
 // Compute 决定学生端如何进入:browser 在浏览器 Worker 内按 package_code 装配内置包,
-// isolated 连 M4 的 stream 只渲染服务端快照(见 docs/04-仿真可视化引擎/02-架构设计.md §8)。
+// isolated 连 M4 的 stream 只渲染服务端快照(见 docs/04-仿真可视化引擎/07-架构设计.md §8)。
 type SimSessionRef struct {
 	ComponentID string `json:"component_id"`
 	Stage       int32  `json:"stage"`

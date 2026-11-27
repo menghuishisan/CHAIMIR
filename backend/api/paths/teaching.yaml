@@ -42,7 +42,18 @@
     operationId: teachingUploadCourseCover
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/MultipartBody" }
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required:
+              - file
+            properties:
+              file:
+                type: string
+                format: binary
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/courses/{id}/cover/access:
   post:
@@ -107,6 +118,18 @@
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - name
+            properties:
+              name:
+                type: string
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/courses/{id}/share:
   post:
@@ -207,7 +230,18 @@
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/MultipartBody" }
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required:
+              - file
+            properties:
+              file:
+                type: string
+                format: binary
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/lessons/{id}/material/access:
   post:
@@ -424,15 +458,18 @@
           schema:
             type: object
             additionalProperties: false
-            required: [content]
+            required:
+              - content
             properties:
               content:
                 type: object
                 additionalProperties:
                   oneOf:
-                    - { type: string }
-                    - { type: boolean }
-                    - { type: array, items: { type: string } }
+                    - type: string
+                    - type: boolean
+                    - type: array
+                      items:
+                        type: string
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/assignments/{id}/submit:
   post:
@@ -476,7 +513,20 @@
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - score
+            properties:
+              score:
+                type: integer
+              comment:
+                type: string
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/courses/{id}/posts:
   get:
@@ -519,7 +569,14 @@
       required: true
       content:
         application/json:
-          schema: { type: object, required: [is_pinned], properties: { is_pinned: { type: boolean } } }
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - is_pinned
+            properties:
+              is_pinned:
+                type: boolean
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/posts/{id}:
   delete:
@@ -560,7 +617,14 @@
       required: true
       content:
         application/json:
-          schema: { type: object, required: [is_pinned], properties: { is_pinned: { type: boolean } } }
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - is_pinned
+            properties:
+              is_pinned:
+                type: boolean
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/courses/{id}/review:
   get:

@@ -4,6 +4,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -151,11 +152,14 @@ func (s *Service) RejectApplication(ctx context.Context, appID int64, reason str
 	}
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		_, err := tx.RejectTenantApplication(ctx, appID, id.AccountID, strings.TrimSpace(reason))
-		return err
+		if err != nil {
+			return err
+		}
+		return s.auditPlatformOperation(ctx, id.AccountID, "tenant.application.reject", "identity.tenant_application", appID, map[string]any{})
 	}); err != nil {
 		return apperr.ErrInternal.WithCause(err)
 	}
-	return s.auditPlatformOperation(ctx, id.AccountID, "tenant.application.reject", "identity.tenant_application", appID, map[string]any{})
+	return nil
 }
 
 // ListApplicationsByPlatform 读取入驻申请列表,仅平台管理员可访问。
@@ -217,10 +221,9 @@ func (s *Service) ListTenantsByPlatform(ctx context.Context, status int16, keywo
 	}
 	page, size = pagex.Normalize(page, size)
 	var rows []Tenant
-	var total int64
 	var byStatus pagex.FacetGroup
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		items, count, err := tx.ListTenants(ctx, TenantListQuery{
+		items, err := tx.ListTenants(ctx, TenantListQuery{
 			Status:  status,
 			Keyword: strings.TrimSpace(keyword),
 			Page:    page,
@@ -230,7 +233,6 @@ func (s *Service) ListTenantsByPlatform(ctx context.Context, status int16, keywo
 			return err
 		}
 		rows = items
-		total = count
 		// 状态分段计数:套用关键词,不套用状态筛选
 		byStatus, err = tx.CountTenantsByStatus(ctx, strings.TrimSpace(keyword))
 		return err
@@ -245,7 +247,11 @@ func (s *Service) ListTenantsByPlatform(ctx context.Context, status int16, keywo
 		}
 		out = append(out, dto)
 	}
-	return out, total, page, size, pagex.Facets{"status": byStatus}, nil
+	statusKey := ""
+	if status != 0 {
+		statusKey = strconv.Itoa(int(status))
+	}
+	return out, byStatus.Total(statusKey), page, size, pagex.Facets{"status": byStatus}, nil
 }
 
 // GetTenantByPlatform 读取单个租户详情,用于平台管理员管理学校状态。
@@ -286,21 +292,21 @@ func (s *Service) UpdateTenantStatusByPlatform(ctx context.Context, tenantID int
 	if req.Status != TenantStatusActive && req.Status != TenantStatusDisabled && req.Status != TenantStatusExpired {
 		return TenantDTO{}, apperr.ErrIdentityTenantStatusInvalid
 	}
-	var row Tenant
+	var out TenantDTO
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		item, err := tx.UpdateTenantStatus(ctx, UpdateTenantStatusInput{TenantID: tenantID, Status: req.Status, ExpireAt: req.ExpireAt})
 		if err != nil {
 			return err
 		}
-		row = item
-		return nil
+		out, err = ToTenantDTO(item)
+		if err != nil {
+			return err
+		}
+		return s.auditPlatformOperation(ctx, id.AccountID, "tenant.status.update", "identity.tenant", tenantID, map[string]any{"status": req.Status})
 	}); err != nil {
 		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
 	}
-	if err := s.auditPlatformOperation(ctx, id.AccountID, "tenant.status.update", "identity.tenant", tenantID, map[string]any{"status": req.Status}); err != nil {
-		return TenantDTO{}, err
-	}
-	return ToTenantDTO(row)
+	return out, nil
 }
 
 // BootstrapSchoolTenant 为私有化初始化创建固定学校租户和首个学校管理员。
@@ -323,7 +329,7 @@ func (s *Service) BootstrapSchoolTenant(ctx context.Context, cfg config.Bootstra
 	if err != nil {
 		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
 	}
-	var created Tenant
+	var out TenantDTO
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		// 私有化初始化直接创建学校租户,不经过 SaaS 入驻申请状态机。
 		row, err := tx.CreateTenant(ctx, CreateTenantInput{
@@ -340,12 +346,13 @@ func (s *Service) BootstrapSchoolTenant(ctx context.Context, cfg config.Bootstra
 		if err != nil {
 			return err
 		}
-		created = row
-		return s.enqueueTenantProvision(ctx, tx, created)
-	}); err != nil {
-		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
-	}
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		out, err = ToTenantDTO(row)
+		if err != nil {
+			return err
+		}
+		if err := tx.UseTenant(ctx, tenantID); err != nil {
+			return err
+		}
 		// 首个学校管理员仍不写虚假组织档案,真实院系由其登录后维护。
 		adminID := s.ids.Generate()
 		if _, err := tx.CreateAccount(ctx, CreateAccountInput{
@@ -364,6 +371,9 @@ func (s *Service) BootstrapSchoolTenant(ctx context.Context, cfg config.Bootstra
 				{ID: s.ids.Generate(), Role: contracts.RoleNumSchoolAdmin},
 			},
 		}); err != nil {
+			return err
+		}
+		if err := s.enqueueTenantProvision(ctx, tx, row); err != nil {
 			return err
 		}
 		// 初始化由系统任务触发,审计 actor 使用系统角色而不是伪造平台管理员。
@@ -387,7 +397,7 @@ func (s *Service) BootstrapSchoolTenant(ctx context.Context, cfg config.Bootstra
 		return TenantDTO{}, apperr.AsAppError(err)
 	}
 	s.drainTenantProvisionOutboxBestEffort(ctx)
-	return ToTenantDTO(created)
+	return out, nil
 }
 
 // BootstrapPlatformAdmin 为 SaaS 初始化首个平台管理员,已存在同名账号时保持原密码不变。

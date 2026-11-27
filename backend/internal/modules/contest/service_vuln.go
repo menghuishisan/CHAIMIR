@@ -322,6 +322,11 @@ func (s *Service) SetVulnPrevalidate(ctx context.Context, problemID int64) (Vuln
 	if err != nil {
 		return VulnProblemDTO{}, err
 	}
+	if current.RuntimeMode == VulnRuntimeForked {
+		if err := bindVulnForkIdentity(&spec, current.DraftBody); err != nil {
+			return VulnProblemDTO{}, err
+		}
+	}
 	spec.ID = fmt.Sprintf("contest:%04d:vuln:%s", timex.Now().Year(), ids.Format(problemID))
 	snapshot, err := s.sandbox.CompileSandboxComposition(ctx, id.TenantID, spec)
 	if err != nil {
@@ -367,6 +372,11 @@ func (s *Service) FinalizeVulnProblem(ctx context.Context, problemID int64) (Vul
 	}
 	if item.Status != VulnProblemStatusDraft {
 		return VulnProblemDTO{}, apperr.ErrContestVulnPrevalidateFailed
+	}
+	if item.RuntimeMode == VulnRuntimeForked {
+		if err := validateVulnForkSnapshot(item); err != nil {
+			return VulnProblemDTO{}, err
+		}
 	}
 	if item.CompositionSnapshot == nil || item.CompositionDigest == "" {
 		return VulnProblemDTO{}, apperr.ErrContestVulnPrevalidateFailed

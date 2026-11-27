@@ -24,6 +24,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -55,6 +56,11 @@ type StdioJSONAdapter struct {
 
 type executionLocker interface {
 	WithLease(ctx context.Context, key string, ttl time.Duration, fn func(context.Context) error) error
+}
+
+type stdioJSONExecution struct {
+	namespace metav1.ObjectMeta
+	pod       *corev1.Pod
 }
 
 // NewStdioJSONBackendRegistry 从部署能力目录构造注册表,同协议算法共享一套编排代码。
@@ -110,17 +116,17 @@ func (a *StdioJSONAdapter) ValidateConfig(value map[string]any) error {
 // 扩展包经 exec stdin 装配；容器保持只读根文件系统和 deny-all 网络。
 // 每次 exec 按 seed 和已执行事件重算，重连也沿同一记录恢复。
 func (a *StdioJSONAdapter) Serve(ctx context.Context, session SessionWithPackage, bundle *ExecutionBundle, conn BackendConn) error {
-	return a.withExecution(ctx, simExecutionScope(session), func(ctx context.Context, namespace string) error {
+	return a.withExecution(ctx, simExecutionScope(session), func(ctx context.Context, execution *stdioJSONExecution) error {
 		recorded, err := conn.LoadReplay(ctx)
 		if err != nil {
 			return err
 		}
-		return a.serveLocked(ctx, session, namespace, bundle, recorded, conn)
+		return a.serveLocked(ctx, session, execution, bundle, recorded, conn)
 	})
 }
 
-func (a *StdioJSONAdapter) serveLocked(ctx context.Context, session SessionWithPackage, namespace string, bundle *ExecutionBundle, recorded []Action, conn BackendConn) error {
-	if err := a.prepareSession(ctx, session, namespace); err != nil {
+func (a *StdioJSONAdapter) serveLocked(ctx context.Context, session SessionWithPackage, execution *stdioJSONExecution, bundle *ExecutionBundle, recorded []Action, conn BackendConn) error {
+	if err := a.prepareSession(ctx, session, execution); err != nil {
 		return err
 	}
 	// 容器每次 exec 都是新进程，按 seed 和已确认事件恢复。
@@ -133,7 +139,7 @@ func (a *StdioJSONAdapter) serveLocked(ctx context.Context, session SessionWithP
 		replay = history.events
 		history.reset()
 	}
-	frame, err := a.firstFrame(ctx, namespace, session, bundle, history)
+	frame, err := a.firstFrame(ctx, execution, session, bundle, history)
 	if err != nil {
 		return err
 	}
@@ -158,9 +164,9 @@ func (a *StdioJSONAdapter) serveLocked(ctx context.Context, session SessionWithP
 			if err := history.seekRecorded(replay, command.Kind); err != nil {
 				return err
 			}
-			frame, err = a.replayRunner(ctx, namespace, session, bundle, history)
+			frame, err = a.replayRunner(ctx, execution, session, bundle, history)
 		} else {
-			frame, err = a.advance(ctx, namespace, session, bundle, history, command)
+			frame, err = a.advance(ctx, execution, session, bundle, history, command)
 		}
 		if err != nil {
 			return err
@@ -177,11 +183,11 @@ func (a *StdioJSONAdapter) serveLocked(ctx context.Context, session SessionWithP
 	}
 }
 
-func (a *StdioJSONAdapter) firstFrame(ctx context.Context, namespace string, session SessionWithPackage, bundle *ExecutionBundle, history *runnerHistory) (runnerFrame, error) {
+func (a *StdioJSONAdapter) firstFrame(ctx context.Context, execution *stdioJSONExecution, session SessionWithPackage, bundle *ExecutionBundle, history *runnerHistory) (runnerFrame, error) {
 	if len(history.events) > 0 {
-		return a.replayRunner(ctx, namespace, session, bundle, history)
+		return a.replayRunner(ctx, execution, session, bundle, history)
 	}
-	frame, err := a.execRunner(ctx, namespace, session.ScaleLimit, runnerCommand{
+	frame, err := a.execRunner(ctx, execution, session.ScaleLimit, runnerCommand{
 		Op:         runnerOpInit,
 		Bundle:     bundle,
 		InitParams: session.InitParams,
@@ -194,20 +200,20 @@ func (a *StdioJSONAdapter) firstFrame(ctx context.Context, namespace string, ses
 }
 
 // 回退和重来通过重放恢复，与浏览器 Worker 保持同一语义。
-func (a *StdioJSONAdapter) advance(ctx context.Context, namespace string, session SessionWithPackage, bundle *ExecutionBundle, history *runnerHistory, command BackendCommand) (runnerFrame, error) {
+func (a *StdioJSONAdapter) advance(ctx context.Context, execution *stdioJSONExecution, session SessionWithPackage, bundle *ExecutionBundle, history *runnerHistory, command BackendCommand) (runnerFrame, error) {
 	switch command.Kind {
 	case BackendCommandBack:
 		history.back()
-		return a.replayRunner(ctx, namespace, session, bundle, history)
+		return a.replayRunner(ctx, execution, session, bundle, history)
 	case BackendCommandRestart:
 		history.reset()
-		return a.replayRunner(ctx, namespace, session, bundle, history)
+		return a.replayRunner(ctx, execution, session, bundle, history)
 	default:
 		executed, next, err := history.plan(command)
 		if err != nil {
 			return runnerFrame{}, err
 		}
-		frame, err := a.execRunner(ctx, namespace, session.ScaleLimit, runnerCommand{
+		frame, err := a.execRunner(ctx, execution, session.ScaleLimit, runnerCommand{
 			Op:         runnerOpApply,
 			Bundle:     bundle,
 			InitParams: session.InitParams,
@@ -225,8 +231,8 @@ func (a *StdioJSONAdapter) advance(ctx context.Context, namespace string, sessio
 	}
 }
 
-func (a *StdioJSONAdapter) replayRunner(ctx context.Context, namespace string, session SessionWithPackage, bundle *ExecutionBundle, history *runnerHistory) (runnerFrame, error) {
-	frame, err := a.execRunner(ctx, namespace, session.ScaleLimit, runnerCommand{
+func (a *StdioJSONAdapter) replayRunner(ctx context.Context, execution *stdioJSONExecution, session SessionWithPackage, bundle *ExecutionBundle, history *runnerHistory) (runnerFrame, error) {
+	frame, err := a.execRunner(ctx, execution, session.ScaleLimit, runnerCommand{
 		Op:         runnerOpRestore,
 		Bundle:     bundle,
 		InitParams: session.InitParams,
@@ -245,9 +251,9 @@ func (a *StdioJSONAdapter) Preview(ctx context.Context, pkg Package, runID int64
 		return PreviewResult{}, fmt.Errorf("隔离预览运行编号或帧数量无效")
 	}
 	var result PreviewResult
-	err := a.withExecution(ctx, ids.Format(runID), func(ctx context.Context, namespace string) error {
+	err := a.withExecution(ctx, ids.Format(runID), func(ctx context.Context, execution *stdioJSONExecution) error {
 		var err error
-		result, err = a.previewLocked(ctx, pkg, runID, namespace, bundle, frameCount)
+		result, err = a.previewLocked(ctx, pkg, runID, execution, bundle, frameCount)
 		return err
 	})
 	if err != nil {
@@ -256,15 +262,15 @@ func (a *StdioJSONAdapter) Preview(ctx context.Context, pkg Package, runID int64
 	return result, nil
 }
 
-func (a *StdioJSONAdapter) previewLocked(ctx context.Context, pkg Package, runID int64, namespace string, bundle *ExecutionBundle, frameCount int) (PreviewResult, error) {
+func (a *StdioJSONAdapter) previewLocked(ctx context.Context, pkg Package, runID int64, execution *stdioJSONExecution, bundle *ExecutionBundle, frameCount int) (PreviewResult, error) {
 	session := SessionWithPackage{
 		Session:    Session{ID: runID, InitParams: map[string]any{}, Seed: previewSeed},
 		ScaleLimit: pkg.ScaleLimit,
 	}
-	if err := a.prepareSession(ctx, session, namespace); err != nil {
+	if err := a.prepareSession(ctx, session, execution); err != nil {
 		return PreviewResult{}, err
 	}
-	raw, err := a.execRunnerRaw(ctx, namespace, runnerCommand{
+	raw, err := a.execRunnerRaw(ctx, execution, runnerCommand{
 		Op:         runnerOpVerify,
 		Bundle:     bundle,
 		InitParams: map[string]any{},
@@ -285,7 +291,7 @@ func simExecutionScope(session SessionWithPackage) string {
 	return scope
 }
 
-func (a *StdioJSONAdapter) withExecution(ctx context.Context, scope string, run func(context.Context, string) error) error {
+func (a *StdioJSONAdapter) withExecution(ctx context.Context, scope string, run func(context.Context, *stdioJSONExecution) error) error {
 	// 必须先固定清理集合，再申请租约；旧执行恢复后也看不到后来接管者创建的资源。
 	items, err := a.k8s.Clientset().CoreV1().Namespaces().List(ctx, metav1.ListOptions{LabelSelector: "chaimir.io/managed-by=chaimir-backend,chaimir.io/sim=true,chaimir.io/execution-scope=" + scope})
 	if err != nil {
@@ -293,6 +299,22 @@ func (a *StdioJSONAdapter) withExecution(ctx context.Context, scope string, run 
 	}
 	return a.locker.WithLease(ctx, "sim.execution:"+scope, time.Duration(a.cfg.SessionLeaseDurationSeconds)*time.Second, func(ctx context.Context) (runErr error) {
 		var failures []error
+		for _, namespace := range items.Items {
+			desired := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace.Name, Labels: map[string]string{
+				"chaimir.io/managed-by": "chaimir-backend", "chaimir.io/sim": "true", "chaimir.io/execution-scope": scope,
+			}}}
+			if !strings.HasPrefix(namespace.Name, "sim-") || namespace.UID == "" || namespace.Namespace != "" {
+				failures = append(failures, fmt.Errorf("历史仿真命名空间身份无效: %s", namespace.Name))
+				continue
+			}
+			if err := platformk8s.VerifyManagedLabels(&namespace, desired); err != nil {
+				failures = append(failures, err)
+				continue
+			}
+		}
+		if err := errors.Join(failures...); err != nil {
+			return err
+		}
 		for _, namespace := range items.Items {
 			if err := a.deleteNamespaceAndWait(ctx, namespace.ObjectMeta); err != nil {
 				failures = append(failures, err)
@@ -304,14 +326,16 @@ func (a *StdioJSONAdapter) withExecution(ctx context.Context, scope string, run 
 		if run == nil {
 			return nil
 		}
-		namespace := a.namespace()
+		execution := &stdioJSONExecution{namespace: metav1.ObjectMeta{Name: a.namespace()}}
 		// 取消执行后仍持有租约，独立清理结束才允许接管。
 		defer func() {
 			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(a.cfg.PodReadyTimeoutSeconds)*time.Second)
 			defer cancel()
-			runErr = errors.Join(runErr, a.deleteNamespaceAndWait(releaseCtx, metav1.ObjectMeta{Name: namespace}))
+			if execution.namespace.UID != "" {
+				runErr = errors.Join(runErr, a.deleteNamespaceAndWait(releaseCtx, execution.namespace))
+			}
 		}()
-		return run(ctx, namespace)
+		return run(ctx, execution)
 	})
 }
 
@@ -354,7 +378,8 @@ func (a *StdioJSONAdapter) Release(ctx context.Context, session SessionWithPacka
 	})
 }
 
-func (a *StdioJSONAdapter) prepareSession(ctx context.Context, session SessionWithPackage, namespace string) error {
+func (a *StdioJSONAdapter) prepareSession(ctx context.Context, session SessionWithPackage, execution *stdioJSONExecution) error {
+	namespace := execution.namespace.Name
 	podLabels := map[string]string{
 		"app.kubernetes.io/name":      "sim-backend",
 		"app.kubernetes.io/component": "stdio-json",
@@ -383,8 +408,16 @@ func (a *StdioJSONAdapter) prepareSession(ctx context.Context, session SessionWi
 		if len(items.Items) >= a.cfg.MaxConcurrentSessionsPerTenant {
 			return apperr.ErrSimBackendComputeUnavailable.WithCause(fmt.Errorf("租户仿真环境达到上限: tenant_id=%d limit=%d", session.TenantID, a.cfg.MaxConcurrentSessionsPerTenant))
 		}
-		_, err = a.k8s.Clientset().CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace, Labels: namespaceLabels}}, metav1.CreateOptions{})
-		return err
+		desired := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace, Labels: namespaceLabels}}
+		accepted, err := a.k8s.Clientset().CoreV1().Namespaces().Create(ctx, desired, metav1.CreateOptions{})
+		if err != nil {
+			return err
+		}
+		if err := platformk8s.VerifyManagedResource(accepted, desired); err != nil {
+			return err
+		}
+		execution.namespace = *accepted.ObjectMeta.DeepCopy()
+		return nil
 	}); err != nil {
 		return fmt.Errorf("创建后端仿真会话命名空间失败: %w", err)
 	}
@@ -396,16 +429,39 @@ func (a *StdioJSONAdapter) prepareSession(ctx context.Context, session SessionWi
 	}
 	automount := false
 	serviceAccount := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: stdioJSONServiceAccount, Namespace: namespace, Labels: podLabels}, AutomountServiceAccountToken: &automount}
-	if _, err := a.k8s.Clientset().CoreV1().ServiceAccounts(namespace).Create(ctx, serviceAccount, metav1.CreateOptions{}); err != nil {
+	acceptedAccount, err := a.k8s.Clientset().CoreV1().ServiceAccounts(namespace).Create(ctx, serviceAccount, metav1.CreateOptions{})
+	if err != nil {
 		return fmt.Errorf("创建后端仿真 ServiceAccount 失败: %w", err)
 	}
-	policy := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "deny-all", Namespace: namespace}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress}}}
-	if _, err := a.k8s.Clientset().NetworkingV1().NetworkPolicies(namespace).Create(ctx, policy, metav1.CreateOptions{}); err != nil {
+	if err := platformk8s.VerifyManagedResource(acceptedAccount, serviceAccount); err != nil {
+		return err
+	}
+	if acceptedAccount.AutomountServiceAccountToken == nil || *acceptedAccount.AutomountServiceAccountToken || len(acceptedAccount.ImagePullSecrets) != 0 {
+		return fmt.Errorf("后端仿真 ServiceAccount 的凭据策略与请求不一致")
+	}
+	policy := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "deny-all", Namespace: namespace, Labels: podLabels}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress}}}
+	acceptedPolicy, err := a.k8s.Clientset().NetworkingV1().NetworkPolicies(namespace).Create(ctx, policy, metav1.CreateOptions{})
+	if err != nil {
 		return fmt.Errorf("创建后端仿真网络隔离策略失败: %w", err)
 	}
-	if _, err := a.k8s.Clientset().CoreV1().Pods(namespace).Create(ctx, a.sessionPod(namespace, podLabels), metav1.CreateOptions{}); err != nil {
+	if err := platformk8s.VerifyManagedResource(acceptedPolicy, policy); err != nil {
+		return err
+	}
+	if !apiequality.Semantic.DeepEqual(acceptedPolicy.Spec, policy.Spec) {
+		return fmt.Errorf("后端仿真网络隔离策略与请求不一致")
+	}
+	desiredPod := a.sessionPod(namespace, podLabels)
+	acceptedPod, err := a.k8s.Clientset().CoreV1().Pods(namespace).Create(ctx, desiredPod, metav1.CreateOptions{})
+	if err != nil {
 		return fmt.Errorf("创建后端仿真计算 Pod 失败: %w", err)
 	}
+	if err := platformk8s.VerifyManagedResource(acceptedPod, desiredPod); err != nil {
+		return err
+	}
+	if !platformk8s.SamePodExecutionSpec(acceptedPod.Spec, desiredPod.Spec) {
+		return fmt.Errorf("后端仿真计算 Pod 的执行规格与请求不一致")
+	}
+	execution.pod = acceptedPod.DeepCopy()
 	readyCtx, cancel := context.WithTimeout(ctx, time.Duration(a.cfg.PodReadyTimeoutSeconds)*time.Second)
 	defer cancel()
 	if err := wait.PollUntilContextCancel(readyCtx, 250*time.Millisecond, true, func(ctx context.Context) (bool, error) {
@@ -413,15 +469,7 @@ func (a *StdioJSONAdapter) prepareSession(ctx context.Context, session SessionWi
 		if err != nil {
 			return false, err
 		}
-		if current.Status.Phase == corev1.PodFailed || current.Status.Phase == corev1.PodSucceeded {
-			return false, fmt.Errorf("后端仿真计算 Pod 提前结束: phase=%s", current.Status.Phase)
-		}
-		for _, condition := range current.Status.Conditions {
-			if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
-				return true, nil
-			}
-		}
-		return false, nil
+		return stdioJSONPodReady(current, acceptedPod)
 	}); err != nil {
 		return fmt.Errorf("等待后端仿真计算 Pod 就绪失败: %w", err)
 	}
@@ -430,15 +478,8 @@ func (a *StdioJSONAdapter) prepareSession(ctx context.Context, session SessionWi
 
 // deleteNamespaceAndWait 只删除指定 UID 的资源；同名资源被重建后即视为原资源已回收。
 func (a *StdioJSONAdapter) deleteNamespaceAndWait(ctx context.Context, namespace metav1.ObjectMeta) error {
-	if namespace.UID == "" {
-		current, err := a.k8s.Clientset().CoreV1().Namespaces().Get(ctx, namespace.Name, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("读取待回收仿真命名空间失败: %w", err)
-		}
-		namespace.UID = current.UID
+	if namespace.UID == "" || !strings.HasPrefix(namespace.Name, "sim-") || namespace.Namespace != "" {
+		return fmt.Errorf("待回收仿真命名空间缺少已确认的身份: %s", namespace.Name)
 	}
 	policy := metav1.DeletePropagationBackground
 	err := a.k8s.Clientset().CoreV1().Namespaces().Delete(ctx, namespace.Name, metav1.DeleteOptions{PropagationPolicy: &policy, Preconditions: &metav1.Preconditions{UID: &namespace.UID}})
@@ -453,6 +494,9 @@ func (a *StdioJSONAdapter) deleteNamespaceAndWait(ctx context.Context, namespace
 	if err := wait.PollUntilContextCancel(waitCtx, 250*time.Millisecond, true, func(ctx context.Context) (bool, error) {
 		current, err := a.k8s.Clientset().CoreV1().Namespaces().Get(ctx, namespace.Name, metav1.GetOptions{})
 		if err == nil {
+			if current.Name != namespace.Name || current.Namespace != "" || current.UID == "" {
+				return false, fmt.Errorf("待回收仿真命名空间返回无效身份: %s", namespace.Name)
+			}
 			return current.UID != namespace.UID, nil
 		}
 		if apierrors.IsNotFound(err) {
@@ -491,6 +535,7 @@ func (a *StdioJSONAdapter) sessionPod(namespace string, labels map[string]string
 		ObjectMeta: metav1.ObjectMeta{Name: stdioJSONPod, Namespace: namespace, Labels: labels},
 		Spec: corev1.PodSpec{
 			AutomountServiceAccountToken:  &automount,
+			EnableServiceLinks:            &automount,
 			ServiceAccountName:            stdioJSONServiceAccount,
 			RestartPolicy:                 corev1.RestartPolicyNever,
 			TerminationGracePeriodSeconds: &zero,
@@ -705,8 +750,8 @@ type runnerVerifyResponse struct {
 }
 
 // execRunner 执行一条命令并返回已通过后端协议校验的教学快照与包自描述信息。
-func (a *StdioJSONAdapter) execRunner(ctx context.Context, namespace string, scaleLimit map[string]any, cmd runnerCommand) (runnerFrame, error) {
-	raw, err := a.execRunnerRaw(ctx, namespace, cmd)
+func (a *StdioJSONAdapter) execRunner(ctx context.Context, execution *stdioJSONExecution, scaleLimit map[string]any, cmd runnerCommand) (runnerFrame, error) {
+	raw, err := a.execRunnerRaw(ctx, execution, cmd)
 	if err != nil {
 		return runnerFrame{}, err
 	}
@@ -725,7 +770,7 @@ func (a *StdioJSONAdapter) execRunner(ctx context.Context, namespace string, sca
 }
 
 // execRunnerRaw 编码命令、经 k8s exec 送入容器标准输入,并读回单行响应。
-func (a *StdioJSONAdapter) execRunnerRaw(ctx context.Context, namespace string, cmd runnerCommand) ([]byte, error) {
+func (a *StdioJSONAdapter) execRunnerRaw(ctx context.Context, execution *stdioJSONExecution, cmd runnerCommand) ([]byte, error) {
 	if cmd.InitParams == nil {
 		cmd.InitParams = map[string]any{}
 	}
@@ -759,15 +804,69 @@ func (a *StdioJSONAdapter) execRunnerRaw(ctx context.Context, namespace string, 
 	}
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(a.profile.ExecTimeoutSeconds)*time.Second)
 	defer cancel()
+	if err := a.verifyExecution(execCtx, execution); err != nil {
+		return nil, err
+	}
 	stdout := limitio.NewBuffer(a.profile.MaxOutputBytes)
 	stderr := limitio.NewBuffer(a.profile.MaxOutputBytes)
-	if err := a.k8s.Exec(execCtx, namespace, stdioJSONPod, stdioJSONContainer, a.profile.Command, bytes.NewReader(input), stdout, stderr, false); err != nil {
+	if err := a.k8s.Exec(execCtx, execution.namespace.Name, stdioJSONPod, stdioJSONContainer, a.profile.Command, bytes.NewReader(input), stdout, stderr, false); err != nil {
 		return nil, fmt.Errorf("隔离执行镜像执行失败: %w: %s", err, stderr.String())
+	}
+	if err := a.verifyExecution(execCtx, execution); err != nil {
+		return nil, err
 	}
 	if stdout.Len() == 0 {
 		return nil, fmt.Errorf("隔离执行镜像没有输出")
 	}
 	return stdout.Bytes(), nil
+}
+
+func (a *StdioJSONAdapter) verifyExecution(ctx context.Context, execution *stdioJSONExecution) error {
+	if execution == nil || execution.namespace.UID == "" || execution.pod == nil || execution.pod.UID == "" {
+		return fmt.Errorf("后端仿真执行缺少已确认的资源身份")
+	}
+	namespace, err := a.k8s.Clientset().CoreV1().Namespaces().Get(ctx, execution.namespace.Name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("核验后端仿真命名空间失败: %w", err)
+	}
+	if err := platformk8s.VerifyManagedResource(namespace, &execution.namespace); err != nil {
+		return err
+	}
+	if namespace.UID != execution.namespace.UID {
+		return fmt.Errorf("后端仿真命名空间已被替换")
+	}
+	current, err := a.k8s.Clientset().CoreV1().Pods(namespace.Name).Get(ctx, execution.pod.Name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("核验后端仿真计算 Pod 失败: %w", err)
+	}
+	ready, err := stdioJSONPodReady(current, execution.pod)
+	if err != nil {
+		return err
+	}
+	if !ready {
+		return fmt.Errorf("后端仿真计算 Pod 已失去就绪状态")
+	}
+	return nil
+}
+
+func stdioJSONPodReady(current, original *corev1.Pod) (bool, error) {
+	if err := platformk8s.VerifyManagedResource(current, original); err != nil {
+		return false, err
+	}
+	if current.UID != original.UID || !platformk8s.SamePodExecutionSpec(current.Spec, original.Spec) {
+		return false, fmt.Errorf("后端仿真计算 Pod 已被替换或修改")
+	}
+	if current.Status.Phase == corev1.PodFailed || current.Status.Phase == corev1.PodSucceeded {
+		return false, fmt.Errorf("后端仿真计算 Pod 提前结束: phase=%s", current.Status.Phase)
+	}
+	if current.Status.Phase == corev1.PodRunning {
+		for _, condition := range current.Status.Conditions {
+			if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // validateBackendStateScale 对通用状态中的 nodes 数组执行仿真包声明的规模上限。

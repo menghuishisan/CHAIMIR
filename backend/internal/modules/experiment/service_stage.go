@@ -135,6 +135,8 @@ func (s *Service) ActivateStage(ctx context.Context, instanceID int64, stageNo i
 		if cleanupErr := s.destroyCreatedStageResources(ctx, inst, sandboxes, simRefs); cleanupErr != nil {
 			return InstanceDTO{}, cleanupErr
 		}
+	} else {
+		s.publishInstanceChanged(ctx, inst.TenantID, inst.ID)
 	}
 	if err := s.store.TenantTx(ctx, inst.TenantID, func(ctx context.Context, tx TxStore) error {
 		checkpoints, err = tx.ListCheckpoints(ctx, inst.TenantID, inst.ID)

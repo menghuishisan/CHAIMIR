@@ -383,24 +383,7 @@ func latePenaltyAmount(rule map[string]any, rawScore int32) (int32, error) {
 
 // numericRuleValue 读取迟交策略中的数值字段。
 func numericRuleValue(rule map[string]any, key string) (float64, bool) {
-	value, ok := rule[key]
-	if !ok {
-		return 0, false
-	}
-	switch typed := value.(type) {
-	case float64:
-		return typed, true
-	case float32:
-		return float64(typed), true
-	case int:
-		return float64(typed), true
-	case int32:
-		return float64(typed), true
-	case int64:
-		return float64(typed), true
-	default:
-		return jsonx.Float64FromAnyOK(typed)
-	}
+	return jsonx.Float64FromAnyOK(rule[key])
 }
 
 // validCourseType 校验课程类型。

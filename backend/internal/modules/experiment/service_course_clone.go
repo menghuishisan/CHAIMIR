@@ -8,11 +8,12 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/storage"
 	"chaimir/pkg/apperr"
 )
 
-// PrepareExperimentClone 仅供 M6 在来源课程授权和锁定期间准备独立实验。
+// PrepareExperimentClone 仅供 M6 复制已授权课程，来源读取先于依赖准备与对象复制。
 func (s *Service) PrepareExperimentClone(ctx context.Context, req contracts.ExperimentCloneRequest) (plan contracts.ExperimentClonePlan, err error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
@@ -31,6 +32,8 @@ func (s *Service) PrepareExperimentClone(ctx context.Context, req contracts.Expe
 		return plan, err
 	}
 	var items []Experiment
+	var sources []Experiment
+	var refs []contracts.ContentItemRef
 	var content contracts.ContentClonePlan
 	var environments []contracts.SandboxCompositionClonePlan
 	plan.Discard = func(ctx context.Context) error {
@@ -51,11 +54,11 @@ func (s *Service) PrepareExperimentClone(ctx context.Context, req contracts.Expe
 		}
 	}()
 	err = s.store.TenantTx(ctx, req.SourceTenantID, func(ctx context.Context, tx TxStore) error {
-		sources, err := tx.ListCourseExperimentsForClone(ctx, req.SourceTenantID, req.SourceCourseID, req.SourceTeacherID, req.LessonExperimentIDs)
+		var err error
+		sources, err = tx.ListCourseExperimentsForClone(ctx, req.SourceTenantID, req.SourceCourseID, req.SourceTeacherID, req.LessonExperimentIDs)
 		if err != nil {
 			return err
 		}
-		var refs []contracts.ContentItemRef
 		for _, source := range sources {
 			if source.TenantID != req.SourceTenantID || (source.CourseID != req.SourceCourseID && (source.CourseID != 0 || source.AuthorID != req.SourceTeacherID)) {
 				return apperr.ErrExperimentNotFound
@@ -73,71 +76,71 @@ func (s *Service) PrepareExperimentClone(ctx context.Context, req contracts.Expe
 				return apperr.ErrExperimentNotFound
 			}
 		}
-		if len(refs) > 0 {
-			content, err = s.contentClone.PrepareContentClone(ctx, req.SourceTenantID, refs)
-			if err != nil {
-				content = contracts.ContentClonePlan{}
-				return err
-			}
-		}
-		validatedSims := make(map[string]bool)
-		for _, source := range sources {
-			item := source
-			item.ID, item.TenantID, item.CourseID, item.AuthorID, item.Status = plan.IDs[source.ID], id.TenantID, req.TargetCourseID, id.AccountID, ExperimentStatusDraft
-			// 独立复制配置，后续引用重写不能修改来源或共享 map/slice。
-			raw, err := json.Marshal(source.Components)
-			if err != nil {
-				return err
-			}
-			item.Components = ComponentConfig{}
-			if err := json.Unmarshal(raw, &item.Components); err != nil {
-				return err
-			}
-			item.GroupConfig.Roles = append([]string(nil), source.GroupConfig.Roles...)
-			// 冻结环境由 M2 单独验证和复制，其余自由参数也须成为本校独立素材。
-			if err := s.cloneComponentObjects(ctx, &item.Components, req.SourceTenantID, copies); err != nil {
-				return err
-			}
-			if source.TemplateRef != "" {
-				ref, ok := content.Refs[contracts.ContentItemRef{ItemCode: source.TemplateRef, ItemVersion: source.TemplateVersion}]
-				if !ok {
-					return apperr.ErrExperimentInvalid
-				}
-				item.TemplateRef, item.TemplateVersion = ref.ItemCode, ref.ItemVersion
-			}
-			for i := range item.Components.Checkpoints {
-				cp := &item.Components.Checkpoints[i]
-				ref, ok := content.Refs[contracts.ContentItemRef{ItemCode: cp.ItemCode, ItemVersion: cp.ItemVersion}]
-				if !ok {
-					return apperr.ErrExperimentInvalid
-				}
-				cp.ItemCode, cp.ItemVersion = ref.ItemCode, ref.ItemVersion
-			}
-			for i := range item.Components.Envs {
-				env := &item.Components.Envs[i]
-				prepared, err := s.sandboxClone.PrepareCompositionClone(ctx, req.SourceTenantID, env.CompositionSnapshot, env.InitCodeRef, env.InitScriptRef)
-				environments = append(environments, prepared)
-				if err != nil {
-					return err
-				}
-				env.CompositionSnapshot, env.InitCodeRef, env.InitScriptRef = prepared.Snapshot, prepared.InitCodeRef, prepared.InitScriptRef
-			}
-			for _, sim := range item.Components.Sims {
-				key := sim.PackageCode + "\x00" + sim.Version
-				if validatedSims[key] {
-					continue
-				}
-				if err := s.sim.ValidatePackage(ctx, id.TenantID, sim.PackageCode, sim.Version); err != nil {
-					return err
-				}
-				validatedSims[key] = true
-			}
-			items = append(items, item)
-		}
 		return nil
 	})
 	if err != nil {
 		return plan, err
+	}
+	if len(refs) > 0 {
+		content, err = s.contentClone.PrepareContentClone(ctx, req.SourceTenantID, refs)
+		if err != nil {
+			content = contracts.ContentClonePlan{}
+			return plan, err
+		}
+	}
+	validatedSims := make(map[string]bool)
+	for _, source := range sources {
+		item := source
+		item.ID, item.TenantID, item.CourseID, item.AuthorID, item.Status = plan.IDs[source.ID], id.TenantID, req.TargetCourseID, id.AccountID, ExperimentStatusDraft
+		// 独立复制配置，后续引用重写不能修改来源或共享 map/slice。
+		raw, err := json.Marshal(source.Components)
+		if err != nil {
+			return plan, err
+		}
+		item.Components = ComponentConfig{}
+		if err := jsonx.DecodeStrictKnownFields(raw, &item.Components); err != nil {
+			return plan, err
+		}
+		item.GroupConfig.Roles = append([]string(nil), source.GroupConfig.Roles...)
+		// 冻结环境由 M2 单独验证和复制，其余自由参数也须成为本校独立素材。
+		if err := s.cloneComponentObjects(ctx, &item.Components, req.SourceTenantID, copies); err != nil {
+			return plan, err
+		}
+		if source.TemplateRef != "" {
+			ref, ok := content.Refs[contracts.ContentItemRef{ItemCode: source.TemplateRef, ItemVersion: source.TemplateVersion}]
+			if !ok {
+				return plan, apperr.ErrExperimentInvalid
+			}
+			item.TemplateRef, item.TemplateVersion = ref.ItemCode, ref.ItemVersion
+		}
+		for i := range item.Components.Checkpoints {
+			cp := &item.Components.Checkpoints[i]
+			ref, ok := content.Refs[contracts.ContentItemRef{ItemCode: cp.ItemCode, ItemVersion: cp.ItemVersion}]
+			if !ok {
+				return plan, apperr.ErrExperimentInvalid
+			}
+			cp.ItemCode, cp.ItemVersion = ref.ItemCode, ref.ItemVersion
+		}
+		for i := range item.Components.Envs {
+			env := &item.Components.Envs[i]
+			prepared, err := s.sandboxClone.PrepareCompositionClone(ctx, req.SourceTenantID, env.CompositionSnapshot, env.InitCodeRef, env.InitScriptRef)
+			environments = append(environments, prepared)
+			if err != nil {
+				return plan, err
+			}
+			env.CompositionSnapshot, env.InitCodeRef, env.InitScriptRef = prepared.Snapshot, prepared.InitCodeRef, prepared.InitScriptRef
+		}
+		for _, sim := range item.Components.Sims {
+			key := sim.PackageCode + "\x00" + sim.Version
+			if validatedSims[key] {
+				continue
+			}
+			if err := s.sim.ValidatePackage(ctx, id.TenantID, sim.PackageCode, sim.Version); err != nil {
+				return plan, err
+			}
+			validatedSims[key] = true
+		}
+		items = append(items, item)
 	}
 	plan.Save = func(ctx context.Context) error {
 		return s.store.CloneTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {

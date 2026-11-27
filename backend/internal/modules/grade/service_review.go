@@ -279,8 +279,8 @@ func mapGradeReviewErr(err error) error {
 	if err == nil {
 		return nil
 	}
-	if appErr, ok := apperr.As(err); ok {
-		return appErr
+	if _, ok := apperr.As(err); ok {
+		return apperr.AsAppError(err)
 	}
 	return apperr.ErrGradeReviewStateInvalid.WithCause(err)
 }

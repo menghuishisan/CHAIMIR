@@ -34,7 +34,10 @@ func (s *Service) GetMe(ctx context.Context) (MeResponse, error) {
 		current, err = tx.GetTenantByID(ctx, id.TenantID)
 		return err
 	}); err != nil {
-		return MeResponse{}, apperr.ErrIdentitySessionInvalid.WithCause(err)
+		if isNoRows(err) {
+			return MeResponse{}, apperr.ErrIdentitySessionInvalid.WithCause(err)
+		}
+		return MeResponse{}, apperr.ErrInternal.WithCause(err)
 	}
 	phone, err := s.decryptPhone(account.PhoneEnc)
 	if err != nil {
@@ -65,13 +68,25 @@ func (s *Service) ChangeMyPassword(ctx context.Context, currentSessionID int64, 
 	if err := ValidatePassword(req.NewPassword); err != nil {
 		return err
 	}
-	var account Account
 	passwordHash, err := crypto.HashPassword(req.NewPassword)
 	if err != nil {
 		return apperr.ErrInternal.WithCause(err)
 	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		if err := tx.LockAccount(ctx, id.TenantID, id.AccountID); err != nil {
+			return err
+		}
 		// 改密前必须读取服务端账号状态并校验旧密码,不能只依赖当前 access token。
+		session, err := tx.GetAuthSessionByID(ctx, id.TenantID, currentSessionID)
+		if err != nil {
+			if isNoRows(err) {
+				return apperr.ErrIdentitySessionInvalid
+			}
+			return err
+		}
+		if session.AccountID != id.AccountID || session.TenantID != id.TenantID || session.Status != SessionStatusActive || !timex.Now().Before(session.ExpireAt) {
+			return apperr.ErrIdentitySessionInvalid
+		}
 		row, err := tx.GetAccount(ctx, id.AccountID)
 		if err != nil {
 			return err
@@ -94,14 +109,11 @@ func (s *Service) ChangeMyPassword(ctx context.Context, currentSessionID int64, 
 		if err := tx.RevokeOtherAccountSessions(ctx, id.TenantID, id.AccountID, currentSessionID); err != nil {
 			return err
 		}
-		account = row
-		account.Status = updated.Status
-		account.MustChangePwd = false
-		return nil
+		return s.auditSelfAccount(ctx, id, updated, "account.password.change")
 	}); err != nil {
 		return apperr.AsAppError(err)
 	}
-	return s.auditSelfAccount(ctx, id, account, "account.password.change")
+	return nil
 }
 
 // ChangeMyPhone 校验新手机号短信验证码后换绑手机号密文和查询哈希。
@@ -122,24 +134,30 @@ func (s *Service) ChangeMyPhone(ctx context.Context, req ChangePhoneRequest) err
 	if err != nil {
 		return apperr.ErrInternal.WithCause(err)
 	}
-	var account Account
+	var verificationErr error
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		if err := tx.LockAccount(ctx, id.TenantID, id.AccountID); err != nil {
+			return err
+		}
 		if err := ensurePhoneAvailableInTx(ctx, tx, id, phoneHash); err != nil {
 			return err
 		}
 		if err := s.verifySMSCodeInTx(ctx, tx, id.TenantID, phoneHash, SMSSceneChangePhone, codeHash); err != nil {
+			if isSMSVerificationRejection(err) {
+				verificationErr = err
+				return nil
+			}
 			return err
 		}
 		row, err := tx.UpdateAccountPhone(ctx, id.TenantID, id.AccountID, phoneEnc, phoneHash)
 		if err != nil {
 			return err
 		}
-		account = row
-		return nil
+		return s.auditSelfAccount(ctx, id, row, "account.phone.change")
 	}); err != nil {
 		return apperr.AsAppError(err)
 	}
-	return s.auditSelfAccount(ctx, id, account, "account.phone.change")
+	return verificationErr
 }
 
 // ListMySessions 读取当前账号的服务端 Refresh 会话,不返回任何令牌明文或哈希;
@@ -187,7 +205,10 @@ func (s *Service) getPlatformMe(ctx context.Context, accountID int64) (MeRespons
 		admin = row
 		return nil
 	}); err != nil {
-		return MeResponse{}, apperr.ErrIdentitySessionInvalid.WithCause(err)
+		if isNoRows(err) {
+			return MeResponse{}, apperr.ErrIdentitySessionInvalid.WithCause(err)
+		}
+		return MeResponse{}, apperr.ErrInternal.WithCause(err)
 	}
 	return MeResponse{Account: AccountDTO{ID: ids.ID(admin.ID), Name: admin.Name, Roles: []int16{contracts.RoleNumPlatformAdmin}, Status: admin.Status}, EnabledModules: []string{}}, nil
 }
@@ -204,11 +225,26 @@ func (s *Service) changePlatformPassword(ctx context.Context, accountID, current
 	if err != nil {
 		return apperr.ErrInternal.WithCause(err)
 	}
-	var admin PlatformAdmin
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		if err := tx.LockPlatformAdmin(ctx, accountID); err != nil {
+			return err
+		}
+		session, err := tx.GetPlatformAuthSessionByID(ctx, currentSessionID)
+		if err != nil {
+			if isNoRows(err) {
+				return apperr.ErrIdentitySessionInvalid
+			}
+			return err
+		}
+		if session.PlatformAdminID != accountID || session.Status != SessionStatusActive || !timex.Now().Before(session.ExpireAt) {
+			return apperr.ErrIdentitySessionInvalid
+		}
 		row, err := tx.GetPlatformAdminByID(ctx, accountID)
 		if err != nil {
 			return err
+		}
+		if row.Status != TenantStatusActive {
+			return apperr.ErrIdentityAccountDisabled
 		}
 		ok, err := crypto.VerifyPassword(req.OldPassword, row.PasswordHash)
 		if err != nil {
@@ -223,12 +259,11 @@ func (s *Service) changePlatformPassword(ctx context.Context, accountID, current
 		if err := tx.RevokeOtherPlatformSessions(ctx, accountID, currentSessionID); err != nil {
 			return err
 		}
-		admin = row
-		return nil
+		return s.auditPlatformOperation(ctx, row.ID, "platform_admin.password.change", "identity.platform_admin", row.ID, map[string]any{})
 	}); err != nil {
 		return apperr.AsAppError(err)
 	}
-	return s.auditPlatformOperation(ctx, admin.ID, "platform_admin.password.change", "identity.platform_admin", admin.ID, map[string]any{})
+	return nil
 }
 
 // listPlatformSessions 返回平台管理员服务端会话列表,不暴露 Refresh 哈希。

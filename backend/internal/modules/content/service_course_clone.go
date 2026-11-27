@@ -54,16 +54,6 @@ func (s *Service) PrepareContentClone(ctx context.Context, sourceTenantID int64,
 			if sourceTenantID != id.TenantID {
 				source.CategoryID = 0
 			}
-			var copied []storage.ObjectRef
-			source.Body, copied, err = s.cloneBodyAttachments(ctx, source.Body, sourceTenantID, id.TenantID, source.ID, source.Code, source.Version)
-			if err != nil {
-				return err
-			}
-			objects = append(objects, copied...)
-			source.VersionHash, err = versionHash(source.Item, source.Body, source.SensitiveFields)
-			if err != nil {
-				return err
-			}
 			plan.Refs[ref] = contracts.ContentItemRef{ItemCode: source.Code, ItemVersion: source.Version}
 			items = append(items, source)
 		}
@@ -71,6 +61,19 @@ func (s *Service) PrepareContentClone(ctx context.Context, sourceTenantID int64,
 	})
 	if err != nil {
 		return plan, err
+	}
+	for i := range items {
+		item := &items[i]
+		var copied []storage.ObjectRef
+		item.Body, copied, err = s.cloneBodyAttachments(ctx, item.Body, sourceTenantID, id.TenantID, item.ID, item.Code, item.Version)
+		if err != nil {
+			return plan, err
+		}
+		objects = append(objects, copied...)
+		item.VersionHash, err = versionHash(item.Item, item.Body, item.SensitiveFields)
+		if err != nil {
+			return plan, err
+		}
 	}
 	plan.Save = func(ctx context.Context) error {
 		return s.store.CloneTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {

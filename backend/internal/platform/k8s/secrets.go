@@ -27,7 +27,6 @@ func (c *Client) SyncImagePullSecrets(ctx context.Context, sourceNamespace, targ
 		return nil
 	}
 	sourceClient := c.clientset.CoreV1().Secrets(sourceNamespace)
-	targetClient := c.clientset.CoreV1().Secrets(targetNamespace)
 	for _, rawName := range names {
 		name := strings.TrimSpace(rawName)
 		if name == "" {
@@ -41,25 +40,8 @@ func (c *Client) SyncImagePullSecrets(ctx context.Context, sourceNamespace, targ
 			return fmt.Errorf("镜像拉取 Secret %s/%s 类型无效", sourceNamespace, name)
 		}
 		desired := imagePullSecretForNamespace(source, targetNamespace, module)
-		existing, err := targetClient.Get(ctx, name, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			if _, err := targetClient.Create(ctx, desired, metav1.CreateOptions{}); err != nil {
-				return fmt.Errorf("创建镜像拉取 Secret %s/%s 失败: %w", targetNamespace, name, err)
-			}
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("查询镜像拉取 Secret %s/%s 失败: %w", targetNamespace, name, err)
-		}
-		if sameImagePullSecret(existing, desired) {
-			continue
-		}
-		updated := existing.DeepCopy()
-		updated.Type = desired.Type
-		updated.Data = desired.Data
-		updated.Labels = desired.Labels
-		if _, err := targetClient.Update(ctx, updated, metav1.UpdateOptions{}); err != nil {
-			return fmt.Errorf("更新镜像拉取 Secret %s/%s 失败: %w", targetNamespace, name, err)
+		if err := c.syncManagedSecret(ctx, desired); err != nil {
+			return fmt.Errorf("同步镜像拉取 Secret %s/%s 失败: %w", targetNamespace, name, err)
 		}
 	}
 	return nil
@@ -80,8 +62,8 @@ func imagePullSecretForNamespace(source *corev1.Secret, namespace, module string
 	}
 }
 
-// sameImagePullSecret 判断目标凭据是否已经与受控源一致。
-func sameImagePullSecret(current, desired *corev1.Secret) bool {
+// sameSecretContent 核对类型与全部数据键值，不在错误中包含密钥内容。
+func sameSecretContent(current, desired *corev1.Secret) bool {
 	if current.Type != desired.Type || len(current.Data) != len(desired.Data) {
 		return false
 	}
@@ -106,6 +88,9 @@ func (c *Client) SyncSecretKeys(ctx context.Context, sourceNamespace, sourceName
 	module = strings.TrimSpace(module)
 	if sourceNamespace == "" || sourceName == "" || targetNamespace == "" || targetName == "" || module == "" {
 		return fmt.Errorf("运行期 Secret 同步边界不完整")
+	}
+	if sourceNamespace == targetNamespace && sourceName == targetName {
+		return fmt.Errorf("运行期 Secret 不能覆盖控制面源对象")
 	}
 	unique := make(map[string]struct{}, len(keys))
 	for _, raw := range keys {
@@ -137,23 +122,46 @@ func (c *Client) SyncSecretKeys(ctx context.Context, sourceNamespace, sourceName
 		Type: corev1.SecretTypeOpaque,
 		Data: data,
 	}
-	targetClient := c.clientset.CoreV1().Secrets(targetNamespace)
-	existing, err := targetClient.Get(ctx, targetName, metav1.GetOptions{})
+	if err := c.syncManagedSecret(ctx, desired); err != nil {
+		return fmt.Errorf("同步沙箱运行期 Secret %s/%s 失败: %w", targetNamespace, targetName, err)
+	}
+	return nil
+}
+
+func (c *Client) syncManagedSecret(ctx context.Context, desired *corev1.Secret) error {
+	client := c.clientset.CoreV1().Secrets(desired.Namespace)
+	existing, err := client.Get(ctx, desired.Name, metav1.GetOptions{})
+	created := false
 	if apierrors.IsNotFound(err) {
-		if _, err := targetClient.Create(ctx, desired, metav1.CreateOptions{}); err != nil {
-			return fmt.Errorf("创建沙箱运行期 Secret %s/%s 失败: %w", targetNamespace, targetName, err)
+		existing, err = client.Create(ctx, desired, metav1.CreateOptions{})
+		created = err == nil
+		if apierrors.IsAlreadyExists(err) {
+			existing, err = client.Get(ctx, desired.Name, metav1.GetOptions{})
 		}
-		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("查询沙箱运行期 Secret %s/%s 失败: %w", targetNamespace, targetName, err)
+		return err
 	}
-	updated := existing.DeepCopy()
-	updated.Type = desired.Type
-	updated.Data = desired.Data
-	updated.Labels = desired.Labels
-	if _, err := targetClient.Update(ctx, updated, metav1.UpdateOptions{}); err != nil {
-		return fmt.Errorf("更新沙箱运行期 Secret %s/%s 失败: %w", targetNamespace, targetName, err)
+	if err := VerifyManagedResource(existing, desired); err != nil {
+		return err
+	}
+	if !created && !sameSecretContent(existing, desired) {
+		updated := existing.DeepCopy()
+		updated.Type, updated.Data = desired.Type, desired.Data
+		accepted, err := client.Update(ctx, updated, metav1.UpdateOptions{})
+		if err != nil {
+			return err
+		}
+		if accepted.UID != existing.UID {
+			return fmt.Errorf("受管 Secret %s 在更新期间已被替换", desired.Name)
+		}
+		existing = accepted
+	}
+	if err := VerifyManagedResource(existing, desired); err != nil {
+		return err
+	}
+	if !sameSecretContent(existing, desired) {
+		return fmt.Errorf("受管 Secret %s 的类型或数据与请求不一致", desired.Name)
 	}
 	return nil
 }

@@ -1,4 +1,3 @@
-// sim validation_bundle 文件负责仿真包归档安全校验、manifest 协议解析和危险调用静态扫描。
 package sim
 
 import (
@@ -10,6 +9,7 @@ import (
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
+	"chaimir/pkg/jsonvalue"
 )
 
 // BundleInput 是 API 边界读取 multipart 后交给 service 的仿真包正文。
@@ -25,7 +25,7 @@ func validateBundleManifestMatchesRequest(manifest bundleManifest, req SubmitPac
 	if strings.TrimSpace(manifest.Meta.Code) != req.Code || strings.TrimSpace(manifest.Meta.Version) != req.Version || strings.TrimSpace(manifest.Meta.Name) != req.Name || strings.TrimSpace(manifest.Meta.Category) != req.Category {
 		return apperr.ErrSimPackageValidationFailed
 	}
-	if !jsonx.Equal(manifest.Meta.ScaleLimit, scale) {
+	if !jsonvalue.Equal(manifest.Meta.ScaleLimit, scale) {
 		return apperr.ErrSimPackageValidationFailed
 	}
 	if len(manifest.InteractionSchema.Events) == 0 {
@@ -200,16 +200,16 @@ func scanBundleEntries(name string, data []byte, limits upload.ArchiveLimits) ([
 	manifests := map[string][]byte{}
 	members := map[string]struct{}{}
 	err := upload.WalkArchiveFiles(name, data, limits, func(file upload.ArchiveFile) error {
+		members[file.Name] = struct{}{}
+		if !scanCandidate(file.Name) {
+			return nil
+		}
 		content, err := upload.ReadArchiveFileContent(file, limits.MaxUnpackedBytes)
 		if err != nil {
 			return err
 		}
-		members[file.Name] = struct{}{}
 		if file.Name == simPackageManifestName || (strings.Count(file.Name, "/") == 1 && strings.HasSuffix(file.Name, "/"+simPackageManifestName)) {
 			manifests[file.Name] = content
-		}
-		if !scanCandidate(file.Name) {
-			return nil
 		}
 		findings = append(findings, scanContent(file.Name, content)...)
 		return nil
@@ -240,8 +240,6 @@ func scanBundleEntries(name string, data []byte, limits upload.ArchiveLimits) ([
 	if len(manifestFindings) > 0 {
 		findings = append(findings, manifestFindings...)
 	}
-	// 入口模块声明合法不代表它真的在包里:容器装配时找不到入口只能报运行失败,
-	// 而那已经是学生打开场景之后了。在上传边界就确认存在性,把缺陷挡在审核之前。
 	if entry := strings.TrimSpace(manifest.Meta.Entry); entry != "" {
 		if _, exists := members[prefix+entry]; !exists {
 			findings = append(findings, "manifest:entry-not-in-archive")

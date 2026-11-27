@@ -275,6 +275,7 @@ function Get-ChaimirInternalImageBuildArguments {
         FABRIC_TOOLS_IMAGE = "base/fabric-tools"
         RUNTIME_IMAGE      = "base/runtime-min"
         EVM_HARDHAT_IMAGE  = "runtime/evm-hardhat"
+        EVM_GETH_IMAGE     = "runtime/evm-geth"
         SLITHER_IMAGE      = "tool/slither"
         PG_CLIENT_IMAGE      = "infra/postgres"
         CILIUM_RUNTIME_IMAGE = "infra/cilium-runtime"

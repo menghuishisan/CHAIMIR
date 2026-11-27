@@ -4,7 +4,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
-	"errors"
 	"fmt"
 )
 
@@ -22,7 +21,7 @@ func NewCipher(key []byte) (*Cipher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("初始化 AES 失败: %w", err)
 	}
-	gcm, err := cipher.NewGCM(block)
+	gcm, err := cipher.NewGCMWithRandomNonce(block)
 	if err != nil {
 		return nil, fmt.Errorf("初始化 GCM 失败: %w", err)
 	}
@@ -34,11 +33,7 @@ func (c *Cipher) Encrypt(plaintext []byte) ([]byte, error) {
 	if c == nil || c.gcm == nil {
 		return nil, fmt.Errorf("加密器尚未初始化")
 	}
-	nonce, err := RandomBytes(c.gcm.NonceSize())
-	if err != nil {
-		return nil, err
-	}
-	return c.gcm.Seal(nonce, nonce, plaintext, nil), nil
+	return c.gcm.Seal(nil, nil, plaintext, nil), nil
 }
 
 // ProtectPhone 返回手机号密文和检索用 HMAC。
@@ -68,12 +63,7 @@ func (c *Cipher) Decrypt(data []byte) ([]byte, error) {
 	if c == nil || c.gcm == nil {
 		return nil, fmt.Errorf("加密器尚未初始化")
 	}
-	ns := c.gcm.NonceSize()
-	if len(data) < ns {
-		return nil, errors.New("密文长度非法")
-	}
-	nonce, ciphertext := data[:ns], data[ns:]
-	plaintext, err := c.gcm.Open(nil, nonce, ciphertext, nil)
+	plaintext, err := c.gcm.Open(nil, nil, data, nil)
 	if err != nil {
 		return nil, fmt.Errorf("解密失败: %w", err)
 	}

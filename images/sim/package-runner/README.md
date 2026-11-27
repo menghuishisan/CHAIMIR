@@ -4,19 +4,15 @@ M4 扩展仿真包通用运行器镜像。教师(`teacher_<id>__`)与第三方(`
 
 ## 镜像职责
 
-镜像内只有平台自己的装配器与 `stdio-json` 协议实现,**不含任何仿真算法**。新增一个教师扩展包不新增镜像 —— 包正文由后端按会话投递。这与 `sim/<package-code>` 恰好相反(后者把算法固化在镜像里),两者职责不可混用。
+镜像内只有平台自己的装配器与 `stdio-json` 协议实现,**不含任何仿真算法**。新增一个教师扩展包不新增镜像 —— 包正文由后端按会话投递。扩展包统一复用该运行器，不按包分别维护镜像。
 
-## 为什么扩展包在容器里跑而不在浏览器里跑
+## 执行边界
 
-装配外部 bundle 必须先解封浏览器 Worker 的动态 import 封锁,那等于让第三方代码在**未封锁的 Worker、平台自己的 origin 内**执行一次:它能拿路径受限 Cookie 打平台接口、能 `importScripts` 同源资产,`connect-src 'self'` 挡不住同源行为。而静态扫描拦不住 `globalThis['fe'+'tch']` 这类拼接 —— 动态语言下的能力访问无法靠模式匹配穷尽。
-
-容器给的是**结构性**保证,不依赖看懂代码:独立命名空间、deny-all 网络、non-root、只读根文件系统、丢弃全部 capability、禁用 ServiceAccount Token、seccomp、资源硬限、执行超时。容器里没有 origin、没有凭据、没有网络出口。
-
-前端 CSP 因此保持 `script-src 'self'` 不变。详见 `docs/04-仿真可视化引擎/07-安全设计.md` §2。
+教师及第三方代码在后端隔离容器执行，浏览器仅渲染平台封闭协议的纯数据教学帧。执行与网络边界见[M4 安全设计](../../../docs/04-仿真可视化引擎/06-安全设计.md)。
 
 ## bundle 经 exec stdin 投递
 
-计算 Pod 根文件系统只读且网络 deny-all,容器既写不下也取不到对象存储正文;放开网络就等于拆掉隔离边界。故字节由后端从统一文件服务取出后直接推入容器标准输入,容器内先校验 sha256 与 `sim_package.bundle_hash` 逐字节一致再按 `meta.entry` 装配 —— 投递通道可信不等于内容可信,哈希是"跑的就是审核过的那份代码"的唯一凭据。**容器全程不持有任何凭据**。归档落在唯一可写的 `emptyDir`(`/tmp/sim-bundle`),随会话命名空间删除一并消失。
+后端从统一文件服务读取 bundle，经 exec 标准输入投递；容器不访问对象存储或持有凭据。容器先核对 bundle SHA-256 与 `sim_package.bundle_hash`，再按 `meta.entry` 装配。根文件系统只读，归档只写入临时 `emptyDir`（`/tmp/sim-bundle`），随会话命名空间回收。
 
 ## 协议
 
@@ -37,7 +33,7 @@ M4 扩展仿真包通用运行器镜像。教师(`teacher_<id>__`)与第三方(`
 
 ## 运行时代码从哪来
 
-来自 `frontend/packages/sim-sdk/src/runtime/`:容器宿主(`containerHost.ts`)与浏览器 Worker 宿主(`sim.worker.ts`)**共用同一个 `SimEngine`**。引擎有两份实现就必然漂移,而漂移的表现是"同一个 seed 在两个宿主跑出两条过程",回放、分享与判分随之失效。故本目录只有 Dockerfile、manifest 与本文,不放任何脚本;镜像构建时执行 `pnpm --filter @chaimir/sim-sdk build:container` 编译容器入口。
+容器宿主 `containerHost.ts` 与浏览器 Worker 宿主 `sim.worker.ts` 共用 `frontend/packages/sim-sdk/src/runtime/` 中的 `SimEngine`，保持种子、回放与判分语义一致。本目录只维护镜像装配，构建时执行 `pnpm --filter @chaimir/sim-sdk build:container` 编译容器入口，不复制 SDK 运行时实现。
 
 入口模块只接受 `.mjs`:归档内没有 `package.json` 时 Node 按 CJS 解析 `.js`,而扩展包必须默认导出 `SimPackage`(ESM 语义),允许 `.js` 会让"能不能装配"取决于归档里有没有 `type:module`。
 
@@ -45,46 +41,6 @@ M4 扩展仿真包通用运行器镜像。教师(`teacher_<id>__`)与第三方(`
 
 能力编号 `sim-package-runner`,digest、命令、受控环境变量、资源与 I/O 上限统一登记在 `SIM_BACKEND_STDIO_ADAPTERS_JSON`;节点规模与执行步数使用仿真包已审核的 `scale_limit`。服务端按 `author_type` 自动为教师/第三方包绑定该能力,教师提交表单不含"运行方式"字段。单租户并发受 `SIM_BACKEND_MAX_CONCURRENT_SESSIONS_PER_TENANT` 约束,超限返回 `42005`。
 
-## 合法 runtime / provider
+## 验收与清理
 
-本镜像是 M4 后端 stdio-json 运行器，不绑定链 runtime 或外部 provider；仿真包正文由平台会话投递。未声明的 provider、网络出口和跨镜像能力均不支持。
-
-## bindings 与 links
-
-本镜像不声明外部 binding 或 link；后端投递通道不是网络 binding。CompositionSpec 不得为本镜像添加未声明依赖。
-
-## 端口与服务
-
-本镜像无对外端口和服务，采用一次性 stdio-json 命令进程；不能通过 HTTP 探活判断仿真业务成功。
-
-## command / args 语义
-
-容器入口由构建阶段生成的 stdio-json runner 固定提供，具体 command、参数、资源和 I/O 上限以 `SIM_BACKEND_STDIO_ADAPTERS_JSON` 与 WorkloadSpec 为准，不使用 generic fallback。
-
-## 初始化材料与运行时注入
-
-本镜像不声明 `init_assets`，不内置仿真包、租户材料、协议材料或私有文件。仿真 bundle 由平台文件服务按会话通过标准输入投递，并在容器内按审核记录的 SHA-256 校验；镜像不访问对象存储。
-
-## Secret / KMS
-
-本镜像不声明 Secret 环境键和 `secrets_required`，运行时不得注入密钥。bundle、seed 和事件由后端逐次投递，容器不持有会话长期状态。
-
-## 持久化与隔离边界
-
-持久化边界为会话临时 `/tmp/sim-bundle`，不作为平台长期数据；根文件系统、网络、资源和 workspace 挂载以对应 WorkloadSpec 为准。该 stdio 进程没有 HTTP readiness，进程启动不等于仿真业务成功。
-
-## 安全边界
-
-容器使用独立命名空间、deny-all 网络、non-root、只读根文件系统、资源硬限和执行超时；不持有平台凭据，不允许未声明的外部访问。
-
-## readiness / health
-
-本镜像没有 HTTP readiness；只有 stdio-json 协议响应通过后端 TeachingFrame 校验才可视为可用。
-
-## 清理
-
-会话结束后删除容器、临时卷、网络和投递材料，保留平台长期对象；不使用 broad prune。
-
-## 验收条件
-
-验收必须使用 `init`、`apply`、`restore`、`verify` 的真实 stdio-json 流程，校验 bundle 哈希、完整教学帧、确定性和非法响应拒绝；结束后删除会话容器、临时卷、网络及投递材料，不使用 broad prune。
+验证 `init`、`apply`、`restore`、`verify` 的真实 stdio-json 流程，包括 bundle 摘要、完整教学帧、确定性、并发上限及非法响应拒绝。会话结束回收执行资源、临时卷与投递材料；不删除平台长期对象。通用构建、供应链及隔离要求见[镜像规范](../../../docs/总-镜像与容器设计.md)。

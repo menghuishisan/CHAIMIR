@@ -960,7 +960,7 @@ const frontendOnlyStringConsts = new Set([
 ]);
 
 // 后端目前用裸字符串字面量表达、尚未命名成 Go 常量组的契约值:
-// 本脚本无法做逐项对照,故单独登记并在 docs/对齐-后端待补齐清单-2026-08-23.md 记为后端待办 ——
+// 当前仅在此登记无法逐项对照的字符串契约；该集合不代表已通过后端常量对照。
 // 后端把它们提成命名常量后,应移入 stringGroups 做真实对照,不留在这里。
 const pendingBackendNamedConsts = new Set([
   // sandbox 组合编译器按 "tool" / "infra" 判定组件类别(composition.go expectedCategory)

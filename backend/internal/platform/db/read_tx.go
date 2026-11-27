@@ -11,9 +11,10 @@ import (
 type transactionContextKey struct{}
 
 type transactionContext struct {
-	database *DB
-	tenantID int64
-	tx       pgx.Tx
+	database      *DB
+	tenantID      int64
+	tx            pgx.Tx
+	notifications *[]func(context.Context) error
 }
 
 // WithTenantReadTxID 供只执行读取查询的仓储使用;同一应用事务内不另占连接或提交。

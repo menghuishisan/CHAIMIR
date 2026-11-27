@@ -99,13 +99,7 @@ func (s *Service) recoverPendingSandboxStarts(ctx context.Context, limit int32) 
 			failures = append(failures, err)
 			continue
 		}
-		plan, err := s.planForExistingSandbox(ctx, sb)
-		if err != nil {
-			s.markStartupFailed(ctx, sb, "start", err, SandboxStatusCreating)
-			failures = append(failures, err)
-			continue
-		}
-		s.scheduleSandboxStart(ctx, plan)
+		s.scheduleSandboxStart(ctx, sb.TenantID, sb.ID)
 	}
 	return errors.Join(failures...)
 }
@@ -206,7 +200,7 @@ func (s *Service) recycleOne(ctx context.Context, sb Sandbox, reason string) err
 
 func (s *Service) recycleResources(ctx context.Context, sb Sandbox, persistWorkspace bool) error {
 	if persistWorkspace {
-		plan, err := s.planForExistingSandbox(ctx, sb)
+		plan, err := cleanupPlanForSandbox(sb)
 		if err != nil {
 			return err
 		}
@@ -231,7 +225,7 @@ func (s *Service) recycleResources(ctx context.Context, sb Sandbox, persistWorks
 	if sb.SnapshotEnabled && sb.Status != SandboxStatusFailed && sb.Phase != SandboxPhaseAllocating && sb.Phase != SandboxPhaseInitializing && sb.SnapshotExpireAt.After(timex.Now()) {
 		retention := time.Until(sb.SnapshotExpireAt)
 		snapshotCtx, cancel := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
-		plan, err := s.planForExistingSandbox(ctx, sb)
+		plan, err := cleanupPlanForSandbox(sb)
 		if err != nil {
 			cancel()
 			return err

@@ -1,4 +1,3 @@
-// engine_composition 文件定义实验、竞赛和判题共用的沙箱组合声明与编译快照契约。
 package contracts
 
 import (
@@ -7,10 +6,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+
+	"chaimir/pkg/jsonvalue"
 )
 
 // SandboxAccessProfile 表示组合运行期的访问边界。
@@ -186,7 +187,7 @@ func AppendPrivateSidecarImageClosure(snapshot *SandboxCompositionSnapshot) erro
 		for _, mount := range sidecar.EphemeralMounts {
 			item.EphemeralMounts = append(item.EphemeralMounts, ImageClosureMount(mount))
 		}
-		if mergeImageClosureItem(snapshot.ImageClosure, item) {
+		if containsImageClosureItem(snapshot.ImageClosure, item) {
 			continue
 		}
 		snapshot.ImageClosure = append(snapshot.ImageClosure, item)
@@ -202,41 +203,23 @@ func imageVersionFromURL(imageURL string) string {
 	return ""
 }
 
-// mergeImageClosureItem 合并相同镜像、自检命令、保持用途的临时挂载,返回是否已存在。
-func mergeImageClosureItem(items []ImageClosureItem, incoming ImageClosureItem) bool {
-	for index := range items {
-		current := &items[index]
-		if current.ImageURL != incoming.ImageURL || current.PrepullHold != incoming.PrepullHold || !slicesEqual(current.PrepullCommand, incoming.PrepullCommand) {
+// containsImageClosureItem 只复用相同镜像、命令、常驻用途和挂载集合的自检。
+func containsImageClosureItem(items []ImageClosureItem, incoming ImageClosureItem) bool {
+	for _, current := range items {
+		if current.ImageURL != incoming.ImageURL || current.PrepullHold != incoming.PrepullHold || !slices.Equal(current.PrepullCommand, incoming.PrepullCommand) {
 			continue
 		}
-		for _, mount := range incoming.EphemeralMounts {
-			seen := false
-			for _, existing := range current.EphemeralMounts {
-				if existing == mount {
-					seen = true
-					break
-				}
-			}
-			if !seen {
-				current.EphemeralMounts = append(current.EphemeralMounts, mount)
-			}
+		if len(current.EphemeralMounts) != len(incoming.EphemeralMounts) {
+			continue
+		}
+		if slices.ContainsFunc(incoming.EphemeralMounts, func(mount ImageClosureMount) bool {
+			return !slices.Contains(current.EphemeralMounts, mount)
+		}) {
+			continue
 		}
 		return true
 	}
 	return false
-}
-
-// slicesEqual 比较私有 sidecar 的受控命令序列,避免把不同自检语义错误合并。
-func slicesEqual(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for index := range left {
-		if left[index] != right[index] {
-			return false
-		}
-	}
-	return true
 }
 
 // CanonicalDigest 对规范化组合生成稳定摘要，保证相同声明在不同调用方得到同一 digest。
@@ -248,7 +231,7 @@ func CanonicalDigest(spec SandboxCompositionSpec) (string, error) {
 		return "", err
 	}
 	canonical := normalizeComposition(spec)
-	b, err := json.Marshal(canonical)
+	b, err := jsonvalue.Canonical(canonical)
 	if err != nil {
 		return "", fmt.Errorf("组合规范化失败: %w", err)
 	}
@@ -261,18 +244,15 @@ func ValidateCompositionRuntimeSelection(runtimes []CompositionRuntimeRef, works
 	if err := validateRuntimeRefs(runtimes); err != nil {
 		return err
 	}
-	workspaceInstance := strings.TrimSpace(workspace)
-	workspaceFound := false
+	if workspace == "" || workspace != strings.TrimSpace(workspace) {
+		return fmt.Errorf("工作区运行时实例必须非空且不含首尾空白")
+	}
 	for _, runtime := range runtimes {
-		if strings.TrimSpace(runtime.InstanceCode) == workspaceInstance {
-			workspaceFound = true
-			break
+		if runtime.InstanceCode == workspace {
+			return nil
 		}
 	}
-	if !workspaceFound {
-		return fmt.Errorf("工作区运行时实例未声明: %s", workspaceInstance)
-	}
-	return nil
+	return fmt.Errorf("工作区运行时实例未声明: %s", workspace)
 }
 
 // CanonicalSnapshotDigest 对完整编译结果生成摘要，确保目录变化不能静默改变已发布工作负载。
@@ -324,18 +304,14 @@ func CanonicalSnapshotDigest(snapshot SandboxCompositionSnapshot) (string, error
 	canonical.Runtimes = append([]CompiledRuntimeSnapshot(nil), snapshot.Runtimes...)
 	canonical.ImageClosure = append([]ImageClosureItem(nil), snapshot.ImageClosure...)
 	for index := range canonical.Runtimes {
-		normalized, normalizeErr := canonicalRawJSON(canonical.Runtimes[index].AdapterSpec)
-		if normalizeErr != nil {
-			return "", fmt.Errorf("运行时适配器规范化失败: %w", normalizeErr)
+		if len(bytes.TrimSpace(canonical.Runtimes[index].AdapterSpec)) == 0 {
+			canonical.Runtimes[index].AdapterSpec = nil
 		}
-		canonical.Runtimes[index].AdapterSpec = normalized
 	}
 	for index := range canonical.Components {
-		normalized, normalizeErr := canonicalRawJSON(canonical.Components[index].ResourceSpec)
-		if normalizeErr != nil {
-			return "", fmt.Errorf("组件资源规范化失败: %w", normalizeErr)
+		if len(bytes.TrimSpace(canonical.Components[index].ResourceSpec)) == 0 {
+			canonical.Components[index].ResourceSpec = nil
 		}
-		canonical.Components[index].ResourceSpec = normalized
 	}
 	sort.Slice(canonical.Runtimes, func(i, j int) bool { return canonical.Runtimes[i].InstanceCode < canonical.Runtimes[j].InstanceCode })
 	sort.Slice(canonical.Components, func(i, j int) bool {
@@ -351,33 +327,12 @@ func CanonicalSnapshotDigest(snapshot SandboxCompositionSnapshot) (string, error
 		right := imageClosureSortKey(canonical.ImageClosure[j])
 		return left < right
 	})
-	b, err := json.Marshal(canonical)
+	b, err := jsonvalue.Canonical(canonical)
 	if err != nil {
 		return "", fmt.Errorf("组合快照规范化失败: %w", err)
 	}
 	h := sha256.Sum256(b)
 	return "sha256:" + hex.EncodeToString(h[:]), nil
-}
-
-// canonicalRawJSON 将 JSONB 往返可能改变的对象键顺序归一化,保证摘要不依赖存储层文本布局。
-func canonicalRawJSON(raw json.RawMessage) (json.RawMessage, error) {
-	if len(bytes.TrimSpace(raw)) == 0 {
-		return nil, nil
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	var value any
-	if err := decoder.Decode(&value); err != nil {
-		return nil, err
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return nil, fmt.Errorf("JSON 包含多个文档")
-		}
-		return nil, err
-	}
-	return json.Marshal(value)
 }
 
 // imageClosureSortKey 为可能共享同一镜像但使用不同自检命令的组件提供稳定排序。
@@ -392,7 +347,6 @@ func imageClosureSortKey(item ImageClosureItem) string {
 // normalizeComposition 只排序无序集合，保留参数和连接的字段含义。
 func normalizeComposition(spec SandboxCompositionSpec) SandboxCompositionSpec {
 	out := spec
-	out.WorkspaceRuntimeInstance = strings.TrimSpace(spec.WorkspaceRuntimeInstance)
 	out.Infra = append([]CompositionComponentRef(nil), spec.Infra...)
 	out.Tools = append([]CompositionComponentRef(nil), spec.Tools...)
 	out.Links = append([]CompositionLink(nil), spec.Links...)
@@ -419,10 +373,12 @@ func validateRuntimeRefs(runtimes []CompositionRuntimeRef) error {
 	}
 	seen := make(map[string]struct{}, len(runtimes))
 	for _, runtime := range runtimes {
-		instance := strings.TrimSpace(runtime.InstanceCode)
-		if instance == "" || strings.TrimSpace(runtime.Code) == "" || strings.TrimSpace(runtime.ImageVersion) == "" {
-			return fmt.Errorf("runtime 实例必须声明 instance_code、runtime_code 和 image_version")
+		for _, value := range []string{runtime.InstanceCode, runtime.Code, runtime.ImageVersion} {
+			if value == "" || value != strings.TrimSpace(value) {
+				return fmt.Errorf("runtime 实例的 instance_code、runtime_code 和 image_version 必须非空且不含首尾空白")
+			}
 		}
+		instance := runtime.InstanceCode
 		if _, exists := seen[instance]; exists {
 			return fmt.Errorf("runtime 实例 %s 重复", instance)
 		}

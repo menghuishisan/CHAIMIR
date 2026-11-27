@@ -4,8 +4,8 @@ CREATE TABLE IF NOT EXISTS sim_package (
     version VARCHAR(32) NOT NULL,
     name VARCHAR(128) NOT NULL,
     category VARCHAR(32) NOT NULL,
-    -- compute 是执行位置:1=浏览器 Worker(平台内置包)、2=后端隔离容器(教师/第三方扩展包与重计算仿真)。
-    -- 它按 author_type 派生,不是作者可选项(见 docs/04-仿真可视化引擎/02-架构设计.md §8)。
+    -- compute 是执行位置:1=浏览器 Worker(平台内置包)、2=后端隔离容器(教师/第三方扩展包)。
+    -- 它按 author_type 派生,不是作者可选项(见 docs/04-仿真可视化引擎/07-架构设计.md §8)。
     compute SMALLINT NOT NULL CHECK (compute IN (1, 2)),
     scale_limit JSONB NOT NULL DEFAULT '{}'::jsonb,
     bundle_key VARCHAR(255) NOT NULL,

@@ -3,6 +3,7 @@ package identity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -103,7 +104,7 @@ func (s *Service) verifySMSCodeInTx(ctx context.Context, tx TxStore, tenantID in
 		}
 		return apperr.ErrIdentitySMSInvalid
 	}
-	if row.Used || timex.Now().After(row.ExpireAt) {
+	if row.Used || !timex.Now().Before(row.ExpireAt) {
 		return apperr.ErrIdentitySMSInvalid
 	}
 	maxAttempts, ok := intx.Int16(s.cfg.SMSVerifyMaxAttempts)
@@ -121,6 +122,11 @@ func (s *Service) verifySMSCodeInTx(ctx context.Context, tx TxStore, tenantID in
 		return apperr.ErrIdentitySMSInvalid
 	}
 	return tx.MarkSMSCodeUsed(ctx, tenantID, row.ID)
+}
+
+// isSMSVerificationRejection 区分应提交错误次数的认证拒绝和必须回滚的存储故障。
+func isSMSVerificationRejection(err error) bool {
+	return errors.Is(err, apperr.ErrIdentitySMSInvalid) || errors.Is(err, apperr.ErrIdentitySMSAttemptsLimited)
 }
 
 // smsCredentialHashes 统一计算短信验证码查询哈希和明文验证码哈希。

@@ -7,6 +7,7 @@
 //   route-matrix          后端注册路由 ↔ openapi 契约是否四方一致、有无同 handler 双轨
 //   sdk-matrix            api-client 每条路径是否命中真实后端路由、有无不可达方法
 //   contract-enums        后端公开枚举 ↔ api-client 数值、类型是否完全一致
+//   request-contracts     已映射 HTTP 请求字段、媒体类型与 WebSocket 票据位置
 //   pagination-contract   后端分页默认值/上限 ↔ api-client 常量是否一致
 //   role-guard-crosscheck 各角色页面调用的接口守卫是否与该角色相容(静态检查发现不了的越权)
 //   sim-catalog-drift     后端内置仿真包清单产物 ↔ 前端 sim-sdk 源码是否一致
@@ -28,6 +29,7 @@ const CHECKS = [
   { name: "route-matrix", title: "后端路由 ↔ openapi 契约一致性" },
   { name: "sdk-matrix", title: "api-client ↔ 后端路由双向可达性" },
   { name: "contract-enums", title: "后端公开枚举 ↔ api-client 契约一致性" },
+  { name: "request-contracts", title: "HTTP 请求边界与 WebSocket 票据契约" },
   { name: "pagination-contract", title: "后端分页契约 ↔ api-client 常量一致性" },
   { name: "role-guard-crosscheck", title: "角色页面 ↔ 接口守卫相容性" },
   { name: "sim-catalog-drift", title: "内置仿真包清单 ↔ sim-sdk 源码一致性" },

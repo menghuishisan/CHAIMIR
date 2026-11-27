@@ -10,6 +10,18 @@ func (g FacetGroup) Add(value any, count int64) {
 	g[fmt.Sprint(value)] += count
 }
 
+// Total 返回指定分段的条数；value 为空表示汇总全部分段。
+func (g FacetGroup) Total(value string) int64 {
+	if value != "" {
+		return g[value]
+	}
+	var total int64
+	for _, count := range g {
+		total += count
+	}
+	return total
+}
+
 // Facets 是一个列表的全部分段计数,键是分段的筛选参数名。
 type Facets map[string]FacetGroup
 

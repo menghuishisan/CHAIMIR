@@ -1525,8 +1525,8 @@ const getLatestSMSCode = `-- name: GetLatestSMSCode :one
 SELECT id, tenant_id, phone_hash, code_hash, scene, expire_at, verify_attempts, used, created_at
 FROM sms_code
 WHERE tenant_id = $1 AND phone_hash = $2 AND scene = $3
-ORDER BY created_at DESC
-LIMIT 1
+ORDER BY created_at DESC, id DESC
+LIMIT 1 FOR UPDATE
 `
 
 type GetLatestSMSCodeParams struct {
@@ -1747,6 +1747,35 @@ func (q *Queries) GetTenantByID(ctx context.Context, id int64) (Tenant, error) {
 	return i, err
 }
 
+const getTenantForUpdate = `-- name: GetTenantForUpdate :one
+SELECT id, code, name, type, status, deploy_mode, expire_at, logo_ref, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
+FROM tenant
+WHERE id = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetTenantForUpdate(ctx context.Context, id int64) (Tenant, error) {
+	row := q.db.QueryRow(ctx, getTenantForUpdate, id)
+	var i Tenant
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Name,
+		&i.Type,
+		&i.Status,
+		&i.DeployMode,
+		&i.ExpireAt,
+		&i.LogoRef,
+		&i.DisplayName,
+		&i.FeatureFlags,
+		&i.AuthMode,
+		&i.EnableActivationCode,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const hasPendingTenantApplication = `-- name: HasPendingTenantApplication :one
 SELECT EXISTS(
   SELECT 1 FROM tenant_application
@@ -1785,8 +1814,7 @@ const listAccounts = `-- name: ListAccounts :many
 SELECT a.id, a.tenant_id, a.phone_enc, a.phone_hash, a.password_hash, a.name, a.base_identity, a.status,
        a.must_change_pwd, a.pwd_failed_count, a.locked_until, a.activated_at, a.deleted_at, a.created_at, a.updated_at,
        p.no, p.org_id, p.enrollment_year, p.title,
-       COALESCE(array_agg(ar.role ORDER BY ar.role) FILTER (WHERE ar.role IS NOT NULL), ARRAY[]::smallint[])::smallint[] AS roles,
-       COUNT(*) OVER() AS total_count
+       COALESCE(array_agg(ar.role ORDER BY ar.role) FILTER (WHERE ar.role IS NOT NULL), ARRAY[]::smallint[])::smallint[] AS roles
 FROM account a
 LEFT JOIN account_profile p ON p.account_id = a.id AND p.tenant_id = a.tenant_id
 LEFT JOIN account_role ar ON ar.account_id = a.id AND ar.tenant_id = a.tenant_id
@@ -1832,7 +1860,6 @@ type ListAccountsRow struct {
 	EnrollmentYear pgtype.Int2        `json:"enrollment_year"`
 	Title          pgtype.Text        `json:"title"`
 	Roles          []int16            `json:"roles"`
-	TotalCount     int64              `json:"total_count"`
 }
 
 func (q *Queries) ListAccounts(ctx context.Context, arg ListAccountsParams) ([]ListAccountsRow, error) {
@@ -1873,7 +1900,6 @@ func (q *Queries) ListAccounts(ctx context.Context, arg ListAccountsParams) ([]L
 			&i.EnrollmentYear,
 			&i.Title,
 			&i.Roles,
-			&i.TotalCount,
 		); err != nil {
 			return nil, err
 		}
@@ -2249,7 +2275,7 @@ type ListPendingImportPreviewsRow struct {
 	ExpireAt      pgtype.Timestamptz `json:"expire_at"`
 }
 
-// 列表只读取公开预览结果,不取包含初始密码的原始rows。
+// 列表只读取公开预览结果,不取包含账号资料和密码哈希的原始rows。
 func (q *Queries) ListPendingImportPreviews(ctx context.Context, arg ListPendingImportPreviewsParams) ([]ListPendingImportPreviewsRow, error) {
 	rows, err := q.db.Query(ctx, listPendingImportPreviews,
 		arg.TenantID,
@@ -2436,8 +2462,7 @@ func (q *Queries) ListTenants(ctx context.Context) ([]Tenant, error) {
 }
 
 const listTenantsPaged = `-- name: ListTenantsPaged :many
-SELECT id, code, name, type, status, deploy_mode, expire_at, logo_ref, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at,
-       COUNT(*) OVER() AS total_count
+SELECT id, code, name, type, status, deploy_mode, expire_at, logo_ref, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
 FROM tenant
 WHERE ($3::smallint = 0 OR status = $3)
   AND ($4::text = '' OR name ILIKE '%' || $4 || '%' OR code ILIKE '%' || $4 || '%')
@@ -2452,25 +2477,7 @@ type ListTenantsPagedParams struct {
 	Column4 string `json:"column_4"`
 }
 
-type ListTenantsPagedRow struct {
-	ID                   int64              `json:"id"`
-	Code                 string             `json:"code"`
-	Name                 string             `json:"name"`
-	Type                 int16              `json:"type"`
-	Status               int16              `json:"status"`
-	DeployMode           int16              `json:"deploy_mode"`
-	ExpireAt             pgtype.Timestamptz `json:"expire_at"`
-	LogoRef              pgtype.Text        `json:"logo_ref"`
-	DisplayName          pgtype.Text        `json:"display_name"`
-	FeatureFlags         []byte             `json:"feature_flags"`
-	AuthMode             int16              `json:"auth_mode"`
-	EnableActivationCode bool               `json:"enable_activation_code"`
-	CreatedAt            pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
-	TotalCount           int64              `json:"total_count"`
-}
-
-func (q *Queries) ListTenantsPaged(ctx context.Context, arg ListTenantsPagedParams) ([]ListTenantsPagedRow, error) {
+func (q *Queries) ListTenantsPaged(ctx context.Context, arg ListTenantsPagedParams) ([]Tenant, error) {
 	rows, err := q.db.Query(ctx, listTenantsPaged,
 		arg.Limit,
 		arg.Offset,
@@ -2481,9 +2488,9 @@ func (q *Queries) ListTenantsPaged(ctx context.Context, arg ListTenantsPagedPara
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListTenantsPagedRow{}
+	items := []Tenant{}
 	for rows.Next() {
-		var i ListTenantsPagedRow
+		var i Tenant
 		if err := rows.Scan(
 			&i.ID,
 			&i.Code,
@@ -2499,7 +2506,6 @@ func (q *Queries) ListTenantsPaged(ctx context.Context, arg ListTenantsPagedPara
 			&i.EnableActivationCode,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.TotalCount,
 		); err != nil {
 			return nil, err
 		}
@@ -2538,6 +2544,25 @@ func (q *Queries) LockOrganizationScope(ctx context.Context, dollar_1 int64) err
 	return err
 }
 
+const lockPlatformAdmin = `-- name: LockPlatformAdmin :one
+SELECT id FROM platform_admin WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) LockPlatformAdmin(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, lockPlatformAdmin, id)
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockSchoolAdministrationScope = `-- name: LockSchoolAdministrationScope :exec
+SELECT pg_advisory_xact_lock(hashtextextended('identity.school_administration', $1::bigint))
+`
+
+func (q *Queries) LockSchoolAdministrationScope(ctx context.Context, dollar_1 int64) error {
+	_, err := q.db.Exec(ctx, lockSchoolAdministrationScope, dollar_1)
+	return err
+}
+
 const majorExists = `-- name: MajorExists :one
 SELECT EXISTS(SELECT 1 FROM major WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL)
 `
@@ -2555,7 +2580,7 @@ func (q *Queries) MajorExists(ctx context.Context, arg MajorExistsParams) (bool,
 }
 
 const markImportPreviewSubmitted = `-- name: MarkImportPreviewSubmitted :execrows
-UPDATE import_preview SET status = 2, submitted_at = now()
+UPDATE import_preview SET status = 2, submitted_at = now(), rows = '[]'::jsonb
 WHERE id = $1 AND tenant_id = $2 AND operator_id = $3 AND status = 1 AND expire_at > now()
 `
 
@@ -2794,7 +2819,7 @@ func (q *Queries) QueryAuditActionFacets(ctx context.Context, arg QueryAuditActi
 }
 
 const queryAuditLogs = `-- name: QueryAuditLogs :many
-SELECT id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id, created_at, COUNT(*) OVER() AS total_count
+SELECT id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id, created_at
 FROM audit_log
 WHERE ($1::bigint = -1 OR ($1::bigint <> -1 AND ($1::bigint = 0 OR tenant_id = $1)))
   AND ($2::bigint = 0 OR actor_id = $2)
@@ -2817,22 +2842,7 @@ type QueryAuditLogsParams struct {
 	Offset  int32              `json:"offset"`
 }
 
-type QueryAuditLogsRow struct {
-	ID         int64              `json:"id"`
-	TenantID   pgtype.Int8        `json:"tenant_id"`
-	ActorID    int64              `json:"actor_id"`
-	ActorRole  int16              `json:"actor_role"`
-	Action     string             `json:"action"`
-	TargetType string             `json:"target_type"`
-	TargetID   pgtype.Int8        `json:"target_id"`
-	Detail     []byte             `json:"detail"`
-	Ip         pgtype.Text        `json:"ip"`
-	TraceID    pgtype.Text        `json:"trace_id"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	TotalCount int64              `json:"total_count"`
-}
-
-func (q *Queries) QueryAuditLogs(ctx context.Context, arg QueryAuditLogsParams) ([]QueryAuditLogsRow, error) {
+func (q *Queries) QueryAuditLogs(ctx context.Context, arg QueryAuditLogsParams) ([]AuditLog, error) {
 	rows, err := q.db.Query(ctx, queryAuditLogs,
 		arg.Column1,
 		arg.Column2,
@@ -2847,9 +2857,9 @@ func (q *Queries) QueryAuditLogs(ctx context.Context, arg QueryAuditLogsParams) 
 		return nil, err
 	}
 	defer rows.Close()
-	items := []QueryAuditLogsRow{}
+	items := []AuditLog{}
 	for rows.Next() {
-		var i QueryAuditLogsRow
+		var i AuditLog
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -2862,7 +2872,6 @@ func (q *Queries) QueryAuditLogs(ctx context.Context, arg QueryAuditLogsParams) 
 			&i.Ip,
 			&i.TraceID,
 			&i.CreatedAt,
-			&i.TotalCount,
 		); err != nil {
 			return nil, err
 		}
@@ -3185,7 +3194,7 @@ func (q *Queries) UpdateAccountBasic(ctx context.Context, arg UpdateAccountBasic
 const updateAccountPassword = `-- name: UpdateAccountPassword :one
 UPDATE account
 SET password_hash = $3, must_change_pwd = $4, status = $5, activated_at = $6, pwd_failed_count = 0, locked_until = NULL, updated_at = now()
-WHERE id = $1 AND tenant_id = $2
+WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL AND status IN (1, 2)
 RETURNING id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, pwd_failed_count, locked_until, activated_at, deleted_at, created_at, updated_at
 `
 
@@ -3560,9 +3569,9 @@ func (q *Queries) UpsertSSOConfig(ctx context.Context, arg UpsertSSOConfigParams
 	return i, err
 }
 
-const useActivationCode = `-- name: UseActivationCode :exec
+const useActivationCode = `-- name: UseActivationCode :execrows
 UPDATE activation_code SET status = 2, used_at = now()
-WHERE id = $1 AND tenant_id = $2 AND status = 1
+WHERE id = $1 AND tenant_id = $2 AND status = 1 AND expire_at > now()
 `
 
 type UseActivationCodeParams struct {
@@ -3570,7 +3579,10 @@ type UseActivationCodeParams struct {
 	TenantID int64 `json:"tenant_id"`
 }
 
-func (q *Queries) UseActivationCode(ctx context.Context, arg UseActivationCodeParams) error {
-	_, err := q.db.Exec(ctx, useActivationCode, arg.ID, arg.TenantID)
-	return err
+func (q *Queries) UseActivationCode(ctx context.Context, arg UseActivationCodeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, useActivationCode, arg.ID, arg.TenantID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

@@ -9,6 +9,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/upload"
@@ -244,9 +245,8 @@ func (a simAPI) createSession(c *gin.Context) {
 		response.Fail(c, apperr.ErrServiceUnauthorized)
 		return
 	}
-	req.SourceRef = sourceRef
-	out, err := a.svc.CreateSessionFromHTTP(c.Request.Context(), tenantID, req)
-	httpx.Write(c, out, err)
+	info, err := a.svc.CreateSession(c.Request.Context(), contractCreateFromDTO(req, tenantID, sourceRef))
+	httpx.Write(c, SimSessionCreateResponse{SessionID: ids.ID(info.SessionID), Compute: info.Compute}, err)
 }
 
 func (a simAPI) reportAction(c *gin.Context) {
@@ -311,8 +311,7 @@ func (a simAPI) recycleSessions(c *gin.Context) {
 		response.Fail(c, apperr.ErrServiceUnauthorized)
 		return
 	}
-	req.SourceRef = sourceRef
-	err := a.svc.RecycleByScopeRef(c.Request.Context(), contracts.SimRecycleRequest{TenantID: tenantID, SourceRef: req.SourceRef, ScopeRef: req.ScopeRef, Reason: req.Reason})
+	err := a.svc.RecycleByScopeRef(c.Request.Context(), contracts.SimRecycleRequest{TenantID: tenantID, SourceRef: sourceRef, ScopeRef: req.ScopeRef, Reason: req.Reason})
 	httpx.Write(c, struct{}{}, err)
 }
 

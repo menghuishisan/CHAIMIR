@@ -1,4 +1,3 @@
-// content convert 文件负责领域模型、DTO 与 contracts 快照之间的纯转换。
 package content
 
 import (
@@ -10,9 +9,9 @@ import (
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
+	"chaimir/pkg/jsonvalue"
 )
 
-// itemDTO 转换内容外壳为 HTTP DTO。
 func itemDTO(item Item) ItemDTO {
 	return ItemDTO{
 		ID:              ids.ID(item.ID),
@@ -49,7 +48,6 @@ func itemSnapshotDTO(item ItemWithBody, includeSensitivePaths bool) (ItemSnapsho
 	return out, nil
 }
 
-// contractSnapshot 转换为跨模块内容快照。
 func contractSnapshot(item ItemWithBody) (contracts.ContentItemSnapshot, error) {
 	body, err := jsonx.CloneObjectStrict(item.Body)
 	if err != nil {
@@ -70,17 +68,14 @@ func contractSnapshot(item ItemWithBody) (contracts.ContentItemSnapshot, error) 
 	}, nil
 }
 
-// categoryDTO 转换分类响应。
 func categoryDTO(category Category) CategoryDTO {
 	return CategoryDTO{ID: ids.ID(category.ID), ParentID: ids.ID(category.ParentID), Name: category.Name, Sort: category.Sort, CreatedAt: timex.RFC3339OrEmpty(category.CreatedAt), UpdatedAt: timex.RFC3339OrEmpty(category.UpdatedAt)}
 }
 
-// paperDTO 转换试卷响应。
 func paperDTO(paper Paper) PaperDTO {
 	return PaperDTO{ID: ids.ID(paper.ID), Name: paper.Name, AuthorID: ids.ID(paper.AuthorID), GenMode: paper.GenMode, GenCriteria: paper.GenCriteria, CreatedAt: timex.RFC3339OrEmpty(paper.CreatedAt), UpdatedAt: timex.RFC3339OrEmpty(paper.UpdatedAt)}
 }
 
-// paperDetailDTO 转换试卷详情响应。
 func paperDetailDTO(detail PaperWithItems) (PaperDetailDTO, error) {
 	items := make([]PaperItemFaceDTO, 0, len(detail.Items))
 	for _, item := range detail.Items {
@@ -115,14 +110,13 @@ func versionHash(item Item, body map[string]any, sensitive []string) (string, er
 		"body":             body,
 		"sensitive_fields": normalizedStrings(sensitive),
 	}
-	raw, err := jsonx.AnyBytes(payload, apperr.ErrInternal)
+	raw, err := jsonvalue.Canonical(payload)
 	if err != nil {
-		return "", err
+		return "", apperr.ErrInternal.WithCause(err)
 	}
 	return crypto.SHA256Hex(raw), nil
 }
 
-// cloneStrings 拷贝字符串切片。
 func cloneStrings(in []string) []string {
 	if len(in) == 0 {
 		return []string{}
@@ -132,7 +126,6 @@ func cloneStrings(in []string) []string {
 	return out
 }
 
-// normalizedStrings 去重排序后返回稳定字符串切片。
 func normalizedStrings(in []string) []string {
 	seen := map[string]struct{}{}
 	for _, value := range in {

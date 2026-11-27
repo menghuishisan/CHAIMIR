@@ -22,8 +22,10 @@ import (
 	"context"
 	"encoding/base64"
 	"strings"
+	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
@@ -43,32 +45,36 @@ func (s *Service) UploadTenantLogo(ctx context.Context, req TenantLogoUploadRequ
 		return TenantDTO{}, apperr.ErrIdentityTenantLogoTooLarge
 	}
 	plan, err := s.files.PlanUpload(ctx, storage.PlanUploadRequest{
-		TenantID:        id.TenantID,
-		AccountID:       id.AccountID,
-		Module:          identityModuleName,
-		ResourceType:    tenantLogoResourceType,
-		ResourceID:      tenantLogoResourceID,
-		FileName:        req.FileName,
-		ContentType:     req.ContentType,
-		Size:            int64(len(req.Content)),
-		MaxBytes:        s.uploadCfg.TenantLogoMaxBytes,
-		ExpectedBucket:  s.objects.BucketAttach(),
-		AllowedFileName: true,
-		Content:         req.Content,
-		KindValidator:   upload.BrandImageKindValid,
-		ScanPolicy:      upload.ScanPolicy{Required: s.uploadCfg.VirusScanRequired},
+		TenantID:          id.TenantID,
+		AccountID:         id.AccountID,
+		Module:            identityModuleName,
+		ResourceType:      tenantLogoResourceType,
+		ResourceID:        tenantLogoResourceID,
+		NestedResourceIDs: []string{ids.Format(s.ids.Generate())},
+		FileName:          req.FileName,
+		ContentType:       req.ContentType,
+		Size:              int64(len(req.Content)),
+		MaxBytes:          s.uploadCfg.TenantLogoMaxBytes,
+		ExpectedBucket:    s.objects.BucketAttach(),
+		AllowedFileName:   true,
+		Content:           req.Content,
+		KindValidator:     upload.BrandImageKindValid,
+		ScanPolicy:        upload.ScanPolicy{Required: s.uploadCfg.VirusScanRequired},
 	})
 	if err != nil {
 		return TenantDTO{}, apperr.ErrIdentityTenantLogoInvalid.WithCause(err)
 	}
 	if err := s.objects.Put(ctx, plan.Bucket, plan.Key, bytes.NewReader(req.Content), plan.Size, plan.ContentType); err != nil {
-		return TenantDTO{}, apperr.ErrIdentityTenantLogoUnavailable.WithCause(err)
+		return TenantDTO{}, apperr.ErrIdentityTenantLogoUnavailable.WithCause(storage.CompensateUpload(ctx, time.Duration(s.uploadCfg.CleanupTimeoutSeconds)*time.Second, err, false, func(ctx context.Context) error {
+			return s.objects.Delete(ctx, plan.Bucket, plan.Key)
+		}))
 	}
 
-	var row Tenant
+	var out TenantDTO
 	var previousLogoRef string
+	commitAttempted := false
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		current, err := tx.GetTenantByID(ctx, id.TenantID)
+		current, err := tx.GetTenantForUpdate(ctx, id.TenantID)
 		if err != nil {
 			return err
 		}
@@ -85,21 +91,24 @@ func (s *Service) UploadTenantLogo(ctx context.Context, req TenantLogoUploadRequ
 		if err != nil {
 			return err
 		}
-		row = item
+		out, err = ToTenantDTO(item)
+		if err != nil {
+			return err
+		}
+		out.LogoImage = "data:" + upload.BrandImageContentType(req.Content) + ";base64," + base64.StdEncoding.EncodeToString(req.Content)
+		if err := s.auditTenantOperation(ctx, id, "tenant.logo.upload", "identity.tenant", id.TenantID, map[string]any{"file_name": plan.FileName, "size": plan.Size}); err != nil {
+			return err
+		}
+		commitAttempted = true
 		return nil
 	}); err != nil {
-		// 引用没写成功时对象就是垃圾,立即清掉,不留给后台任务去猜。
-		if cleanupErr := s.objects.Delete(ctx, plan.Bucket, plan.Key); cleanupErr != nil {
-			logging.ErrorContext(ctx, "清理未关联校徽对象失败", cleanupErr.Error())
-		}
-		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
+		return TenantDTO{}, apperr.ErrInternal.WithCause(storage.CompensateUpload(ctx, time.Duration(s.uploadCfg.CleanupTimeoutSeconds)*time.Second, err, commitAttempted, func(ctx context.Context) error {
+			return s.objects.Delete(ctx, plan.Bucket, plan.Key)
+		}))
 	}
 	// 换徽后旧对象没有任何引用者,留着只会在附件桶里堆积。
-	s.discardReplacedTenantLogo(ctx, id.TenantID, previousLogoRef, row.LogoRef)
-	if err := s.auditTenantOperation(ctx, id, "tenant.logo.upload", "identity.tenant", id.TenantID, map[string]any{"file_name": plan.FileName, "size": plan.Size}); err != nil {
-		return TenantDTO{}, err
-	}
-	return s.tenantDTOWithLogo(ctx, id.TenantID, row)
+	s.discardReplacedTenantLogo(ctx, id.TenantID, previousLogoRef, out.LogoRef)
+	return out, nil
 }
 
 // ClearTenantLogo 移除校徽:清空引用并删除对象,让徽记位回落学校名首字。
@@ -108,10 +117,10 @@ func (s *Service) ClearTenantLogo(ctx context.Context) (TenantDTO, error) {
 	if err != nil {
 		return TenantDTO{}, err
 	}
-	var row Tenant
+	var out TenantDTO
 	var previousLogoRef string
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		current, err := tx.GetTenantByID(ctx, id.TenantID)
+		current, err := tx.GetTenantForUpdate(ctx, id.TenantID)
 		if err != nil {
 			return err
 		}
@@ -127,16 +136,16 @@ func (s *Service) ClearTenantLogo(ctx context.Context) (TenantDTO, error) {
 		if err != nil {
 			return err
 		}
-		row = item
-		return nil
+		out, err = ToTenantDTO(item)
+		if err != nil {
+			return err
+		}
+		return s.auditTenantOperation(ctx, id, "tenant.logo.clear", "identity.tenant", id.TenantID, map[string]any{})
 	}); err != nil {
 		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
 	}
 	s.discardReplacedTenantLogo(ctx, id.TenantID, previousLogoRef, "")
-	if err := s.auditTenantOperation(ctx, id, "tenant.logo.clear", "identity.tenant", id.TenantID, map[string]any{}); err != nil {
-		return TenantDTO{}, err
-	}
-	return ToTenantDTO(row)
+	return out, nil
 }
 
 // tenantDTOWithLogo 把租户行转成配置视图并补上内联校徽,读不出校徽时只记日志不影响其余字段。
@@ -241,6 +250,8 @@ func (s *Service) discardReplacedTenantLogo(ctx context.Context, tenantID int64,
 	if previous == "" || previous == strings.TrimSpace(current) {
 		return
 	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(s.uploadCfg.CleanupTimeoutSeconds)*time.Second)
+	defer cancel()
 	ref, err := s.tenantLogoObject(tenantID, previous)
 	if err != nil {
 		logging.ErrorContext(ctx, "替换校徽时旧对象引用不在受控前缀", err.Error())

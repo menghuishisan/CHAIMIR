@@ -16,6 +16,16 @@ var (
 	emailRe      = regexp.MustCompile(`^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$`)
 )
 
+func refreshReplayReason(status int16, expireAt, now time.Time) string {
+	if status != SessionStatusActive {
+		return "revoked"
+	}
+	if !now.Before(expireAt) {
+		return "expired"
+	}
+	return ""
+}
+
 // ValidatePhone 校验国内高校场景使用的中国大陆手机号。
 func ValidatePhone(phone string) error {
 	if !phoneRe.MatchString(strings.TrimSpace(phone)) {

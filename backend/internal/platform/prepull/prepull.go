@@ -2,8 +2,10 @@
 package prepull
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -20,15 +22,15 @@ type ImageSpec struct {
 
 // RuntimeDefinition 是运行时对预拉取闭包有影响的最小声明。
 type RuntimeDefinition struct {
-	RuntimeContainerName  string
-	RuntimePrepullCommand []string
-	InfraSidecars         []workload.ComponentSpec
-	Pods                  []workload.PodSpec
+	RuntimeContainer workload.ComponentSpec
+	InfraSidecars    []workload.ComponentSpec
+	Pods             []workload.PodSpec
 }
 
 // RuntimeImageSpecs 汇总运行时自身与辅助组件的预拉取闭包。
 func RuntimeImageSpecs(imageURL string, definition RuntimeDefinition) ([]ImageSpec, error) {
-	specs := []ImageSpec{{ImageURL: imageURL, Command: definition.RuntimePrepullCommand}}
+	main := definition.RuntimeContainer
+	specs := []ImageSpec{{ImageURL: imageURL, Command: main.PrepullCommand, Hold: main.PrepullHold, EphemeralMounts: main.EphemeralMounts}}
 	add := func(component workload.ComponentSpec) {
 		specs = append(specs, ImageSpec{ImageURL: component.ImageURL, Command: component.PrepullCommand, Hold: component.PrepullHold, EphemeralMounts: component.EphemeralMounts})
 	}
@@ -40,7 +42,7 @@ func RuntimeImageSpecs(imageURL string, definition RuntimeDefinition) ([]ImageSp
 			add(component)
 		}
 		for _, component := range pod.Containers {
-			if strings.TrimSpace(component.Name) == strings.TrimSpace(definition.RuntimeContainerName) {
+			if strings.TrimSpace(component.Name) == strings.TrimSpace(main.Name) {
 				continue
 			}
 			add(component)
@@ -67,26 +69,25 @@ func Equivalent(left, right []ImageSpec) bool {
 	return reflect.DeepEqual(canonical(left), canonical(right))
 }
 
-// Collect 校验并合并预拉取声明，保留首次出现顺序，不改写输入。
+// Collect 校验并去重相同执行环境的自检，保留首次出现顺序，不改写输入。
 func Collect(specs []ImageSpec) ([]ImageSpec, error) {
 	out := make([]ImageSpec, 0, len(specs))
-	seen := make(map[string]int, len(specs))
+	seen := make(map[string]struct{}, len(specs))
 	for _, spec := range specs {
 		imageURL := strings.TrimSpace(spec.ImageURL)
 		if imageURL == "" {
 			continue
 		}
-		command := compactCommand(spec.Command)
-		if len(command) == 0 {
-			return nil, fmt.Errorf("预拉取镜像 %s 缺少自检命令", imageURL)
+		if !workload.ValidCommand(spec.Command) {
+			return nil, fmt.Errorf("预拉取镜像 %s 自检命令无效", imageURL)
 		}
-		key := imageSpecKey(imageURL, command, spec.Hold)
-		if index, exists := seen[key]; exists {
-			out[index].EphemeralMounts = mergeMounts(out[index].EphemeralMounts, spec.EphemeralMounts)
+		item := ImageSpec{ImageURL: imageURL, Command: slices.Clone(spec.Command), Hold: spec.Hold, EphemeralMounts: canonicalMounts(spec.EphemeralMounts)}
+		key := imageSpecKey(item)
+		if _, exists := seen[key]; exists {
 			continue
 		}
-		seen[key] = len(out)
-		out = append(out, ImageSpec{ImageURL: imageURL, Command: command, Hold: spec.Hold, EphemeralMounts: mergeMounts(nil, spec.EphemeralMounts)})
+		seen[key] = struct{}{}
+		out = append(out, item)
 	}
 	return out, nil
 }
@@ -94,30 +95,25 @@ func Collect(specs []ImageSpec) ([]ImageSpec, error) {
 func canonical(specs []ImageSpec) []ImageSpec {
 	out := make([]ImageSpec, 0, len(specs))
 	for _, spec := range specs {
-		item := ImageSpec{ImageURL: strings.TrimSpace(spec.ImageURL), Command: append([]string(nil), compactCommand(spec.Command)...), Hold: spec.Hold}
-		item.EphemeralMounts = mergeMounts(nil, spec.EphemeralMounts)
-		sort.Slice(item.EphemeralMounts, func(i, j int) bool {
-			return item.EphemeralMounts[i].Name+"\x00"+item.EphemeralMounts[i].MountPath < item.EphemeralMounts[j].Name+"\x00"+item.EphemeralMounts[j].MountPath
-		})
+		item := ImageSpec{ImageURL: strings.TrimSpace(spec.ImageURL), Command: slices.Clone(spec.Command), Hold: spec.Hold}
+		item.EphemeralMounts = canonicalMounts(spec.EphemeralMounts)
 		out = append(out, item)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		return imageSpecKey(out[i].ImageURL, out[i].Command, out[i].Hold) < imageSpecKey(out[j].ImageURL, out[j].Command, out[j].Hold)
+		return imageSpecKey(out[i]) < imageSpecKey(out[j])
 	})
 	return out
 }
 
-func imageSpecKey(imageURL string, command []string, hold bool) string {
-	return fmt.Sprintf("%s\x00%s\x00%t", imageURL, strings.Join(compactCommand(command), "\x00"), hold)
+func imageSpecKey(spec ImageSpec) string {
+	encoded, _ := json.Marshal(spec)
+	return string(encoded)
 }
 
-func mergeMounts(base, extra []workload.EphemeralMountSpec) []workload.EphemeralMountSpec {
-	if len(base) == 0 && len(extra) == 0 {
-		return nil
-	}
+func canonicalMounts(mounts []workload.EphemeralMountSpec) []workload.EphemeralMountSpec {
 	var out []workload.EphemeralMountSpec
 	seen := map[string]struct{}{}
-	for _, mount := range append(append([]workload.EphemeralMountSpec(nil), base...), extra...) {
+	for _, mount := range mounts {
 		name, mountPath := strings.TrimSpace(mount.Name), strings.TrimSpace(mount.MountPath)
 		if name == "" || mountPath == "" {
 			continue
@@ -129,15 +125,8 @@ func mergeMounts(base, extra []workload.EphemeralMountSpec) []workload.Ephemeral
 		seen[key] = struct{}{}
 		out = append(out, workload.EphemeralMountSpec{Name: name, MountPath: mountPath})
 	}
-	return out
-}
-
-func compactCommand(command []string) []string {
-	out := make([]string, 0, len(command))
-	for _, part := range command {
-		if trimmed := strings.TrimSpace(part); trimmed != "" {
-			out = append(out, trimmed)
-		}
-	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name+"\x00"+out[i].MountPath < out[j].Name+"\x00"+out[j].MountPath
+	})
 	return out
 }

@@ -17,6 +17,7 @@ RUN set -eux; \
     tar -xzf "${archive}" -C /src/geth --strip-components=1; \
     rm -f "${archive}"
 WORKDIR /src/geth
+COPY history/ /src/geth/cmd/chaimir-history/
 RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}"; fi \
     && for attempt in 1 2 3 4 5; do \
         go get \
@@ -27,6 +28,7 @@ RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}";
           go.opentelemetry.io/otel/sdk@v1.44.0 \
         && go mod tidy \
         && go build -trimpath -ldflags "-s -w" -o /out/geth ./cmd/geth \
+        && go build -trimpath -ldflags "-s -w" -o /out/chaimir-evm-history ./cmd/chaimir-history \
         && break; \
         if [ "${attempt}" -eq 5 ]; then exit 1; fi; \
         sleep $((attempt * 5)); \
@@ -51,6 +53,7 @@ RUN for attempt in 1 2 3 4 5; do \
     && chown -R 1000:1000 /workspace /runtime-state
 
 COPY --from=build --chown=1000:1000 /out/geth /usr/local/bin/geth
+COPY --from=build /out/chaimir-evm-history /usr/local/bin/chaimir-evm-history
 COPY entrypoint.sh /usr/local/bin/chaimir-geth-entrypoint
 COPY chaimir-geth-adapter /usr/local/bin/chaimir-geth-adapter
 RUN chmod +x /usr/local/bin/chaimir-geth-entrypoint /usr/local/bin/chaimir-geth-adapter

@@ -32,13 +32,14 @@ SET name = EXCLUDED.name,
     resource_spec = EXCLUDED.resource_spec,
     selftest_status = EXCLUDED.selftest_status,
     status = EXCLUDED.status,
-    updated_at = now()
+    updated_at = GREATEST(clock_timestamp(), judger.updated_at + interval '1 microsecond')
 RETURNING id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, status, created_at, updated_at;
 
 -- name: UpdateJudgerExecutionState :one
 UPDATE judger
 SET resource_spec = sqlc.arg(resource_spec),
-    selftest_status = sqlc.arg(selftest_status), status = sqlc.arg(status), updated_at = clock_timestamp()
+    selftest_status = sqlc.arg(selftest_status), status = sqlc.arg(status),
+    updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
 WHERE id = sqlc.arg(id) AND updated_at = sqlc.arg(expected_updated_at)::timestamptz
 RETURNING id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, status, created_at, updated_at;
 

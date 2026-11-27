@@ -32,11 +32,6 @@ func tenantProvisionOutboxFromRow(row sqlcgen.TenantProvisionOutbox) TenantProvi
 	}
 }
 
-// tenantFromPagedRow 转换分页租户查询行,忽略 repo 单独处理的窗口计数字段。
-func tenantFromPagedRow(row sqlcgen.ListTenantsPagedRow) Tenant {
-	return tenantFields(row.ID, row.Code, row.Name, row.Type, row.Status, row.DeployMode, row.ExpireAt, row.LogoRef, row.DisplayName, row.FeatureFlags, row.AuthMode, row.EnableActivationCode, row.CreatedAt, row.UpdatedAt)
-}
-
 // tenantFields 统一租户字段映射,避免普通查询和分页查询复制转换口径。
 func tenantFields(id int64, code, name string, typ, status, deployMode int16, expireAt pgtype.Timestamptz, logoRef, displayName pgtype.Text, featureFlags []byte, authMode int16, enableActivationCode bool, createdAt, updatedAt pgtype.Timestamptz) Tenant {
 	return Tenant{

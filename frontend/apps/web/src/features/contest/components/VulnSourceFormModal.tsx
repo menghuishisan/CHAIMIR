@@ -29,7 +29,7 @@ import { api } from '../../../app/api'
 import { useFormValidation } from '../../../hooks/useFormValidation'
 import { vulnLevelLabel, vulnSourceTypeLabel } from '../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
-import { isHttpUrl } from '../../../utils/validators'
+import { parseHttpUrl } from '../../../utils/validators'
 import { VULN_LEVELS, VULN_SOURCE_METHODS, VULN_SOURCE_TYPES } from '../options'
 import { readString } from '../jsonReaders'
 import {
@@ -88,11 +88,12 @@ export function VulnSourceFormModal({
   const [submitting, setSubmitting] = useState(false)
 
   const requestFields = parseVulnSourceRequestFields(headers, body, timeoutSeconds)
+  const endpointUrl = parseHttpUrl(endpoint)
   const { errors, validate } = useFormValidation(() => {
     const next: Record<string, string | null> = {
       ...requestFields.errors,
       name: name.trim() === '' ? '请输入来源名称' : [...name.trim()].length > 128 ? '来源名称不能超过 128 个字' : null,
-      endpoint: !isHttpUrl(endpoint) ? '请输入完整的接口地址,以 http:// 或 https:// 开头' : null,
+      endpoint: !endpointUrl ? '请输入完整的 HTTP 或 HTTPS 地址，访问凭证请单独配置' : null,
       externalRef: mapping.externalRef.trim() === '' ? '请填写案例编号所在的字段路径' : null,
       title: mapping.title.trim() === '' ? '请填写标题所在的字段路径' : null,
       draftBody: mapping.draftBody.trim() === '' ? '请填写题目正文所在的字段路径' : null,
@@ -102,7 +103,7 @@ export function VulnSourceFormModal({
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!validate()) return
+    if (submitting || !validate() || !endpointUrl) return
 
     const payload: VulnSourceRequest = {
       id: source?.id,
@@ -112,7 +113,7 @@ export function VulnSourceFormModal({
       enabled,
       config: {
         ...requestFields.config,
-        [VULN_SOURCE_CONFIG_FIELDS.endpoint]: endpoint.trim(),
+        [VULN_SOURCE_CONFIG_FIELDS.endpoint]: endpointUrl.href,
         [VULN_SOURCE_CONFIG_FIELDS.method]: method,
         ...(casesPath.trim() !== ''
           ? { [VULN_SOURCE_CONFIG_FIELDS.casesPath]: casesPath.trim() }

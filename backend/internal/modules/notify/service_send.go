@@ -16,12 +16,12 @@ import (
 
 // Send 渲染模板并按接收人偏好写入站内信。
 func (s *Service) Send(ctx context.Context, req contracts.NotifySendRequest) error {
-	input, err := validateSendRequest(SendRequest{RequestID: req.RequestID, TenantID: ids.ID(req.TenantID), Type: req.Type, Receivers: req.Receivers, Params: req.Params, Link: req.Link})
+	input, err := validateSendRequest(req)
 	if err != nil {
 		return err
 	}
 	delivered := make([]int64, 0, len(input.Receivers))
-	err = s.store.TenantTx(ctx, input.TenantID.Int64(), func(ctx context.Context, tx TxStore) error {
+	err = s.store.TenantTx(ctx, input.TenantID, func(ctx context.Context, tx TxStore) error {
 		tpl, err := tx.GetNotificationTemplate(ctx, input.Type)
 		if err != nil {
 			return apperr.ErrNotifyTemplateUnavailable.WithCause(err)
@@ -34,7 +34,7 @@ func (s *Service) Send(ctx context.Context, req contracts.NotifySendRequest) err
 		for _, receiverID := range input.Receivers {
 			enabled := true
 			if !tpl.Force {
-				enabled, err = tx.PreferenceEnabled(ctx, input.TenantID.Int64(), receiverID, input.Type)
+				enabled, err = tx.PreferenceEnabled(ctx, input.TenantID, receiverID, input.Type)
 				if err != nil {
 					return apperr.ErrNotifySendFailed.WithCause(err)
 				}
@@ -42,14 +42,14 @@ func (s *Service) Send(ctx context.Context, req contracts.NotifySendRequest) err
 			if !enabled {
 				continue
 			}
-			rows = append(rows, notificationRecord{ID: s.ids.Generate(), TenantID: input.TenantID.Int64(), ReceiverID: receiverID, Type: input.Type, Title: title, Content: content, Link: input.Link, SourceRef: input.RequestID})
+			rows = append(rows, notificationRecord{ID: s.ids.Generate(), TenantID: input.TenantID, ReceiverID: receiverID, Type: input.Type, Title: title, Content: content, Link: input.Link, SourceRef: input.RequestID})
 			delivered = append(delivered, receiverID)
 		}
 		if len(rows) == 0 {
 			return nil
 		}
 		if input.RequestID != "" {
-			persisted, err := tx.CountNotificationsBySource(ctx, input.TenantID.Int64(), input.RequestID, delivered)
+			persisted, err := tx.CountNotificationsBySource(ctx, input.TenantID, input.RequestID, delivered)
 			if err != nil {
 				return apperr.ErrNotifySendFailed.WithCause(err)
 			}
@@ -57,7 +57,7 @@ func (s *Service) Send(ctx context.Context, req contracts.NotifySendRequest) err
 				return nil
 			}
 		}
-		if err := s.checkRateLimit(ctx, input.TenantID.Int64(), input.Type); err != nil {
+		if err := s.checkRateLimit(ctx, input.TenantID, input.Type); err != nil {
 			return err
 		}
 		return tx.CreateNotifications(ctx, rows)
@@ -66,8 +66,8 @@ func (s *Service) Send(ctx context.Context, req contracts.NotifySendRequest) err
 		return err
 	}
 	for _, receiverID := range delivered {
-		if err := s.refreshUnread(ctx, input.TenantID.Int64(), receiverID); err != nil {
-			logging.ErrorContext(ctx, "刷新通知未读数失败", err.Error(), slog.Int64("tenant_id", input.TenantID.Int64()), slog.Int64("receiver_id", receiverID))
+		if err := s.refreshUnread(ctx, input.TenantID, receiverID); err != nil {
+			logging.ErrorContext(ctx, "刷新通知未读数失败", err.Error(), slog.Int64("tenant_id", input.TenantID), slog.Int64("receiver_id", receiverID))
 		}
 	}
 	return nil

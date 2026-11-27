@@ -363,7 +363,7 @@ func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config
 	if err != nil {
 		return err
 	}
-	if _, err := RegisterNotifyModule(ctx, NotifyModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Redis: infra.redis, Hub: infra.wsHub, Config: cfg.Notify, EventBus: infra.bus, Auth: infra.auth, Roles: identitySvc, Contests: contestSvc, Audit: auditWriter}); err != nil {
+	if _, err := RegisterNotifyModule(ctx, NotifyModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Redis: infra.redis, Hub: infra.wsHub, Config: cfg.Notify, EventBus: infra.bus, Auth: infra.auth, Roles: identitySvc, Contests: contestSvc, Experiments: experimentSvc, Audit: auditWriter}); err != nil {
 		return err
 	}
 	gradeSvc, err := RegisterGradeModule(ctx, GradeModuleDeps{CleanupTimeout: time.Duration(cfg.Upload.CleanupTimeoutSeconds) * time.Second, Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Teaching: teachingSvc, EventBus: infra.bus, Redis: infra.redis, Storage: infra.storage, FileService: infra.files, Config: cfg.Grade, Auth: infra.auth, Roles: identitySvc})

@@ -38,7 +38,7 @@ type SendRequest struct {
 	RequestID string            `json:"request_id,omitempty"`
 	TenantID  ids.ID            `json:"tenant_id"`
 	Type      string            `json:"type"`
-	Receivers []int64           `json:"receivers"`
+	Receivers []ids.ID          `json:"receivers"`
 	Params    map[string]string `json:"params"`
 	Link      string            `json:"link"`
 }

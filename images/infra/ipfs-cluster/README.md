@@ -1,80 +1,23 @@
 # infra/ipfs-cluster
 
-## 镜像职责
+> 更新：2026-11-27。端口、命令、资源、探针和安全字段见本目录 [manifest](manifest.yaml)；通用构建、供应链与隔离见[镜像规范](../../../docs/总-镜像与容器设计.md)。
 
-本镜像运行官方 IPFS Cluster `v1.1.6`，为同一 CompositionSpec 中的 IPFS provider 提供 pin 协调、状态查询、IPFS proxy 和 pinning API。它不是 IPFS 数据节点，也不替代 `infra/ipfs`；所有内容读写都通过必需的 `ipfs_api` binding 访问 IPFS provider。
+为同一组合内提供 `ipfs-node` 能力的 IPFS provider 协调 pin、查询状态及提供原生 proxy/pinning API。Cluster 不存储 IPFS 内容，不替代 IPFS provider；所有内容访问经显式 `ipfs_api` binding，不按名称发现或连接外部节点。API 仅在组合授权范围内访问，不向学生或公网直接公开长期凭据。
 
-## 能力边界
+## 身份、配置与持久化
 
-支持：
+入口仅在运行域没有 `service.json` 时执行官方初始化，随后写入连接、Secret 和明确的 peer 列表，以 exec 交接原生 daemon；追加参数保持 argv 语义。
 
-- IPFS Cluster REST API：`9094`；
-- IPFS-compatible proxy：`9095`；
-- CRDT pinning API：`9097`；
-- peer transport：`9096`；
-- 对已绑定 IPFS provider 的内容 add、pin、status、proxy cat 联动；
-- 将官方 identity、service 配置、peerstore 和 pin 状态持久化到 `runtime-state`。
+- `CHAIMIR_IPFS_CLUSTER_SECRET` 由平台 Secret/KMS 注入，为 32 字节、64 位十六进制的原生 CRDT cluster secret；缺失、空白、长度或编码不符时拒绝。读取后从子进程环境清除，官方初始化和 daemon 不继承原始环境键。
+- `CHAIMIR_IPFS_CLUSTER_TRUSTED_PEERS` 是明确的逗号分隔 peer ID；空值只信任当前 identity，拒绝通配符、控制字符与重复 peer。
+- binding URL 校验 scheme、主机、显式端口和地址族；不得注入任意外部目标。
+- identity、service 配置、peerstore 与 pin 状态只保存在本实例 `runtime-state`，不共享其他租户或实例卷。配置保留 JSON 数字精度、拒绝尾随文档，在同目录 0600 临时文件写入、同步并关闭后替换；失败保留旧配置并报告写入、关闭和清理错误。
+- 根文件系统可写属于原生服务运行约束，业务持久写入只授予声明的运行域；网络仅允许绑定 IPFS 和受控 Cluster peer。
 
-不支持：
+## 专项验收
 
-- 单独承担 IPFS 内容存储、IPFS gateway 或 provider 发现；
-- 使用通配 peer 信任、自动接受任意远端 peer 或公网节点；
-- 通过宿主机端口、宿主机源码或可变镜像 tag 提供服务；
-- 把 Cluster API 地址或长期凭据直接暴露给学生或业务模块。
+使用 `run-platform-provider-links.ps1` 的存储流程。`-StorageOnly -StorageRuntime runtime/edu-chain -EvidenceSuffix <唯一编号>` 可限定一个合法 runtime；省略 runtime 时遍历执行器声明的存储组合，校验其受控材料并写入不覆盖的独立证据。
 
-## 合法 runtime / provider
+验证 IPFS add/cat/gateway 内容一致；Cluster `peer_map` 中本地 peer 为 pinned 且无错误，完成 pin/status 与 proxy cat；IPFS 和 Cluster 分别重启后内容、配置、身份及 pin 状态仍在。缺 Secret、缺端口 binding 与 wildcard trust 必须失败。TCP readiness 只证明端口监听，不能代替上述操作。
 
-- 合法 runtime：由 CompositionSpec 的 runtime capability 选择；该镜像本身不限定链 runtime。
-- 合法 provider：同一 CompositionSpec 必须包含提供 `ipfs-node` capability 的 `infra/ipfs`。
-
-## bindings 与 links
-- 必需 binding：`ipfs_api`，来源为 `ipfs-node` provider 的 `api` endpoint，注入 `CHAIMIR_IPFS_API_URL`。
-- 必需 links：无额外跨链 link；Cluster 到 IPFS 的唯一联动就是上述 binding。不得把 Cluster 自身当作 IPFS provider。
-- `CHAIMIR_IPFS_CLUSTER_TRUSTED_PEERS` 为非密钥配置，使用逗号分隔的官方 peer ID；为空时入口只写入当前官方 identity。通配值 `*`、控制字符和重复 peer ID 均拒绝启动。
-
-## command / args 语义
-
-镜像默认 `ENTRYPOINT` 为 `/usr/local/bin/chaimir-ipfs-cluster-entrypoint`，manifest 未声明覆盖 command/args。入口先执行官方 `ipfs-cluster-service init`（仅在 `runtime-state` 中没有 `service.json` 时），写入 binding、Secret 和显式 peer 列表，然后以 `exec` 启动 `/usr/local/bin/ipfs-cluster-service daemon`；运行参数只按 CompositionSpec 的 `ComponentSpec.Args` 追加，不通过兼容入口或 generic fallback 改写。
-
-## 端口与服务
-
-| 端口 | 语义 | 暴露范围 |
-| --- | --- | --- |
-| 9094 | Cluster REST API | 集群内部 |
-| 9095 | IPFS-compatible proxy | 集群内部 |
-| 9096 | Cluster peer transport | 集群内部 |
-| 9097 | CRDT pinning API | 集群内部 |
-
-readiness 使用 `9094` TCP；业务验收还必须请求 `/id`、执行 pin/status 和 proxy cat，端口探活不能替代业务成功。
-
-## 初始化材料与运行时注入
-
-- 官方初始化材料由镜像入口在声明的 `/runtime-state/ipfs-cluster` 中生成，不写入镜像层、工作区或仓库。
-- `CHAIMIR_IPFS_CLUSTER_SECRET` 是官方 CRDT `cluster.secret`，由平台 Secret/KMS 注入为 32 字节的 64 位十六进制值；缺失、首尾空白、非十六进制或长度不符时退出。入口读取后清除该环境键，官方初始化与 daemon 均不继承它。
-- `CHAIMIR_IPFS_API_URL` 和 `CHAIMIR_IPFS_CLUSTER_TRUSTED_PEERS` 由 CompositionSpec 的配置与 binding 注入；入口会校验 HTTP scheme、主机、显式端口和地址族。
-- 持久化边界只有 `runtime-state`，包括 `service.json`、`identity.json`、`peerstore` 和 pin 状态。每个 sandbox/实例使用独立卷，不共享其他租户或实例状态。
-- 配置更新保留原有数字精度，拒绝尾随 JSON 文档。新配置在同目录的 0600 临时文件中编码、同步并关闭后替换旧文件；失败保留旧配置，并报告写入、关闭与清理错误。
-
-## Secret / KMS
-
-`CHAIMIR_IPFS_CLUSTER_SECRET` 只能由平台 Secret/KMS 注入，不能由组合调用方把明文写入镜像或仓库。
-
-## 持久化与隔离边界
-
-持久化目录和实例隔离以 `runtime-state` 及 CompositionSpec owner 为边界；不得复用其他租户或实例的卷。
-
-## 安全边界
-
-容器以非 root 用户 `1000:1000` 运行，关闭特权提升、特权模式、host network 和 ServiceAccount token，丢弃全部 Linux capabilities。根文件系统保持可写是官方服务运行约束；除 `/runtime-state` 外不授予业务写入目录。网络默认 deny-all，只允许 CompositionSpec 声明的 IPFS provider binding 和必要的 Cluster peer 连接。Secret 不写入镜像、README、源码或日志。
-
-## readiness / health
-
-readiness 使用 `9094` TCP；业务验收还必须请求 `/id`、执行 pin/status 和 proxy cat，端口探活不能替代业务成功。
-
-## 清理
-
-验收结束必须删除本次 CompositionSpec 对应容器、网络和测试卷，确认 `docker ps -a`、`docker network ls`、`docker volume ls` 没有测试残留；不得使用 broad prune，也不得删除 `kind-chaimir-cilium` 节点或其他项目资源。
-
-## 验收条件
-
-候选 digest 验收使用项目的 `run-platform-provider-links.ps1`。存储专项可通过 `-StorageOnly -StorageRuntime runtime/edu-chain -EvidenceSuffix <唯一编号>` 限定一个合法 runtime，结果写入独立 TSV 且拒绝覆盖旧证据；未指定 `-StorageRuntime` 时遍历执行器声明的存储 runtime 组合，并校验所选 runtime 所需的受控材料。验收必须同时证明：IPFS add/cat/gateway 内容一致；Cluster 返回的 `peer_map` 中本地 peer 为 `pinned` 且无错误，并完成 proxy cat；IPFS 与 Cluster 分别重启后数据、pin 状态和配置仍在；缺失 Secret、缺端口 binding、wildcard peer trust 严格失败；记录容器、网络和卷清理结果。地址族入口探针另执行 `run-ipfs-cluster-address-family-functional.ps1 -DigestLockPath <候选锁> -EvidenceSuffix <唯一编号>`，只验证 IPv4、IPv6、DNS binding 的实际物化，不替代真实内容联动测试。
+另以 `run-ipfs-cluster-address-family-functional.ps1 -DigestLockPath <候选锁> -EvidenceSuffix <唯一编号>` 验证 IPv4、IPv6、DNS binding 的实际物化；不代替真实内容联动。结束后按本次组合归属回收容器、网络及测试卷，保留平台长期资源和证据。

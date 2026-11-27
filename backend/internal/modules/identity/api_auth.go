@@ -2,6 +2,7 @@
 package identity
 
 import (
+	"errors"
 	"time"
 
 	"chaimir/internal/platform/auth"
@@ -126,7 +127,9 @@ func (a authAPI) refreshToken(c *gin.Context) {
 	}
 	out, err := a.svc.RefreshToken(c.Request.Context(), refreshToken, c.GetHeader("User-Agent"), c.ClientIP())
 	if err != nil {
-		a.authn.ClearRefreshCookie(c)
+		if errors.Is(err, apperr.ErrIdentitySessionInvalid) {
+			a.authn.ClearRefreshCookie(c)
+		}
 		httpx.Write(c, struct{}{}, err)
 		return
 	}

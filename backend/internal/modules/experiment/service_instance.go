@@ -12,7 +12,6 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
-	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/timex"
@@ -41,7 +40,7 @@ func (s *Service) CreateInstance(ctx context.Context, experimentID int64, req Cr
 			return err
 		}
 		if req.GroupID > 0 {
-			group, err := tx.GetGroup(ctx, id.TenantID, req.GroupID.Int64())
+			group, err := tx.GetGroupForUpdate(ctx, id.TenantID, req.GroupID.Int64())
 			if err != nil {
 				return err
 			}
@@ -72,8 +71,11 @@ func (s *Service) CreateInstance(ctx context.Context, experimentID int64, req Cr
 		instanceID := s.ids.Generate()
 		sourceRef := sourceRefForInstance(instanceID, timex.Now())
 		inst, err = tx.CreateInstance(ctx, ExperimentInstance{ID: instanceID, TenantID: id.TenantID, ExperimentID: experimentID, OwnerAccountID: id.AccountID, GroupID: req.GroupID.Int64(), SourceRef: sourceRef, ScopeRef: scopeRefForInstanceGeneration(sourceRef, instanceID)})
-		created = err == nil
-		return err
+		if err != nil {
+			return err
+		}
+		created = true
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "experiment.instance.create", auditTargetInstance, inst.ID, map[string]any{"experiment_id": experimentID, "source_ref": inst.SourceRef})
 	}); err != nil {
 		return InstanceDTO{}, err
 	}
@@ -124,14 +126,12 @@ func (s *Service) CreateInstance(ctx context.Context, experimentID int64, req Cr
 		return InstanceDTO{}, errors.Join(createErr, err)
 	}
 	inst = bound
+	s.publishInstanceChanged(ctx, inst.TenantID, inst.ID)
 	if createErr != nil {
 		return InstanceDTO{}, createErr
 	}
 	inst, err = s.reconcileSandboxFailure(ctx, inst)
 	if err != nil {
-		return InstanceDTO{}, err
-	}
-	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "experiment.instance.create", auditTargetInstance, inst.ID, map[string]any{"experiment_id": experimentID, "source_ref": inst.SourceRef}); err != nil {
 		return InstanceDTO{}, err
 	}
 	return instanceDTOFromModel(inst, nil, stageDTOs(exp, inst, nil)), nil
@@ -150,6 +150,7 @@ func (s *Service) reconcileReleasedInstance(ctx context.Context, inst Experiment
 		return inst, nil
 	}
 	var updated ExperimentInstance
+	changed := false
 	if err := s.store.TenantTx(ctx, inst.TenantID, func(ctx context.Context, tx TxStore) error {
 		current, err := tx.GetInstanceForUpdate(ctx, inst.TenantID, inst.ID)
 		if err != nil {
@@ -165,9 +166,13 @@ func (s *Service) reconcileReleasedInstance(ctx context.Context, inst Experiment
 			return err
 		}
 		updated, err = tx.SetInstanceStatus(ctx, current.TenantID, current.ID, InstanceStatusReleased)
+		changed = err == nil
 		return err
 	}); err != nil {
 		return ExperimentInstance{}, err
+	}
+	if changed {
+		s.publishInstanceChanged(ctx, updated.TenantID, updated.ID)
 	}
 	return updated, nil
 }
@@ -258,6 +263,7 @@ func (s *Service) reconcileSandboxFailure(ctx context.Context, inst ExperimentIn
 // markSandboxFailure 只把补偿回收的同代实例推进错误态，保留期间重建或完成的状态。
 func (s *Service) markSandboxFailure(ctx context.Context, inst ExperimentInstance) (ExperimentInstance, error) {
 	var updated ExperimentInstance
+	changed := false
 	if err := s.store.TenantTx(ctx, inst.TenantID, func(ctx context.Context, tx TxStore) error {
 		current, err := tx.GetInstanceForUpdate(ctx, inst.TenantID, inst.ID)
 		if err != nil {
@@ -268,9 +274,13 @@ func (s *Service) markSandboxFailure(ctx context.Context, inst ExperimentInstanc
 			return nil
 		}
 		updated, err = tx.SetInstanceStatus(ctx, inst.TenantID, inst.ID, InstanceStatusError)
+		changed = err == nil && current.Status != updated.Status
 		return err
 	}); err != nil {
 		return ExperimentInstance{}, err
+	}
+	if changed {
+		s.publishInstanceChanged(ctx, updated.TenantID, updated.ID)
 	}
 	return updated, nil
 }
@@ -326,17 +336,10 @@ func (s *Service) GetProgress(ctx context.Context, instanceID int64) (ProgressDT
 	if err != nil {
 		return ProgressDTO{}, err
 	}
-	var inst ExperimentInstance
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		inst, err = tx.GetInstance(ctx, id.TenantID, instanceID)
-		if err != nil {
-			return err
-		}
-		return ensureInstanceAccess(ctx, tx, id.AccountID, inst)
-	}); err != nil {
+	if err := s.AuthorizeProgressSubscription(ctx, id.TenantID, instanceID); err != nil {
 		return ProgressDTO{}, err
 	}
-	return ProgressDTO{Topic: "tenant:" + ids.Format(inst.TenantID) + ":experiment:" + ids.Format(inst.ID) + ":" + progressChannelName, Channel: progressChannelName}, nil
+	return ProgressDTO{Topic: instanceProgressTopic(id.TenantID, instanceID), Channel: progressChannelName}, nil
 }
 
 // PauseInstance 暂停实验实例并通知 M2 暂停已有沙箱。
@@ -474,7 +477,10 @@ func (s *Service) FinishInstance(ctx context.Context, instanceID int64) (Instanc
 		if err != nil {
 			return err
 		}
-		return s.enqueueExperimentEventOutbox(ctx, tx, inst)
+		if err := s.enqueueExperimentEventOutbox(ctx, tx, inst); err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "experiment.instance.finish", auditTargetInstance, inst.ID, map[string]any{"score": inst.Score})
 	}); err != nil {
 		return InstanceDTO{}, err
 	}
@@ -482,13 +488,14 @@ func (s *Service) FinishInstance(ctx context.Context, instanceID int64) (Instanc
 		return instanceDTOFromModel(inst, nil), nil
 	}
 	if action == instanceFinishPrepare {
+		s.publishInstanceChanged(ctx, inst.TenantID, inst.ID)
 		s.drainExperimentEventOutboxBestEffort(ctx)
 	}
 	inst, err = s.recycleInstance(ctx, inst, "finished")
 	if err != nil {
 		return InstanceDTO{}, err
 	}
-	return instanceDTOFromModel(inst, nil), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "experiment.instance.finish", auditTargetInstance, inst.ID, map[string]any{"score": inst.Score})
+	return instanceDTOFromModel(inst, nil), nil
 }
 
 // syncTerminalCheckpointResults 在实例锁内同步终态结果，消除事件回写延迟对首次结算的影响。
@@ -567,6 +574,7 @@ func (s *Service) controlInstance(ctx context.Context, instanceID int64, next in
 		}
 		return InstanceDTO{}, err
 	}
+	s.publishInstanceChanged(ctx, updated.TenantID, updated.ID)
 	return instanceDTOFromModel(updated, nil), nil
 }
 
@@ -607,6 +615,7 @@ func (s *Service) recycleInstance(ctx context.Context, inst ExperimentInstance, 
 		return ExperimentInstance{}, err
 	}
 	var updated ExperimentInstance
+	changed := false
 	err := s.store.TenantTx(ctx, inst.TenantID, func(ctx context.Context, tx TxStore) error {
 		current, err := tx.GetInstanceForUpdate(ctx, inst.TenantID, inst.ID)
 		if err != nil {
@@ -618,9 +627,13 @@ func (s *Service) recycleInstance(ctx context.Context, inst ExperimentInstance, 
 		updated = current
 		if current.Status != InstanceStatusRecycled {
 			updated, err = tx.SetInstanceStatus(ctx, inst.TenantID, inst.ID, InstanceStatusRecycled)
+			changed = err == nil
 		}
 		return err
 	})
+	if err == nil && changed {
+		s.publishInstanceChanged(ctx, updated.TenantID, updated.ID)
+	}
 	return updated, err
 }
 
@@ -707,6 +720,7 @@ func (s *Service) HandleSandboxRecycled(ctx context.Context, event contracts.San
 	}
 	var inst ExperimentInstance
 	var finishRecovery bool
+	released := false
 	if err := s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		inst, err = tx.GetInstanceBySourceRef(ctx, event.TenantID, event.SourceRef)
@@ -734,12 +748,16 @@ func (s *Service) HandleSandboxRecycled(ctx context.Context, event contracts.San
 				return err
 			}
 			_, err = tx.SetInstanceStatus(ctx, event.TenantID, inst.ID, InstanceStatusReleased)
+			released = err == nil
 			return err
 		}
 		finishRecovery = inst.Status == InstanceStatusFinished
 		return nil
 	}); err != nil {
 		return err
+	}
+	if released {
+		s.publishInstanceChanged(ctx, inst.TenantID, inst.ID)
 	}
 	if !finishRecovery {
 		return nil

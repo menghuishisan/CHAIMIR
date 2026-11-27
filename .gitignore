@@ -84,6 +84,7 @@ pnpm-debug.log*
 images/vendor/**/*.tar.gz
 images/vendor/**/*.zip
 images/**/build/
+images/runtime/evm-history/snapshot/
 
 # ---- 工具/IDE ----
 .DS_Store

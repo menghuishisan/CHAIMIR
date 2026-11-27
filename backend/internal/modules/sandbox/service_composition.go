@@ -1,4 +1,3 @@
-// composition 文件实现 M2 唯一的组合编译、依赖展开和摘要生成逻辑。
 package sandbox
 
 import (
@@ -15,6 +14,7 @@ import (
 	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
@@ -42,54 +42,17 @@ func (s *Service) CompileSandboxComposition(ctx context.Context, tenantID int64,
 			return contracts.SandboxCompositionSnapshot{}, err
 		}
 	}
-	return CompilePlatformSandboxComposition(ctx, s.store, spec)
+	return CompilePlatformSandboxComposition(ctx, s.store, spec, nil)
 }
 
 // CompilePlatformSandboxComposition 供平台治理面冻结判题器等全局组合，不借用任意租户身份。
-func (s *Service) CompilePlatformSandboxComposition(ctx context.Context, spec contracts.SandboxCompositionSpec) (contracts.SandboxCompositionSnapshot, error) {
-	return CompilePlatformSandboxComposition(ctx, s.store, spec)
+func (s *Service) CompilePlatformSandboxComposition(ctx context.Context, spec contracts.SandboxCompositionSpec, privateSidecars []contracts.SandboxPrivateSidecarSpec) (contracts.SandboxCompositionSnapshot, error) {
+	return CompilePlatformSandboxComposition(ctx, s.store, spec, privateSidecars)
 }
 
-// ReplacePlatformSandboxCompositionSnapshot 将 sidecar 等平台私有闭包加入后的最终快照登记为唯一事实。
-func (s *Service) ReplacePlatformSandboxCompositionSnapshot(ctx context.Context, previousDigests []string, snapshot contracts.SandboxCompositionSnapshot) error {
-	return ReplacePlatformSandboxCompositionSnapshot(ctx, s.store, previousDigests, snapshot)
-}
-
-// ReplacePlatformSandboxCompositionSnapshot 删除编译中间摘要并原子登记最终组合快照。
-func ReplacePlatformSandboxCompositionSnapshot(ctx context.Context, store Store, previousDigests []string, snapshot contracts.SandboxCompositionSnapshot) error {
-	if store == nil {
-		return apperr.ErrSandboxCreateRequestInvalid
-	}
-	digest, err := contracts.CanonicalSnapshotDigest(snapshot)
-	if err != nil || strings.TrimSpace(snapshot.Digest) == "" || digest != snapshot.Digest {
-		return apperr.ErrSandboxCreateRequestInvalid
-	}
-	raw, err := json.Marshal(snapshot)
-	if err != nil {
-		return apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
-	}
-	return store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		seen := map[string]struct{}{snapshot.Digest: {}}
-		for _, previous := range previousDigests {
-			previous = strings.TrimSpace(previous)
-			if previous == "" {
-				continue
-			}
-			if _, exists := seen[previous]; exists {
-				continue
-			}
-			if err := tx.DeleteCompositionSnapshot(ctx, previous); err != nil {
-				return err
-			}
-			seen[previous] = struct{}{}
-		}
-		return tx.UpsertCompositionSnapshot(ctx, snapshot.Digest, raw)
-	})
-}
-
-// CompilePlatformSandboxComposition 让部署装配层复用 M2 唯一编译器冻结平台目录快照。
-// 它只读取平台运行时、镜像和工具目录，不创建沙箱或绕开自检门禁。
-func CompilePlatformSandboxComposition(ctx context.Context, store Store, spec contracts.SandboxCompositionSpec) (contracts.SandboxCompositionSnapshot, error) {
+// CompilePlatformSandboxComposition 原子编译并登记包含平台私有 sidecar 的完整快照。
+// 它复用已通过接入自检的运行时目录，不创建沙箱资源。
+func CompilePlatformSandboxComposition(ctx context.Context, store Store, spec contracts.SandboxCompositionSpec, privateSidecars []contracts.SandboxPrivateSidecarSpec) (contracts.SandboxCompositionSnapshot, error) {
 	if store == nil {
 		return contracts.SandboxCompositionSnapshot{}, apperr.ErrSandboxCreateRequestInvalid
 	}
@@ -130,8 +93,8 @@ func CompilePlatformSandboxComposition(ctx context.Context, store Store, spec co
 		if err := applyCompositionInitAssets(spec.InitAssets, compiledRuntimes); err != nil {
 			return err
 		}
-		if err := validateNetworkRulesForRuntimes(compiledRuntimes, compiledTools); err != nil {
-			return fmt.Errorf("运行时连接拓扑无效: %w", err)
+		if err := validateCompositionNetworkRules(compiledRuntimes, compiledTools); err != nil {
+			return fmt.Errorf("组合连接拓扑无效: %w", err)
 		}
 		for _, ref := range selected {
 			tool := compiledTools[ref.Code]
@@ -150,9 +113,6 @@ func CompilePlatformSandboxComposition(ctx context.Context, store Store, spec co
 			}
 			if err := validateToolNetworkRules(&tool.ResourceSpec); err != nil {
 				return fmt.Errorf("组件 %s 连接拓扑无效: %w", ref.Code, err)
-			}
-			if err := validateToolNetworkRulesForComposition(tool, compiledRuntimes, compiledTools); err != nil {
-				return fmt.Errorf("组件 %s 连接目标无效: %w", ref.Code, err)
 			}
 		}
 		var closure []contracts.ImageClosureItem
@@ -227,10 +187,14 @@ func CompilePlatformSandboxComposition(ctx context.Context, store Store, spec co
 			compiledSnapshots = append(compiledSnapshots, contracts.CompiledRuntimeSnapshot{InstanceCode: runtimePlan.InstanceCode, RuntimeID: runtimePlan.Runtime.ID, ImageID: runtimePlan.Image.ID, Code: runtimePlan.Runtime.Code, Eco: runtimePlan.Runtime.Eco, AdapterLevel: runtimePlan.Runtime.AdapterLevel, CapabilityImpl: runtimePlan.Runtime.CapabilityImpl, PluginRef: runtimePlan.Runtime.PluginRef, AdapterSpec: adapterSpec, ImageURL: runtimePlan.Image.ImageURL, ImageVersion: runtimePlan.Image.Version})
 		}
 		snapshot = contracts.SandboxCompositionSnapshot{
-			Spec:         spec,
-			Runtimes:     compiledSnapshots,
-			Components:   components,
-			ImageClosure: closure,
+			Spec:            spec,
+			Runtimes:        compiledSnapshots,
+			Components:      components,
+			PrivateSidecars: privateSidecars,
+			ImageClosure:    closure,
+		}
+		if err := contracts.AppendPrivateSidecarImageClosure(&snapshot); err != nil {
+			return err
 		}
 		digest, err := contracts.CanonicalSnapshotDigest(snapshot)
 		if err != nil {
@@ -452,7 +416,6 @@ func runtimeCapabilitiesByInstance(plans []RuntimePlan) map[string]CapabilityCon
 func aggregateRuntimeCapabilities(items []CapabilityConstraints) CapabilityConstraints {
 	out := CapabilityConstraints{}
 	seenProvides := map[string]struct{}{}
-	seenRequires := map[string]struct{}{}
 	seenConflicts := map[string]struct{}{}
 	for _, item := range items {
 		for _, value := range item.Provides {
@@ -460,14 +423,6 @@ func aggregateRuntimeCapabilities(items []CapabilityConstraints) CapabilityConst
 				if _, ok := seenProvides[value]; !ok {
 					out.Provides = append(out.Provides, value)
 					seenProvides[value] = struct{}{}
-				}
-			}
-		}
-		for _, value := range item.Requires {
-			if value = strings.TrimSpace(value); value != "" {
-				if _, ok := seenRequires[value]; !ok {
-					out.Requires = append(out.Requires, value)
-					seenRequires[value] = struct{}{}
 				}
 			}
 		}
@@ -637,13 +592,6 @@ func compositionTargetProvides(target, capability string, runtimes map[string]Ca
 	return false
 }
 
-// requiresExplicitCompositionParams 判断自动展开的组件是否需要教师或平台快照提供初始化参数。
-// 自动依赖没有可推断的安全材料时必须在编译期拒绝,不能把空值或默认值带入启动期。
-func requiresExplicitCompositionParams(schema map[string]any) bool {
-	required, ok := schema["required"].([]any)
-	return ok && len(required) > 0
-}
-
 // applyCompositionParams 编译 manifest 声明的非敏感参数到唯一目标容器环境变量。
 // 参数映射来自 JSON Schema 属性上的 x-chaimir-env,平台不按组件编码维护硬编码分支。
 func applyCompositionParams(params map[string]any, schema map[string]any, components *[]workload.ComponentSpec) error {
@@ -761,7 +709,7 @@ func validateCapabilityCardinality(runtime CapabilityConstraints, refs []contrac
 
 // findCapabilityProvider 在可用的沙箱内组件里找提供某能力的唯一候选(按编码排序,结果稳定);
 // 没有候选返回空,多个候选时要求组合显式选择,不替用户挑。
-func findCapabilityProvider(tools map[string]Tool, required, category string) (string, error) {
+func findCapabilityProvider(tools map[string]Tool, required, category, excludedCode string) (string, error) {
 	required = strings.TrimSpace(required)
 	codes := make([]string, 0, len(tools))
 	for code := range tools {
@@ -770,6 +718,9 @@ func findCapabilityProvider(tools map[string]Tool, required, category string) (s
 	sort.Strings(codes)
 	candidates := make([]string, 0, len(codes))
 	for _, code := range codes {
+		if code == excludedCode {
+			continue
+		}
 		tool := tools[code]
 		if tool.Category != category || strings.TrimSpace(tool.ResourceSpec.Capabilities.Placement) != "sandbox" {
 			continue
@@ -791,11 +742,16 @@ func findCapabilityProvider(tools map[string]Tool, required, category string) (s
 }
 
 // capabilityProvided 判断某能力是否已由运行时或其他已选组件提供;excludedCode 是正在检查的组件本身,不算在内。
-func capabilityProvided(runtime CapabilityConstraints, refs []contracts.CompositionComponentRef, tools map[string]Tool, required, excludedCode string) bool {
+func capabilityProvided(runtimes map[string]CapabilityConstraints, refs []contracts.CompositionComponentRef, tools map[string]Tool, required, excludedCode string) bool {
 	required = strings.TrimSpace(required)
-	for _, provided := range runtime.Provides {
-		if strings.TrimSpace(provided) == required {
-			return true
+	for instance, runtime := range runtimes {
+		if instance == excludedCode {
+			continue
+		}
+		for _, provided := range runtime.Provides {
+			if strings.TrimSpace(provided) == required {
+				return true
+			}
 		}
 	}
 	for _, ref := range refs {
@@ -861,22 +817,17 @@ func compileCompositionLinks(spec contracts.SandboxCompositionSpec, runtimes map
 		}
 		compiledTools[ref.Code] = cloned
 	}
-	for _, runtimePlan := range runtimePlans {
-		compiledRuntime := compiledRuntimes[runtimePlan.InstanceCode]
+	for _, ref := range spec.Runtimes {
+		compiledRuntime := compiledRuntimes[ref.InstanceCode]
 		runtimeComponents, err := runtimeParameterComponents(compiledRuntime)
 		if err != nil {
-			return nil, nil, fmt.Errorf("运行时 %s 参数目标不唯一: %w", runtimePlan.InstanceCode, err)
+			return nil, nil, fmt.Errorf("运行时 %s 参数目标不唯一: %w", ref.InstanceCode, err)
 		}
-		for _, ref := range spec.Runtimes {
-			if ref.InstanceCode != runtimePlan.InstanceCode {
-				continue
-			}
-			if err := applyCompositionParams(ref.Params, compiledRuntime.Capabilities.ConfigSchema, &runtimeComponents); err != nil {
-				return nil, nil, fmt.Errorf("运行时 %s 参数编译失败: %w", runtimePlan.InstanceCode, err)
-			}
+		if err := applyCompositionParams(ref.Params, compiledRuntime.Capabilities.ConfigSchema, &runtimeComponents); err != nil {
+			return nil, nil, fmt.Errorf("运行时 %s 参数编译失败: %w", ref.InstanceCode, err)
 		}
 		applyRuntimeParameterComponents(&compiledRuntime, runtimeComponents)
-		compiledRuntimes[runtimePlan.InstanceCode] = MaterializeRuntimeTopology(runtimePlan.InstanceCode, compiledRuntime)
+		compiledRuntimes[ref.InstanceCode] = MaterializeRuntimeTopology(ref.InstanceCode, compiledRuntime)
 	}
 	for _, ref := range refs {
 		tool := compiledTools[ref.Code]
@@ -964,7 +915,7 @@ func compileCompositionLinks(spec contracts.SandboxCompositionSpec, runtimes map
 			Name:  compositionRuleName(link, binding),
 			From:  source.Role,
 			To:    target.Role,
-			Ports: []workload.NetworkPortRef{{Port: target.ContainerPort}},
+			Ports: []workload.NetworkPortRef{{Port: target.ContainerPort, Protocol: target.Protocol}},
 		}
 		if _, isRuntime := compiledRuntimes[source.ComponentCode]; !isRuntime {
 			// 工具自身的规则以组件名表达来源,编排层再转换为该组件 Pod 角色。
@@ -1186,53 +1137,6 @@ func compositionBindingValue(protocol string, endpoint compositionEndpoint) stri
 		return address
 	}
 	return protocol + "://" + address
-}
-
-func compositionPodPorts(runtimes map[string]AdapterSpec, tools map[string]Tool) (map[string]map[string]int32, error) {
-	portsByRole := make(map[string]map[string]int32)
-	for _, runtime := range runtimes {
-		for role, ports := range podPortMap(podTopologyForAdapter(runtime)) {
-			if _, exists := portsByRole[role]; exists {
-				return nil, apperr.ErrSandboxNetworkPolicyInvalid
-			}
-			portsByRole[role] = ports
-		}
-	}
-	for _, tool := range tools {
-		for name, ports := range componentPortMap(tool.ResourceSpec.Components) {
-			role := toolComponentPodName(tool.Code, name)
-			if _, exists := portsByRole[role]; exists {
-				return nil, apperr.ErrSandboxNetworkPolicyInvalid
-			}
-			portsByRole[role] = ports
-		}
-	}
-	return portsByRole, nil
-}
-
-// validateToolNetworkRulesForComposition 校验编译后工具规则的来源和目标都属于本次冻结组合。
-func validateToolNetworkRulesForComposition(tool Tool, runtimes map[string]AdapterSpec, tools map[string]Tool) error {
-	componentPorts := componentPortMap(tool.ResourceSpec.Components)
-	portsByRole, err := compositionPodPorts(runtimes, tools)
-	if err != nil {
-		return err
-	}
-	for _, rule := range tool.ResourceSpec.NetworkRules {
-		if _, ok := componentPorts[rule.From]; !ok {
-			return fmt.Errorf("来源组件 %s 未声明", rule.From)
-		}
-		targetPorts, ok := componentPorts[rule.To]
-		if !ok {
-			targetPorts = portsByRole[rule.To]
-		}
-		if len(targetPorts) == 0 {
-			return fmt.Errorf("目标 Pod 或组件 %s 未声明", rule.To)
-		}
-		if err := resolveNetworkRulePorts(rule.Ports, targetPorts); err != nil {
-			return fmt.Errorf("规则 %s 的目标 %s 端口无效: %w", rule.Name, rule.To, err)
-		}
-	}
-	return nil
 }
 
 type compositionEndpoint struct {
@@ -1516,8 +1420,11 @@ func MaterializeRuntimeTopology(instance string, adapter AdapterSpec) AdapterSpe
 	adapter.NetworkRules = slices.Clone(adapter.NetworkRules)
 	podNames := make(map[string]string)
 	if len(adapter.Pods) == 0 {
-		containers := []workload.ComponentSpec{adapter.RuntimeContainer}
-		containers = append(containers, adapter.InfraSidecars...)
+		containers := make([]workload.ComponentSpec, 0, 1+len(adapter.InfraSidecars))
+		containers = append(containers, workload.ComponentSpec{Name: adapter.RuntimeContainer.Name})
+		for _, sidecar := range adapter.InfraSidecars {
+			containers = append(containers, workload.ComponentSpec{Name: sidecar.Name})
+		}
 		name := runtimePodName(instance, "sandbox")
 		adapter.Pods = []workload.PodSpec{{Name: name, Containers: containers}}
 		podNames["sandbox"] = name
@@ -1590,7 +1497,7 @@ func cloneAdapterSpec(input AdapterSpec) (AdapterSpec, error) {
 		return AdapterSpec{}, fmt.Errorf("复制运行时适配器失败: %w", err)
 	}
 	var out AdapterSpec
-	if err := json.Unmarshal(b, &out); err != nil {
+	if err := jsonx.DecodeStrict(b, &out); err != nil {
 		return AdapterSpec{}, fmt.Errorf("解析运行时适配器副本失败: %w", err)
 	}
 	return out, nil
@@ -1603,7 +1510,7 @@ func cloneTool(input Tool) (Tool, error) {
 		return Tool{}, fmt.Errorf("复制组件 %s 工作负载失败: %w", input.Code, err)
 	}
 	var spec ToolResourceSpec
-	if err := json.Unmarshal(b, &spec); err != nil {
+	if err := jsonx.DecodeStrict(b, &spec); err != nil {
 		return Tool{}, fmt.Errorf("解析组件 %s 工作负载副本失败: %w", input.Code, err)
 	}
 	input.ResourceSpec = spec
@@ -1624,8 +1531,7 @@ func validateCompositionAccess(profile contracts.SandboxAccessProfile, category,
 	return nil
 }
 
-// validateCompositionConflicts 汇总运行时与已选组件提供的能力:双方声明互斥的能力不能同时出现,
-// 每个组件需要的能力也必须有人提供。
+// validateCompositionConflicts 拒绝运行时或组件声明的互斥能力。
 func validateCompositionConflicts(runtime CapabilityConstraints, refs []contracts.CompositionComponentRef, tools map[string]Tool) error {
 	capabilities := make(map[string]struct{}, len(runtime.Provides))
 	for _, item := range runtime.Provides {
@@ -1647,11 +1553,6 @@ func validateCompositionConflicts(runtime CapabilityConstraints, refs []contract
 		for _, conflict := range tool.ResourceSpec.Capabilities.Conflicts {
 			if _, ok := capabilities[strings.TrimSpace(conflict)]; ok && strings.TrimSpace(conflict) != "" {
 				return fmt.Errorf("组件 %s 与能力 %s 冲突", ref.Code, conflict)
-			}
-		}
-		for _, required := range tool.ResourceSpec.Capabilities.Requires {
-			if _, ok := capabilities[strings.TrimSpace(required)]; !ok {
-				return fmt.Errorf("组件 %s 缺少必需能力 %s", ref.Code, required)
 			}
 		}
 	}

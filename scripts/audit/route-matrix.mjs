@@ -9,6 +9,9 @@ import { join, relative, dirname } from 'node:path'
 
 const ROOT = process.cwd()
 const AS_JSON = process.argv.includes('--json')
+const HTTP_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE', 'CONNECT'])
+const routeCallPattern = new RegExp(`^(.*?)\\.(${[...HTTP_METHODS].join('|')})\\(`)
+const yamlMethodPattern = new RegExp(`^\\s{2}(${[...HTTP_METHODS].map(method => method.toLowerCase()).join('|')}):\\s*$`)
 
 function walk(dir, filter, out = []) {
   let names
@@ -105,7 +108,7 @@ function parsePackage(dir) {
         }
         // 路由注册。groupVar 可能是变量,也可能是链式内联 `x.Group("p", mw).GET(...)`,
         // 故先按最后一个 `.METHOD(` 切开,左侧整体当作组表达式交给 resolveExpr。
-        const rm = /^(.*?)\.(GET|POST|PUT|PATCH|DELETE)\(/.exec(t)
+        const rm = routeCallPattern.exec(t)
         if (rm) {
           const ca = callArgs(t.slice(rm[1].length), new RegExp(`^\\.${rm[2]}\\(`))
           if (ca && ca.args.length >= 2) {
@@ -125,9 +128,9 @@ function parsePackage(dir) {
           const ca = callArgs(t, new RegExp(`${mm2[1]}\\.Match\\(`))
           if (ca && ca.args.length >= 3) {
             const sub = /^"([^"]*)"$/.exec(ca.args[1])
-            for (const meth of ca.args[0].matchAll(/http\.Method(\w+)/g)) {
-              const m = meth[1].toUpperCase()
-              if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(m)) continue
+            for (const meth of ca.args[0].matchAll(/http\.Method(\w+)|"([A-Z]+)"/g)) {
+              const m = (meth[1] ?? meth[2]).toUpperCase()
+              if (!HTTP_METHODS.has(m)) continue
               registrations.push({
                 line, groupVar: mm2[1], method: m,
                 sub: sub ? sub[1] : ca.args[1],
@@ -216,7 +219,7 @@ for (const f of walk(join(ROOT, 'backend/api/paths'), (p) => p.endsWith('.yaml')
   lines.forEach((line, i) => {
     const pm = /^(\/\S+):\s*$/.exec(line)
     if (pm) { cur = pm[1]; return }
-    const mm = /^\s{2}(get|post|put|patch|delete):\s*$/.exec(line)
+    const mm = yamlMethodPattern.exec(line)
     if (mm && cur) {
       let opId = '', aud = ''
       for (let j = i + 1; j < Math.min(i + 16, lines.length); j++) {
@@ -242,13 +245,19 @@ const onlyBackend = [...backendSet.keys()].filter((k) => !yamlSet.has(k)).sort()
 const onlyYaml = [...yamlSet.keys()].filter((k) => !backendSet.has(k)).sort()
 const yamlNotIndexed = [...new Set(yamlOps.map((o) => o.path))].filter((p) => !indexedPaths.has(p)).sort()
 const indexedNotYaml = [...indexedPaths].filter((p) => !yamlOps.some((o) => o.path === p)).sort()
+const unresolved = routes.filter((r) => !r.path.startsWith('/api/'))
+const byRegistration = new Map()
+for (const route of routes) {
+  const key = `${route.method} ${norm(route.path)}`
+  byRegistration.set(key, [...(byRegistration.get(key) || []), route])
+}
+const duplicates = [...byRegistration].filter(([, entries]) => entries.length > 1)
 
 if (AS_JSON) {
   console.log(JSON.stringify({ routes, yamlOps, onlyBackend, onlyYaml, yamlNotIndexed, indexedNotYaml }, null, 0))
 } else {
   console.log('=== 统计 ===')
   console.log(`后端注册 ${backendSet.size} 条 | paths/*.yaml ${yamlSet.size} 条 | openapi.yaml 索引 ${indexedPaths.size} 路径`)
-  const unresolved = routes.filter((r) => !r.path.startsWith('/api/'))
   console.log(`\n=== 未解析出绝对路径(脚本盲区) ${unresolved.length} ===`)
   for (const r of unresolved) console.log(`  ${r.method} ${r.path} [${r.file}:${r.line}] fn=${r.fn} guards=${r.guards}`)
   console.log(`\n=== A. 后端有、openapi 无 (${onlyBackend.length}) ===`)
@@ -259,11 +268,6 @@ if (AS_JSON) {
   for (const p of yamlNotIndexed) console.log('  ' + p)
   console.log(`\n=== D. openapi.yaml 索引了但 paths/*.yaml 无 (${indexedNotYaml.length}) ===`)
   for (const p of indexedNotYaml) console.log('  ' + p)
-  const byRegistration = new Map()
-  for (const r of routes) {
-    const key = `${r.method} ${norm(r.path)}`
-    byRegistration.set(key, [...(byRegistration.get(key) || []), r])
-  }
   console.log('\n=== E. 相同方法和路径的重复注册 ===')
   let dup = 0
   for (const [key, entries] of byRegistration) {
@@ -274,4 +278,8 @@ if (AS_JSON) {
     console.log(`  ${key}${handlerSummary}\n      ${entries.map((r) => `@${r.line} ${r.file} guards=${r.guards}`).join('\n      ')}`)
   }
   if (!dup) console.log('  (无)')
+}
+
+if (onlyBackend.length || onlyYaml.length || yamlNotIndexed.length || indexedNotYaml.length || unresolved.length || duplicates.length) {
+  process.exitCode = 1
 }

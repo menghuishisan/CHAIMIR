@@ -21,7 +21,7 @@ type ContentClonePlan struct {
 	Discard func(context.Context) error
 }
 
-// ContentCloneService 仅供已授权并锁定来源课程的 M6/M7 复制真实依赖，不开放 HTTP。
+// ContentCloneService 仅供已完成课程锁内授权的 M6/M7 复制依赖，调用前结束来源事务。
 // Save 必须借用同数据库、同目标租户普通事务；调用方只在未尝试提交时 Discard。
 type ContentCloneService interface {
 	PrepareContentClone(ctx context.Context, sourceTenantID int64, refs []ContentItemRef) (ContentClonePlan, error)

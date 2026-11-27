@@ -138,7 +138,18 @@
     x-chaimir-audience: school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - semester_id
+            properties:
+              semester_id:
+                $ref: "#/components/schemas/SnowflakeID"
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/grade-center/appeals:
   get:
@@ -169,7 +180,16 @@
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              comment:
+                type: string
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/grade-center/appeals/{id}/reject:
   post:
@@ -179,7 +199,16 @@
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              comment:
+                type: string
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/grade-center/warning-rules:
   get:
@@ -229,7 +258,18 @@
     operationId: gradeScanWarnings
     x-chaimir-audience: school-admin
     security: [{ bearerAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              student_id:
+                $ref: "#/components/schemas/SnowflakeID"
+              semester_id:
+                $ref: "#/components/schemas/SnowflakeID"
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/grade-center/transcripts:
   post:
@@ -256,5 +296,23 @@
     operationId: gradeGenerateTranscriptBatch
     x-chaimir-audience: school-admin
     security: [{ bearerAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - student_ids
+              - scope
+            properties:
+              student_ids:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SnowflakeID"
+              scope:
+                type: integer
+              semester_id:
+                $ref: "#/components/schemas/SnowflakeID"
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

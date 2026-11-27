@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"mime"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/auth"
@@ -138,7 +140,7 @@ func WritePageWithFacets(c *gin.Context, list any, total int64, page, size int, 
 
 // WriteAttachment 统一输出小型附件内容,避免各模块手写不安全的 Content-Disposition。
 func WriteAttachment(c *gin.Context, fileName, contentType string, data []byte) {
-	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, safeAttachmentName(fileName)))
+	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": SafeAttachmentName(fileName)}))
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Data(http.StatusOK, contentType, data)
 }
@@ -148,13 +150,10 @@ func WriteAttachmentStream(c *gin.Context, fileName, contentType string, size in
 	if strings.TrimSpace(contentType) == "" {
 		contentType = "application/octet-stream"
 	}
-	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, safeAttachmentName(fileName)))
+	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": SafeAttachmentName(fileName)}))
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.DataFromReader(http.StatusOK, size, contentType, reader, nil)
 }
-
-// SafeAttachmentName 返回经过响应头安全处理的文件名,供 inline 文件响应复用。
-func SafeAttachmentName(fileName string) string { return safeAttachmentName(fileName) }
 
 // PrefixReverseProxyConfig 描述挂在平台代理前缀下的内部 Web 服务。
 type PrefixReverseProxyConfig struct {
@@ -295,8 +294,8 @@ func Page(c *gin.Context) (int, int, bool) {
 	return p, s, true
 }
 
-// safeAttachmentName 把响应头文件名限制为单段可见字符,防止头注入和路径片段进入下载名。
-func safeAttachmentName(fileName string) string {
+// SafeAttachmentName 保留单段可打印文件名,供标准库 MIME 序列化；拒绝路径片段和头注入字符。
+func SafeAttachmentName(fileName string) string {
 	name := strings.TrimSpace(fileName)
 	name = strings.ReplaceAll(name, "\\", "/")
 	if idx := strings.LastIndex(name, "/"); idx >= 0 {
@@ -307,7 +306,7 @@ func safeAttachmentName(fileName string) string {
 		switch {
 		case r == '"' || r == '\\' || r == '\r' || r == '\n':
 			b.WriteByte('_')
-		case r >= 32 && r < 127:
+		case unicode.IsPrint(r):
 			b.WriteRune(r)
 		}
 	}
@@ -353,20 +352,29 @@ func rewriteProxyLocation(header http.Header, target *url.URL, externalPrefix st
 	if location == "" || externalPrefix == "" {
 		return
 	}
-	if location == externalPrefix || strings.HasPrefix(location, externalPrefix+"/") {
+	parsed, err := url.Parse(location)
+	if err != nil {
 		return
 	}
-	parsed, err := url.Parse(location)
-	if err == nil && parsed.IsAbs() {
+	if parsed.IsAbs() || parsed.Host != "" {
 		if !strings.EqualFold(parsed.Host, target.Host) {
 			return
 		}
-		location = parsed.RequestURI()
+		parsed.Scheme, parsed.Host, parsed.User = "", "", nil
+		if parsed.Path == "" {
+			parsed.Path = "/"
+		}
 	}
-	if !strings.HasPrefix(location, "/") || strings.HasPrefix(location, "//") {
+	if !strings.HasPrefix(parsed.Path, "/") {
 		return
 	}
-	header.Set("Location", externalPrefix+location)
+	if parsed.Path != externalPrefix && !strings.HasPrefix(parsed.Path, externalPrefix+"/") {
+		parsed.Path = externalPrefix + parsed.Path
+		if parsed.RawPath != "" {
+			parsed.RawPath = externalPrefix + parsed.RawPath
+		}
+	}
+	header.Set("Location", parsed.String())
 }
 
 // rewriteProxyCookies 将上游 Cookie 限定在当前代理前缀下,避免同域 Cookie 互相污染。
@@ -380,34 +388,18 @@ func rewriteProxyCookies(header http.Header, externalPrefix string) {
 	}
 	header.Del("Set-Cookie")
 	for _, raw := range cookies {
-		header.Add("Set-Cookie", scopeProxyCookie(raw, externalPrefix))
-	}
-}
-
-// scopeProxyCookie 移除上游 Domain,并把根路径 Cookie 收敛到代理前缀。
-func scopeProxyCookie(raw, externalPrefix string) string {
-	parts := strings.Split(raw, ";")
-	if len(parts) == 0 {
-		return raw
-	}
-	scoped := []string{strings.TrimSpace(parts[0])}
-	hasPath := false
-	for _, part := range parts[1:] {
-		attr := strings.TrimSpace(part)
-		if attr == "" || strings.HasPrefix(strings.ToLower(attr), "domain=") {
+		cookie, err := http.ParseSetCookie(raw)
+		if err != nil {
 			continue
 		}
-		if strings.HasPrefix(strings.ToLower(attr), "path=") {
-			hasPath = true
-			path := strings.TrimSpace(attr[len("path="):])
-			if path == "" || path == "/" {
-				attr = "Path=" + externalPrefix
-			}
+		cookie.Domain = ""
+		switch {
+		case cookie.Path == "/" || !strings.HasPrefix(cookie.Path, "/"):
+			cookie.Path = externalPrefix
+		case cookie.Path == externalPrefix || strings.HasPrefix(cookie.Path, externalPrefix+"/"):
+		default:
+			cookie.Path = externalPrefix + cookie.Path
 		}
-		scoped = append(scoped, attr)
+		header.Add("Set-Cookie", cookie.String())
 	}
-	if !hasPath {
-		scoped = append(scoped, "Path="+externalPrefix)
-	}
-	return strings.Join(scoped, "; ")
 }

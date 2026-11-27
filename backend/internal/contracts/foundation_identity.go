@@ -53,6 +53,8 @@ type IdentityService interface {
 	// RequireTenantModules 根据租户当前配置校验所需模块，不返回租户私有配置。
 	RequireTenantModules(ctx context.Context, tenantID int64, modules ...string) error
 	// GetAccount 读取单个账号摘要,供平台鉴权、审计与聚合逻辑复用。
+	// 未命中返回NotFound，存储故障返回Internal；应用错误及完整原因链保留。
+	// 普通租户读取复用已有同数据库、同租户事务；无外层事务时走应用连接。
 	GetAccount(ctx context.Context, accountID int64) (AccountInfo, error)
 	// BatchGetAccounts 批量读取账号摘要,避免上层形成 N+1 查询。
 	BatchGetAccounts(ctx context.Context, accountIDs []int64) ([]AccountInfo, error)
@@ -69,6 +71,7 @@ type IdentityTenantReadService interface {
 	// ListTenants 读取租户列表,供平台看板聚合使用。
 	ListTenants(ctx context.Context) ([]TenantSummary, error)
 	// GetTenant 读取单个租户摘要,供聚合层按租户投影使用。
+	// 未命中返回NotFound，存储故障返回Internal；应用错误及完整原因链保留。
 	GetTenant(ctx context.Context, tenantID int64) (TenantSummary, error)
 	// PlatformAdminNames 按编号批量解析平台管理员姓名,供平台页面显示操作人;读不到的编号不在结果里。
 	PlatformAdminNames(ctx context.Context, adminIDs []int64) (map[int64]string, error)

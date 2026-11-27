@@ -64,7 +64,52 @@
     x-chaimir-audience: internal
     x-chaimir-internal: true
     security: [{ serviceAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - judger_code
+              - item_code
+              - item_version
+              - submitter_id
+              - source_owner_id
+              - source_scope
+            properties:
+              judger_code:
+                type: string
+              item_code:
+                type: string
+              item_version:
+                type: string
+              code_storage_key:
+                type: string
+              code_hash:
+                type: string
+              submitter_id:
+                $ref: "#/components/schemas/SnowflakeID"
+              source_owner_id:
+                $ref: "#/components/schemas/SnowflakeID"
+              source_course_id:
+                $ref: "#/components/schemas/SnowflakeID"
+              source_scope:
+                type: string
+              sandbox_mode:
+                type: string
+              target_sandbox_ref:
+                type: string
+              sandbox_source_ref:
+                type: string
+              sandbox_composition_digest:
+                type: string
+              extra_input:
+                type: object
+                additionalProperties: true
+              priority:
+                type: integer
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/judge/tasks/{id}:
   get:
@@ -73,7 +118,7 @@
     operationId: judgeGetTask
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: ticket, in: query, required: true, schema: { type: string }, description: 通过 /api/v1/auth/ws-ticket 换取的短时路径绑定连接票据 }]
+    parameters: [{$ref: '#/components/parameters/IDPath'}]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/judge/internal/tasks/{id}:
   delete:
@@ -93,7 +138,7 @@
     x-chaimir-audience: teacher
     x-chaimir-websocket: true
     security: [{ wsTicketAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    parameters: [{$ref: '#/components/parameters/IDPath'}, {name: ticket, in: query, required: true, schema: {type: string}, description: 通过 /api/v1/auth/ws-ticket 换取的短时路径绑定连接票据}]
     responses: { "101": { description: WebSocket 升级成功 }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/judge/tasks/{id}/rejudge:
   post:
@@ -122,7 +167,18 @@
     x-chaimir-audience: internal
     x-chaimir-internal: true
     security: [{ serviceAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - source_ref
+            properties:
+              source_ref:
+                type: string
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/judge/internal/fingerprints/exact:
   get:
@@ -151,11 +207,21 @@
           schema:
             type: object
             additionalProperties: false
-            required: [problem_ref]
+            required:
+              - problem_ref
             properties:
-              problem_ref: { type: string, minLength: 1 }
-              source_refs: { type: array, items: { type: string }, description: 已鉴权的提交来源集合；空集合无匹配 }
-              code_hash: { type: string }
-              exclude_source_ref: { type: string }
-              threshold: { type: number }
+              problem_ref:
+                type: string
+                minLength: 1
+              source_refs:
+                type: array
+                items:
+                  type: string
+                description: 已鉴权的提交来源集合；空集合无匹配
+              code_hash:
+                type: string
+              exclude_source_ref:
+                type: string
+              threshold:
+                type: number
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

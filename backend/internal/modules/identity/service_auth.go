@@ -44,10 +44,24 @@ func (s *Service) LoginPlatform(ctx context.Context, req LoginPlatformRequest, d
 	if err != nil || !ok {
 		return LoginResponse{}, apperr.ErrIdentityInvalidCredentials
 	}
-	var refresh string
+	var refresh, access string
 	var session PlatformAuthSession
 	// 平台登录也执行单端语义:先吊销旧会话,再保存新 Refresh 哈希。
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		if err := tx.LockPlatformAdmin(ctx, admin.ID); err != nil {
+			return err
+		}
+		current, err := tx.GetPlatformAdminByID(ctx, admin.ID)
+		if err != nil {
+			return err
+		}
+		if current.Status != TenantStatusActive {
+			return apperr.ErrIdentityAccountDisabled
+		}
+		if current.PasswordHash != admin.PasswordHash {
+			return apperr.ErrIdentityInvalidCredentials
+		}
+		admin = current
 		if err := tx.RevokePlatformSessions(ctx, admin.ID); err != nil {
 			return err
 		}
@@ -72,17 +86,13 @@ func (s *Service) LoginPlatform(ctx context.Context, req LoginPlatformRequest, d
 		}
 		refresh = token
 		session = row
-		return nil
+		access, err = s.auth.IssueAccess(0, admin.ID, session.ID, true)
+		if err != nil {
+			return err
+		}
+		return s.auditLogin(ctx, 0, admin.ID, contracts.RoleNumPlatformAdmin)
 	}); err != nil {
-		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
-	}
-	access, err := s.auth.IssueAccess(0, admin.ID, session.ID, true)
-	if err != nil {
-		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
-	}
-	// 登录成功必须落审计,平台级审计 tenant_id 固定为 0。
-	if err := s.auditLogin(ctx, 0, admin.ID, contracts.RoleNumPlatformAdmin); err != nil {
-		return LoginResponse{}, err
+		return LoginResponse{}, apperr.AsAppError(err)
 	}
 	return LoginResponse{AccessToken: access, RefreshToken: refresh, Account: &AccountDTO{ID: ids.ID(admin.ID), Name: admin.Name, Roles: []int16{contracts.RoleNumPlatformAdmin}, Status: admin.Status}}, nil
 }
@@ -182,7 +192,7 @@ func (s *Service) LoginSMS(ctx context.Context, req LoginSMSRequest, device, ip 
 	if err != nil {
 		return LoginResponse{}, err
 	}
-	var account Account
+	var out LoginResponse
 	var authErr error
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		tenantSnapshot, err := tx.GetTenantByID(ctx, tenantID)
@@ -196,6 +206,17 @@ func (s *Service) LoginSMS(ctx context.Context, req LoginSMSRequest, device, ip 
 		if err != nil {
 			return err
 		}
+		if err := tx.LockAccount(ctx, tenantID, a.ID); err != nil {
+			return err
+		}
+		current, err := tx.GetAccountByPhoneHash(ctx, tenantID, phoneHash)
+		if err != nil {
+			return err
+		}
+		if current.ID != a.ID {
+			return apperr.ErrIdentityInvalidCredentials
+		}
+		a = current
 		if err := EnsureAccountCanLogin(a, timex.Now()); err != nil {
 			return err
 		}
@@ -203,21 +224,21 @@ func (s *Service) LoginSMS(ctx context.Context, req LoginSMSRequest, device, ip 
 			return apperr.ErrIdentityAccountDisabled
 		}
 		if err := s.verifySMSCodeInTx(ctx, tx, tenantID, phoneHash, SMSSceneLogin, codeHash); err != nil {
-			if !errors.Is(err, apperr.ErrIdentitySMSInvalid) && !errors.Is(err, apperr.ErrIdentitySMSAttemptsLimited) {
+			if !isSMSVerificationRejection(err) {
 				return err
 			}
 			authErr = err
 			return s.auditLoginFailure(ctx, a, "sms")
 		}
-		account = a
-		return nil
+		out, err = s.issueTenantLoginInTx(ctx, tx, a, device, ip)
+		return err
 	}); err != nil {
 		return LoginResponse{}, apperr.AsAppError(err)
 	}
 	if authErr != nil {
 		return LoginResponse{}, authErr
 	}
-	return s.issueTenantLogin(ctx, account, device, ip)
+	return out, nil
 }
 
 // RefreshToken 校验并轮转 Refresh Token,旧 token 立即失效。
@@ -267,22 +288,34 @@ func (s *Service) Logout(ctx context.Context, sessionID int64) error {
 	}
 	if id.IsPlatform {
 		if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-			return tx.RevokePlatformAuthSession(ctx, sessionID)
+			if err := tx.LockPlatformAdmin(ctx, id.AccountID); err != nil {
+				return err
+			}
+			if err := tx.RevokePlatformAuthSession(ctx, sessionID); err != nil {
+				return err
+			}
+			return s.auditLogout(ctx, 0, id.AccountID, contracts.RoleNumPlatformAdmin)
 		}); err != nil {
 			return apperr.ErrInternal.WithCause(err)
 		}
-		return s.auditLogout(ctx, 0, id.AccountID, contracts.RoleNumPlatformAdmin)
+		return nil
 	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		return tx.RevokeAuthSession(ctx, id.TenantID, sessionID)
+		if err := tx.LockAccount(ctx, id.TenantID, id.AccountID); err != nil {
+			return err
+		}
+		account, err := tx.GetAccount(ctx, id.AccountID)
+		if err != nil {
+			return err
+		}
+		if err := tx.RevokeAuthSession(ctx, id.TenantID, sessionID); err != nil {
+			return err
+		}
+		return s.auditLogout(ctx, id.TenantID, id.AccountID, audit.ActorRoleFromAccount(ToContractAccount(account, "")))
 	}); err != nil {
 		return apperr.ErrInternal.WithCause(err)
 	}
-	actorID, actorRole, err := audit.ResolveActor(ctx, s)
-	if err != nil {
-		return err
-	}
-	return s.auditLogout(ctx, id.TenantID, actorID, actorRole)
+	return nil
 }
 
 // Activate 使用一次性激活码设置密码并激活账号。
@@ -303,9 +336,15 @@ func (s *Service) Activate(ctx context.Context, req ActivateRequest) (LoginRespo
 		code = row
 		return nil
 	}); err != nil {
+		if isNoRows(err) {
+			return LoginResponse{}, apperr.ErrIdentityActivationInvalid
+		}
+		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
+	}
+	if code.Status != ActivationStatusActive || !timex.Now().Before(code.ExpireAt) {
 		return LoginResponse{}, apperr.ErrIdentityActivationInvalid
 	}
-	if code.Status != ActivationStatusActive || timex.Now().After(code.ExpireAt) {
+	if !tenantAllowedForDeployment(code.TenantID, s.deploy) {
 		return LoginResponse{}, apperr.ErrIdentityActivationInvalid
 	}
 	passwordHash, err := crypto.HashPassword(req.Password)
@@ -313,12 +352,32 @@ func (s *Service) Activate(ctx context.Context, req ActivateRequest) (LoginRespo
 		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
 	}
 	if err := s.store.TenantTx(ctx, code.TenantID, func(ctx context.Context, tx TxStore) error {
+		if err := tx.LockAccount(ctx, code.TenantID, code.AccountID); err != nil {
+			return err
+		}
+		t, err := tx.GetTenantByID(ctx, code.TenantID)
+		if err != nil {
+			return err
+		}
+		if err := EnsureTenantCanLogin(t, timex.Now()); err != nil {
+			return err
+		}
+		account, err := tx.GetAccount(ctx, code.AccountID)
+		if err != nil {
+			return err
+		}
+		if account.Status != AccountStatusPending {
+			return apperr.ErrIdentityActivationInvalid
+		}
+		if err := tx.UseActivationCode(ctx, code.TenantID, code.ID); err != nil {
+			return err
+		}
 		if _, err := tx.UpdateAccountPassword(ctx, code.AccountID, code.TenantID, passwordHash, false, AccountStatusActive); err != nil {
 			return err
 		}
-		return tx.UseActivationCode(ctx, code.TenantID, code.ID)
+		return s.auditCredentialChange(ctx, code.TenantID, code.AccountID, "account.activate")
 	}); err != nil {
-		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
+		return LoginResponse{}, apperr.AsAppError(err)
 	}
 	return LoginResponse{}, nil
 }
@@ -344,6 +403,7 @@ func (s *Service) ResetPassword(ctx context.Context, req PasswordResetRequest) e
 	if err != nil {
 		return apperr.ErrInternal.WithCause(err)
 	}
+	var verificationErr error
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		tenantSnapshot, err := tx.GetTenantByID(ctx, tenantID)
 		if err != nil {
@@ -356,24 +416,45 @@ func (s *Service) ResetPassword(ctx context.Context, req PasswordResetRequest) e
 		if err != nil {
 			return err
 		}
+		if err := tx.LockAccount(ctx, tenantID, account.ID); err != nil {
+			return err
+		}
+		current, err := tx.GetAccountByPhoneHash(ctx, tenantID, phoneHash)
+		if err != nil {
+			return err
+		}
+		if current.ID != account.ID {
+			return apperr.ErrIdentityInvalidCredentials
+		}
+		account = current
 		if account.Status != AccountStatusActive {
 			return apperr.ErrIdentityAccountDisabled
 		}
 		if err := s.verifySMSCodeInTx(ctx, tx, tenantID, phoneHash, SMSSceneReset, codeHash); err != nil {
+			if isSMSVerificationRejection(err) {
+				verificationErr = err
+				return nil
+			}
 			return err
 		}
 		if _, err := tx.UpdateAccountPassword(ctx, account.ID, tenantID, passwordHash, false, AccountStatusActive); err != nil {
 			return err
 		}
-		return tx.RevokeAccountSessions(ctx, tenantID, account.ID)
+		if err := tx.RevokeAccountSessions(ctx, tenantID, account.ID); err != nil {
+			return err
+		}
+		return s.auditCredentialChange(ctx, tenantID, account.ID, "account.password.reset")
 	}); err != nil {
 		return apperr.AsAppError(err)
 	}
-	return nil
+	return verificationErr
 }
 
 // finishPasswordLogin 校验密码和状态后创建单端会话并签发 Token。
 func (s *Service) finishPasswordLogin(ctx context.Context, tenantID, accountID int64, password, device, ip string) (LoginResponse, error) {
+	if !tenantAllowedForDeployment(tenantID, s.deploy) {
+		return LoginResponse{}, apperr.ErrIdentityInvalidCredentials
+	}
 	var tenantSnapshot Tenant
 	var account Account
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
@@ -413,47 +494,68 @@ func (s *Service) finishPasswordLogin(ctx context.Context, tenantID, accountID i
 
 // issueTenantLogin 吊销旧会话后签发新的租户 Token 对。
 func (s *Service) issueTenantLogin(ctx context.Context, account Account, device, ip string) (LoginResponse, error) {
-	var refresh string
-	var session AuthSession
+	var out LoginResponse
 	if err := s.store.TenantTx(ctx, account.TenantID, func(ctx context.Context, tx TxStore) error {
-		// 单端登录要求同账号旧 Refresh 立即失效,因此吊销和新会话创建必须在同一事务。
-		if err := tx.RevokeAccountSessions(ctx, account.TenantID, account.ID); err != nil {
-			return err
-		}
-		token, err := crypto.RandomToken(48)
-		if err != nil {
-			return err
-		}
-		hash, err := s.hashSecret(token)
-		if err != nil {
-			return err
-		}
-		row, err := tx.CreateAuthSession(ctx, CreateSessionInput{
-			ID:               s.ids.Generate(),
-			TenantID:         account.TenantID,
-			AccountID:        account.ID,
-			RefreshTokenHash: hash,
-			DeviceInfo:       device,
-			IP:               ip,
-			ExpireAt:         s.refreshExpireAt(),
-		})
-		if err != nil {
-			return err
-		}
-		refresh = token
-		session = row
-		return nil
+		var err error
+		out, err = s.issueTenantLoginInTx(ctx, tx, account, device, ip)
+		return err
 	}); err != nil {
-		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
+		return LoginResponse{}, apperr.AsAppError(err)
+	}
+	return out, nil
+}
+
+func (s *Service) issueTenantLoginInTx(ctx context.Context, tx TxStore, account Account, device, ip string) (LoginResponse, error) {
+	if !tenantAllowedForDeployment(account.TenantID, s.deploy) {
+		return LoginResponse{}, apperr.ErrIdentityInvalidCredentials
+	}
+	// 锁账号而非已有会话，首次并发登录也必须串行化。
+	if err := tx.LockAccount(ctx, account.TenantID, account.ID); err != nil {
+		return LoginResponse{}, err
+	}
+	current, err := tx.GetAccount(ctx, account.ID)
+	if err != nil {
+		return LoginResponse{}, err
+	}
+	if err := EnsureAccountCanLogin(current, timex.Now()); err != nil {
+		return LoginResponse{}, err
+	}
+	if current.PasswordHash != account.PasswordHash {
+		return LoginResponse{}, apperr.ErrIdentityInvalidCredentials
+	}
+	t, err := tx.GetTenantByID(ctx, account.TenantID)
+	if err != nil {
+		return LoginResponse{}, err
+	}
+	if err := EnsureTenantCanLogin(t, timex.Now()); err != nil {
+		return LoginResponse{}, err
+	}
+	account = current
+	if err := tx.RevokeAccountSessions(ctx, account.TenantID, account.ID); err != nil {
+		return LoginResponse{}, err
+	}
+	refresh, err := crypto.RandomToken(48)
+	if err != nil {
+		return LoginResponse{}, err
+	}
+	hash, err := s.hashSecret(refresh)
+	if err != nil {
+		return LoginResponse{}, err
+	}
+	session, err := tx.CreateAuthSession(ctx, CreateSessionInput{
+		ID: s.ids.Generate(), TenantID: account.TenantID, AccountID: account.ID,
+		RefreshTokenHash: hash, DeviceInfo: device, IP: ip, ExpireAt: s.refreshExpireAt(),
+	})
+	if err != nil {
+		return LoginResponse{}, err
 	}
 	access, err := s.auth.IssueAccess(account.TenantID, account.ID, session.ID, false)
 	if err != nil {
-		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
+		return LoginResponse{}, err
 	}
-	// 响应前解密手机号只用于 DTO 脱敏和角色审计,不把明文写回数据库或日志。
 	phonePlain, err := s.decryptPhone(account.PhoneEnc)
 	if err != nil {
-		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
+		return LoginResponse{}, err
 	}
 	if err := s.auditLogin(ctx, account.TenantID, account.ID, audit.ActorRoleFromAccount(ToContractAccount(account, phonePlain))); err != nil {
 		return LoginResponse{}, err
@@ -463,24 +565,41 @@ func (s *Service) issueTenantLogin(ctx context.Context, account Account, device,
 
 // refreshTenantSession 轮转租户 Refresh 会话并签发新 Token。
 func (s *Service) refreshTenantSession(ctx context.Context, old AuthSession, device, ip string) (LoginResponse, error) {
-	now := timex.Now()
-	if old.Status != SessionStatusActive {
-		if err := s.handleTenantRefreshReplay(ctx, old, "revoked"); err != nil {
-			return LoginResponse{}, apperr.ErrInternal.WithCause(err)
-		}
-		return LoginResponse{}, apperr.ErrIdentitySessionInvalid
-	}
-	if now.After(old.ExpireAt) {
-		if err := s.handleTenantRefreshReplay(ctx, old, "expired"); err != nil {
-			return LoginResponse{}, apperr.ErrInternal.WithCause(err)
-		}
+	if !tenantAllowedForDeployment(old.TenantID, s.deploy) {
 		return LoginResponse{}, apperr.ErrIdentitySessionInvalid
 	}
 	var refresh string
 	var session AuthSession
 	var account Account
+	var replay bool
 	if err := s.store.TenantTx(ctx, old.TenantID, func(ctx context.Context, tx TxStore) error {
+		if err := tx.LockAccount(ctx, old.TenantID, old.AccountID); err != nil {
+			return err
+		}
+		current, err := tx.GetAuthSessionByID(ctx, old.TenantID, old.ID)
+		if err != nil {
+			return err
+		}
+		if current.AccountID != old.AccountID || current.TenantID != old.TenantID {
+			return apperr.ErrIdentitySessionInvalid
+		}
+		reason := refreshReplayReason(current.Status, current.ExpireAt, timex.Now())
+		if reason != "" {
+			replay = true
+			return s.handleTenantRefreshReplay(ctx, tx, current, reason)
+		}
 		if err := tx.RevokeAuthSession(ctx, old.TenantID, old.ID); err != nil {
+			if errors.Is(err, apperr.ErrIdentitySessionInvalid) {
+				replay = true
+				return s.handleTenantRefreshReplay(ctx, tx, current, "revoked")
+			}
+			return err
+		}
+		t, err := tx.GetTenantByID(ctx, old.TenantID)
+		if err != nil {
+			return err
+		}
+		if err := EnsureTenantCanLogin(t, timex.Now()); err != nil {
 			return err
 		}
 		a, err := tx.GetAccount(ctx, old.AccountID)
@@ -488,7 +607,7 @@ func (s *Service) refreshTenantSession(ctx context.Context, old AuthSession, dev
 			return err
 		}
 		account = a
-		if err := EnsureAccountCanLogin(account, now); err != nil {
+		if err := EnsureAccountCanLogin(account, timex.Now()); err != nil {
 			return err
 		}
 		token, err := crypto.RandomToken(48)
@@ -515,7 +634,13 @@ func (s *Service) refreshTenantSession(ctx context.Context, old AuthSession, dev
 		session = row
 		return nil
 	}); err != nil {
-		return LoginResponse{}, err
+		if isNoRows(err) {
+			return LoginResponse{}, apperr.ErrIdentitySessionInvalid
+		}
+		return LoginResponse{}, apperr.AsAppError(err)
+	}
+	if replay {
+		return LoginResponse{}, apperr.ErrIdentitySessionInvalid
 	}
 	access, err := s.auth.IssueAccess(account.TenantID, account.ID, session.ID, false)
 	if err != nil {
@@ -526,23 +651,40 @@ func (s *Service) refreshTenantSession(ctx context.Context, old AuthSession, dev
 
 // refreshPlatformSession 轮转平台管理员 Refresh 会话并签发新 Token。
 func (s *Service) refreshPlatformSession(ctx context.Context, old PlatformAuthSession, device, ip string) (LoginResponse, error) {
-	if old.Status != SessionStatusActive {
-		if err := s.handlePlatformRefreshReplay(ctx, old, "revoked"); err != nil {
-			return LoginResponse{}, apperr.ErrInternal.WithCause(err)
-		}
-		return LoginResponse{}, apperr.ErrIdentitySessionInvalid
-	}
-	if timex.Now().After(old.ExpireAt) {
-		if err := s.handlePlatformRefreshReplay(ctx, old, "expired"); err != nil {
-			return LoginResponse{}, apperr.ErrInternal.WithCause(err)
-		}
+	if !s.deploy.PlatformEnabled {
 		return LoginResponse{}, apperr.ErrIdentitySessionInvalid
 	}
 	var refresh string
 	var session PlatformAuthSession
+	var replay bool
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		if err := tx.RevokePlatformAuthSession(ctx, old.ID); err != nil {
+		if err := tx.LockPlatformAdmin(ctx, old.PlatformAdminID); err != nil {
 			return err
+		}
+		current, err := tx.GetPlatformAuthSessionByID(ctx, old.ID)
+		if err != nil {
+			return err
+		}
+		if current.PlatformAdminID != old.PlatformAdminID {
+			return apperr.ErrIdentitySessionInvalid
+		}
+		if reason := refreshReplayReason(current.Status, current.ExpireAt, timex.Now()); reason != "" {
+			replay = true
+			return s.handlePlatformRefreshReplay(ctx, tx, current, reason)
+		}
+		if err := tx.RevokePlatformAuthSession(ctx, old.ID); err != nil {
+			if errors.Is(err, apperr.ErrIdentitySessionInvalid) {
+				replay = true
+				return s.handlePlatformRefreshReplay(ctx, tx, current, "revoked")
+			}
+			return err
+		}
+		admin, err := tx.GetPlatformAdminByID(ctx, old.PlatformAdminID)
+		if err != nil {
+			return err
+		}
+		if admin.Status != TenantStatusActive {
+			return apperr.ErrIdentityAccountDisabled
 		}
 		token, err := crypto.RandomToken(48)
 		if err != nil {
@@ -560,7 +702,13 @@ func (s *Service) refreshPlatformSession(ctx context.Context, old PlatformAuthSe
 		session = row
 		return nil
 	}); err != nil {
-		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
+		if isNoRows(err) {
+			return LoginResponse{}, apperr.ErrIdentitySessionInvalid
+		}
+		return LoginResponse{}, apperr.AsAppError(err)
+	}
+	if replay {
+		return LoginResponse{}, apperr.ErrIdentitySessionInvalid
 	}
 	access, err := s.auth.IssueAccess(0, old.PlatformAdminID, session.ID, true)
 	if err != nil {
@@ -570,8 +718,8 @@ func (s *Service) refreshPlatformSession(ctx context.Context, old PlatformAuthSe
 }
 
 // handleTenantRefreshReplay 处理租户 Refresh 重放或过期命中,吊销账号会话并写入统一审计表。
-func (s *Service) handleTenantRefreshReplay(ctx context.Context, old AuthSession, reason string) error {
-	if err := s.revokeAllTenantSessions(ctx, old.TenantID, old.AccountID); err != nil {
+func (s *Service) handleTenantRefreshReplay(ctx context.Context, tx TxStore, old AuthSession, reason string) error {
+	if err := tx.RevokeAccountSessions(ctx, old.TenantID, old.AccountID); err != nil {
 		return err
 	}
 	entry, err := audit.BuildEntry(ctx, old.TenantID, old.AccountID, audit.ActorRoleSystem, "auth.refresh.replay", "identity.auth_session", old.ID, map[string]any{"reason": reason})
@@ -582,10 +730,8 @@ func (s *Service) handleTenantRefreshReplay(ctx context.Context, old AuthSession
 }
 
 // handlePlatformRefreshReplay 处理平台 Refresh 重放或过期命中,吊销平台账号会话并写入统一审计表。
-func (s *Service) handlePlatformRefreshReplay(ctx context.Context, old PlatformAuthSession, reason string) error {
-	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		return tx.RevokePlatformSessions(ctx, old.PlatformAdminID)
-	}); err != nil {
+func (s *Service) handlePlatformRefreshReplay(ctx context.Context, tx TxStore, old PlatformAuthSession, reason string) error {
+	if err := tx.RevokePlatformSessions(ctx, old.PlatformAdminID); err != nil {
 		return err
 	}
 	entry, err := audit.BuildEntry(ctx, 0, old.PlatformAdminID, contracts.RoleNumPlatformAdmin, "auth.refresh.replay", "identity.platform_auth_session", old.ID, map[string]any{"reason": reason})
@@ -617,13 +763,6 @@ func (s *Service) clearPasswordFailure(ctx context.Context, account Account) err
 	})
 }
 
-// revokeAllTenantSessions 吊销账号全部会话,用于 refresh 重放处理。
-func (s *Service) revokeAllTenantSessions(ctx context.Context, tenantID, accountID int64) error {
-	return s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		return tx.RevokeAccountSessions(ctx, tenantID, accountID)
-	})
-}
-
 // ptrAccountDTO 返回账号 DTO 指针。
 func ptrAccountDTO(dto AccountDTO) *AccountDTO {
 	return &dto
@@ -650,6 +789,14 @@ func (s *Service) auditLogout(ctx context.Context, tenantID, accountID int64, ro
 // auditLoginFailure 与失败计数同事务保存认证失败事实，不保存密码或验证码。
 func (s *Service) auditLoginFailure(ctx context.Context, account Account, method string) error {
 	entry, err := audit.BuildEntry(ctx, account.TenantID, account.ID, audit.ActorRoleSystem, "auth.login.failed", "identity.account", account.ID, map[string]any{"method": method})
+	if err != nil {
+		return err
+	}
+	return s.auditWriter.Write(ctx, entry)
+}
+
+func (s *Service) auditCredentialChange(ctx context.Context, tenantID, accountID int64, action string) error {
+	entry, err := audit.BuildEntry(ctx, tenantID, accountID, audit.ActorRoleSystem, action, "identity.account", accountID, map[string]any{})
 	if err != nil {
 		return err
 	}

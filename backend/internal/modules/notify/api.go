@@ -126,7 +126,11 @@ func (a notifyAPI) send(c *gin.Context) {
 	if !serviceTenantMatches(c, req.TenantID.Int64()) {
 		return
 	}
-	httpx.Write(c, struct{}{}, a.svc.Send(c.Request.Context(), contracts.NotifySendRequest{RequestID: req.RequestID, TenantID: req.TenantID.Int64(), Type: req.Type, Receivers: req.Receivers, Params: req.Params, Link: req.Link}))
+	receivers := make([]int64, len(req.Receivers))
+	for i, id := range req.Receivers {
+		receivers[i] = id.Int64()
+	}
+	httpx.Write(c, struct{}{}, a.svc.Send(c.Request.Context(), contracts.NotifySendRequest{RequestID: req.RequestID, TenantID: req.TenantID.Int64(), Type: req.Type, Receivers: receivers, Params: req.Params, Link: req.Link}))
 }
 
 func (a notifyAPI) push(c *gin.Context) {

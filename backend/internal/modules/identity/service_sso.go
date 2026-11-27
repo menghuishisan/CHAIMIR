@@ -45,6 +45,9 @@ func (s *Service) UpsertSSOConfig(ctx context.Context, req SSOConfigRequest) (SS
 	}
 	var out SSOConfig
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		if _, err := tx.GetTenantForUpdate(ctx, id.TenantID); err != nil {
+			return err
+		}
 		// 修改已有 LDAP 配置时绑定密码留空表示不修改:同一事务里读出已保存的配置,沿用其中的密文
 		var stored map[string]any
 		if req.Type == SSOTypeLDAP {
@@ -71,15 +74,12 @@ func (s *Service) UpsertSSOConfig(ctx context.Context, req SSOConfigRequest) (SS
 			return err
 		}
 		out = row
-		return nil
+		return s.auditTenantOperation(ctx, id, "tenant.sso.update", "identity.sso_config", out.ID, map[string]any{"type": req.Type, "enabled": req.Enabled})
 	}); err != nil {
 		if _, ok := apperr.As(err); ok {
 			return SSOConfig{}, err
 		}
 		return SSOConfig{}, apperr.ErrInternal.WithCause(err)
-	}
-	if err := s.auditTenantOperation(ctx, id, "tenant.sso.update", "identity.sso_config", out.ID, map[string]any{"type": req.Type, "enabled": req.Enabled}); err != nil {
-		return SSOConfig{}, err
 	}
 	return out, nil
 }
@@ -349,7 +349,10 @@ func (s *Service) loadEnabledSSOConfig(ctx context.Context, tenantCode string, t
 			return err
 		}
 		tenantID = t.ID
-		return nil
+		if !tenantAllowedForDeployment(tenantID, s.deploy) {
+			return apperr.ErrIdentitySSONotEnabled
+		}
+		return EnsureTenantCanLogin(t, timex.Now())
 	}); err != nil {
 		return 0, SSOConfig{}, apperr.ErrIdentitySSONotEnabled
 	}
@@ -482,7 +485,19 @@ func (s *Service) matchSSOAccount(ctx context.Context, tenantID int64, matchFiel
 
 // finishSSOLogin 校验租户和名单账号状态,并把 SSO 首登的待激活账号推进为正常账号。
 func (s *Service) finishSSOLogin(ctx context.Context, tenantID int64, account Account, device, ip string) (LoginResponse, error) {
+	var out LoginResponse
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		if err := tx.LockAccount(ctx, tenantID, account.ID); err != nil {
+			return err
+		}
+		current, err := tx.GetAccount(ctx, account.ID)
+		if err != nil {
+			return err
+		}
+		if current.No != account.No || current.PhoneHash != account.PhoneHash {
+			return apperr.ErrIdentityInvalidCredentials
+		}
+		account = current
 		t, err := tx.GetTenantByID(ctx, tenantID)
 		if err != nil {
 			return err
@@ -498,14 +513,12 @@ func (s *Service) finishSSOLogin(ctx context.Context, tenantID int64, account Ac
 			}
 			account = activated
 		}
-		return nil
+		out, err = s.issueTenantLoginInTx(ctx, tx, account, device, ip)
+		return err
 	}); err != nil {
-		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
+		return LoginResponse{}, apperr.AsAppError(err)
 	}
-	if err := EnsureAccountCanLogin(account, timex.Now()); err != nil {
-		return LoginResponse{}, err
-	}
-	return s.issueTenantLogin(ctx, account, device, ip)
+	return out, nil
 }
 
 // serviceOriginAllowed 校验 CAS service 回调 origin 是否在部署白名单内。

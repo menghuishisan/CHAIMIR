@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"reflect"
 	"strconv"
 	"strings"
 
 	"chaimir/internal/platform/intx"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/jsonvalue"
 )
 
 // RawMessage 返回输入 JSON 字节的隔离副本,供模块边界安全传递原始 JSON。
@@ -56,13 +56,13 @@ func AnyBytes(v any, marshalErr *apperr.Error) ([]byte, error) {
 	return data, nil
 }
 
-// ObjectMapStrict 将 JSON 对象字节解析为 map;配置等强校验场景保留解析错误。
+// ObjectMapStrict 解析 JSON 对象，动态数值保留为 json.Number；空输入或 null 返回空对象。
 func ObjectMapStrict(data []byte) (map[string]any, error) {
 	if len(data) == 0 {
 		return map[string]any{}, nil
 	}
 	var out map[string]any
-	if err := json.Unmarshal(data, &out); err != nil {
+	if err := DecodeStrict(data, &out); err != nil {
 		return nil, err
 	}
 	if out == nil {
@@ -71,7 +71,7 @@ func ObjectMapStrict(data []byte) (map[string]any, error) {
 	return out, nil
 }
 
-// DecodeStrict 解析 JSON 到指定目标;强校验读取时直接返回错误。
+// DecodeStrict 解析单个 JSON 值到目标，动态数值保留为 json.Number。
 func DecodeStrict(data []byte, out any) error {
 	if len(data) == 0 {
 		return nil
@@ -102,11 +102,6 @@ func CloneObjectStrict(in map[string]any) (map[string]any, error) {
 		return nil, err
 	}
 	return ObjectMapStrict(data)
-}
-
-// Equal 按 JSON 结构语义比较两个值,避免 map 顺序和具体实现影响比较结果。
-func Equal(left, right any) bool {
-	return reflect.DeepEqual(normalize(left), normalize(right))
 }
 
 // StringFromAny 把 JSON 标量转换为字符串表示,无效值返回空字符串。
@@ -173,7 +168,6 @@ func Float64FromAnyOK(v any) (float64, bool) {
 	return float64Scalar(v)
 }
 
-// stringScalar 把平台允许的 JSON 标量规整为字符串,集中维护数字到文本的格式规则。
 func stringScalar(v any) (string, bool) {
 	switch val := v.(type) {
 	case string:
@@ -216,7 +210,7 @@ func int64Scalar(v any) (int64, bool) {
 		}
 		return int64(val), true
 	case json.Number:
-		return int64Scalar(val.String())
+		return jsonvalue.Int64(val)
 	case string:
 		n, err := strconv.ParseInt(strings.TrimSpace(val), 10, 64)
 		return n, err == nil
@@ -225,7 +219,6 @@ func int64Scalar(v any) (int64, bool) {
 	}
 }
 
-// float64Scalar 把平台允许的 JSON 数字或数字字符串转换为 float64,并返回是否成功。
 func float64Scalar(v any) (float64, bool) {
 	switch val := v.(type) {
 	case float64:
@@ -252,7 +245,6 @@ func float64Scalar(v any) (float64, bool) {
 	}
 }
 
-// isFiniteFloat64 判断浮点值是否可安全参与范围比较和持久化。
 func isFiniteFloat64(value float64) bool {
 	return !math.IsNaN(value) && !math.IsInf(value, 0)
 }
@@ -314,22 +306,10 @@ func StringMapFromAny(v any) map[string]string {
 	return out
 }
 
-// normalize 通过 JSON 往返把结构化值归一到标准 map/slice/number 表示。
-func normalize(v any) any {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return v
-	}
-	var out any
-	if err := json.Unmarshal(data, &out); err != nil {
-		return v
-	}
-	return out
-}
-
 // decodeStrict 使用标准 decoder 统一强校验 JSON,拒绝未知字段可选,并拒绝尾随非空 JSON token。
 func decodeStrict(data []byte, out any, knownFields bool) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	if knownFields {
 		dec.DisallowUnknownFields()
 	}

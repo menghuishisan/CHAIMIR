@@ -99,19 +99,39 @@
 /api/v1/sandbox/runtimes/{id}/images/{img}/prepull:
   post:
     tags: [sandbox]
-    summary: 触发运行时工作负载镜像集合全节点预拉取
+    summary: 按冻结组合摘要预拉取完整镜像闭包
     operationId: sandboxPrepullRuntimeImage
     x-chaimir-audience: platform-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ImagePath" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [composition_digest]
+            properties:
+              composition_digest:
+                type: string
+                minLength: 1
+                description: M2 已登记的冻结组合摘要，完整快照及镜像闭包由服务端读取。
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   get:
     tags: [sandbox]
-    summary: 查询运行时工作负载镜像集合预拉取状态
+    summary: 查询指定冻结组合的镜像预拉取状态
+    description: 进行中返回编排器最近一次真实节点进度；image_count 按完整镜像地址去重，与触发和加入等待的响应一致。
     operationId: sandboxGetRuntimeImagePrepull
     x-chaimir-audience: platform-admin
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ImagePath" }]
+    parameters:
+      - { $ref: "#/components/parameters/IDPath" }
+      - { $ref: "#/components/parameters/ImagePath" }
+      - name: composition_digest
+        in: query
+        required: true
+        schema: { type: string, minLength: 1 }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sandbox/tools:
   get:
@@ -134,22 +154,54 @@
   post:
     tags: [sandbox]
     summary: 创建沙箱
-    description: 新创建在事务提交后返回分配中、创建中的受理快照，包含沙箱编号及冻结能力；启动异步推进，通过现有详情和进度观察就绪。重复请求返回已有沙箱的当前状态。
+    description: 请求包含完整 composition_snapshot、owner_account_id、可选 authorized_account_ids、scope_ref 及保活/快照参数；租户和来源只取服务签名上下文，请求体不接受 tenant_id、source_ref 或独立 composition_digest。新创建在事务提交后返回分配中、创建中的受理快照，包含沙箱编号及冻结能力；启动异步推进，通过现有详情和进度观察就绪。重复请求返回已有沙箱的当前状态。
     operationId: sandboxCreateSandbox
     x-chaimir-audience: internal
     x-chaimir-internal: true
     security: [{ serviceAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [composition_snapshot, owner_account_id, scope_ref]
+            properties:
+              composition_snapshot:
+                type: object
+                additionalProperties: true
+                description: M2 已编译登记的完整冻结快照，内容须与其中 digest 及服务端记录一致。
+              owner_account_id: { $ref: "#/components/schemas/SnowflakeID" }
+              authorized_account_ids:
+                type: array
+                items: { $ref: "#/components/schemas/SnowflakeID" }
+              scope_ref: { type: string, minLength: 1 }
+              keep_alive: { type: boolean, default: false }
+              snapshot_enabled: { type: boolean, default: false }
+              keep_alive_minutes: { type: integer, format: int32, minimum: 0, default: 0 }
+              snapshot_retention_minutes: { type: integer, format: int32, minimum: 0, default: 0 }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sandbox/internal/sandboxes/recycle:
   post:
     tags: [sandbox]
     summary: 按 scope_ref 批量回收沙箱
+    description: 请求体只接受 scope_ref 和可选 reason，租户与来源取服务签名上下文。
     operationId: sandboxRecycleByScopeRef
     x-chaimir-audience: internal
     x-chaimir-internal: true
     security: [{ serviceAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [scope_ref]
+            properties:
+              scope_ref: { type: string, minLength: 1 }
+              reason: { type: string }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sandbox/sandboxes/{id}:
   get:
@@ -377,6 +429,7 @@
     tags: [sandbox]
     summary: 调整配额
     operationId: sandboxUpsertQuota
+    description: 平台管理员必须指定 tenant_id；校管按统一 JSON 规则解析后覆写为会话租户。七项配额与审计同事务提交。
     x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }

@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"fmt"
+	"maps"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -19,6 +20,7 @@ import (
 	pkgcrypto "chaimir/pkg/crypto"
 
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/validation"
 	podresource "k8s.io/component-helpers/resource"
@@ -337,26 +339,20 @@ func validateComponentBindings(bindings []ComponentBinding, components []workloa
 	return nil
 }
 
-// validateCommandToolPolicy 校验命令工具只允许声明完整 argv 白名单和正数超时。
 func validateCommandToolPolicy(policy *CommandToolPolicy) error {
 	if policy == nil || len(policy.AllowedArgv) == 0 || policy.DefaultTimeoutSeconds <= 0 || policy.MaxTimeoutSeconds <= 0 || policy.DefaultTimeoutSeconds > policy.MaxTimeoutSeconds {
 		return apperr.ErrSandboxToolCreateInvalid
 	}
 	seen := map[string]struct{}{}
-	for i := range policy.AllowedArgv {
-		argv := policy.AllowedArgv[i]
+	for _, argv := range policy.AllowedArgv {
 		if !workload.ValidNonShellCommand(argv) {
 			return apperr.ErrSandboxToolCreateInvalid
-		}
-		for j := range argv {
-			argv[j] = strings.TrimSpace(argv[j])
 		}
 		key := strings.Join(argv, "\x00")
 		if _, exists := seen[key]; exists {
 			return apperr.ErrSandboxToolCreateInvalid
 		}
 		seen[key] = struct{}{}
-		policy.AllowedArgv[i] = argv
 	}
 	return nil
 }
@@ -366,16 +362,12 @@ func commandPolicyConfigured(policy CommandToolPolicy) bool {
 	return len(policy.AllowedArgv) > 0 || policy.DefaultTimeoutSeconds != 0 || policy.MaxTimeoutSeconds != 0
 }
 
-// validatePrepullCommand 复用统一 argv 边界并归一镜像 manifest 提供的受控自检命令。
 func validatePrepullCommand(command []string) error {
 	if len(command) == 0 {
 		return nil
 	}
 	if !workload.ValidCommand(command) {
 		return apperr.ErrSandboxToolCreateInvalid
-	}
-	for i := range command {
-		command[i] = strings.TrimSpace(command[i])
 	}
 	return nil
 }
@@ -471,13 +463,12 @@ func validateToolServicesAndRoutes(spec *ToolResourceSpec) error {
 	return nil
 }
 
-// componentPortMap 汇总组件名称到端口名称的索引。
-func componentPortMap(components []workload.ComponentSpec) map[string]map[string]int32 {
-	out := map[string]map[string]int32{}
+func componentPortMap(components []workload.ComponentSpec) map[string]map[string]workload.PortSpec {
+	out := map[string]map[string]workload.PortSpec{}
 	for _, component := range components {
-		ports := map[string]int32{}
+		ports := map[string]workload.PortSpec{}
 		for _, port := range component.Ports {
-			ports[port.Name] = port.ContainerPort
+			ports[port.Name] = port
 		}
 		out[component.Name] = ports
 	}
@@ -574,11 +565,13 @@ func validateTenantResourceCapacity(quota TenantQuota, sandboxCount int64, cfg c
 	if err != nil {
 		return apperr.ErrSandboxQuotaInvalid.WithCause(err)
 	}
-	if cpu.MilliValue()*sandboxCount > int64(quota.MaxCPU)*1000 {
+	// 先按 quantity 累加再比较，避免单位取整及 int64 乘法溢出。
+	cpu.Mul(sandboxCount)
+	if cpu.Cmp(*resource.NewQuantity(int64(quota.MaxCPU), resource.DecimalSI)) > 0 {
 		return apperr.ErrSandboxResourceQuotaExceeded
 	}
-	memoryMiB := memory.Value() / (1024 * 1024)
-	if memoryMiB*sandboxCount > int64(quota.MaxMemoryMB) {
+	memory.Mul(sandboxCount)
+	if memory.Cmp(*resource.NewQuantity(int64(quota.MaxMemoryMB)*1024*1024, resource.BinarySI)) > 0 {
 		return apperr.ErrSandboxResourceQuotaExceeded
 	}
 	return nil
@@ -715,11 +708,6 @@ func normalizeAndValidateAdapterSpec(spec *AdapterSpec, cfg config.SandboxConfig
 	}
 	if err := validateRuntimeContainerNames(spec); err != nil {
 		return err
-	}
-	if len(spec.Pods) == 0 {
-		if err := validatePodPortConflicts(podTopologyForAdapter(*spec)); err != nil {
-			return err
-		}
 	}
 	if err := validatePodTopology(spec); err != nil {
 		return err
@@ -877,7 +865,7 @@ func validateRuntimeContainerNames(spec *AdapterSpec) error {
 // validatePodTopology 校验显式 Pod 组拓扑,缺省时使用单 Pod 多容器口径。
 func validatePodTopology(spec *AdapterSpec) error {
 	if len(spec.Pods) == 0 {
-		return nil
+		return validatePodPortConflicts(podTopologyForAdapter(*spec))
 	}
 	containerDefs := declaredContainerMap(*spec)
 	seenPods := map[string]struct{}{}
@@ -893,7 +881,6 @@ func validatePodTopology(spec *AdapterSpec) error {
 		}
 		seenPods[pod.Name] = struct{}{}
 		containerNames := map[string]struct{}{}
-		ports := map[int32]struct{}{}
 		for j := range pod.Containers {
 			container := &pod.Containers[j]
 			container.Name = strings.TrimSpace(container.Name)
@@ -914,30 +901,25 @@ func validatePodTopology(spec *AdapterSpec) error {
 				return apperr.ErrSandboxPodTopologyInvalid
 			}
 			containerNames[declared.Name] = struct{}{}
-			for _, port := range declared.Ports {
-				if _, exists := ports[port.ContainerPort]; exists {
-					return apperr.ErrSandboxPodTopologyInvalid
-				}
-				ports[port.ContainerPort] = struct{}{}
-			}
 		}
 	}
 	if !runtimeContainerSeen {
 		return apperr.ErrSandboxPodTopologyInvalid
 	}
-	return nil
+	return validatePodPortConflicts(podTopologyForAdapter(*spec))
 }
 
-// validatePodPortConflicts 校验缺省单 Pod 拓扑中所有容器的数值端口不冲突。
+// 同 Pod 内端口号与协议共同标识监听地址。
 func validatePodPortConflicts(pods []workload.PodSpec) error {
 	for _, pod := range pods {
-		ports := map[int32]struct{}{}
+		ports := map[workload.NetworkPortRef]bool{}
 		for _, container := range pod.Containers {
 			for _, port := range container.Ports {
-				if _, exists := ports[port.ContainerPort]; exists {
+				identity := workload.NetworkPortRef{Port: port.ContainerPort, Protocol: valueOrDefault(port.Protocol, "TCP")}
+				if ports[identity] {
 					return apperr.ErrSandboxPodTopologyInvalid
 				}
-				ports[port.ContainerPort] = struct{}{}
+				ports[identity] = true
 			}
 		}
 	}
@@ -955,31 +937,16 @@ func declaredContainerMap(spec AdapterSpec) map[string]workload.ComponentSpec {
 
 // podContainerIsReferenceOnly 保证 pods[].containers 只是引用,避免同一容器在 adapter_spec 中出现两套声明。
 func podContainerIsReferenceOnly(spec workload.ComponentSpec) bool {
-	return spec.Name != "" &&
-		strings.TrimSpace(spec.ImageURL) == "" &&
-		len(spec.Command) == 0 &&
-		len(spec.Args) == 0 &&
-		len(spec.Env) == 0 &&
-		len(spec.Ports) == 0 &&
-		len(spec.Resources.Requests) == 0 &&
-		len(spec.Resources.Limits) == 0 &&
-		strings.TrimSpace(spec.ReadinessProbe.Type) == "" &&
-		strings.TrimSpace(spec.LivenessProbe.Type) == "" &&
-		strings.TrimSpace(spec.Workdir) == "" &&
-		spec.ReadOnlyRootFilesystem == nil &&
-		len(spec.Labels) == 0 &&
-		spec.MountWorkspace == nil &&
-		len(spec.MountDomains) == 0 &&
-		len(spec.EphemeralMounts) == 0 &&
-		spec.RunAsUser == nil && spec.RunAsGroup == nil
+	return spec.Name != "" && apiequality.Semantic.DeepEqual(spec, workload.ComponentSpec{Name: spec.Name})
 }
 
 // validateNetworkRules 校验同沙箱 Pod 互通必须显式引用已声明的目标端口。
 func validateNetworkRules(spec *AdapterSpec) error {
-	return validateNetworkRulesForRuntimes(map[string]AdapterSpec{"": *spec}, nil)
+	return validateCompositionNetworkRules(map[string]AdapterSpec{"": *spec}, nil)
 }
 
-func validateNetworkRulesForRuntimes(runtimes map[string]AdapterSpec, tools map[string]Tool) error {
+// validateCompositionNetworkRules 在本次完整拓扑上核对所有运行时和工具的网络规则。
+func validateCompositionNetworkRules(runtimes map[string]AdapterSpec, tools map[string]Tool) error {
 	owners := make([]string, 0, len(runtimes))
 	for owner := range runtimes {
 		owners = append(owners, owner)
@@ -1017,32 +984,98 @@ func validateNetworkRulesForRuntimes(runtimes map[string]AdapterSpec, tools map[
 			}
 		}
 	}
+	for _, code := range slices.Sorted(maps.Keys(tools)) {
+		if err := validateToolNetworkTargets(tools[code], portsByRole); err != nil {
+			return apperr.ErrSandboxToolIncompatible.WithCause(fmt.Errorf("组件 %s 连接目标无效: %w", code, err))
+		}
+	}
 	return nil
 }
 
-// 名称优先，解析结果写入规则，保证冻结快照和 K8s 策略使用同一容器端口。
-func resolveNetworkRulePorts(refs []workload.NetworkPortRef, targetPorts map[string]int32) error {
+func compositionPodPorts(runtimes map[string]AdapterSpec, tools map[string]Tool) (map[string]map[string]workload.PortSpec, error) {
+	portsByRole := make(map[string]map[string]workload.PortSpec)
+	for _, runtime := range runtimes {
+		for role, ports := range podPortMap(podTopologyForAdapter(runtime)) {
+			if _, exists := portsByRole[role]; exists {
+				return nil, apperr.ErrSandboxNetworkPolicyInvalid
+			}
+			portsByRole[role] = ports
+		}
+	}
+	for _, tool := range tools {
+		for name, ports := range componentPortMap(tool.ResourceSpec.Components) {
+			role := toolComponentPodName(tool.Code, name)
+			if _, exists := portsByRole[role]; exists {
+				return nil, apperr.ErrSandboxNetworkPolicyInvalid
+			}
+			portsByRole[role] = ports
+		}
+	}
+	return portsByRole, nil
+}
+
+func validateToolNetworkTargets(tool Tool, portsByRole map[string]map[string]workload.PortSpec) error {
+	componentPorts := componentPortMap(tool.ResourceSpec.Components)
+	for _, rule := range tool.ResourceSpec.NetworkRules {
+		if _, ok := componentPorts[rule.From]; !ok {
+			return fmt.Errorf("来源组件 %s 未声明", rule.From)
+		}
+		targetPorts, ok := componentPorts[rule.To]
+		if !ok {
+			targetPorts = portsByRole[rule.To]
+		}
+		if len(targetPorts) == 0 {
+			return fmt.Errorf("目标 Pod 或组件 %s 未声明", rule.To)
+		}
+		if err := resolveNetworkRulePorts(rule.Ports, targetPorts); err != nil {
+			return fmt.Errorf("规则 %s 的目标 %s 端口无效: %w", rule.Name, rule.To, err)
+		}
+	}
+	return nil
+}
+
+// 冻结实际端口与协议；仅数字端口跨协议重名时拒绝猜测。
+func resolveNetworkRulePorts(refs []workload.NetworkPortRef, targetPorts map[string]workload.PortSpec) error {
 	if len(refs) == 0 {
 		return apperr.ErrSandboxNetworkPolicyInvalid
 	}
-	seen := make(map[int32]struct{}, len(refs))
+	seen := make(map[workload.NetworkPortRef]bool, len(refs))
 	for i := range refs {
 		ref := &refs[i]
 		ref.Name = strings.TrimSpace(ref.Name)
+		ref.Protocol = strings.ToUpper(strings.TrimSpace(ref.Protocol))
+		var resolved workload.PortSpec
+		found := false
 		if ref.Name != "" {
 			port, ok := targetPorts[ref.Name]
-			if !ok {
+			if !ok || ref.Protocol != "" && ref.Protocol != valueOrDefault(port.Protocol, "TCP") {
 				return apperr.ErrSandboxNetworkPolicyInvalid
 			}
-			ref.Port = port
+			resolved, found = port, true
+		} else {
+			for _, port := range targetPorts {
+				port.Protocol = valueOrDefault(port.Protocol, "TCP")
+				if port.ContainerPort != ref.Port || ref.Protocol != "" && ref.Protocol != port.Protocol {
+					continue
+				}
+				if found && resolved.Protocol != port.Protocol {
+					return apperr.ErrSandboxNetworkPolicyInvalid
+				}
+				resolved, found = port, true
+			}
 		}
-		if ref.Port <= 0 || ref.Port > 65535 || !networkPortDeclared(targetPorts, ref.Port) {
+		if !found || resolved.ContainerPort <= 0 || resolved.ContainerPort > 65535 {
 			return apperr.ErrSandboxNetworkPolicyInvalid
 		}
-		if _, duplicate := seen[ref.Port]; duplicate {
+		ref.Port, ref.Protocol = resolved.ContainerPort, valueOrDefault(resolved.Protocol, "TCP")
+		if ref.Protocol != "TCP" && ref.Protocol != "UDP" {
 			return apperr.ErrSandboxNetworkPolicyInvalid
 		}
-		seen[ref.Port] = struct{}{}
+		identity := workload.NetworkPortRef{Port: ref.Port, Protocol: ref.Protocol}
+		if seen[identity] {
+			return apperr.ErrSandboxNetworkPolicyInvalid
+		}
+		seen[identity] = true
 	}
 	return nil
 }
@@ -1084,29 +1117,18 @@ func toolHasContainerSpec(spec ToolResourceSpec) bool {
 		len(spec.Routes) > 0
 }
 
-// podPortMap 汇总 Pod 名称到该 Pod 已声明端口的索引。
-func podPortMap(pods []workload.PodSpec) map[string]map[string]int32 {
-	podPorts := map[string]map[string]int32{}
+func podPortMap(pods []workload.PodSpec) map[string]map[string]workload.PortSpec {
+	podPorts := map[string]map[string]workload.PortSpec{}
 	for _, pod := range pods {
-		ports := map[string]int32{}
+		ports := map[string]workload.PortSpec{}
 		for _, container := range pod.Containers {
 			for _, port := range container.Ports {
-				ports[port.Name] = port.ContainerPort
+				ports[port.Name] = port
 			}
 		}
 		podPorts[pod.Name] = ports
 	}
 	return podPorts
-}
-
-// networkPortDeclared 判断数字端口是否属于目标 Pod 已声明端口,避免规则放行未公开端口。
-func networkPortDeclared(ports map[string]int32, port int32) bool {
-	for _, declared := range ports {
-		if declared == port {
-			return true
-		}
-	}
-	return false
 }
 
 // podTopologyForAdapter 返回 adapter 归一化后的运行时 Pod 组,供校验与服务解析复用。
@@ -1577,20 +1599,22 @@ func validateProbeSpec(probe *workload.ProbeSpec, portNames map[string]struct{})
 	return nil
 }
 
-// validateResourceSpec 校验显式资源配置必须同时声明 requests 与 limits,并能被 K8s quantity 解析。
+// validateResourceSpec 校验显式 CPU/内存非负，且 requests 不超过 limits。
 func validateResourceSpec(spec workload.ResourceSpec) error {
 	if len(spec.Requests) == 0 && len(spec.Limits) == 0 {
 		return nil
 	}
-	for _, resources := range []map[string]string{spec.Requests, spec.Limits} {
-		if strings.TrimSpace(resources["cpu"]) == "" || strings.TrimSpace(resources["memory"]) == "" {
+	for _, name := range []string{"cpu", "memory"} {
+		request, err := resource.ParseQuantity(spec.Requests[name])
+		if err != nil {
+			return apperr.ErrSandboxContainerSpecInvalid.WithCause(err)
+		}
+		limit, err := resource.ParseQuantity(spec.Limits[name])
+		if err != nil {
+			return apperr.ErrSandboxContainerSpecInvalid.WithCause(err)
+		}
+		if request.Sign() < 0 || limit.Sign() < 0 || request.Cmp(limit) > 0 {
 			return apperr.ErrSandboxContainerSpecInvalid
-		}
-		if _, err := resource.ParseQuantity(resources["cpu"]); err != nil {
-			return apperr.ErrSandboxContainerSpecInvalid.WithCause(err)
-		}
-		if _, err := resource.ParseQuantity(resources["memory"]); err != nil {
-			return apperr.ErrSandboxContainerSpecInvalid.WithCause(err)
 		}
 	}
 	return nil

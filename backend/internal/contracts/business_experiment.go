@@ -3,7 +3,12 @@ package contracts
 
 import "context"
 
-// ExperimentCloneRequest 的来源由已锁定课程产生，不接受外部请求直接指定。
+// ExperimentProgressReadService 由 M7 校验实例成员，供 M10 订阅进度时复核。
+type ExperimentProgressReadService interface {
+	AuthorizeProgressSubscription(ctx context.Context, tenantID, instanceID int64) error
+}
+
+// ExperimentCloneRequest 的来源在课程锁内完成授权，读取结束后才准备依赖；不接受外部请求。
 type ExperimentCloneRequest struct {
 	SourceTenantID      int64
 	SourceCourseID      int64

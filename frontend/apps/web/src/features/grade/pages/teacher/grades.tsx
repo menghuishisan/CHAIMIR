@@ -63,36 +63,40 @@ function ReportWorkspace() {
     () => false,
   )
   const states = useMemo(() => courseReportStates(reviews.data ?? []), [reviews.data])
+  const semestersReady = semesters.status === 'success' || semesters.status === 'empty'
+  const reviewsReady = reviews.status === 'success' || reviews.status === 'empty'
+  const reviewProblem = reviewsReady
+    ? undefined
+    : reviews.status === 'error'
+      ? '报送状态暂时读不到,请重新读取后再报送'
+      : '正在读取报送状态,请在读取成功后报送'
 
   const currentSemester = semesters.data?.find((semester) => semester.is_current)
   const semesterValue = query.semester || currentSemester?.id || 'all'
   const semesterName = semesters.data?.find((semester) => semester.id === semesterValue)?.name
   const visibleCourses = useMemo(
-    () => (courses.data ?? []).filter((course) => semesterValue === 'all' || course.semester === semesterName),
-    [courses.data, semesterName, semesterValue],
+    () => semestersReady
+      ? (courses.data ?? []).filter((course) => semesterValue === 'all' || course.semester === semesterName)
+      : [],
+    [courses.data, semesterName, semesterValue, semestersReady],
   )
+  const defaultCourseId = reviewsReady
+    ? defaultReportCourse(visibleCourses.map((course) => course.id), states)
+    : undefined
   const selectedId =
-    visibleCourses.find((course) => course.id === query.course)?.id ??
-    defaultReportCourse(
-      visibleCourses.map((course) => course.id),
-      states,
-    )
+    visibleCourses.find((course) => course.id === query.course)?.id ?? defaultCourseId
   const selected = visibleCourses.find((course) => course.id === selectedId)
 
   if (courses.status === 'error') {
     return <ResourceError message={courses.error?.message ?? '课程暂时读取不到'} traceId={courses.error?.traceId} onRetry={courses.reload} />
   }
+  if (semesters.status === 'error') {
+    return <ResourceError message={semesters.error?.message ?? '学期暂时读取不到'} traceId={semesters.error?.traceId} onRetry={semesters.reload} />
+  }
 
   return (
     <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
       <section aria-label="课程与报送状态" className="flex flex-col gap-3 lg:w-80 lg:shrink-0">
-        {semesters.status === 'error' ? (
-          <ResourceError
-            message={semesters.error?.message ?? '学期暂时读取不到'}
-            traceId={semesters.error?.traceId}
-            onRetry={semesters.reload}
-          />
-        ) : null}
         <Select
           aria-label="按学期筛选课程"
           options={[
@@ -106,10 +110,12 @@ function ReportWorkspace() {
           onValueChange={(value) => setQuery({ semester: value, course: '' })}
         />
         <div className="overflow-hidden rounded-lg bg-surface shadow-xs">
-          {courses.status === 'loading' || reviews.status === 'loading' ? (
+          {courses.status === 'loading' || reviews.status === 'loading' || !semestersReady ? (
             <div aria-busy="true" className="p-4">
               <Skeleton variant="line" lines={4} />
             </div>
+          ) : reviews.status === 'error' ? (
+            <ResourceError message={reviews.error?.message ?? '报送状态暂时读不到'} traceId={reviews.error?.traceId} onRetry={reviews.reload} />
           ) : visibleCourses.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-ink-sub">这个学期没有你的课程。</p>
           ) : (
@@ -143,16 +149,6 @@ function ReportWorkspace() {
             </ul>
           )}
         </div>
-        {reviews.status === 'error' ? (
-          <Callout tone="warning">
-            <span className="flex flex-wrap items-center gap-2">
-              报送状态暂时读不到。
-              <Button variant="outline" size="sm" onClick={reviews.reload}>
-                重新读取
-              </Button>
-            </span>
-          </Callout>
-        ) : null}
       </section>
 
       <section aria-label="所选课程的成绩" className="min-w-0 flex-1">
@@ -161,11 +157,12 @@ function ReportWorkspace() {
             key={selected.id}
             course={selected}
             semesters={semesters.data ?? []}
-            semestersReady={semesters.status === 'success' || semesters.status === 'empty'}
+            semestersReady={semestersReady}
             review={states.get(selected.id)}
+            reviewProblem={reviewProblem}
             onSubmitted={reviews.reload}
           />
-        ) : courses.status === 'loading' ? (
+        ) : courses.status === 'loading' || reviews.status === 'loading' || !semestersReady ? (
           <Skeleton variant="block" />
         ) : (
           <div className="rounded-lg bg-surface px-6 py-12 text-center text-sm text-ink-sub shadow-xs">在左侧选一门课。</div>
@@ -184,12 +181,14 @@ function SelectedCourse({
   semesters,
   semestersReady,
   review,
+  reviewProblem,
   onSubmitted,
 }: {
   course: Course
   semesters: Semester[]
   semestersReady: boolean
   review: GradeReview | undefined
+  reviewProblem: string | undefined
   onSubmitted: () => void
 }) {
   const [comment, setComment] = useState('')
@@ -203,7 +202,7 @@ function SelectedCourse({
       : !semesters.some((semester) => semester.name === course.semester)
         ? `学期「${course.semester}」还没有在学校登记,请联系学校管理员核对`
         : undefined
-  const reason = blocked ?? semesterProblem
+  const reason = reviewProblem ?? blocked ?? semesterProblem
 
   const submit = useCallback(async () => {
     if (submitting || reason) return
@@ -225,13 +224,15 @@ function SelectedCourse({
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="text-lg font-semibold text-ink">{course.name}</h2>
-        {review ? (
+        {reviewProblem ? (
+          <span className="text-sm text-ink-sub">{reviewProblem}</span>
+        ) : review ? (
           <StatusIndicator tone={gradeReviewStatusTone(review.status)} label={gradeReviewStatusLabel(review.status)} />
         ) : (
           <span className="text-sm text-ink-sub">未报送</span>
         )}
       </div>
-      {review?.status === GradeReviewStatus.REJECTED && review.comment ? (
+      {!reviewProblem && review?.status === GradeReviewStatus.REJECTED && review.comment ? (
         <Callout tone="warning" title="学校驳回了上次报送">
           {review.comment}。按意见改好成绩后可以重新报送。
         </Callout>
@@ -278,7 +279,9 @@ function ReviewHistoryOnly() {
       <Callout tone="info">学校暂未开放课程教学,可以查看已有的报送记录;开放后可以维护课程成绩并报送。</Callout>
       {reviews.status === 'error' ? (
         <ResourceError message={reviews.error?.message ?? '报送记录暂时读取不到'} traceId={reviews.error?.traceId} onRetry={reviews.reload} />
-      ) : reviews.status === 'loading' ? (
+      ) : semesters.status === 'error' ? (
+        <ResourceError message={semesters.error?.message ?? '学期暂时读取不到'} traceId={semesters.error?.traceId} onRetry={semesters.reload} />
+      ) : reviews.status === 'loading' || semesters.status === 'loading' ? (
         <Skeleton variant="line" lines={4} />
       ) : (reviews.data ?? []).length === 0 ? (
         <div className="flex flex-col items-center rounded-lg bg-surface px-6 py-12 text-center shadow-xs">

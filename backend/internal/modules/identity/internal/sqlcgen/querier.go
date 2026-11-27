@@ -64,6 +64,7 @@ type Querier interface {
 	GetTenantApplication(ctx context.Context, id int64) (TenantApplication, error)
 	GetTenantByCode(ctx context.Context, code string) (Tenant, error)
 	GetTenantByID(ctx context.Context, id int64) (Tenant, error)
+	GetTenantForUpdate(ctx context.Context, id int64) (Tenant, error)
 	HasPendingTenantApplication(ctx context.Context, arg HasPendingTenantApplicationParams) (bool, error)
 	IncrementSMSVerifyAttempts(ctx context.Context, arg IncrementSMSVerifyAttemptsParams) error
 	ListAccounts(ctx context.Context, arg ListAccountsParams) ([]ListAccountsRow, error)
@@ -78,15 +79,17 @@ type Querier interface {
 	ListDepartments(ctx context.Context) ([]Department, error)
 	ListImportBatches(ctx context.Context, tenantID int64) ([]ImportBatch, error)
 	ListMajors(ctx context.Context, dollar_1 int64) ([]Major, error)
-	// 列表只读取公开预览结果,不取包含初始密码的原始rows。
+	// 列表只读取公开预览结果,不取包含账号资料和密码哈希的原始rows。
 	ListPendingImportPreviews(ctx context.Context, arg ListPendingImportPreviewsParams) ([]ListPendingImportPreviewsRow, error)
 	ListPlatformAuthSessionsByAdmin(ctx context.Context, platformAdminID int64) ([]PlatformAuthSession, error)
 	ListSSOConfigs(ctx context.Context, tenantID int64) ([]SsoConfig, error)
 	ListTenantApplications(ctx context.Context, dollar_1 int16) ([]TenantApplication, error)
 	ListTenants(ctx context.Context) ([]Tenant, error)
-	ListTenantsPaged(ctx context.Context, arg ListTenantsPagedParams) ([]ListTenantsPagedRow, error)
+	ListTenantsPaged(ctx context.Context, arg ListTenantsPagedParams) ([]Tenant, error)
 	LockAccount(ctx context.Context, arg LockAccountParams) (int64, error)
 	LockOrganizationScope(ctx context.Context, dollar_1 int64) error
+	LockPlatformAdmin(ctx context.Context, id int64) (int64, error)
+	LockSchoolAdministrationScope(ctx context.Context, dollar_1 int64) error
 	MajorExists(ctx context.Context, arg MajorExistsParams) (bool, error)
 	MarkImportPreviewSubmitted(ctx context.Context, arg MarkImportPreviewSubmittedParams) (int64, error)
 	MarkSMSCodeUsed(ctx context.Context, arg MarkSMSCodeUsedParams) error
@@ -97,7 +100,7 @@ type Querier interface {
 	PromoteClasses(ctx context.Context, arg PromoteClassesParams) (int64, error)
 	// 动作下拉的分组计数:套用学校、操作人、对象类型与时间范围,不套用动作筛选(接口总览「分段计数」)。
 	QueryAuditActionFacets(ctx context.Context, arg QueryAuditActionFacetsParams) ([]QueryAuditActionFacetsRow, error)
-	QueryAuditLogs(ctx context.Context, arg QueryAuditLogsParams) ([]QueryAuditLogsRow, error)
+	QueryAuditLogs(ctx context.Context, arg QueryAuditLogsParams) ([]AuditLog, error)
 	RecordPasswordFailure(ctx context.Context, arg RecordPasswordFailureParams) (Account, error)
 	RejectTenantApplication(ctx context.Context, arg RejectTenantApplicationParams) (TenantApplication, error)
 	RevokeAccountSessions(ctx context.Context, arg RevokeAccountSessionsParams) error
@@ -123,7 +126,7 @@ type Querier interface {
 	UpdateTenantConfig(ctx context.Context, arg UpdateTenantConfigParams) (Tenant, error)
 	UpdateTenantStatus(ctx context.Context, arg UpdateTenantStatusParams) (Tenant, error)
 	UpsertSSOConfig(ctx context.Context, arg UpsertSSOConfigParams) (SsoConfig, error)
-	UseActivationCode(ctx context.Context, arg UseActivationCodeParams) error
+	UseActivationCode(ctx context.Context, arg UseActivationCodeParams) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)

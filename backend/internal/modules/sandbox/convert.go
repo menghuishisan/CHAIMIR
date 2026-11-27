@@ -11,6 +11,27 @@ import (
 	"chaimir/pkg/apperr"
 )
 
+func prepullResponseFromModel(attempt CompositionPrepull) (PrepullResponse, error) {
+	var closure []contracts.ImageClosureItem
+	if err := jsonx.DecodeStrictKnownFields(attempt.ImageClosure, &closure); err != nil {
+		return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(err)
+	}
+	images := make(map[string]struct{}, len(closure))
+	for _, item := range closure {
+		if imageURL := strings.TrimSpace(item.ImageURL); imageURL != "" {
+			images[imageURL] = struct{}{}
+		}
+	}
+	return PrepullResponse{
+		ImageID:           ids.ID(attempt.RuntimeImageID),
+		CompositionDigest: attempt.CompositionDigest,
+		PrepullStatus:     attempt.Status,
+		DesiredNodes:      attempt.DesiredNodes,
+		ReadyNodes:        attempt.ReadyNodes,
+		ImageCount:        len(images),
+	}, nil
+}
+
 // sandboxInfoFromModel 把内部沙箱快照转换为跨模块摘要;运行时实例列表取自已校验的组合快照。
 func sandboxInfoFromModel(sb Sandbox, snapshot contracts.SandboxCompositionSnapshot, runtime Runtime, image RuntimeImage, tools []SandboxTool) contracts.SandboxInfo {
 	instances := make([]string, 0, len(snapshot.Runtimes))
@@ -240,7 +261,7 @@ func orchestrationCatalogResponse(runtimes []CatalogRuntime, tools []CatalogTool
 }
 
 // contractCreateFromDTO 把内部 HTTP 创建请求转换为跨模块创建契约。
-func contractCreateFromDTO(req CreateSandboxRequest) contracts.SandboxCreateRequest {
+func contractCreateFromDTO(req CreateSandboxRequest, tenantID int64, sourceRef string) contracts.SandboxCreateRequest {
 	authorizedAccountIDs := make([]int64, 0, len(req.AuthorizedAccountIDs))
 	for _, accountID := range req.AuthorizedAccountIDs {
 		authorizedAccountIDs = append(authorizedAccountIDs, accountID.Int64())
@@ -248,13 +269,13 @@ func contractCreateFromDTO(req CreateSandboxRequest) contracts.SandboxCreateRequ
 	snapshot := req.CompositionSnapshot
 	snapshot.Digest = strings.TrimSpace(snapshot.Digest)
 	return contracts.SandboxCreateRequest{
-		TenantID:                 req.TenantID.Int64(),
+		TenantID:                 tenantID,
 		CompositionSnapshot:      snapshot,
 		InitCodeRef:              strings.TrimSpace(snapshot.Spec.InitCodeRef),
 		InitScriptRef:            strings.TrimSpace(snapshot.Spec.InitScriptRef),
 		OwnerAccountID:           req.OwnerAccountID.Int64(),
 		AuthorizedAccountIDs:     authorizedAccountIDs,
-		SourceRef:                strings.TrimSpace(req.SourceRef),
+		SourceRef:                sourceRef,
 		ScopeRef:                 strings.TrimSpace(req.ScopeRef),
 		KeepAlive:                req.KeepAlive,
 		SnapshotEnabled:          req.SnapshotEnabled,

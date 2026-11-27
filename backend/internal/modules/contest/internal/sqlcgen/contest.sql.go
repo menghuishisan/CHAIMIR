@@ -1260,7 +1260,7 @@ UPDATE vuln_problem
 SET content_item_code = $3,
     content_item_version = $4,
     status = 2,
-    updated_at = now()
+    updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
 WHERE tenant_id = $1 AND id = $2 AND prevalidate_status = 2 AND status = 1
   AND updated_at = $5::timestamptz
 RETURNING id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, composition_digest, composition_snapshot, content_item_code, content_item_version, status, created_at, updated_at
@@ -3809,7 +3809,7 @@ SET prevalidate_status = $3,
     prevalidate_detail = $4,
     composition_digest = $5,
     composition_snapshot = $6,
-    updated_at = now()
+    updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
 WHERE tenant_id = $1 AND id = $2 AND status = 1
   AND updated_at = $7::timestamptz
 RETURNING id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, composition_digest, composition_snapshot, content_item_code, content_item_version, status, created_at, updated_at
@@ -4071,7 +4071,7 @@ SET source_id = $1::bigint,
     composition_snapshot = NULL,
     content_item_code = NULL,
     content_item_version = NULL,
-    updated_at = clock_timestamp()
+    updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
 WHERE tenant_id = $7 AND id = $8 AND status = 1
   AND updated_at = $9::timestamptz
 RETURNING id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, composition_digest, composition_snapshot, content_item_code, content_item_version, status, created_at, updated_at
@@ -4298,7 +4298,7 @@ SET title = EXCLUDED.title,
     composition_snapshot = NULL,
     content_item_code = NULL,
     content_item_version = NULL,
-    updated_at = now()
+    updated_at = GREATEST(clock_timestamp(), vuln_problem.updated_at + interval '1 microsecond')
 WHERE vuln_problem.status = 1
 RETURNING id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, composition_digest, composition_snapshot, content_item_code, content_item_version, status, created_at, updated_at
 `

@@ -1,7 +1,6 @@
 package sandbox
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/tenant"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/jsonvalue"
 )
 
 // PrepareCompositionClone 仅改写已登记快照中的素材，不重新解析最新镜像目录。
@@ -33,7 +33,7 @@ func (s *Service) PrepareCompositionClone(ctx context.Context, sourceTenantID in
 		if err := jsonx.DecodeStrictKnownFields(raw, &stored); err != nil {
 			return err
 		}
-		if !jsonx.Equal(snapshot, stored) {
+		if !jsonvalue.Equal(snapshot, stored) {
 			return apperr.ErrSandboxCreateRequestInvalid
 		}
 		return nil
@@ -44,10 +44,8 @@ func (s *Service) PrepareCompositionClone(ctx context.Context, sourceTenantID in
 	if err != nil {
 		return plan, err
 	}
-	var value map[string]any
-	decoder := json.NewDecoder(bytes.NewReader(encoded))
-	decoder.UseNumber()
-	if err := decoder.Decode(&value); err != nil {
+	value, err := jsonx.ObjectMapStrict(encoded)
+	if err != nil {
 		return plan, err
 	}
 	prefix, err := storage.ObjectKey(id.TenantID, "sandbox", "clone", ids.Format(s.ids.Generate()))

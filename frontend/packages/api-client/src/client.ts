@@ -343,7 +343,7 @@ export class ApiClient {
   /**
    * 获取附件响应:返回文件内容与后端在 Content-Disposition 中声明的保存文件名。
    * 全站所有文件下载共用这一条 —— 文件名的单一来源是后端响应头
-   * (`httpx.WriteAttachment*` 恒写入并已做单段化与字符白名单),
+   * (`httpx.WriteAttachment*` 经单段化后使用标准 MIME 序列化),
    * 客户端不自造名字、不按多个业务字段依次取值。
    */
   async getAttachment(url: string, params?: object): Promise<AttachmentResponse> {
@@ -378,15 +378,21 @@ interface AttachmentResult {
 
 /**
  * attachmentFileName 从 Content-Disposition 解析保存文件名。
- * 后端出口恒写 `attachment; filename="<单段 ASCII 名>"`,取不到即说明响应不来自后端
- * (网关错误页等),按传输层失败处理 —— 不编造文件名掩盖这一情况。
+ * 只接收统一出口经安全文件名处理后的标准库序列化形式，UTF-8 扩展值使用原生解码。
+ * 缺失或畸形声明按传输层失败处理，不编造文件名。
  */
 function attachmentFileName(disposition: unknown): string {
-  const matched = typeof disposition === 'string' ? /filename="([^"]+)"/.exec(disposition) : null
+  const matched = typeof disposition === 'string'
+    ? /^attachment; filename(?:\*=utf-8''([^;]+)|="([^"]+)"|=([^;\s"]+))$/.exec(disposition)
+    : null
   if (!matched) {
     throw new ApiError(API_TRANSPORT_ERROR_MESSAGES.MALFORMED_RESPONSE)
   }
-  return matched[1]
+  try {
+    return matched[1] ? decodeURIComponent(matched[1]) : matched[2] ?? matched[3]
+  } catch {
+    throw new ApiError(API_TRANSPORT_ERROR_MESSAGES.MALFORMED_RESPONSE)
+  }
 }
 
 /** requiresReauthentication 统一识别需要结束本地受保护会话的服务端错误码。 */

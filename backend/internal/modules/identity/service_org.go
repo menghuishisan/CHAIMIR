@@ -134,8 +134,8 @@ func mapPromoteClassesError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if appErr, ok := apperr.As(err); ok {
-		return appErr
+	if _, ok := apperr.As(err); ok {
+		return apperr.AsAppError(err)
 	}
 	return apperr.ErrInternal.WithCause(err)
 }
@@ -459,12 +459,18 @@ func (s *Service) CommitOrgImportByAdmin(ctx context.Context, req ImportCommitRe
 				continue
 			}
 			// 只提交预览阶段校验通过的行,数据库唯一约束仍作为并发导入的最后防线。
-			if err := s.createOrgImportRow(ctx, tx, id.TenantID, row); err != nil {
+			rowErr, transactionErr := tx.ImportRowTx(ctx, func(ctx context.Context, rowTx TxStore) error {
+				return s.createOrgImportRow(ctx, rowTx, id.TenantID, row)
+			})
+			if transactionErr != nil {
+				return transactionErr
+			}
+			if rowErr != nil {
 				failed++
 				if idx := row.Line - 2; idx >= 0 && idx < len(rows) {
 					rows[idx].Error = "组织写入失败,请检查是否与现有组织冲突"
 				}
-				logging.ErrorContext(ctx, "组织导入行写入失败", err.Error(), slog.Int64("tenant_id", id.TenantID), slog.Int("line", row.Line), slog.String("kind", row.Kind))
+				logging.ErrorContext(ctx, "组织导入行写入失败", rowErr.Error(), slog.Int64("tenant_id", id.TenantID), slog.Int("line", row.Line), slog.String("kind", row.Kind))
 				continue
 			}
 			success++

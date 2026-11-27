@@ -71,6 +71,12 @@ func (t *txStore) MarkTenantProvisionOutboxFailed(ctx context.Context, id int64,
 	return tenantProvisionOutboxFromRow(row), nil
 }
 
+// LockPlatformAdmin 串行化同一平台账号的登录、刷新和凭据变更。
+func (t *txStore) LockPlatformAdmin(ctx context.Context, id int64) error {
+	_, err := t.q.LockPlatformAdmin(ctx, id)
+	return err
+}
+
 // BatchGetPlatformAdminNames 按编号批量读取平台管理员的编号与姓名,不带口令与账号名。
 func (t *txStore) BatchGetPlatformAdminNames(ctx context.Context, ids []int64) ([]PlatformAdmin, error) {
 	rows, err := t.q.BatchGetPlatformAdminNames(ctx, ids)
@@ -112,6 +118,15 @@ func (t *txStore) UpdatePlatformAdminPassword(ctx context.Context, adminID int64
 // GetTenantByCode 按学校短码读取租户。
 func (t *txStore) GetTenantByCode(ctx context.Context, code string) (Tenant, error) {
 	row, err := t.q.GetTenantByCode(ctx, code)
+	if err != nil {
+		return Tenant{}, err
+	}
+	return tenantFromRow(row), nil
+}
+
+// GetTenantForUpdate 锁住配置快照，使学校配置与校徽更新串行。
+func (t *txStore) GetTenantForUpdate(ctx context.Context, id int64) (Tenant, error) {
+	row, err := t.q.GetTenantForUpdate(ctx, id)
 	if err != nil {
 		return Tenant{}, err
 	}
@@ -167,8 +182,8 @@ func (t *txStore) CountAccountsByStatus(ctx context.Context, query AccountQuery)
 }
 
 // ListTenants 分页读取平台租户摘要。
-// status 传 0、keyword 传空串表示该维度不过滤;总数取窗口函数结果,与过滤条件同口径。
-func (t *txStore) ListTenants(ctx context.Context, query TenantListQuery) ([]Tenant, int64, error) {
+// status 传 0、keyword 传空串表示该维度不过滤。
+func (t *txStore) ListTenants(ctx context.Context, query TenantListQuery) ([]Tenant, error) {
 	limit, offset := pagex.LimitOffset(query.Page, query.Size)
 	rows, err := t.q.ListTenantsPaged(ctx, sqlcgen.ListTenantsPagedParams{
 		Limit:   limit,
@@ -177,15 +192,13 @@ func (t *txStore) ListTenants(ctx context.Context, query TenantListQuery) ([]Ten
 		Column4: query.Keyword,
 	})
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	out := make([]Tenant, 0, len(rows))
-	var total int64
 	for _, row := range rows {
-		total = row.TotalCount
-		out = append(out, tenantFromPagedRow(row))
+		out = append(out, tenantFromRow(row))
 	}
-	return out, total, nil
+	return out, nil
 }
 
 // CreateTenant 创建学校租户及内联配置。
@@ -388,6 +401,11 @@ func (t *txStore) CreateAccount(ctx context.Context, input CreateAccountInput) (
 	return account, nil
 }
 
+// LockSchoolAdministrationScope 串行化同租户管理员角色及账号状态变更。
+func (t *txStore) LockSchoolAdministrationScope(ctx context.Context, tenantID int64) error {
+	return t.q.LockSchoolAdministrationScope(ctx, tenantID)
+}
+
 // LockAccount 在读取可变状态之前锁定租户账号,供单条和批量状态机共用。
 func (t *txStore) LockAccount(ctx context.Context, tenantID, id int64) error {
 	_, err := t.q.LockAccount(ctx, sqlcgen.LockAccountParams{TenantID: tenantID, ID: id})
@@ -500,7 +518,7 @@ func (t *txStore) GetAccountByNo(ctx context.Context, no string) (Account, error
 }
 
 // ListAccounts 分页读取学校管理员账号列表。
-func (t *txStore) ListAccounts(ctx context.Context, query AccountQuery) ([]Account, int64, error) {
+func (t *txStore) ListAccounts(ctx context.Context, query AccountQuery) ([]Account, error) {
 	rows, err := t.q.ListAccounts(ctx, sqlcgen.ListAccountsParams{
 		Column1: query.Status,
 		Column2: query.BaseIdentity,
@@ -511,13 +529,10 @@ func (t *txStore) ListAccounts(ctx context.Context, query AccountQuery) ([]Accou
 		Column7: query.PhoneHash,
 	})
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
-	// sqlc 查询通过窗口计数返回 total,repo 在这里拆成列表和总数两个领域值。
 	out := make([]Account, 0, len(rows))
-	var total int64
 	for _, row := range rows {
-		total = row.TotalCount
 		out = append(out, Account{
 			ID:             row.ID,
 			TenantID:       row.TenantID,
@@ -540,7 +555,7 @@ func (t *txStore) ListAccounts(ctx context.Context, query AccountQuery) ([]Accou
 			UpdatedAt:      timex.FromTimestamptz(row.UpdatedAt),
 		})
 	}
-	return out, total, nil
+	return out, nil
 }
 
 // ListClassStudents 读取指定班级的在校学生摘要。
@@ -878,7 +893,14 @@ func (t *txStore) GetActivationCodeByHash(ctx context.Context, codeHash string) 
 
 // UseActivationCode 标记激活码已使用。
 func (t *txStore) UseActivationCode(ctx context.Context, tenantID, id int64) error {
-	return t.q.UseActivationCode(ctx, sqlcgen.UseActivationCodeParams{ID: id, TenantID: tenantID})
+	affected, err := t.q.UseActivationCode(ctx, sqlcgen.UseActivationCodeParams{ID: id, TenantID: tenantID})
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return apperr.ErrIdentityActivationInvalid
+	}
+	return nil
 }
 
 // UpsertSSOConfig 创建或更新租户 SSO 配置。
@@ -1040,7 +1062,7 @@ func (t *txStore) WriteAudit(ctx context.Context, input WriteAuditInput) error {
 }
 
 // QueryAuditLogs 按条件分页查询共享审计日志。
-func (t *txStore) QueryAuditLogs(ctx context.Context, query AuditQueryInput) ([]AuditLogRow, int64, error) {
+func (t *txStore) QueryAuditLogs(ctx context.Context, query AuditQueryInput) ([]AuditLogRow, error) {
 	rows, err := t.q.QueryAuditLogs(ctx, sqlcgen.QueryAuditLogsParams{
 		Column1: query.TenantID,
 		Column2: query.ActorID,
@@ -1052,13 +1074,11 @@ func (t *txStore) QueryAuditLogs(ctx context.Context, query AuditQueryInput) ([]
 		Offset:  (query.Page - 1) * query.Size,
 	})
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	// audit_log 的 tenant_id/target_id 允许平台级空值,转换时保留零值语义给 service 判定范围。
 	out := make([]AuditLogRow, 0, len(rows))
-	var total int64
 	for _, row := range rows {
-		total = row.TotalCount
 		out = append(out, AuditLogRow{
 			ID:         row.ID,
 			TenantID:   pgtypex.Int8Value(row.TenantID),
@@ -1073,7 +1093,7 @@ func (t *txStore) QueryAuditLogs(ctx context.Context, query AuditQueryInput) ([]
 			CreatedAt:  timex.FromTimestamptz(row.CreatedAt),
 		})
 	}
-	return out, total, nil
+	return out, nil
 }
 
 // QueryAuditActionFacets 按与审计列表完全相同的权限和过滤条件统计动作。

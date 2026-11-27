@@ -37,6 +37,13 @@ import (
 
 type executionLockFunc func(context.Context, string, time.Duration, func(context.Context) error) error
 
+func validateTeachingFrame(view map[string]any, scaleLimit map[string]any) error {
+	if err := validateRuntimeProtocol("TeachingFrame", view); err != nil {
+		return err
+	}
+	return validateTeachingFrameSemantics(view, scaleLimit)
+}
+
 func validTeachingFrame(t *testing.T) map[string]any {
 	t.Helper()
 	var frame map[string]any
@@ -288,7 +295,7 @@ func TestIsolatedEnvironmentCapacityIncludesArchivedAndTerminating(t *testing.T)
 				adapter := &StdioJSONAdapter{k8s: client, cfg: config.SimBackendConfig{MaxConcurrentSessionsPerTenant: 1, SessionLeaseDurationSeconds: 60}, locker: executionLockFunc(func(ctx context.Context, _ string, _ time.Duration, run func(context.Context) error) error {
 					return run(ctx)
 				})}
-				err := adapter.prepareSession(context.Background(), SessionWithPackage{Session: Session{ID: 91, TenantID: tenantID, Status: status}}, "new-run")
+				err := adapter.prepareSession(context.Background(), SessionWithPackage{Session: Session{ID: 91, TenantID: tenantID, Status: status}}, &stdioJSONExecution{namespace: metav1.ObjectMeta{Name: "sim-new-run"}})
 				if !errors.Is(err, apperr.ErrSimBackendComputeUnavailable) || posts != 0 {
 					t.Fatalf("existing replay bypassed environment capacity: error=%v creates=%d", err, posts)
 				}
@@ -418,24 +425,26 @@ func TestIsolatedEnvironmentAllocationIsSerializedAcrossReplicas(t *testing.T) {
 	}
 	session := SessionWithPackage{Session: Session{ID: 91, TenantID: 7, Status: SessionArchived}}
 	firstResult := make(chan error, 1)
-	go func() { firstResult <- adapters[0].prepareSession(ctx, session, "first-replay") }()
+	go func() {
+		firstResult <- adapters[0].prepareSession(ctx, session, &stdioJSONExecution{namespace: metav1.ObjectMeta{Name: "first-replay"}})
+	}()
 	select {
 	case <-countStarted:
 	case <-ctx.Done():
 		t.Fatal("first replica did not check actual capacity")
 	}
-	if err := adapters[1].prepareSession(ctx, session, "racing-replay"); !errors.Is(err, platformredis.ErrLeaseHeld) {
+	if err := adapters[1].prepareSession(ctx, session, &stdioJSONExecution{namespace: metav1.ObjectMeta{Name: "racing-replay"}}); !errors.Is(err, platformredis.ErrLeaseHeld) {
 		t.Errorf("second replica entered the same tenant allocation: %v", err)
 	}
 	close(allowCount)
 	if err := <-firstResult; err == nil || errors.Is(err, apperr.ErrSimBackendComputeUnavailable) {
 		t.Fatalf("first allocation did not reach the deliberately denied RBAC setup: %v", err)
 	}
-	if err := adapters[1].prepareSession(ctx, session, "later-replay"); !errors.Is(err, apperr.ErrSimBackendComputeUnavailable) {
+	if err := adapters[1].prepareSession(ctx, session, &stdioJSONExecution{namespace: metav1.ObjectMeta{Name: "later-replay"}}); !errors.Is(err, apperr.ErrSimBackendComputeUnavailable) {
 		t.Fatalf("remaining environment no longer consumes capacity: %v", err)
 	}
 	session.TenantID = 8
-	if err := adapters[1].prepareSession(ctx, session, "other-tenant"); err == nil || errors.Is(err, apperr.ErrSimBackendComputeUnavailable) {
+	if err := adapters[1].prepareSession(ctx, session, &stdioJSONExecution{namespace: metav1.ObjectMeta{Name: "other-tenant"}}); err == nil || errors.Is(err, apperr.ErrSimBackendComputeUnavailable) {
 		t.Fatalf("another tenant shared the first tenant's capacity: %v", err)
 	}
 	resourcesMu.Lock()
@@ -466,7 +475,7 @@ func TestExecutionCleanupRetainsLeaseAndPreservesBothErrors(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	adapter := &StdioJSONAdapter{k8s: client, cfg: config.SimBackendConfig{SessionLeaseDurationSeconds: 60, PodReadyTimeoutSeconds: 1}}
+	adapter := &StdioJSONAdapter{k8s: client, cfg: config.SimBackendConfig{NamespacePrefix: "sim-session-", SessionLeaseDurationSeconds: 60, PodReadyTimeoutSeconds: 1}}
 	adapter.locker = executionLockFunc(func(ctx context.Context, _ string, _ time.Duration, run func(context.Context) error) error {
 		held.Store(true)
 		defer held.Store(false)
@@ -475,7 +484,8 @@ func TestExecutionCleanupRetainsLeaseAndPreservesBothErrors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	runFailure := errors.New("execution failed")
-	err := adapter.withExecution(ctx, "91", func(context.Context, string) error {
+	err := adapter.withExecution(ctx, "91", func(_ context.Context, execution *stdioJSONExecution) error {
+		execution.namespace.UID = "current-uid"
 		cancel()
 		return runFailure
 	})
@@ -752,7 +762,7 @@ func (f executionLockFunc) WithLease(ctx context.Context, key string, ttl time.D
 func TestExecutionCleanupCannotDeleteLaterOwnersResources(t *testing.T) {
 	for _, replaceUID := range []bool{false, true} {
 		t.Run(fmt.Sprint("replaceUID=", replaceUID), func(t *testing.T) {
-			resources := map[string]types.UID{"old-run": "old-uid"}
+			resources := map[string]types.UID{"sim-old-run": "old-uid"}
 			var resourcesMu sync.Mutex
 			var deleted []string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -766,7 +776,7 @@ func TestExecutionCleanupCannotDeleteLaterOwnersResources(t *testing.T) {
 					}
 					list := corev1.NamespaceList{TypeMeta: metav1.TypeMeta{Kind: "NamespaceList", APIVersion: "v1"}}
 					for name, uid := range resources {
-						list.Items = append(list.Items, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, UID: uid}})
+						list.Items = append(list.Items, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, UID: uid, Labels: map[string]string{"chaimir.io/managed-by": "chaimir-backend", "chaimir.io/sim": "true", "chaimir.io/execution-scope": "91"}}})
 					}
 					if err := json.NewEncoder(w).Encode(list); err != nil {
 						t.Error(err)
@@ -804,7 +814,7 @@ func TestExecutionCleanupCannotDeleteLaterOwnersResources(t *testing.T) {
 					}
 					return
 				}
-				if err := json.NewEncoder(w).Encode(corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, UID: uid}}); err != nil {
+				if err := json.NewEncoder(w).Encode(corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, UID: uid, Labels: map[string]string{"chaimir.io/managed-by": "chaimir-backend", "chaimir.io/sim": "true", "chaimir.io/execution-scope": "91"}}}); err != nil {
 					t.Error(err)
 				}
 			}))
@@ -818,31 +828,31 @@ func TestExecutionCleanupCannotDeleteLaterOwnersResources(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			adapter := &StdioJSONAdapter{k8s: client, cfg: config.SimBackendConfig{SessionLeaseDurationSeconds: 60, PodReadyTimeoutSeconds: 1}}
+			adapter := &StdioJSONAdapter{k8s: client, cfg: config.SimBackendConfig{NamespacePrefix: "sim-session-", SessionLeaseDurationSeconds: 60, PodReadyTimeoutSeconds: 1}}
 			adapter.locker = executionLockFunc(func(ctx context.Context, key string, _ time.Duration, run func(context.Context) error) error {
 				if key != "sim.execution:91" {
 					t.Fatalf("wrong lock scope: %s", key)
 				}
 				resourcesMu.Lock()
-				resources["new-run"] = "new-uid"
+				resources["sim-new-run"] = "new-uid"
 				if replaceUID {
-					resources["old-run"] = "replacement-uid"
+					resources["sim-old-run"] = "replacement-uid"
 				}
 				resourcesMu.Unlock()
 				return run(ctx)
 			})
 			ran := false
-			err = adapter.withExecution(context.Background(), "91", func(context.Context, string) error { ran = true; return nil })
+			err = adapter.withExecution(context.Background(), "91", func(context.Context, *stdioJSONExecution) error { ran = true; return nil })
 			resourcesMu.Lock()
 			defer resourcesMu.Unlock()
 			if replaceUID {
 				if err == nil || ran || len(deleted) != 0 {
 					t.Fatalf("replacement resource was touched: error=%v ran=%v deleted=%v", err, ran, deleted)
 				}
-			} else if err != nil || !ran || len(deleted) != 1 || deleted[0] != "old-run" {
+			} else if err != nil || !ran || len(deleted) != 1 || deleted[0] != "sim-old-run" {
 				t.Fatalf("old resource cleanup failed: error=%v ran=%v deleted=%v", err, ran, deleted)
 			}
-			if resources["new-run"] != "new-uid" {
+			if resources["sim-new-run"] != "new-uid" {
 				t.Fatal("stale cleanup deleted successor environment")
 			}
 		})

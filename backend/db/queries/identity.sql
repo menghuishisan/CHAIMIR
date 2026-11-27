@@ -8,6 +8,9 @@ SELECT id, username, password_hash, name, status, created_at, updated_at
 FROM platform_admin
 WHERE id = $1;
 
+-- name: LockPlatformAdmin :one
+SELECT id FROM platform_admin WHERE id = $1 FOR UPDATE;
+
 -- name: BatchGetPlatformAdminNames :many
 -- 平台操作记录(配置变更、场景审核)只存管理员编号;平台页面按一页编号一次解析姓名。
 SELECT id, name
@@ -34,9 +37,14 @@ SELECT id, code, name, type, status, deploy_mode, expire_at, logo_ref, display_n
 FROM tenant
 WHERE id = $1;
 
+-- name: GetTenantForUpdate :one
+SELECT id, code, name, type, status, deploy_mode, expire_at, logo_ref, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
+FROM tenant
+WHERE id = $1
+FOR UPDATE;
+
 -- name: ListTenantsPaged :many
-SELECT id, code, name, type, status, deploy_mode, expire_at, logo_ref, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at,
-       COUNT(*) OVER() AS total_count
+SELECT id, code, name, type, status, deploy_mode, expire_at, logo_ref, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
 FROM tenant
 WHERE ($3::smallint = 0 OR status = $3)
   AND ($4::text = '' OR name ILIKE '%' || $4 || '%' OR code ILIKE '%' || $4 || '%')
@@ -146,6 +154,9 @@ RETURNING id, school_name, school_type, contact_name, contact_phone, contact_ema
 
 -- name: LockOrganizationScope :exec
 SELECT pg_advisory_xact_lock(hashtextextended('identity.organization', $1::bigint));
+
+-- name: LockSchoolAdministrationScope :exec
+SELECT pg_advisory_xact_lock(hashtextextended('identity.school_administration', $1::bigint));
 
 -- name: CreateDepartment :one
 INSERT INTO department (id, tenant_id, name, code)
@@ -369,8 +380,7 @@ GROUP BY a.id, p.no, p.org_id, p.enrollment_year, p.title;
 SELECT a.id, a.tenant_id, a.phone_enc, a.phone_hash, a.password_hash, a.name, a.base_identity, a.status,
        a.must_change_pwd, a.pwd_failed_count, a.locked_until, a.activated_at, a.deleted_at, a.created_at, a.updated_at,
        p.no, p.org_id, p.enrollment_year, p.title,
-       COALESCE(array_agg(ar.role ORDER BY ar.role) FILTER (WHERE ar.role IS NOT NULL), ARRAY[]::smallint[])::smallint[] AS roles,
-       COUNT(*) OVER() AS total_count
+       COALESCE(array_agg(ar.role ORDER BY ar.role) FILTER (WHERE ar.role IS NOT NULL), ARRAY[]::smallint[])::smallint[] AS roles
 FROM account a
 LEFT JOIN account_profile p ON p.account_id = a.id AND p.tenant_id = a.tenant_id
 LEFT JOIN account_role ar ON ar.account_id = a.id AND ar.tenant_id = a.tenant_id
@@ -440,7 +450,7 @@ WHERE account_id = $1 AND tenant_id = $2;
 -- name: UpdateAccountPassword :one
 UPDATE account
 SET password_hash = $3, must_change_pwd = $4, status = $5, activated_at = $6, pwd_failed_count = 0, locked_until = NULL, updated_at = now()
-WHERE id = $1 AND tenant_id = $2
+WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL AND status IN (1, 2)
 RETURNING id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, pwd_failed_count, locked_until, activated_at, deleted_at, created_at, updated_at;
 
 -- name: ActivateSSOAccount :one
@@ -542,8 +552,8 @@ RETURNING id, tenant_id, phone_hash, code_hash, scene, expire_at, verify_attempt
 SELECT id, tenant_id, phone_hash, code_hash, scene, expire_at, verify_attempts, used, created_at
 FROM sms_code
 WHERE tenant_id = $1 AND phone_hash = $2 AND scene = $3
-ORDER BY created_at DESC
-LIMIT 1;
+ORDER BY created_at DESC, id DESC
+LIMIT 1 FOR UPDATE;
 
 -- name: MarkSMSCodeUsed :exec
 UPDATE sms_code SET used = true
@@ -563,9 +573,9 @@ SELECT id, tenant_id, account_id, code_hash, status, expire_at, used_at, created
 FROM activation_code
 WHERE code_hash = $1;
 
--- name: UseActivationCode :exec
+-- name: UseActivationCode :execrows
 UPDATE activation_code SET status = 2, used_at = now()
-WHERE id = $1 AND tenant_id = $2 AND status = 1;
+WHERE id = $1 AND tenant_id = $2 AND status = 1 AND expire_at > now();
 
 -- name: UpsertSSOConfig :one
 INSERT INTO sso_config (id, tenant_id, type, config, match_field, enabled, created_at, updated_at)
@@ -597,7 +607,7 @@ WHERE id = $1 AND tenant_id = $2 AND operator_id = $3
 FOR UPDATE;
 
 -- name: ListPendingImportPreviews :many
--- 列表只读取公开预览结果,不取包含初始密码的原始rows。
+-- 列表只读取公开预览结果,不取包含账号资料和密码哈希的原始rows。
 SELECT id, target_type, file_name, preview_result, expire_at
 FROM import_preview
 WHERE tenant_id = $1 AND operator_id = $2 AND target_type = $3 AND status = 1 AND expire_at > now()
@@ -613,7 +623,7 @@ WHERE tenant_id = $1 AND operator_id = $2 AND target_type = $3 AND status = 1 AN
 DELETE FROM import_preview WHERE id = $1 AND tenant_id = $2 AND operator_id = $3 AND status = 1;
 
 -- name: MarkImportPreviewSubmitted :execrows
-UPDATE import_preview SET status = 2, submitted_at = now()
+UPDATE import_preview SET status = 2, submitted_at = now(), rows = '[]'::jsonb
 WHERE id = $1 AND tenant_id = $2 AND operator_id = $3 AND status = 1 AND expire_at > now();
 
 -- name: CreateImportBatch :one
@@ -633,7 +643,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
 RETURNING id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id, created_at;
 
 -- name: QueryAuditLogs :many
-SELECT id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id, created_at, COUNT(*) OVER() AS total_count
+SELECT id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id, created_at
 FROM audit_log
 WHERE ($1::bigint = -1 OR ($1::bigint <> -1 AND ($1::bigint = 0 OR tenant_id = $1)))
   AND ($2::bigint = 0 OR actor_id = $2)

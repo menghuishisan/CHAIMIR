@@ -12,6 +12,7 @@ import (
 // decodeStrictJSON 统一解析结构化环境变量,拒绝未知字段和尾随 JSON 值。
 func decodeStrictJSON(raw string, out any) error {
 	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(out); err != nil {
 		return err

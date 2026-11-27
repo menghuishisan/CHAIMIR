@@ -10,7 +10,7 @@ import type { RoleRouteConfig } from '../../utils/roleRouting'
 export interface RoleNavigationItem {
   /**
    * 侧栏可见的栏目名(面向用户的自然语言,不用开发术语)。
-   * 名称与顺序的唯一真相源是 `docs/前端后端功能对齐清单.md` §1.4 四端侧栏表,必须逐字一致。
+   * 名称与顺序的唯一真相源是 `docs/总-前端设计规范.md` §6 四端侧栏契约,必须逐字一致。
    */
   name: string
   path: string

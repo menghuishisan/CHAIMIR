@@ -85,11 +85,15 @@ func filterLoginCandidatesForDeployment(candidates []LoginCandidate, deploy conf
 	}
 	filtered := make([]LoginCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		if candidate.TenantID == deploy.SchoolTenantID {
+		if tenantAllowedForDeployment(candidate.TenantID, deploy) {
 			filtered = append(filtered, candidate)
 		}
 	}
 	return filtered
+}
+
+func tenantAllowedForDeployment(tenantID int64, deploy config.DeployConfig) bool {
+	return tenantID > 0 && (!deploy.IsSchool() || tenantID == deploy.SchoolTenantID)
 }
 
 // NewService 构造 identity 服务,不接收数据库连接,由装配层传入 Store。

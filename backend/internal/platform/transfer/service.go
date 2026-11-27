@@ -2,6 +2,7 @@ package transfer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -156,7 +157,7 @@ func (s *Service) ClaimTask(ctx context.Context, tenantID, taskID int64) (Task, 
 }
 
 // RunWithLease 在模块 worker 处理长任务期间续租,失去租约时取消执行上下文。
-func (s *Service) RunWithLease(ctx context.Context, task Task, run func(context.Context) error) error {
+func (s *Service) RunWithLease(ctx context.Context, task Task, run func(context.Context) error) (resultErr error) {
 	if task.TenantID < 0 || task.TaskID <= 0 || task.Status != StatusRunning || strings.TrimSpace(task.LeaseToken) == "" || run == nil {
 		return apperr.ErrTransferTaskInvalid
 	}
@@ -211,20 +212,21 @@ func (s *Service) RunWithLease(ctx context.Context, task Task, run func(context.
 		}
 	}()
 
-	runErr := run(workCtx)
-	close(stop)
-	cancelHeartbeat()
-	<-heartbeatDone
-	cancelWork()
-	select {
-	case err := <-leaseLost:
-		return err
-	default:
-		if runErr != nil {
-			return runErr
+	defer func() {
+		close(stop)
+		cancelHeartbeat()
+		<-heartbeatDone
+		cancelWork()
+		select {
+		case err := <-leaseLost:
+			resultErr = errors.Join(err, resultErr)
+		default:
+			if resultErr == nil {
+				resultErr = ctx.Err()
+			}
 		}
-		return ctx.Err()
-	}
+	}()
+	return run(workCtx)
 }
 
 // renewTaskLease 延长仍有效且由当前任务 token 持有的租约。

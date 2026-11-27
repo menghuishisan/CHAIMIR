@@ -8,7 +8,6 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
-	"chaimir/internal/platform/ids"
 	"chaimir/pkg/apperr"
 )
 
@@ -32,8 +31,7 @@ func (s *Service) CreateSession(ctx context.Context, req contracts.SimCreateSess
 	if initParams == nil {
 		initParams = map[string]any{}
 	}
-	create := CreateSessionRequest{PackageCode: req.PackageCode, Version: req.Version, Seed: req.Seed, InitParams: initParams, OwnerAccountID: ids.ID(req.OwnerAccountID), SourceRef: req.SourceRef, ScopeRef: req.ScopeRef}
-	if err := validateCreateSession(create, req.TenantID); err != nil {
+	if err := validateCreateSession(req); err != nil {
 		return contracts.SimSessionInfo{}, err
 	}
 	if !auth.ServiceSourceRefAuthorized(ctx, req.SourceRef) {
@@ -163,7 +161,7 @@ func (s *Service) UpdateSessionAuthorizedAccounts(ctx context.Context, req contr
 	if !auth.ServiceSourceRefAuthorized(ctx, req.SourceRef) {
 		return apperr.ErrServiceUnauthorized
 	}
-	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
+	return s.store.AuthorizationTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
 		if err := tx.LockSessionActions(ctx, req.TenantID, req.SessionID); err != nil {
 			return apperr.ErrSimSessionStateInvalid.WithCause(err)
 		}
@@ -189,10 +187,9 @@ func (s *Service) UpdateSessionAuthorizedAccounts(ctx context.Context, req contr
 			return apperr.ErrSimSessionStateInvalid.WithCause(err)
 		}
 		return nil
-	}); err != nil {
-		return err
-	}
-	return s.publishSessionChanged(ctx, req.TenantID, req.SessionID)
+	}, func(ctx context.Context) error {
+		return s.publishSessionChanged(ctx, req.TenantID, req.SessionID)
+	})
 }
 
 // RecycleByScopeRef 按生命周期作用域归档仿真会话并释放后端计算资源。

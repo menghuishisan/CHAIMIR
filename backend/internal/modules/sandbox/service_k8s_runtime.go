@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	platformk8s "chaimir/internal/platform/k8s"
 	"context"
 	"errors"
 	"fmt"
@@ -115,32 +116,28 @@ func (o *K8sOrchestrator) initializeRuntimeAssets(ctx context.Context, cs kubern
 }
 
 func (o *K8sOrchestrator) writeRuntimeInitArchives(ctx context.Context, cs kubernetes.Interface, job runtimeInitPod, exec func(context.Context, string, string, []string, []byte, bool) ([]byte, []byte, error)) (failure error) {
-	pod := job.pod
-	if err := createOrVerifyPod(ctx, cs, pod); err != nil {
+	pod, err := createOrVerifyPod(ctx, cs, job.pod)
+	if err != nil {
 		return err
+	}
+	if pod.UID == "" {
+		return fmt.Errorf("初始化资产 Pod %s 缺少 UID", pod.Name)
 	}
 	defer func() {
 		cleanupCtx, cancel := asyncPersistenceContext(ctx, timeDurationSeconds(o.cfg.ReadyTimeoutSeconds))
 		defer cancel()
-		err := cs.CoreV1().Pods(pod.Namespace).Delete(cleanupCtx, pod.Name, metav1.DeleteOptions{})
-		if apierrors.IsNotFound(err) {
-			err = nil
-		}
-		if err == nil {
-			err = waitPodDeleted(cleanupCtx, cs, pod.Namespace, pod.Name, o.cfg.ReadyPollIntervalSeconds)
-		}
-		if err != nil {
+		if err := deleteObservedPods(cleanupCtx, cs, []corev1.Pod{*pod}, o.cfg.ReadyPollIntervalSeconds); err != nil {
 			failure = errors.Join(failure, fmt.Errorf("回收初始化资产 Pod %s 失败: %w", pod.Name, err))
 		}
 	}()
-	if err := o.waitPodsReady(ctx, cs, pod.Namespace, []string{pod.Name}); err != nil {
+	if err := o.waitPodsReady(ctx, cs, []*corev1.Pod{pod}); err != nil {
 		return err
 	}
 	adapter := job.runtime.Runtime.AdapterSpec
 	for _, archive := range job.archives {
 		domain, _ := volumeDomainByName(adapter, archive.TargetDomain)
 		command := workspaceCommand(adapter.InitAssetOps.UnpackTar, adapter.WorkspaceDir, domain.MountPath)
-		if _, stderr, err := exec(ctx, pod.Namespace, pod.Name+"/"+pod.Spec.Containers[0].Name, command, archive.Tarball, false); err != nil {
+		if _, stderr, err := exec(ctx, pod.Namespace, pod.Name+"/"+job.pod.Spec.Containers[0].Name, command, archive.Tarball, false); err != nil {
 			return sandboxExecFailure(apperr.ErrSandboxInitExecFailed, err, stderr)
 		}
 	}
@@ -183,10 +180,18 @@ func (o *K8sOrchestrator) ResetSandboxRuntime(ctx context.Context, plan CreateSa
 		}
 	}
 	cs := o.client.Clientset()
+	namespace, err := sandboxNamespace(ctx, cs, plan.Sandbox)
+	if err != nil {
+		return err
+	}
+	if namespace == nil {
+		return fmt.Errorf("待重置沙箱 Namespace 不存在")
+	}
 	currentPods, err := cs.CoreV1().Pods(plan.Sandbox.Namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("读取账本消费者失败: %w", err)
 	}
+	var stopped []corev1.Pod
 	for _, current := range currentPods.Items {
 		desired := affected[current.Name]
 		if desired == nil {
@@ -195,9 +200,10 @@ func (o *K8sOrchestrator) ResetSandboxRuntime(ctx context.Context, plan CreateSa
 			}
 			continue
 		}
-		if err := verifyManagedLabels(&current, desired); err != nil {
+		if err := platformk8s.VerifyManagedLabels(&current, desired); err != nil {
 			return err
 		}
+		stopped = append(stopped, current)
 	}
 	var resetLedger bool
 	var oldLedger *corev1.PersistentVolumeClaim
@@ -213,7 +219,7 @@ func (o *K8sOrchestrator) ResetSandboxRuntime(ctx context.Context, plan CreateSa
 			desired := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: domain.claimName(), Labels: map[string]string{
 				"app": "chaimir", "module": "sandbox", "chaimir.io/sandbox-id": ids.Format(plan.Sandbox.ID), "chaimir.io/volume": domain.claimName(),
 			}}}
-			if err := verifyManagedLabels(current, desired); err != nil {
+			if err := platformk8s.VerifyManagedLabels(current, desired); err != nil {
 				return err
 			}
 			if domain.claimName() == ledger {
@@ -226,18 +232,12 @@ func (o *K8sOrchestrator) ResetSandboxRuntime(ctx context.Context, plan CreateSa
 		if _, err := resource.ParseQuantity(o.cfg.WorkspaceStorage); err != nil {
 			return fmt.Errorf("账本卷容量配置无效: %w", err)
 		}
-	}
-	for _, current := range currentPods.Items {
-		if affected[current.Name] != nil {
-			if err := cs.CoreV1().Pods(plan.Sandbox.Namespace).Delete(ctx, current.Name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &current.UID}}); err != nil && !apierrors.IsNotFound(err) {
-				return err
-			}
+		if oldLedger != nil && oldLedger.UID == "" {
+			return fmt.Errorf("账本卷 %s 缺少 UID，拒绝重置", ledger)
 		}
 	}
-	for _, pod := range restart {
-		if err := waitPodDeleted(ctx, cs, plan.Sandbox.Namespace, pod.Name, o.cfg.ReadyPollIntervalSeconds); err != nil {
-			return err
-		}
+	if err := deleteObservedPods(ctx, cs, stopped, o.cfg.ReadyPollIntervalSeconds); err != nil {
+		return err
 	}
 	if resetLedger {
 		client := cs.CoreV1().PersistentVolumeClaims(plan.Sandbox.Namespace)
@@ -245,15 +245,18 @@ func (o *K8sOrchestrator) ResetSandboxRuntime(ctx context.Context, plan CreateSa
 			if err := client.Delete(ctx, ledger, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &oldLedger.UID}}); err != nil && !apierrors.IsNotFound(err) {
 				return err
 			}
-		}
-		if err := wait.PollUntilContextCancel(ctx, sandboxPodReadyPollInterval(o.cfg.ReadyPollIntervalSeconds), true, func(ctx context.Context) (bool, error) {
-			_, err := client.Get(ctx, ledger, metav1.GetOptions{})
-			if apierrors.IsNotFound(err) {
-				return true, nil
+			if err := wait.PollUntilContextCancel(ctx, sandboxPodReadyPollInterval(o.cfg.ReadyPollIntervalSeconds), true, func(ctx context.Context) (bool, error) {
+				current, err := client.Get(ctx, ledger, metav1.GetOptions{})
+				if apierrors.IsNotFound(err) {
+					return true, nil
+				}
+				if err == nil && current.UID != oldLedger.UID {
+					return false, fmt.Errorf("账本卷 %s 的 UID 已改变，拒绝继续重置", ledger)
+				}
+				return false, err
+			}); err != nil {
+				return fmt.Errorf("等待旧账本卷释放失败: %w", err)
 			}
-			return false, err
-		}); err != nil {
-			return fmt.Errorf("等待旧账本卷释放失败: %w", err)
 		}
 		if err := createOrVerifyPVC(ctx, cs, o.volumeDomainPVC(plan, ledger, nil), true); err != nil {
 			return err
@@ -262,18 +265,15 @@ func (o *K8sOrchestrator) ResetSandboxRuntime(ctx context.Context, plan CreateSa
 	if err := o.initializeRuntimeAssets(ctx, cs, jobs, o.Exec); err != nil {
 		return err
 	}
-	if err := createPodsInStartupOrder(plan, restart, func(pod *corev1.Pod) error {
+	created, err := createPodsInStartupOrder(plan, restart, func(pod *corev1.Pod) (*corev1.Pod, error) {
 		return createOrVerifyPod(ctx, cs, pod)
-	}, func(names []string) error {
-		return o.waitPodsReady(ctx, cs, plan.Sandbox.Namespace, names)
-	}); err != nil {
+	}, func(pods []*corev1.Pod) error {
+		return o.waitPodsReady(ctx, cs, pods)
+	})
+	if err != nil {
 		return err
 	}
-	var names []string
-	for _, pod := range restart {
-		names = append(names, pod.Name)
-	}
-	return o.waitPodsReady(ctx, cs, plan.Sandbox.Namespace, names)
+	return o.waitPodsReady(ctx, cs, created)
 }
 
 func podUsesClaims(pod *corev1.Pod, claims map[string]bool) bool {

@@ -129,36 +129,57 @@ func (p *SandboxRBACProvisioner) reconcileNamespace(ctx context.Context, namespa
 		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Namespace: p.backendServiceAccountNS, Name: p.backendServiceAccountName}},
 	}
 	existingBinding, err := bindings.Get(ctx, SandboxBackendRoleBindingName, metav1.GetOptions{})
+	created := false
 	if apierrors.IsNotFound(err) {
-		if _, err := bindings.Create(ctx, desiredBinding, metav1.CreateOptions{}); err != nil {
-			return fmt.Errorf("创建动态命名空间 RoleBinding 失败: %w", err)
+		existingBinding, err = bindings.Create(ctx, desiredBinding, metav1.CreateOptions{})
+		created = err == nil
+		if apierrors.IsAlreadyExists(err) {
+			existingBinding, err = bindings.Get(ctx, desiredBinding.Name, metav1.GetOptions{})
 		}
-	} else if err != nil {
-		return fmt.Errorf("查询动态命名空间 RoleBinding 失败: %w", err)
-	} else if existingBinding.RoleRef != desiredBinding.RoleRef || !reflect.DeepEqual(existingBinding.Subjects, desiredBinding.Subjects) || !reflect.DeepEqual(existingBinding.Labels, desiredBinding.Labels) {
+	}
+	if err != nil {
+		return fmt.Errorf("准备动态命名空间 RoleBinding 失败: %w", err)
+	}
+	if err := VerifyManagedResource(existingBinding, desiredBinding); err != nil {
+		return err
+	}
+	if existingBinding.RoleRef != desiredBinding.RoleRef {
+		return fmt.Errorf("RoleBinding %s 的不可变角色引用与配置不一致", desiredBinding.Name)
+	}
+	if !created && !reflect.DeepEqual(existingBinding.Subjects, desiredBinding.Subjects) {
 		updated := existingBinding.DeepCopy()
-		updated.Labels = desiredBinding.Labels
-		updated.RoleRef = desiredBinding.RoleRef
 		updated.Subjects = desiredBinding.Subjects
-		if _, err := bindings.Update(ctx, updated, metav1.UpdateOptions{}); err != nil {
+		accepted, err := bindings.Update(ctx, updated, metav1.UpdateOptions{})
+		if err != nil {
 			return fmt.Errorf("修复动态命名空间 RoleBinding 失败: %w", err)
 		}
+		if accepted.UID != existingBinding.UID {
+			return fmt.Errorf("RoleBinding %s 在更新期间已被替换", desiredBinding.Name)
+		}
+		existingBinding = accepted
+	}
+	if err := VerifyManagedResource(existingBinding, desiredBinding); err != nil {
+		return err
+	}
+	if !roleBindingMatches(existingBinding, p.backendServiceAccountNS, p.backendServiceAccountName) {
+		return fmt.Errorf("RoleBinding %s 的实际授权与配置不一致", desiredBinding.Name)
 	}
 	return nil
 }
 
 // WaitForSandboxBackendRBAC 在创建沙箱资源前等待固定命名空间绑定就绪。
 func WaitForSandboxBackendRBAC(ctx context.Context, client kubernetes.Interface, namespace, serviceAccountNamespace, serviceAccountName string, timeout, poll time.Duration) error {
-	if client == nil || strings.TrimSpace(namespace) == "" || timeout <= 0 || poll <= 0 {
+	if client == nil || strings.TrimSpace(namespace) == "" || strings.TrimSpace(serviceAccountNamespace) == "" || strings.TrimSpace(serviceAccountName) == "" || timeout <= 0 || poll <= 0 {
 		return fmt.Errorf("等待动态命名空间 RBAC 的参数非法")
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
+	desired := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: SandboxBackendRoleBindingName, Namespace: namespace, Labels: sandboxResourceLabels(namespace)}}
 	for {
 		binding, err := client.RbacV1().RoleBindings(namespace).Get(waitCtx, SandboxBackendRoleBindingName, metav1.GetOptions{})
-		if err == nil && roleBindingMatches(binding, serviceAccountNamespace, serviceAccountName) {
+		if err == nil && VerifyManagedResource(binding, desired) == nil && roleBindingMatches(binding, serviceAccountNamespace, serviceAccountName) {
 			return nil
 		}
 		if err != nil && !apierrors.IsNotFound(err) {
@@ -195,5 +216,5 @@ func roleBindingMatches(binding *rbacv1.RoleBinding, namespace, name string) boo
 		return false
 	}
 	subject := binding.Subjects[0]
-	return subject.Kind == "ServiceAccount" && subject.Namespace == namespace && subject.Name == name
+	return subject.Kind == "ServiceAccount" && subject.APIGroup == "" && subject.Namespace == namespace && subject.Name == name
 }

@@ -1,4 +1,3 @@
-// sandbox dto 文件定义 M2 HTTP 请求和响应结构,不承载业务编排逻辑。
 package sandbox
 
 import (
@@ -109,11 +108,9 @@ type CatalogToolResponse struct {
 
 // CreateSandboxRequest 是内部 HTTP 创建沙箱请求。
 type CreateSandboxRequest struct {
-	TenantID                 ids.ID                               `json:"tenant_id"`
 	CompositionSnapshot      contracts.SandboxCompositionSnapshot `json:"composition_snapshot"`
 	OwnerAccountID           ids.ID                               `json:"owner_account_id"`
 	AuthorizedAccountIDs     []ids.ID                             `json:"authorized_account_ids"`
-	SourceRef                string                               `json:"source_ref"`
 	ScopeRef                 string                               `json:"scope_ref"`
 	KeepAlive                bool                                 `json:"keep_alive"`
 	SnapshotEnabled          bool                                 `json:"snapshot_enabled"`
@@ -123,10 +120,8 @@ type CreateSandboxRequest struct {
 
 // RecycleRequest 是内部 HTTP 生命周期作用域级联回收请求。
 type RecycleRequest struct {
-	TenantID  ids.ID `json:"tenant_id"`
-	SourceRef string `json:"source_ref"`
-	ScopeRef  string `json:"scope_ref"`
-	Reason    string `json:"reason"`
+	ScopeRef string `json:"scope_ref"`
+	Reason   string `json:"reason"`
 }
 
 // FileWriteRequest 是账号写入授权工作区的请求，租户取服务端会话。

@@ -320,7 +320,13 @@ func (s *Service) persistSandboxFiles(ctx context.Context, sb Sandbox) (contract
 	ctx, cancel := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.ExecTimeoutSeconds))
 	defer cancel()
 	tenantID, sandboxID := sb.TenantID, sb.ID
-	runtime, _, err := s.workspaceRuntimeForSandbox(ctx, sb)
+	var runtime Runtime
+	var err error
+	if sb.resourceLeaseToken == "" {
+		runtime, _, err = s.workspaceRuntimeForSandbox(ctx, sb)
+	} else {
+		runtime, _, err = workspaceRuntimeSnapshot(sb)
+	}
 	if err != nil {
 		return contracts.SandboxWorkspaceSave{}, err
 	}

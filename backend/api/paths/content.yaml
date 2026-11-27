@@ -34,7 +34,61 @@
     x-chaimir-audience: internal
     x-chaimir-internal: true
     security: [{ serviceAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - code
+              - version
+              - type
+              - title
+              - difficulty
+              - author_id
+              - visibility
+              - body
+            properties:
+              code:
+                type: string
+              version:
+                type: string
+              type:
+                type: integer
+              title:
+                type: string
+              category_id:
+                $ref: "#/components/schemas/SnowflakeID"
+              difficulty:
+                type: integer
+              tags:
+                type: array
+                items:
+                  type: string
+              knowledge_points:
+                type: array
+                items:
+                  type: string
+              author_id:
+                $ref: "#/components/schemas/SnowflakeID"
+              author_type:
+                type: integer
+              visibility:
+                type: integer
+              body:
+                type: object
+                additionalProperties: true
+              sensitive_fields:
+                type: array
+                items:
+                  type: string
+              auto_publish:
+                type: boolean
+              system_import_note:
+                type: object
+                additionalProperties: true
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/content/internal/items/batch:
   post:
@@ -44,7 +98,29 @@
     x-chaimir-audience: internal
     x-chaimir-internal: true
     security: [{ serviceAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - items
+            properties:
+              items:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required:
+                    - code
+                    - version
+                  properties:
+                    code:
+                      type: string
+                    version:
+                      type: string
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/content/items/{item}:
   patch:
@@ -164,7 +240,21 @@
     operationId: contentUploadAttachment
     x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/MultipartBody" }
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required:
+              - file
+            properties:
+              resource_id:
+                type: string
+                description: 可选资源分段；省略时由服务端使用 draft。
+              file:
+                type: string
+                format: binary
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/content/attachments/download-grant:
   post:

@@ -7,6 +7,7 @@ import (
 
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/jsonvalue"
 )
 
 func frameError(reason string) error {
@@ -44,13 +45,6 @@ func validatePreviewFrames(frames []BackendSnapshot, scaleLimit map[string]any) 
 		}
 	}
 	return nil
-}
-
-func validateTeachingFrame(view map[string]any, scaleLimit map[string]any) error {
-	if err := validateRuntimeProtocol("TeachingFrame", view); err != nil {
-		return err
-	}
-	return validateTeachingFrameSemantics(view, scaleLimit)
 }
 
 // 结构先经共享 schema 校验；这里仅处理引用与包声明的动态容量。
@@ -111,7 +105,7 @@ func validateBackendDescriptor(descriptor BackendDescriptor, code, version strin
 		return frameError(fmt.Sprintf("编码包描述失败: %v", err))
 	}
 	var value any
-	if err := json.Unmarshal(raw, &value); err != nil {
+	if err := jsonx.DecodeStrict(raw, &value); err != nil {
 		return frameError(fmt.Sprintf("读取包描述失败: %v", err))
 	}
 	if err := validateRuntimeProtocol("SimPackageDescriptor", value); err != nil {
@@ -127,7 +121,7 @@ func validateBackendDescriptor(descriptor BackendDescriptor, code, version strin
 			LabelTag      string `json:"labelTag"`
 		} `json:"interactions"`
 	}
-	if err := json.Unmarshal(raw, &controls); err != nil {
+	if err := jsonx.DecodeStrict(raw, &controls); err != nil {
 		return frameError(fmt.Sprintf("读取控件声明失败: %v", err))
 	}
 	if len(controls.Interactions) != len(schema.Events) {
@@ -142,7 +136,7 @@ func validateBackendDescriptor(descriptor BackendDescriptor, code, version strin
 		expected, ok := schema.Events[in.Emits]
 		if !ok || len(findings) > 0 || in.ID != expected.InteractionID ||
 			actual.Kind != expected.Kind || actual.Target != expected.Target ||
-			!slices.EqualFunc(actual.Params, expected.Params, func(a, b InteractionParam) bool { return jsonx.Equal(a, b) }) {
+			!slices.EqualFunc(actual.Params, expected.Params, func(a, b InteractionParam) bool { return jsonvalue.Equal(a, b) }) {
 			return frameError("运行控件与审核声明不一致: " + in.Emits)
 		}
 		if seenEvents[in.Emits] || seenIDs[in.ID] {

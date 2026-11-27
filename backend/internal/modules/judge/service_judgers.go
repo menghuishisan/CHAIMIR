@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
-	"reflect"
 	"sort"
 	"strings"
 
@@ -15,6 +14,7 @@ import (
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/chainassert"
 	pkgcrypto "chaimir/pkg/crypto"
+	"chaimir/pkg/jsonvalue"
 	"chaimir/pkg/privacy"
 	"chaimir/pkg/question"
 )
@@ -312,7 +312,7 @@ func judgeSimCheckpoint(task JudgeTask) (JudgeExecutionResult, error) {
 	if err != nil {
 		return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
 	}
-	passed := reflect.DeepEqual(expected, actual)
+	passed := jsonvalue.Equal(expected, actual)
 	score := int32(0)
 	if passed {
 		score = task.InputSnapshot.MaxScore

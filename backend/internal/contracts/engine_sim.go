@@ -22,7 +22,7 @@ type SimCreateSessionRequest struct {
 // SimSessionInfo 是跨模块传递的仿真会话摘要。
 //
 // 不含 bundle 引用:内置包由前端按 package_code 在 Worker 内装配,扩展包 bundle 只经
-// 受控 k8s exec 投入隔离容器,从不下发浏览器(见 docs/04-仿真可视化引擎/05-接口设计.md §3.1)。
+// 受控 k8s exec 投入隔离容器,从不下发浏览器(见 docs/04-仿真可视化引擎/03-接口设计.md §3.1)。
 // Compute 取 "browser" 或 "isolated",调用方据此决定是起 Worker 还是连 stream。
 type SimSessionInfo struct {
 	SessionID   int64  `json:"session_id"`
@@ -85,7 +85,7 @@ type SimService interface {
 	GetReplay(ctx context.Context, tenantID, sessionID int64) (SimReplayInfo, error)
 	// DestroySession 回收单个仿真会话,供来源模块显式关闭实例时释放资源。
 	DestroySession(ctx context.Context, req SimDestroySessionRequest) error
-	// UpdateSessionAuthorizedAccounts 原子替换共享仿真会话的授权账号集合,并关闭被撤销账号的在线流。
+	// UpdateSessionAuthorizedAccounts 与同租户调用方事务原子替换共享账号，提交后再广播撤权。
 	UpdateSessionAuthorizedAccounts(ctx context.Context, req SimAuthorizedAccountsRequest) error
 	// RecycleByScopeRef 按生命周期作用域归档仿真会话并释放后端计算资源。
 	RecycleByScopeRef(ctx context.Context, req SimRecycleRequest) error

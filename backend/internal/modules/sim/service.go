@@ -366,8 +366,8 @@ func lookupError(err error, notFound, queryFailed *apperr.Error) error {
 	if err == nil {
 		return nil
 	}
-	if ae, ok := apperr.As(err); ok {
-		return ae
+	if _, ok := apperr.As(err); ok {
+		return apperr.AsAppError(err)
 	}
 	if isNoRows(err) && notFound != nil {
 		return notFound.WithCause(err)

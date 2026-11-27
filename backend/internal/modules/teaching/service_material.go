@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"mime"
 	"path/filepath"
 	"strings"
 
@@ -24,6 +25,10 @@ func (s *Service) UploadLessonMaterial(ctx context.Context, lessonID int64, req 
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return LessonDTO{}, err
+	}
+	contentType, _, err := mime.ParseMediaType(req.ContentType)
+	if err != nil {
+		return LessonDTO{}, apperr.ErrTeachingLessonInvalid.WithCause(err)
 	}
 	if len(req.Content) == 0 || !upload.CourseMaterialKindValid(req.FileName, req.ContentType, req.Content) {
 		return LessonDTO{}, apperr.ErrTeachingLessonInvalid
@@ -47,7 +52,6 @@ func (s *Service) UploadLessonMaterial(ctx context.Context, lessonID int64, req 
 		return LessonDTO{}, mapCourseError(err)
 	}
 
-	contentType := normalizedContentType(req.ContentType)
 	lessonType := LessonContentAttachment
 	if upload.CourseVideoKindValid(req.FileName, req.ContentType, req.Content) {
 		lessonType = LessonContentVideo
@@ -165,7 +169,10 @@ func (s *Service) IssueLessonMaterialAccess(ctx context.Context, lessonID int64)
 	}
 	objectRef := strings.TrimSpace(jsonx.StringFromAny(lesson.ContentRef["object_ref"]))
 	fileName := strings.TrimSpace(jsonx.StringFromAny(lesson.ContentRef["file_name"]))
-	contentType := normalizedContentType(jsonx.StringFromAny(lesson.ContentRef["content_type"]))
+	contentType, _, err := mime.ParseMediaType(jsonx.StringFromAny(lesson.ContentRef["content_type"]))
+	if err != nil {
+		return LessonMaterialAccessDTO{}, apperr.ErrTeachingLessonInvalid.WithCause(err)
+	}
 	size := jsonx.Int64FromAny(lesson.ContentRef["size"], 0)
 	if (lesson.ContentType != LessonContentVideo && lesson.ContentType != LessonContentAttachment) || objectRef == "" || fileName == "" || filepath.Base(fileName) != fileName || size <= 0 || contentType == "" {
 		return LessonMaterialAccessDTO{}, apperr.ErrTeachingLessonInvalid
@@ -197,10 +204,6 @@ func (s *Service) IssueLessonMaterialAccess(ctx context.Context, lessonID int64)
 	return LessonMaterialAccessDTO{Token: token, Mode: grant.Mode, FileName: fileName, Size: size, ContentType: contentType, ExpiresAt: timex.RFC3339OrEmpty(grant.ExpiresAt)}, nil
 }
 
-func normalizedContentType(value string) string {
-	return strings.ToLower(strings.TrimSpace(strings.Split(value, ";")[0]))
-}
-
 // copyLessonMaterial 在源课时锁内复制，目标对象只属于新课时。
 func (s *Service) copyLessonMaterial(ctx context.Context, source Lesson, target *Lesson) (storage.ObjectRef, error) {
 	if source.ContentType != LessonContentVideo && source.ContentType != LessonContentAttachment {
@@ -220,7 +223,10 @@ func (s *Service) copyLessonMaterial(ctx context.Context, source Lesson, target 
 	}
 	fileName := jsonx.StringFromAny(source.ContentRef["file_name"])
 	size := jsonx.Int64FromAny(source.ContentRef["size"], 0)
-	if ref.Bucket != s.storage.BucketAttach() || !strings.HasPrefix(ref.Key, prefix+"/") || fileName == "" || filepath.Base(fileName) != fileName || size <= 0 || normalizedContentType(jsonx.StringFromAny(source.ContentRef["content_type"])) == "" {
+	if _, _, err := mime.ParseMediaType(jsonx.StringFromAny(source.ContentRef["content_type"])); err != nil {
+		return storage.ObjectRef{}, apperr.ErrTeachingLessonInvalid.WithCause(err)
+	}
+	if ref.Bucket != s.storage.BucketAttach() || !strings.HasPrefix(ref.Key, prefix+"/") || fileName == "" || filepath.Base(fileName) != fileName || size <= 0 {
 		return storage.ObjectRef{}, apperr.ErrTeachingLessonInvalid
 	}
 	key, err := storage.ObjectKey(target.TenantID, teachingModuleName, lessonMaterialResourceType, ids.Format(target.ID), ids.Format(s.ids.Generate()), fileName)

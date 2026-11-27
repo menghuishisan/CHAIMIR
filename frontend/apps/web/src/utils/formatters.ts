@@ -1,3 +1,5 @@
+import { parseDateInput } from './dateInput.ts'
+
 const SHORT_DATE_TIME_FORMAT = new Intl.DateTimeFormat('zh-CN', {
   month: '2-digit',
   day: '2-digit',
@@ -34,7 +36,7 @@ const DATE_TIME_SECONDS_FORMAT = new Intl.DateTimeFormat('zh-CN', {
 const TIME_FORMAT = new Intl.DateTimeFormat('zh-CN', {
   hour: '2-digit',
   minute: '2-digit',
-  hour12: false,
+  hourCycle: 'h23',
 })
 
 /** 时间解析失败时的用户向占位,不把原始值抛到界面上。 */
@@ -50,7 +52,14 @@ export function formatShortDateTime(value: string): string {
   return Number.isNaN(date.getTime()) ? UNKNOWN_TIME : SHORT_DATE_TIME_FORMAT.format(date)
 }
 
-/** formatDate 展示仅到日的日期(课程起止、学期区间等)。 */
+/** formatCalendarDate 展示自然日，拒绝时间戳和不存在的日期。 */
+export function formatCalendarDate(value: string): string {
+  const day = parseDateInput(value)
+  if (!day) return UNKNOWN_TIME
+  return DATE_FORMAT.format(new Date(day.year, day.month - 1, day.day))
+}
+
+/** formatDate 按本地时区展示时间戳所属日期。 */
 export function formatDate(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? UNKNOWN_TIME : DATE_FORMAT.format(date)
@@ -107,11 +116,6 @@ function pad2(value: number): string {
   return String(value).padStart(2, '0')
 }
 
-/** clockText 给出本地时刻 HH:mm;自己拼而不用 Intl,避免部分环境把零点写成 24:00。 */
-function clockText(date: Date): string {
-  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
-}
-
 /** calendarDayDiff 返回从 from 到 to 跨过的日历天数(按本地日期算,不按 24 小时算)。 */
 function calendarDayDiff(from: Date, to: Date): number {
   const fromDay = new Date(from.getFullYear(), from.getMonth(), from.getDate()).getTime()
@@ -135,8 +139,8 @@ export function formatRelativeDeadline(
   if (Number.isNaN(date.getTime())) return { text: UNKNOWN_TIME, urgency: 'normal' }
   if (date.getTime() <= now.getTime()) return { text: '已截止', urgency: 'overdue' }
   const days = calendarDayDiff(now, date)
-  if (days === 0) return { text: `今天 ${clockText(date)} 截止`, urgency: 'urgent' }
-  if (days === 1) return { text: `明天 ${clockText(date)} 截止`, urgency: 'urgent' }
+  if (days === 0) return { text: `今天 ${TIME_FORMAT.format(date)} 截止`, urgency: 'urgent' }
+  if (days === 1) return { text: `明天 ${TIME_FORMAT.format(date)} 截止`, urgency: 'urgent' }
   return { text: `还剩 ${days} 天`, urgency: days <= 3 ? 'urgent' : 'normal' }
 }
 
@@ -152,8 +156,8 @@ export function formatRelativeOccurrence(value: string, now: Date = new Date()):
   if (diffMs < 60_000 && diffMs > -CLOCK_SKEW_TOLERANCE_MS) return '刚刚'
   if (diffMs >= 60_000 && diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)} 分钟前`
   const days = calendarDayDiff(date, now)
-  if (days === 0) return `今天 ${clockText(date)}`
-  if (days === 1) return `昨天 ${clockText(date)}`
+  if (days === 0) return `今天 ${TIME_FORMAT.format(date)}`
+  if (days === 1) return `昨天 ${TIME_FORMAT.format(date)}`
   if (Math.abs(days) < 365) return `${date.getMonth() + 1}月${date.getDate()}日`
   return `${date.getFullYear()}.${pad2(date.getMonth() + 1)}.${pad2(date.getDate())}`
 }

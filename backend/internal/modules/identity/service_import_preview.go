@@ -13,7 +13,7 @@ import (
 	"chaimir/pkg/apperr"
 )
 
-// importPreviewResponse只解码服务端校验结果,从不把含密码的原始rows送入响应。
+// importPreviewResponse只解码服务端校验结果,不把账号资料及密码哈希送入响应。
 func importPreviewResponse(preview ImportPreview) (ImportPreviewResponse, error) {
 	var rows []ImportRowResult
 	if err := jsonx.DecodeStrictKnownFields(preview.PreviewResult, &rows); err != nil {

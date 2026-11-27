@@ -4,6 +4,7 @@ package identity
 import (
 	"context"
 	"sort"
+	"strconv"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -38,15 +39,13 @@ func (s *Service) ListAccountsByAdmin(ctx context.Context, query AccountQuery) (
 		return nil, 0, page, size, nil, apperr.ErrInternal.WithCause(err)
 	}
 	var rows []Account
-	var total int64
 	var byStatus pagex.FacetGroup
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		items, count, err := tx.ListAccounts(ctx, query)
+		items, err := tx.ListAccounts(ctx, query)
 		if err != nil {
 			return err
 		}
 		rows = items
-		total = count
 		// 状态分段计数:套用其余筛选,不套用状态筛选
 		byStatus, err = tx.CountAccountsByStatus(ctx, query)
 		return err
@@ -61,7 +60,11 @@ func (s *Service) ListAccountsByAdmin(ctx context.Context, query AccountQuery) (
 		}
 		list = append(list, ToAccountDTO(row, phonePlain))
 	}
-	return list, total, page, size, pagex.Facets{"status": byStatus}, nil
+	status := ""
+	if query.Status != 0 {
+		status = strconv.Itoa(int(query.Status))
+	}
+	return list, byStatus.Total(status), page, size, pagex.Facets{"status": byStatus}, nil
 }
 
 // GetAccountByAdmin 读取本校单个账号(手机号脱敏),供按编号恢复的筛选条件与详情抽屉显示是谁;
@@ -169,12 +172,9 @@ func (s *Service) CreateAccountByAdmin(ctx context.Context, req CreateAccountReq
 			}
 			activationPlain = code
 		}
-		return nil
+		return s.auditAccount(ctx, id, "account.create", account.ID)
 	}); err != nil {
 		return AccountDTO{}, "", apperr.AsAppError(err)
-	}
-	if err := s.auditAccount(ctx, id, "account.create", account.ID); err != nil {
-		return AccountDTO{}, "", apperr.ErrInternal.WithCause(err)
 	}
 	return ToAccountDTO(account, req.Phone), activationPlain, nil
 }
@@ -188,7 +188,7 @@ func (s *Service) UpdateAccountByAdmin(ctx context.Context, accountID int64, req
 	if strings.TrimSpace(req.Name) == "" || req.OrgID <= 0 {
 		return AccountDTO{}, apperr.ErrIdentityAccountUpdateInvalid
 	}
-	var account Account
+	var out AccountDTO
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		current, err := tx.GetAccount(ctx, accountID)
 		if err != nil {
@@ -202,19 +202,16 @@ func (s *Service) UpdateAccountByAdmin(ctx context.Context, accountID int64, req
 		if err != nil {
 			return err
 		}
-		account = row
-		return nil
+		phonePlain, err := s.decryptPhone(row.PhoneEnc)
+		if err != nil {
+			return err
+		}
+		out = ToAccountDTO(row, phonePlain)
+		return s.auditAccount(ctx, id, "account.update", accountID)
 	}); err != nil {
 		return AccountDTO{}, apperr.AsAppError(err)
 	}
-	phonePlain, err := s.decryptPhone(account.PhoneEnc)
-	if err != nil {
-		return AccountDTO{}, apperr.ErrInternal.WithCause(err)
-	}
-	if err := s.auditAccount(ctx, id, "account.update", accountID); err != nil {
-		return AccountDTO{}, apperr.ErrInternal.WithCause(err)
-	}
-	return ToAccountDTO(account, phonePlain), nil
+	return out, nil
 }
 
 // ResetAccountPasswordByAdmin 重置指定账号密码并按请求设置是否强制首登改密。
@@ -231,6 +228,9 @@ func (s *Service) ResetAccountPasswordByAdmin(ctx context.Context, accountID int
 		return apperr.ErrInternal.WithCause(err)
 	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		if err := tx.LockAccount(ctx, id.TenantID, accountID); err != nil {
+			return err
+		}
 		account, err := tx.GetAccount(ctx, accountID)
 		if err != nil {
 			return err
@@ -241,11 +241,14 @@ func (s *Service) ResetAccountPasswordByAdmin(ctx context.Context, accountID int
 		if _, err := tx.UpdateAccountPassword(ctx, accountID, id.TenantID, hash, req.MustChange, AccountStatusActive); err != nil {
 			return err
 		}
-		return tx.RevokeAccountSessions(ctx, id.TenantID, accountID)
+		if err := tx.RevokeAccountSessions(ctx, id.TenantID, accountID); err != nil {
+			return err
+		}
+		return s.auditAccount(ctx, id, "account.password.reset", accountID)
 	}); err != nil {
 		return apperr.AsAppError(err)
 	}
-	return s.auditAccount(ctx, id, "account.password.reset", accountID)
+	return nil
 }
 
 // GrantSchoolAdmin 授予教师学校管理员角色。
@@ -255,6 +258,9 @@ func (s *Service) GrantSchoolAdmin(ctx context.Context, accountID int64) error {
 		return err
 	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		if err := lockAccountAdministration(ctx, tx, id.TenantID, accountID); err != nil {
+			return err
+		}
 		account, err := tx.GetAccount(ctx, accountID)
 		if err != nil {
 			return err
@@ -265,11 +271,14 @@ func (s *Service) GrantSchoolAdmin(ctx context.Context, accountID int64) error {
 		if account.BaseIdentity != BaseIdentityTeacher {
 			return apperr.ErrIdentityTeacherAdminRequired
 		}
-		return tx.GrantRole(ctx, id.TenantID, accountID, contracts.RoleNumSchoolAdmin, s.ids.Generate())
+		if err := tx.GrantRole(ctx, id.TenantID, accountID, contracts.RoleNumSchoolAdmin, s.ids.Generate()); err != nil {
+			return err
+		}
+		return s.auditAccount(ctx, id, "account.admin.grant", accountID)
 	}); err != nil {
 		return apperr.AsAppError(err)
 	}
-	return s.auditAccount(ctx, id, "account.admin.grant", accountID)
+	return nil
 }
 
 // RevokeSchoolAdmin 撤销账号学校管理员角色。
@@ -282,6 +291,9 @@ func (s *Service) RevokeSchoolAdmin(ctx context.Context, accountID int64) error 
 		return apperr.ErrIdentitySchoolAdminSelfRevoke
 	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		if err := lockAccountAdministration(ctx, tx, id.TenantID, accountID); err != nil {
+			return err
+		}
 		account, err := tx.GetAccount(ctx, accountID)
 		if err != nil {
 			return err
@@ -289,18 +301,17 @@ func (s *Service) RevokeSchoolAdmin(ctx context.Context, accountID int64) error 
 		if !hasRoleNumber(account.Roles, contracts.RoleNumSchoolAdmin) {
 			return apperr.ErrForbidden
 		}
-		count, err := tx.CountActiveRoleAccounts(ctx, id.TenantID, contracts.RoleNumSchoolAdmin)
-		if err != nil {
+		if err := validateSchoolAdminRemoval(ctx, tx, id.TenantID, account); err != nil {
 			return err
 		}
-		if account.Status == AccountStatusActive && count <= 1 {
-			return apperr.ErrIdentitySchoolAdminLastRevoke
+		if err := tx.RevokeRole(ctx, id.TenantID, accountID, contracts.RoleNumSchoolAdmin); err != nil {
+			return err
 		}
-		return tx.RevokeRole(ctx, id.TenantID, accountID, contracts.RoleNumSchoolAdmin)
+		return s.auditAccount(ctx, id, "account.admin.revoke", accountID)
 	}); err != nil {
 		return apperr.AsAppError(err)
 	}
-	return s.auditAccount(ctx, id, "account.admin.revoke", accountID)
+	return nil
 }
 
 // UpdateAccountStatusByAdmin 执行学校管理员账号状态流转。
@@ -319,7 +330,7 @@ func (s *Service) UpdateAccountStatusByAdmin(ctx context.Context, accountID int6
 
 // updateAccountStatusInTx 统一在行锁下校验状态,并使状态、会话撤销和审计同成同败。
 func (s *Service) updateAccountStatusInTx(ctx context.Context, tx TxStore, id tenant.Identity, accountID int64, status int16) error {
-	if err := tx.LockAccount(ctx, id.TenantID, accountID); err != nil {
+	if err := lockAccountAdministration(ctx, tx, id.TenantID, accountID); err != nil {
 		return err
 	}
 	current, err := tx.GetAccount(ctx, accountID)
@@ -328,6 +339,11 @@ func (s *Service) updateAccountStatusInTx(ctx context.Context, tx TxStore, id te
 	}
 	if err := ValidateAccountStatusTransition(current.Status, status); err != nil {
 		return err
+	}
+	if status != AccountStatusActive {
+		if err := validateSchoolAdminRemoval(ctx, tx, id.TenantID, current); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.UpdateAccountStatus(ctx, accountID, id.TenantID, status, status == AccountStatusCancelled); err != nil {
 		return err
@@ -340,6 +356,27 @@ func (s *Service) updateAccountStatusInTx(ctx context.Context, tx TxStore, id te
 	return s.writeTenantAuditInTx(ctx, tx, id, "account.status.update", "identity.account", accountID, map[string]any{"status": status})
 }
 
+func lockAccountAdministration(ctx context.Context, tx TxStore, tenantID, accountID int64) error {
+	if err := tx.LockSchoolAdministrationScope(ctx, tenantID); err != nil {
+		return err
+	}
+	return tx.LockAccount(ctx, tenantID, accountID)
+}
+
+func validateSchoolAdminRemoval(ctx context.Context, tx TxStore, tenantID int64, account Account) error {
+	if account.Status != AccountStatusActive || !hasRoleNumber(account.Roles, contracts.RoleNumSchoolAdmin) {
+		return nil
+	}
+	count, err := tx.CountActiveRoleAccounts(ctx, tenantID, contracts.RoleNumSchoolAdmin)
+	if err != nil {
+		return err
+	}
+	if count <= 1 {
+		return apperr.ErrIdentitySchoolAdminLastRevoke
+	}
+	return nil
+}
+
 // ForceLogoutAccountByAdmin 吊销指定账号全部会话。
 func (s *Service) ForceLogoutAccountByAdmin(ctx context.Context, accountID int64) error {
 	id, err := requireTenantRole(ctx, s, contracts.RoleSchoolAdmin)
@@ -347,14 +384,20 @@ func (s *Service) ForceLogoutAccountByAdmin(ctx context.Context, accountID int64
 		return err
 	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		if err := tx.LockAccount(ctx, id.TenantID, accountID); err != nil {
+			return err
+		}
 		if _, err := tx.GetAccount(ctx, accountID); err != nil {
 			return err
 		}
-		return tx.RevokeAccountSessions(ctx, id.TenantID, accountID)
+		if err := tx.RevokeAccountSessions(ctx, id.TenantID, accountID); err != nil {
+			return err
+		}
+		return s.auditAccount(ctx, id, "account.force_logout", accountID)
 	}); err != nil {
 		return apperr.ErrInternal.WithCause(err)
 	}
-	return s.auditAccount(ctx, id, "account.force_logout", accountID)
+	return nil
 }
 
 // BatchUpdateAccountStatusByAdmin 在一个事务中按固定锁顺序批量执行同一账号状态机。

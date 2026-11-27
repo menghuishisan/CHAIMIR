@@ -21,6 +21,7 @@ func (s *Service) CreateGroup(ctx context.Context, experimentID int64, req Creat
 		return GroupDTO{}, apperr.ErrExperimentGroupInvalid
 	}
 	var group ExperimentGroup
+	var profiles map[int64]contracts.AccountInfo
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		exp, err := tx.GetExperiment(ctx, id.TenantID, experimentID)
 		if err != nil {
@@ -33,15 +34,18 @@ func (s *Service) CreateGroup(ctx context.Context, experimentID int64, req Creat
 			return apperr.ErrExperimentGroupInvalid
 		}
 		group, err = tx.CreateGroup(ctx, ExperimentGroup{ID: s.ids.Generate(), TenantID: id.TenantID, ExperimentID: experimentID, Name: req.Name})
-		return err
+		if err != nil {
+			return err
+		}
+		profiles, err = s.groupMemberProfiles(ctx, []ExperimentGroup{group})
+		if err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.group.create", auditTargetGroup, group.ID, map[string]any{"experiment_id": experimentID})
 	}); err != nil {
 		return GroupDTO{}, err
 	}
-	profiles, err := s.groupMemberProfiles(ctx, []ExperimentGroup{group})
-	if err != nil {
-		return GroupDTO{}, err
-	}
-	return groupDTOFromModel(group, profiles), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.group.create", auditTargetGroup, group.ID, map[string]any{"experiment_id": experimentID})
+	return groupDTOFromModel(group, profiles), nil
 }
 
 // UpsertGroupMember 添加或调整协作小组成员角色。
@@ -55,6 +59,7 @@ func (s *Service) UpsertGroupMember(ctx context.Context, groupID int64, req Upse
 		return GroupDTO{}, apperr.ErrExperimentGroupInvalid
 	}
 	var group ExperimentGroup
+	var profiles map[int64]contracts.AccountInfo
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		currentGroup, err := tx.GetGroupForUpdate(ctx, id.TenantID, groupID)
 		if err != nil {
@@ -80,15 +85,9 @@ func (s *Service) UpsertGroupMember(ctx context.Context, groupID int64, req Upse
 		if exp.GroupConfig.Size > 0 && !memberAlreadyExists(members, req.StudentID.Int64()) && len(members) >= exp.GroupConfig.Size {
 			return apperr.ErrExperimentGroupFull
 		}
-		// 先尝试清空全部旧授权再改成员表;跨模块调用无法共享数据库事务,失败时拒绝提交并由重试继续收敛。
 		activeInstance, instanceErr := tx.GetActiveGroupInstance(ctx, id.TenantID, currentGroup.ExperimentID, groupID)
 		if instanceErr != nil && !isNoRows(instanceErr) {
 			return instanceErr
-		}
-		if instanceErr == nil {
-			if err := s.syncActiveInstanceAuthorizations(ctx, activeInstance, nil); err != nil {
-				return err
-			}
 		}
 		if _, err := tx.UpsertGroupMember(ctx, GroupMember{ID: s.ids.Generate(), TenantID: id.TenantID, GroupID: groupID, StudentID: req.StudentID.Int64(), Role: req.Role}); err != nil {
 			return err
@@ -107,15 +106,15 @@ func (s *Service) UpsertGroupMember(ctx context.Context, groupID int64, req Upse
 				return err
 			}
 		}
-		return nil
+		profiles, err = s.groupMemberProfiles(ctx, []ExperimentGroup{group})
+		if err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.group.member.upsert", auditTargetGroup, groupID, map[string]any{"student_id": req.StudentID, "role": req.Role})
 	}); err != nil {
 		return GroupDTO{}, err
 	}
-	profiles, err := s.groupMemberProfiles(ctx, []ExperimentGroup{group})
-	if err != nil {
-		return GroupDTO{}, err
-	}
-	return groupDTOFromModel(group, profiles), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.group.member.upsert", auditTargetGroup, groupID, map[string]any{"student_id": req.StudentID, "role": req.Role})
+	return groupDTOFromModel(group, profiles), nil
 }
 
 // ensureStudentAccount 校验编组目标账号属于当前租户且具备学生角色。
@@ -131,7 +130,7 @@ func (s *Service) ensureStudentAccount(ctx context.Context, accountID int64) err
 	return nil
 }
 
-// RemoveGroupMember 移除协作小组成员,并在同一行锁流程内收回再重同步活跃资源授权。
+// RemoveGroupMember 在小组行锁下原子更新成员、资源授权与审计。
 func (s *Service) RemoveGroupMember(ctx context.Context, groupID, studentID int64) (GroupDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
@@ -141,6 +140,7 @@ func (s *Service) RemoveGroupMember(ctx context.Context, groupID, studentID int6
 		return GroupDTO{}, apperr.ErrExperimentGroupInvalid
 	}
 	var group ExperimentGroup
+	var profiles map[int64]contracts.AccountInfo
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		currentGroup, err := tx.GetGroupForUpdate(ctx, id.TenantID, groupID)
 		if err != nil {
@@ -161,9 +161,6 @@ func (s *Service) RemoveGroupMember(ctx context.Context, groupID, studentID int6
 			if activeInstance.OwnerAccountID == studentID {
 				return apperr.ErrExperimentGroupOwnerLocked
 			}
-			if err := s.syncActiveInstanceAuthorizations(ctx, activeInstance, nil); err != nil {
-				return err
-			}
 		}
 		if err := tx.DeleteGroupMember(ctx, id.TenantID, groupID, studentID); err != nil {
 			return err
@@ -181,20 +178,18 @@ func (s *Service) RemoveGroupMember(ctx context.Context, groupID, studentID int6
 				return err
 			}
 		}
-		return nil
+		profiles, err = s.groupMemberProfiles(ctx, []ExperimentGroup{group})
+		if err != nil {
+			return err
+		}
+		return s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.group.member.remove", auditTargetGroup, groupID, map[string]any{"student_id": studentID})
 	}); err != nil {
 		return GroupDTO{}, err
 	}
-	profiles, err := s.groupMemberProfiles(ctx, []ExperimentGroup{group})
-	if err != nil {
-		return GroupDTO{}, err
-	}
-	return groupDTOFromModel(group, profiles), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.group.member.remove", auditTargetGroup, groupID, map[string]any{"student_id": studentID})
+	return groupDTOFromModel(group, profiles), nil
 }
 
-// syncActiveInstanceAuthorizations 在跨引擎边界执行一轮授权同步。
-// 所有资源都会尝试更新并收集错误;授予新集合阶段若任一资源失败,再次尝试把全部资源收回 owner-only,
-// 让跨模块事务回滚时尽快收敛到安全集合。跨模块调用不能共享同一数据库事务,清空仍失败的资源由重试继续收敛。
+// syncActiveInstanceAuthorizations 在当前租户事务内更新全部引擎授权，失败由持有者整体回滚。
 func (s *Service) syncActiveInstanceAuthorizations(ctx context.Context, inst ExperimentInstance, accountIDs []int64) error {
 	var syncErrs []error
 	for _, ref := range inst.SandboxRefs {
@@ -215,27 +210,7 @@ func (s *Service) syncActiveInstanceAuthorizations(ctx context.Context, inst Exp
 			syncErrs = append(syncErrs, apperr.ErrExperimentSimUnavailable.WithCause(err))
 		}
 	}
-	if len(syncErrs) == 0 {
-		return nil
-	}
-	var clearErrs []error
-	for _, ref := range inst.SandboxRefs {
-		if s.sandbox == nil {
-			continue
-		}
-		if err := s.sandbox.UpdateSandboxAuthorizedAccounts(ctx, contracts.SandboxAuthorizedAccountsRequest{TenantID: inst.TenantID, SandboxID: ref.SandboxID.Int64(), SourceRef: inst.SourceRef, AuthorizedAccountIDs: nil}); err != nil {
-			clearErrs = append(clearErrs, apperr.ErrExperimentSandboxUnavailable.WithCause(err))
-		}
-	}
-	for _, ref := range inst.SimSessionRefs {
-		if s.sim == nil {
-			continue
-		}
-		if err := s.sim.UpdateSessionAuthorizedAccounts(ctx, contracts.SimAuthorizedAccountsRequest{TenantID: inst.TenantID, SessionID: ref.SessionID.Int64(), SourceRef: inst.SourceRef, AuthorizedAccountIDs: nil}); err != nil {
-			clearErrs = append(clearErrs, apperr.ErrExperimentSimUnavailable.WithCause(err))
-		}
-	}
-	return errors.Join(append(syncErrs, clearErrs...)...)
+	return errors.Join(syncErrs...)
 }
 
 // ListGroups 按实验列出全部协作小组,供教师编组视角使用。

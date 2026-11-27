@@ -5,7 +5,7 @@
 //
 // 「我提交的」与「可用场景」是同一列表接口的两个视角(GET /sim/packages 按 mine 分叉),作者边界由服务端会话判定。
 // 边界:审核通过、驳回、下架、重新上架只在平台管理端;表单也没有「运行方式」—— 教师提交的场景一律
-// 在平台的隔离容器内运行(见 docs/04-仿真可视化引擎/02-架构设计.md §8)。
+// 在平台的隔离容器内运行(见 docs/04-仿真可视化引擎/07-架构设计.md §8)。
 
 import { useState } from 'react'
 import { Network, Pencil, Plus } from 'lucide-react'

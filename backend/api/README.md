@@ -1,6 +1,6 @@
 # backend/api 目录说明
 
-`backend/api` 是 Chaimir 后端对外接口契约目录,用于维护 OpenAPI、proto 等接口描述文件。
+`backend/api` 是 Chaimir 后端对外接口契约目录,用于维护 OpenAPI 接口描述文件。
 
 ## 职责边界
 
@@ -23,6 +23,7 @@
 - `openapi.yaml`: OpenAPI 根文件,只放全局信息、tags、公共 components,以及对各模块 path 文件的 `$ref`。
 - `paths/health.yaml`: 健康探针。
 - `paths/identity.yaml`: M1 身份与租户。
+- `paths/storage.yaml`: 基础横切统一文件服务。
 - `paths/transfer.yaml`: 基础横切统一导入导出中心。
 - `paths/sandbox.yaml` ~ `paths/grade.yaml`: M2-M11 各模块路径。
 
@@ -36,3 +37,5 @@
   ```
 - 公共响应体、鉴权、通用参数和通用请求体只放根文件 `components`。
 - 模块私有 schema 只有在字段已经由文档或 DTO 明确时才允许补充;文档未明确的请求体继续引用公共 `ObjectBody`,避免伪造字段。
+- 已核对调用链的请求按实际边界登记：JSON 正文逐字段声明，上传使用 multipart 表单，查询与持久化导出记录不得冒充 JSON 请求。已明确的正文不继续使用通用对象掩盖必填字段、字符串 ID、显式 false 或服务身份来源。
+- `scripts/audit/request-contracts.go` 使用 Go AST 和真实 YAML 解析核对已映射请求及所有 WebSocket 票据位置，经统一审查入口执行；字段类型、上传字段或入口改变时同步更新对应契约映射。

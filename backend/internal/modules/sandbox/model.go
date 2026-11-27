@@ -89,7 +89,7 @@ type CatalogRuntime struct {
 	Capabilities CapabilityConstraints
 }
 
-// CatalogRuntimeImage 是编排目录里的镜像版本投影,只有版本号与是否默认。
+// CatalogRuntimeImage 是编排目录中的可用镜像版本。
 type CatalogRuntimeImage struct {
 	Version string
 }
@@ -307,6 +307,7 @@ type RuntimePlan struct {
 }
 
 // RuntimeInitArchive 是已校验并重打的初始化归档，仅在本次资源操作中传递。
+// Tarball 可由不同注入目标共享，编排器不得修改其内容。
 type RuntimeInitArchive struct {
 	RuntimeInstance string
 	TargetDomain    string

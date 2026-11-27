@@ -23,17 +23,18 @@ import (
 
 // NotifyModuleDeps 是 M10 装配所需的依赖。
 type NotifyModuleDeps struct {
-	Router   gin.IRouter
-	Database *db.DB
-	IDs      snowflake.Generator
-	Redis    *redis.Client
-	Hub      *ws.Hub
-	Config   config.NotifyConfig
-	EventBus eventbus.Bus
-	Auth     *auth.Manager
-	Roles    contracts.IdentityService
-	Contests contracts.ContestReadService
-	Audit    audit.Writer
+	Router      gin.IRouter
+	Database    *db.DB
+	IDs         snowflake.Generator
+	Redis       *redis.Client
+	Hub         *ws.Hub
+	Config      config.NotifyConfig
+	EventBus    eventbus.Bus
+	Auth        *auth.Manager
+	Roles       contracts.IdentityService
+	Contests    contracts.ContestReadService
+	Experiments contracts.ExperimentProgressReadService
+	Audit       audit.Writer
 }
 
 // RegisterNotifyModule 构造通知 store/service,注册路由和事件订阅。
@@ -48,7 +49,7 @@ func RegisterNotifyModule(ctx context.Context, deps NotifyModuleDeps) (*notify.S
 		return nil, fmt.Errorf("notify module 缺少 database")
 	}
 	store := notify.NewStore(deps.Database)
-	svc, err := notify.NewService(notify.ServiceDeps{Store: store, IDs: deps.IDs, Redis: deps.Redis, Hub: deps.Hub, Roles: deps.Roles, Contests: deps.Contests, Audit: deps.Audit, Config: deps.Config})
+	svc, err := notify.NewService(notify.ServiceDeps{Store: store, IDs: deps.IDs, Redis: deps.Redis, Hub: deps.Hub, Roles: deps.Roles, Contests: deps.Contests, Experiments: deps.Experiments, Audit: deps.Audit, Config: deps.Config})
 	if err != nil {
 		return nil, err
 	}

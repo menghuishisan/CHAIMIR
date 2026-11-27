@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"mime"
 	"net/http"
 	"path"
 	"strings"
@@ -92,7 +93,7 @@ func (a downloadAPI) download(c *gin.Context) {
 		if strings.TrimSpace(contentType) == "" {
 			contentType = "application/octet-stream"
 		}
-		c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, httpx.SafeAttachmentName(fileName)))
+		c.Header("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": httpx.SafeAttachmentName(fileName)}))
 		c.Header("Content-Type", contentType)
 		c.Header("X-Content-Type-Options", "nosniff")
 		http.ServeContent(c.Writer, c.Request, fileName, time.Time{}, reader)

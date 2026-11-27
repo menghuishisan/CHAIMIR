@@ -9,23 +9,9 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
-
-// CreateSessionFromHTTP 转换内部 HTTP 请求为跨模块契约调用。
-func (s *Service) CreateSessionFromHTTP(ctx context.Context, tenantID int64, req CreateSessionRequest) (SimSessionCreateResponse, error) {
-	authorizedAccountIDs := make([]int64, 0, len(req.AuthorizedAccountIDs))
-	for _, accountID := range req.AuthorizedAccountIDs {
-		authorizedAccountIDs = append(authorizedAccountIDs, accountID.Int64())
-	}
-	info, err := s.CreateSession(ctx, contracts.SimCreateSessionRequest{TenantID: tenantID, PackageCode: req.PackageCode, Version: req.Version, Seed: req.Seed, InitParams: req.InitParams, OwnerAccountID: req.OwnerAccountID.Int64(), AuthorizedAccountIDs: authorizedAccountIDs, SourceRef: req.SourceRef, ScopeRef: req.ScopeRef})
-	if err != nil {
-		return SimSessionCreateResponse{}, err
-	}
-	return SimSessionCreateResponse{SessionID: ids.ID(info.SessionID), Compute: info.Compute}, nil
-}
 
 // ReportAction 保存用户操作序列,同 seq 同内容幂等,同 seq 不同内容拒绝。
 func (s *Service) ReportAction(ctx context.Context, tenantID, accountID, sessionID int64, req ReportActionRequest) (SimActionResponse, error) {

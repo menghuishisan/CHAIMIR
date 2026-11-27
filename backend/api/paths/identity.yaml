@@ -364,7 +364,18 @@
     operationId: identityUploadTenantLogo
     x-chaimir-audience: school-admin
     security: [{ bearerAuth: [] }]
-    requestBody: { $ref: "#/components/requestBodies/MultipartBody" }
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required:
+              - file
+            properties:
+              file:
+                type: string
+                format: binary
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   delete:
     tags: [identity]
@@ -592,7 +603,17 @@
     security:
       - bearerAuth: []
     requestBody:
-      $ref: "#/components/requestBodies/MultipartBody"
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required:
+              - file
+            properties:
+              file:
+                type: string
+                format: binary
     responses:
       "200":
         $ref: "#/components/responses/Standard"
@@ -917,7 +938,23 @@
     security:
       - bearerAuth: []
     requestBody:
-      $ref: "#/components/requestBodies/MultipartBody"
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required:
+              - type
+              - file
+            properties:
+              type:
+                type: string
+                enum:
+                  - teacher
+                  - student
+              file:
+                type: string
+                format: binary
     responses:
       "200":
         $ref: "#/components/responses/Standard"

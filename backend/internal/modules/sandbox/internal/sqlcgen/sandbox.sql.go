@@ -641,16 +641,6 @@ func (q *Queries) DeleteCompositionPrepullByRuntimeImage(ctx context.Context, ru
 	return err
 }
 
-const deleteCompositionSnapshot = `-- name: DeleteCompositionSnapshot :exec
-DELETE FROM sandbox_composition
-WHERE composition_digest = $1 AND status = 1
-`
-
-func (q *Queries) DeleteCompositionSnapshot(ctx context.Context, compositionDigest string) error {
-	_, err := q.db.Exec(ctx, deleteCompositionSnapshot, compositionDigest)
-	return err
-}
-
 const disableRuntimeImage = `-- name: DisableRuntimeImage :one
 UPDATE runtime_image
 SET status = 2
@@ -803,57 +793,6 @@ func (q *Queries) EnsureTool(ctx context.Context, arg EnsureToolParams) error {
 		arg.Status,
 	)
 	return err
-}
-
-const finishCompositionPrepull = `-- name: FinishCompositionPrepull :one
-UPDATE sandbox_composition_prepull
-SET status = $1::smallint, daemonset_name = $2::text, desired_nodes = $3::int, ready_nodes = $4::int, detail = $5,
-    completed_at = CASE WHEN $1::smallint = 2 OR $1::smallint = 3 THEN now() ELSE NULL END, updated_at = now()
-WHERE runtime_image_id = $6::bigint AND composition_digest = $7::text AND status = 4 AND attempt_id = $8::text
-RETURNING id, runtime_image_id, composition_digest, status, attempt_id, daemonset_name, image_closure,
-          desired_nodes, ready_nodes, detail, started_at, completed_at, created_at, updated_at
-`
-
-type FinishCompositionPrepullParams struct {
-	Status            int16  `json:"status"`
-	DaemonsetName     string `json:"daemonset_name"`
-	DesiredNodes      int32  `json:"desired_nodes"`
-	ReadyNodes        int32  `json:"ready_nodes"`
-	Detail            []byte `json:"detail"`
-	RuntimeImageID    int64  `json:"runtime_image_id"`
-	CompositionDigest string `json:"composition_digest"`
-	AttemptID         string `json:"attempt_id"`
-}
-
-func (q *Queries) FinishCompositionPrepull(ctx context.Context, arg FinishCompositionPrepullParams) (SandboxCompositionPrepull, error) {
-	row := q.db.QueryRow(ctx, finishCompositionPrepull,
-		arg.Status,
-		arg.DaemonsetName,
-		arg.DesiredNodes,
-		arg.ReadyNodes,
-		arg.Detail,
-		arg.RuntimeImageID,
-		arg.CompositionDigest,
-		arg.AttemptID,
-	)
-	var i SandboxCompositionPrepull
-	err := row.Scan(
-		&i.ID,
-		&i.RuntimeImageID,
-		&i.CompositionDigest,
-		&i.Status,
-		&i.AttemptID,
-		&i.DaemonsetName,
-		&i.ImageClosure,
-		&i.DesiredNodes,
-		&i.ReadyNodes,
-		&i.Detail,
-		&i.StartedAt,
-		&i.CompletedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
 }
 
 const finishRuntimeSelftest = `-- name: FinishRuntimeSelftest :one
@@ -2442,6 +2381,57 @@ func (q *Queries) StatsByTenant(ctx context.Context, tenantID int64) (StatsByTen
 		&i.MaxLifetimeMin,
 		&i.MaxKeepaliveMin,
 		&i.MaxSnapshotRetentionMin,
+	)
+	return i, err
+}
+
+const updateCompositionPrepull = `-- name: UpdateCompositionPrepull :one
+UPDATE sandbox_composition_prepull
+SET status = $1::smallint, daemonset_name = $2::text, desired_nodes = $3::int, ready_nodes = $4::int, detail = $5,
+    completed_at = CASE WHEN $1::smallint = 2 OR $1::smallint = 3 THEN now() ELSE NULL END, updated_at = now()
+WHERE runtime_image_id = $6::bigint AND composition_digest = $7::text AND status = 4 AND attempt_id = $8::text
+RETURNING id, runtime_image_id, composition_digest, status, attempt_id, daemonset_name, image_closure,
+          desired_nodes, ready_nodes, detail, started_at, completed_at, created_at, updated_at
+`
+
+type UpdateCompositionPrepullParams struct {
+	Status            int16  `json:"status"`
+	DaemonsetName     string `json:"daemonset_name"`
+	DesiredNodes      int32  `json:"desired_nodes"`
+	ReadyNodes        int32  `json:"ready_nodes"`
+	Detail            []byte `json:"detail"`
+	RuntimeImageID    int64  `json:"runtime_image_id"`
+	CompositionDigest string `json:"composition_digest"`
+	AttemptID         string `json:"attempt_id"`
+}
+
+func (q *Queries) UpdateCompositionPrepull(ctx context.Context, arg UpdateCompositionPrepullParams) (SandboxCompositionPrepull, error) {
+	row := q.db.QueryRow(ctx, updateCompositionPrepull,
+		arg.Status,
+		arg.DaemonsetName,
+		arg.DesiredNodes,
+		arg.ReadyNodes,
+		arg.Detail,
+		arg.RuntimeImageID,
+		arg.CompositionDigest,
+		arg.AttemptID,
+	)
+	var i SandboxCompositionPrepull
+	err := row.Scan(
+		&i.ID,
+		&i.RuntimeImageID,
+		&i.CompositionDigest,
+		&i.Status,
+		&i.AttemptID,
+		&i.DaemonsetName,
+		&i.ImageClosure,
+		&i.DesiredNodes,
+		&i.ReadyNodes,
+		&i.Detail,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

@@ -1,4 +1,3 @@
-// composition_catalog 统一解析编排选择和依赖闭包,供连接预览与最终编译复用。
 package sandbox
 
 import (
@@ -10,7 +9,6 @@ import (
 	"chaimir/pkg/apperr"
 )
 
-// compositionCatalog 是一次目录读取解析出的完整选择,不包含发布或执行副作用。
 type compositionCatalog struct {
 	spec            contracts.SandboxCompositionSpec
 	runtimePlans    []RuntimePlan
@@ -26,8 +24,8 @@ func loadCompositionCatalog(ctx context.Context, tx TxStore, spec contracts.Sand
 	runtimeAdapters := make(map[string]AdapterSpec, len(spec.Runtimes))
 	runtimeCapabilities := make([]CapabilityConstraints, 0, len(spec.Runtimes))
 	for _, ref := range spec.Runtimes {
-		instance := strings.TrimSpace(ref.InstanceCode)
-		runtime, err := tx.GetRuntimeByCode(ctx, strings.TrimSpace(ref.Code))
+		instance := ref.InstanceCode
+		runtime, err := tx.GetRuntimeByCode(ctx, ref.Code)
 		if err != nil {
 			return compositionCatalog{}, apperr.ErrSandboxRuntimeNotFound.WithCause(err)
 		}
@@ -37,7 +35,7 @@ func loadCompositionCatalog(ctx context.Context, tx TxStore, spec contracts.Sand
 		if err := validateComponentParams(ref.Params, runtime.AdapterSpec.Capabilities.ConfigSchema); err != nil {
 			return compositionCatalog{}, fmt.Errorf("运行时 %s 参数无效: %w", runtime.Code, err)
 		}
-		image, err := tx.GetRuntimeImageByVersionForShare(ctx, runtime.ID, strings.TrimSpace(ref.ImageVersion))
+		image, err := tx.GetRuntimeImageByVersionForShare(ctx, runtime.ID, ref.ImageVersion)
 		if err != nil {
 			return compositionCatalog{}, apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
 		}
@@ -75,6 +73,32 @@ func loadCompositionCatalog(ctx context.Context, tx TxStore, spec contracts.Sand
 		}
 		selectedCodes[code] = struct{}{}
 	}
+	runtimesByInstance := runtimeCapabilitiesByInstance(runtimePlans)
+	expandDependencies := func(owner string, required []string) error {
+		for _, capability := range required {
+			if capabilityProvided(runtimesByInstance, selected, toolByCode, capability, owner) {
+				continue
+			}
+			provider, err := findCapabilityProvider(toolByCode, capability, "infra", owner)
+			if err != nil {
+				return err
+			}
+			if provider == "" {
+				return fmt.Errorf("组件 %s 缺少必需能力 %s", owner, capability)
+			}
+			if _, exists := selectedCodes[provider]; exists {
+				continue
+			}
+			selectedCodes[provider] = struct{}{}
+			selected = append(selected, contracts.CompositionComponentRef{Code: provider, Selection: "auto"})
+		}
+		return nil
+	}
+	for _, runtime := range runtimePlans {
+		if err := expandDependencies(runtime.InstanceCode, runtime.Runtime.AdapterSpec.Capabilities.Requires); err != nil {
+			return compositionCatalog{}, err
+		}
+	}
 	for idx := 0; idx < len(selected); idx++ {
 		ref := selected[idx]
 		code := strings.TrimSpace(ref.Code)
@@ -105,26 +129,8 @@ func loadCompositionCatalog(ctx context.Context, tx TxStore, spec contracts.Sand
 		if err := validateComponentParams(ref.Params, tool.ResourceSpec.Capabilities.ConfigSchema); err != nil {
 			return compositionCatalog{}, fmt.Errorf("组件 %s 参数无效: %w", code, err)
 		}
-		for _, required := range tool.ResourceSpec.Capabilities.Requires {
-			if capabilityProvided(aggregatedCapabilities, selected, toolByCode, required, code) {
-				continue
-			}
-			provider, providerErr := findCapabilityProvider(toolByCode, required, "infra")
-			if providerErr != nil {
-				return compositionCatalog{}, providerErr
-			}
-			if provider == "" {
-				return compositionCatalog{}, fmt.Errorf("组件 %s 缺少必需能力 %s", code, required)
-			}
-			if _, exists := selectedCodes[provider]; exists {
-				continue
-			}
-			providerTool := toolByCode[provider]
-			if requiresExplicitCompositionParams(providerTool.ResourceSpec.Capabilities.ConfigSchema) {
-				return compositionCatalog{}, fmt.Errorf("组件 %s 自动依赖组件 %s,但该组件声明了必填参数;必须显式选择并提供参数", code, provider)
-			}
-			selectedCodes[provider] = struct{}{}
-			selected = append(selected, contracts.CompositionComponentRef{Code: provider, Selection: "auto"})
+		if err := expandDependencies(code, tool.ResourceSpec.Capabilities.Requires); err != nil {
+			return compositionCatalog{}, err
 		}
 	}
 	if err := validateCompositionConflicts(aggregatedCapabilities, selected, toolByCode); err != nil {

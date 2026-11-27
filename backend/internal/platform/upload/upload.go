@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"mime"
 	"path"
 	"path/filepath"
 	"strings"
@@ -72,10 +73,13 @@ func ReadBounded(r io.Reader, maxBytes int64) ([]byte, SizeResult, error) {
 
 // CSVOrXLSXKind 校验 CSV/XLSX 的扩展名、声明 MIME 与内容签名是否一致。
 func CSVOrXLSXKind(fileName, contentType string, content []byte) FileKind {
+	declared, _, err := mime.ParseMediaType(contentType)
+	if err != nil && strings.TrimSpace(contentType) != "" {
+		return KindInvalid
+	}
 	ext := strings.ToLower(filepath.Ext(fileName))
 	switch ext {
 	case ".csv":
-		declared := baseContentType(contentType)
 		// Chromium/Firefox 在本地选择器上传部分纯文本文件时可能省略
 		// 文件级 Content-Type,或声明为通用 octet-stream。此时必须靠
 		// 扩展名与文本内容签名共同兜底,不能把合法 CSV 误判为不支持。
@@ -84,7 +88,7 @@ func CSVOrXLSXKind(fileName, contentType string, content []byte) FileKind {
 		}
 		return KindCSV
 	case ".xlsx":
-		if baseContentType(contentType) != XLSXContentType || !LooksLikeZip(content) {
+		if declared != XLSXContentType || !LooksLikeZip(content) {
 			return KindInvalid
 		}
 		return KindXLSX
@@ -96,8 +100,8 @@ func CSVOrXLSXKind(fileName, contentType string, content []byte) FileKind {
 // AttachmentKindValid 校验通用附件扩展名、声明 MIME 与内容签名是否一致。
 func AttachmentKindValid(fileName, contentType string, content []byte) bool {
 	ext := strings.ToLower(filepath.Ext(fileName))
-	declared := baseContentType(contentType)
-	if ext == "" || declared == "" || len(content) == 0 {
+	declared, _, err := mime.ParseMediaType(contentType)
+	if err != nil || ext == "" || len(content) == 0 {
 		return false
 	}
 	switch ext {
@@ -128,8 +132,8 @@ func AttachmentKindValid(fileName, contentType string, content []byte) bool {
 // 品牌位只放行 JPEG/PNG/WEBP，不使用通用附件的宽类型集合。
 func BrandImageKindValid(fileName, contentType string, content []byte) bool {
 	ext := strings.ToLower(filepath.Ext(fileName))
-	declared := baseContentType(contentType)
-	if len(content) == 0 {
+	declared, _, err := mime.ParseMediaType(contentType)
+	if err != nil || len(content) == 0 {
 		return false
 	}
 	switch ext {
@@ -162,7 +166,10 @@ func BrandImageContentType(content []byte) string {
 // CourseVideoKindValid 校验课时视频扩展名、声明 MIME 与容器签名。
 func CourseVideoKindValid(fileName, contentType string, content []byte) bool {
 	ext := strings.ToLower(filepath.Ext(fileName))
-	declared := baseContentType(contentType)
+	declared, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return false
+	}
 	switch ext {
 	case ".mp4":
 		return declared == "video/mp4" && looksLikeMP4(content)
@@ -180,7 +187,11 @@ func CourseMaterialKindValid(fileName, contentType string, content []byte) bool 
 
 // AllowedCSVContentType 判断 CSV 上传允许的常见 MIME 类型。
 func AllowedCSVContentType(contentType string) bool {
-	switch baseContentType(contentType) {
+	declared, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return false
+	}
+	switch declared {
 	case "text/csv", "application/csv", "application/vnd.ms-excel":
 		return true
 	default:
@@ -254,8 +265,4 @@ func SafeArchiveDirectoryName(name string) bool {
 		return true
 	}
 	return clean != ".." && !path.IsAbs(clean) && !strings.HasPrefix(clean, "../") && !strings.Contains(clean, ":")
-}
-
-func baseContentType(contentType string) string {
-	return strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
 }

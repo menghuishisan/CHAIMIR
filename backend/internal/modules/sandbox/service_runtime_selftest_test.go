@@ -811,7 +811,7 @@ func TestRuntimeCanCompileAndLoadInfraDependency(t *testing.T) {
 		Links: []contracts.CompositionLink{{SourceComponent: "chain", SourceEndpoint: "rpc", TargetComponent: "database", TargetEndpoint: "api",
 			Protocol: "TCP", AccessScope: "sandbox", ConfigBinding: "env:DATABASE_URL", RequiredAtStart: true}},
 	}
-	snapshot, err := CompilePlatformSandboxComposition(context.Background(), networkCompositionStore{store}, spec)
+	snapshot, err := CompilePlatformSandboxComposition(context.Background(), networkCompositionStore{store}, spec, nil)
 	if err != nil {
 		t.Fatalf("runtime cannot compile a declared infra dependency: %v", err)
 	}
@@ -879,7 +879,7 @@ func TestCompositionLinksUseServiceAddressAndPodPort(t *testing.T) {
 						}
 						spec.Links = []contracts.CompositionLink{{SourceComponent: source, SourceEndpoint: sourceEndpoint, TargetComponent: target, TargetEndpoint: targetEndpoint,
 							Protocol: protocol, AccessScope: "sandbox", ConfigBinding: "env:TARGET"}}
-						snapshot, err := CompilePlatformSandboxComposition(context.Background(), networkCompositionStore{store}, spec)
+						snapshot, err := CompilePlatformSandboxComposition(context.Background(), networkCompositionStore{store}, spec, nil)
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -966,7 +966,7 @@ func TestFrozenToolNetworkPortsResolveBeforePolicy(t *testing.T) {
 				spec := contracts.SandboxCompositionSpec{ID: "named-network", AccessProfile: contracts.SandboxAccessJudgePrivate, WorkspaceRuntimeInstance: "chain",
 					Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "chain", Code: store.runtime.Code, ImageVersion: store.image.Version}},
 					Infra:    []contracts.CompositionComponentRef{{Code: "database", Selection: "explicit"}}}
-				snapshot, err := CompilePlatformSandboxComposition(context.Background(), networkCompositionStore{store}, spec)
+				snapshot, err := CompilePlatformSandboxComposition(context.Background(), networkCompositionStore{store}, spec, nil)
 				if !tt.valid {
 					if err == nil {
 						t.Fatal("invalid network port reached frozen snapshot")
@@ -1026,7 +1026,7 @@ func TestCompositionRejectsUnsupportedLinkProtocols(t *testing.T) {
 				},
 				Links: []contracts.CompositionLink{{SourceComponent: "chain", SourceEndpoint: "rpc", TargetComponent: "peer", TargetEndpoint: "rpc", Protocol: protocol, AccessScope: "sandbox", ConfigBinding: "env:TARGET"}},
 			}
-			if _, err := CompilePlatformSandboxComposition(context.Background(), networkCompositionStore{store}, spec); err == nil {
+			if _, err := CompilePlatformSandboxComposition(context.Background(), networkCompositionStore{store}, spec, nil); err == nil {
 				t.Fatal("unsupported protocol produced a frozen connection")
 			}
 		})
@@ -1054,7 +1054,7 @@ func TestServiceAdmissionMatchesCompilationAndFrozenLoading(t *testing.T) {
 				var snapshot contracts.SandboxCompositionSnapshot
 				var err error
 				if entry == "frozen-load" {
-					snapshot, err = CompilePlatformSandboxComposition(context.Background(), networkCompositionStore{store}, spec)
+					snapshot, err = CompilePlatformSandboxComposition(context.Background(), networkCompositionStore{store}, spec, nil)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -1104,7 +1104,7 @@ func TestServiceAdmissionMatchesCompilationAndFrozenLoading(t *testing.T) {
 				}
 				store.components["right"] = right
 				if entry == "compile" {
-					_, err = CompilePlatformSandboxComposition(context.Background(), networkCompositionStore{store}, spec)
+					_, err = CompilePlatformSandboxComposition(context.Background(), networkCompositionStore{store}, spec, nil)
 				} else {
 					snapshot.Runtimes[0].AdapterSpec, err = json.Marshal(store.runtime.AdapterSpec)
 					if err != nil {

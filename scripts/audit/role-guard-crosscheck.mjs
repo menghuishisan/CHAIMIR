@@ -114,6 +114,7 @@ const VERIFIED_EXCEPTIONS = new Map([
 
 console.log(`=== 页面-守卫核对:共比对 ${rows.length} 条(页面,方法,路由)组合 ===`)
 const unresolved = problems.filter((p) => !VERIFIED_EXCEPTIONS.has(`${p.page}|${p.key}`))
+if (unresolved.length) process.exitCode = 1
 console.log(`\n=== 角色与守卫不相容 (${unresolved.length}) ===`)
 const seen = new Set()
 for (const p of unresolved) {

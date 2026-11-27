@@ -12,6 +12,7 @@ import (
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
+	"chaimir/pkg/logging"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -96,12 +97,18 @@ func (d *DB) WithTenantTxID(ctx context.Context, tenantID int64, fn TxFunc) erro
 	if tenantID <= 0 {
 		return fmt.Errorf("tenant_id 必须大于 0")
 	}
-	return runTx(ctx, d.app, func(ctx context.Context, tx pgx.Tx) error {
+	notifications := []func(context.Context) error{}
+	err := runTx(ctx, d.app, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", ids.Format(tenantID)); err != nil {
 			return fmt.Errorf("注入 app.tenant_id 失败: %w", err)
 		}
-		return fn(context.WithValue(ctx, transactionContextKey{}, transactionContext{database: d, tenantID: tenantID, tx: tx}), tx)
+		return fn(context.WithValue(ctx, transactionContextKey{}, transactionContext{database: d, tenantID: tenantID, tx: tx, notifications: &notifications}), tx)
 	})
+	if err != nil {
+		return err
+	}
+	notifyTenantCommit(ctx, tenantID, notifications)
+	return nil
 }
 
 // WithAppTx 在应用连接池中开启普通事务,用于访问无需 RLS 的平台级表。
@@ -231,6 +238,12 @@ func runTx(ctx context.Context, pool *pgxpool.Pool, fn TxFunc) error {
 	if err != nil {
 		return fmt.Errorf("开启事务失败: %w", err)
 	}
+	// 回调可能被上层恢复或退出 goroutine，仍须归还连接；保留原有 panic。
+	defer func() {
+		if err := tx.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+			logging.ErrorContext(ctx, "transaction exit rollback failed", err.Error())
+		}
+	}()
 
 	if err := fn(ctx, tx); err != nil {
 		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {

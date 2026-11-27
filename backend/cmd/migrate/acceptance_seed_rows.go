@@ -13,6 +13,7 @@ import (
 	"chaimir/internal/modules/experiment"
 	"chaimir/internal/modules/sandbox"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/workload"
@@ -159,7 +160,7 @@ WHERE r.code=$1 AND ri.version=$2`, ref.Code, ref.ImageVersion).Scan(
 		runtime.InstanceCode = ref.InstanceCode
 		runtime.Code = ref.Code
 		var adapter sandbox.AdapterSpec
-		if err := json.Unmarshal(adapterSpec, &adapter); err != nil {
+		if err := jsonx.DecodeStrictKnownFields(adapterSpec, &adapter); err != nil {
 			return contracts.SandboxCompositionSnapshot{}, fmt.Errorf("解析验收运行时 %s 适配器失败: %w", ref.InstanceCode, err)
 		}
 		// 验收快照必须与正式组合编译使用同一份运行时实例拓扑规则。

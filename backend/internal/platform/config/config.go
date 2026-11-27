@@ -1637,14 +1637,37 @@ func validateSandboxQuantities(cfg SandboxConfig) []string {
 		"SANDBOX_PREPULL_LIMIT_MEMORY":   cfg.PrepullLimitMemory,
 	}
 	var errs []string
+	parsed := make(map[string]resource.Quantity, len(values))
 	for key, value := range values {
 		// 这里统一在启动期校验 quantity,避免不同编排分支各自报错且口径不一致。
 		if strings.TrimSpace(value) == "" {
 			errs = append(errs, "环境变量 "+key+" 不能为空")
 			continue
 		}
-		if _, err := resource.ParseQuantity(value); err != nil {
+		quantity, err := resource.ParseQuantity(value)
+		if err != nil {
 			errs = append(errs, fmt.Sprintf("环境变量 %s 需为 Kubernetes quantity,实际=%q", key, value))
+			continue
+		}
+		if quantity.Sign() < 0 {
+			errs = append(errs, "环境变量 "+key+" 不得为负数")
+			continue
+		}
+		parsed[key] = quantity
+	}
+	if pods, ok := parsed["SANDBOX_MAX_PODS"]; ok && pods.Cmp(*resource.NewQuantity(pods.Value(), resource.DecimalSI)) != 0 {
+		errs = append(errs, "环境变量 SANDBOX_MAX_PODS 需为 int64 范围内的非负整数 Pod 数量")
+	}
+	for _, pair := range [][2]string{
+		{"SANDBOX_DEFAULT_REQUEST_CPU", "SANDBOX_DEFAULT_CPU"},
+		{"SANDBOX_DEFAULT_REQUEST_MEMORY", "SANDBOX_DEFAULT_MEMORY"},
+		{"SANDBOX_PREPULL_REQUEST_CPU", "SANDBOX_PREPULL_LIMIT_CPU"},
+		{"SANDBOX_PREPULL_REQUEST_MEMORY", "SANDBOX_PREPULL_LIMIT_MEMORY"},
+	} {
+		request, requestOK := parsed[pair[0]]
+		limit, limitOK := parsed[pair[1]]
+		if requestOK && limitOK && request.Cmp(limit) > 0 {
+			errs = append(errs, "环境变量 "+pair[0]+" 不得大于 "+pair[1])
 		}
 	}
 	return errs

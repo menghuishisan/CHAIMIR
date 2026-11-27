@@ -13,7 +13,13 @@ import (
 // ValidateAccessSession 校验 JWT 绑定的服务端会话仍有效,用于强制下线和单端登录即时生效。
 func (s *Service) ValidateAccessSession(ctx context.Context, id auth.SessionIdentity) error {
 	if id.IsPlatform {
+		if !s.deploy.PlatformEnabled {
+			return apperr.ErrIdentitySessionInvalid
+		}
 		return s.validatePlatformAccessSession(ctx, id)
+	}
+	if !tenantAllowedForDeployment(id.TenantID, s.deploy) {
+		return apperr.ErrIdentitySessionInvalid
 	}
 	return s.validateTenantAccessSession(ctx, id)
 }

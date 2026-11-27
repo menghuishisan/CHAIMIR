@@ -48,9 +48,20 @@ func (s *Service) HandleSubscribe(ctx context.Context, conn *ws.Conn) error {
 	}
 }
 
-// authorizeTopic 对赛事榜单复核 M8 权限，其余主题保持 M10 的租户边界。
+// authorizeTopic 经业务契约复核榜单和实验进度权限，其余主题保持租户边界。
 func (s *Service) authorizeTopic(ctx context.Context, id tenant.Identity, topic string) error {
 	topic = strings.TrimSpace(topic)
+	if matches := businessTopicPattern.FindStringSubmatch(topic); len(matches) == 5 && matches[2] == "experiment" && matches[4] == "progress" {
+		tenantID, validTenant := ids.Parse(matches[1])
+		instanceID, validInstance := ids.Parse(matches[3])
+		if !validTenant || !validInstance || tenantID != id.TenantID || s.experiments == nil {
+			return apperr.ErrNotifyTopicForbidden
+		}
+		if err := s.experiments.AuthorizeProgressSubscription(ctx, tenantID, instanceID); err != nil {
+			return apperr.ErrNotifyTopicForbidden.WithCause(err)
+		}
+		return nil
+	}
 	if matches := businessTopicPattern.FindStringSubmatch(topic); len(matches) == 5 && matches[2] == "contest" && matches[4] == "leaderboard" {
 		organizerID, validOrganizer := ids.Parse(matches[1])
 		contestID, validContest := ids.Parse(matches[3])

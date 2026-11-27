@@ -1,7 +1,7 @@
 # API 接口总览
 
 > 汇总 11 模块 API 的 Base 路径、错误码段与全局规范。详细接口见各模块"接口设计"文档。
-> 最后更新:2026-08-23
+> 最后更新:2026-11-27
 
 **本文结构**
 - 一、API 规范:基础路径/响应信封/ID 契约/鉴权/接口分类/错误码段/跨模块调用约定
@@ -17,6 +17,7 @@
 - 风格:RESTful;资源名词,非 CRUD 用动词子路径;路径嵌套 ≤2 层。
 - 协议:HTTPS;实时用 WebSocket。
 - JSON 请求统一由 `httpx.BindJSON`/`BindJSONWithError` 绑定：只接收一个完整值，拒绝结构体未声明字段和尾随内容，并执行 Gin 的字段校验。显式声明的 map 字段仍按各自业务契约接收动态键；业务校验和租户、资源归属校验由所属模块负责。
+- 动态 JSON 数值在请求、JSONB、深拷贝和链查询边界统一保留为 `json.Number`；领域需要浮点运算时才显式转换。结构比较按十进制数值判等，区分相邻大整数、不同小数，等价的整数、小数及指数写法相等。资源 ID 仍遵守字符串契约。
 
 ### 2. 统一响应体
 ```json
@@ -26,8 +27,8 @@
 - `message`:用户向友好文案;技术原因只进入日志,不进入响应体。
 - 分页:请求 `?page=1&size=20`;响应 `data: { list, total, page, size }`(默认 size=20,上限 100)。
 - 分段计数:列表页上方有状态分段(或类别分段)的接口,在同一事务、同一权限范围里另返回 `data.facets`:`{ <键>: { <取值>: 条数 } }`;键名与该分段的筛选参数同名(如 `status`、`is_read`、`channel`、`state`),取值与筛选参数的取值一致,数字按十进制字符串、布尔为 `"true"`/`"false"`。每组分段的计数套用本次请求里的其他全部筛选(含其他分段组),只不套用本组自己的筛选 —— 选中某个分段后,同组其他分段的数字仍然可见;一组分段可以由多列构成(如批改台「待批改 / 已出分 / 迟交」由状态与是否迟交两列构成),这时两列的计数都不套用这一组的筛选;没有记录的取值不返回,前端按 0 显示。前端不得为每个分段各发一次只取总数的请求,也不得对没有该契约的接口猜测 `facets`。
-- HTTP 状态码在业务面恒为 200,交互一律按 `code` 判定;不存在"按状态码分支"的第二套判断。
-- 信封只有两类显式例外:统一文件服务 `GET /download` 流式返回附件,以及运维探针 `/-/healthz`、`/-/readyz`、`/api/healthz`(消费者是 kubelet/网关,判定信号只有状态码,详见 `docs/总-部署架构设计.md` §三 健康探针契约)。除此之外任何接口不得绕过信封。
+- JSON 业务响应统一使用 HTTP 200，客户端按 `code` 判定业务结果；网络或协议失败由传输层处理。
+- 文件下载/分段流、WebSocket 升级及交互流、受控工具反向代理和运维探针遵守各自传输协议，不套 JSON 信封。授权和业务校验仍执行；普通业务 JSON 入口不得借此绕过统一响应。探针见[部署规范](总-部署架构设计.md)。
 
 #### 2.1 资源 ID 传输契约
 
@@ -35,6 +36,7 @@
 - path/query 中的 ID 按十进制字符串解析，必须为大于 0 的 `int64` 范围整数；空白、符号、小数、指数写法和前导零均非法。
 - 后端 DTO 使用既有 `internal/platform/ids` 中的统一边界类型，模块 service/sqlc model 内部仍使用 `int64`；不得新建平行 ID 工具包或把传输类型扩散到数据库层。
 - 前端 API Client 统一使用 `SnowflakeID = string`，不得对资源 ID 调用 `Number`、`parseInt`、算术运算或隐式数值比较。
+- ID 数组遵循同一规则，内部 HTTP 通知的 `receivers` 也只接受规范十进制字符串；进入模块契约后再转换为 `int64`，不接受 number 双读。
 - 含 ID 的适配器声明、资源约束和 WebSocket payload 必须使用有类型 DTO，不允许把 ID 藏在无类型 JSON 中绕过该规则。
 
 这是一次不兼容的统一契约，不接受旧 number ID 双读或降级分支。
@@ -44,12 +46,13 @@
 - 登录前定位租户:`X-Tenant-Code`(学校短码)。
 - Access 15min,Refresh 7d 轮转;单端登录。
 - 浏览器原生 WebSocket 不能设置 `Authorization` 头时,前端先通过 `POST /api/v1/auth/ws-ticket` 使用当前登录态为目标 WS path 换取短时路径绑定票据,再以 `?ticket=<ws_ticket>` 建连;后端校验票据路径和服务端会话,不得在普通 WS URL 中携带 access token。
+- OpenAPI 的必填 `ticket` 查询参数只登记在实际 WebSocket 入口；普通判题查询和仿真审核使用登录态，不要求 WebSocket 票据。
 - iframe/Web 工具入口不能设置 `Authorization` 头时,前端先通过 `POST /api/v1/auth/browser-ticket` 为工具代理路径前缀换取短时票据,再以 `?ticket=<browser_ticket>` 首次进入;后端校验票据、服务端会话与路径前缀后重新签发 access token,写入路径受限 HttpOnly Cookie 并清除 query。access token 不得出现在 URL,票据和平台 Cookie 均不得透传给工具容器。
 
 ### 4. 接口分类
 - **`[用户]`**:前端调用,JWT + 角色鉴权。
 - **`[内部]`**:模块间(服务间)调用,服务间鉴权 + 强制带 `tenant_id`;不对前端开放。在模块化单体中表现为 `internal/contracts` 接口调用,对外暴露时走内网鉴权,并携带调用方模块、`source_ref` 与 trace 上下文。
-- 内部 HTTP 服务鉴权统一使用 HMAC-SHA256 签名,签名输入绑定 method、path、tenant_id、source_ref、timestamp 与 trace_id;`timestamp` 必须落在 `SERVICE_AUTH_MAX_SKEW_SECONDS` 环境变量声明的时间窗口内,超出窗口直接拒绝,防止截获请求被重放。
+- 内部 HTTP 服务鉴权统一使用 HMAC-SHA256 签名,签名输入绑定调用方 service、method、path、tenant_id、source_ref、timestamp 与 trace_id;`timestamp` 必须落在 `SERVICE_AUTH_MAX_SKEW_SECONDS` 环境变量声明的时间窗口内,超出窗口直接拒绝。时间窗口不消除窗口内重放，写入口仍按来源与业务标识执行幂等校验，不把验签当作业务恰好一次。
 
 ### 5. 错误码分段
 | 段 | 模块 |
@@ -80,7 +83,7 @@ M5 错误补充:`51014` 表示分类仍有活动子分类或未删除题目引�
 租户功能错误补充:`13027` 表示学校未开放本次操作需要的模块。HTTP、WebSocket、浏览器工具及匿名分享按当前租户配置与资源来源检查,不注销会话;`GET /me.enabled_modules` 返回规范顺序的启用集合,供本角色导航和深链门禁使用。
 
 ### 6. 跨模块调用约定
-- 业务实时数据经 M10 `POST /notify/push` 或模块授权后的进度 WS 入口推送;topic 必须带租户前缀 `tenant:{tenant_id}:...`;引擎内部字节流(终端/仿真 stream)走各模块自有 WS。
+- 业务实时数据经 `notify.push.requested`/`notify.send.requested` 事件进入 M10；模块授权的引擎进度 WS 复用原主题;topic 必须带租户前缀 `tenant:{tenant_id}:...`;引擎内部字节流(终端/仿真 stream)走各模块自有 WS。
 - 资源回收:M7/M8 调 M2 `/sandboxes/recycle`、M4 `/sessions/recycle`(按 `scope_ref`);稳定业务归属仍使用 `source_ref`。
 - `source_ref` 格式:`<来源>:<年份>:<资源类型>:<id>`(全称,见总纲约定;M7 实例统一为 `experiment:<年份>:instance:<id>`);`scope_ref` 是同一业务实例的生命周期批次引用,两者不得混用。
 
@@ -128,12 +131,14 @@ M5 错误补充:`51014` 表示分类仍有活动子分类或未删除题目引�
 
 > 所有模块签发的授权都只能由本入口消费。业务模块和前端页面不得拼接 S3 对象存储 地址、复制 token 验签逻辑或新增模块私有下载路由。
 
+下载与 inline 响应的文件名统一由 `mime.FormatMediaType` 写入 `Content-Disposition`，保留单段可打印 Unicode 名称；非 ASCII 使用 `filename*=utf-8''...`，ASCII 由标准库按需输出 token 或引号形式。SDK 只适配该统一出口的规范形式，并用原生 `decodeURIComponent` 恢复 UTF-8 扩展值；缺失、重复或畸形声明按传输失败处理，不自造文件名。
+
 ### M2 沙箱引擎 `/api/v1/sandbox`
 - `/runtimes`、`/tools`:运行时/工具管理 + 接入即测 `[平台管理员]`;镜像预拉取提供触发与状态查询,完成以全目标节点真实拉取成功为准。
 - `/catalog`:能力编排目录 `[教师/学校管理员/平台管理员]` —— 返回可选择的运行时、工具和基础设施能力摘要及参数 schema,不返回原始 WorkloadSpec、镜像 digest 地址、命令白名单或自检详情。业务模块提交声明式 `CompositionSpec` 由 M2 唯一编译;依赖自动展开结果只在编译预览和发布快照中出现。
 - `POST /catalog/composition-preview`:只读复用M2目录与依赖解析返回连接候选和完整性,唯一候选预选、多候选明确选择;不决定业务访问边界、不写快照、不预拉取。四编排入口共用,最终仍提交显式links并经原编译器校验。
 - `/sandboxes`:创建/查询/销毁/回收 `[内部]`;创建请求只接受已编译组合快照 digest、`source_ref`、`scope_ref`、访问主体和生命周期参数;拒绝运行时/工具/镜像/命令/端口等旁路字段。`WS /sandboxes/{id}/progress`、`/terminal`。
-- `/sandboxes/{id}/files`、`/tools/{code}/*`、`/command-tools/{code}/run`:文件、Web 工具代理和受控命令工具 `[用户]`;竞赛授权网关的保存接口只返回工作区修订号,不暴露内部代码对象引用或哈希。Web 工具代理支持浏览器一次性 `token` 入口并换成路径受限 Cookie。
+- `/sandboxes/{id}/files`、`/tools/{code}/*`、`/command-tools/{code}/run`:文件、Web 工具代理和受控命令工具 `[用户]`;竞赛授权网关的保存接口只返回工作区修订号,不暴露内部代码对象引用或哈希。Web 工具代理支持浏览器短时 `ticket` 入口并换成路径受限 Cookie。
 - `GET /sandboxes/{id}` 响应中的 `capabilities` 由运行时命令清单与服务端注册表计算,是前端文件、终端、命令工具和链操作入口的权威能力声明。
 - `/sandboxes/{id}/chain/deploy|tx|query`:链上部署、交易和查询`[用户/内部]`;用户路径按沙箱 owner 校验,内部服务路径按签名 `source_ref` 校验。
 - `/sandboxes/{id}/chain/reset`:链恢复创世就绪态`[内部]`。
@@ -226,5 +231,5 @@ M5 错误补充:`51014` 表示分类仍有活动子分类或未删除题目引�
 | 对抗赛 | M8 提交参战物 → 撮合起 M2 对局沙箱 → M3 判 → ELO + replay → M10 推天梯 |
 | 成绩聚合 | M6 单课程成绩/锁定投影 → M11 只读聚合 GPA → 审核状态流转 → 申诉解锁改 M6 → M11 重算重锁 |
 | 漏洞出题 | M8 外部源 → 分级 → 预验证 → M5 system-import 固化 → 竞赛引用 |
-| 扩展仿真接入 | 教师提交 bundle → M4 算 sha256 + 静态扫描 + manifest 协议校验 → 隔离容器预览(同 seed 双跑比对 + 渲样例帧)→ 内部签名回写报告 → 平台管理员按样例帧判定 → 上架 |
-| 通知 | 模块发事件/调 M10 send → 渲染模板 → 站内信 + M10 push 红点 |
+| 扩展仿真接入 | 教师提交 bundle → M4 算 sha256 + 静态扫描 + manifest 协议校验 → 隔离容器预览(同 seed 双跑比对 + 渲样例帧)→ M4 进程内预览 worker 写入报告 → 平台管理员按样例帧判定 → 上架 |
+| 通知 | 模块发布通知请求事件 → 渲染模板 → 站内信 + M10 push 红点 |

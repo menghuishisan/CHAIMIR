@@ -13,7 +13,7 @@ import (
 // GetAccount 读取账号摘要,供审计、鉴权和聚合只读调用。
 func (s *Service) GetAccount(ctx context.Context, accountID int64) (contracts.AccountInfo, error) {
 	var account Account
-	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+	if err := s.accountReadTx(ctx, func(ctx context.Context, tx TxStore) error {
 		row, err := tx.GetAccount(ctx, accountID)
 		if err != nil {
 			return err
@@ -24,10 +24,7 @@ func (s *Service) GetAccount(ctx context.Context, accountID int64) (contracts.Ac
 		account = row
 		return nil
 	}); err != nil {
-		if appErr, ok := apperr.As(err); ok {
-			return contracts.AccountInfo{}, appErr
-		}
-		return contracts.AccountInfo{}, apperr.ErrNotFound.WithCause(err)
+		return contracts.AccountInfo{}, mapIdentityLookupError(err)
 	}
 	phone, err := s.decryptPhone(account.PhoneEnc)
 	if err != nil {
@@ -39,7 +36,7 @@ func (s *Service) GetAccount(ctx context.Context, accountID int64) (contracts.Ac
 // BatchGetAccounts 批量读取账号摘要,避免高层模块形成 N+1 查询。
 func (s *Service) BatchGetAccounts(ctx context.Context, accountIDs []int64) ([]contracts.AccountInfo, error) {
 	var accounts []Account
-	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+	if err := s.accountReadTx(ctx, func(ctx context.Context, tx TxStore) error {
 		rows, err := tx.BatchGetAccounts(ctx, accountIDs)
 		if err != nil {
 			return err
@@ -52,10 +49,7 @@ func (s *Service) BatchGetAccounts(ctx context.Context, accountIDs []int64) ([]c
 		accounts = rows
 		return nil
 	}); err != nil {
-		if appErr, ok := apperr.As(err); ok {
-			return nil, appErr
-		}
-		return nil, apperr.ErrInternal.WithCause(err)
+		return nil, apperr.AsAppError(err)
 	}
 	out := make([]contracts.AccountInfo, 0, len(accounts))
 	for _, account := range accounts {
@@ -75,7 +69,7 @@ func (s *Service) ListClassStudents(ctx context.Context, tenantID, classID int64
 		return nil, apperr.ErrIdentityOrgInvalidInput
 	}
 	var students []Account
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+	if err := s.tenantReadTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		// 先确认班级确属本租户,再取学生 —— 否则拿到空列表分不清「班级不存在」和「班里没人」。
 		// 班级归档本身不需要在这里判:归档班级是整届毕业动作,同事务已把该学年学生账号一并
 		// 归档(ArchiveClassesByAdmin),而查询只回 status=在用 的学生,已覆盖这一情形。
@@ -89,10 +83,7 @@ func (s *Service) ListClassStudents(ctx context.Context, tenantID, classID int64
 		students, _, err = tx.ListClassStudents(ctx, tenantID, classID, page, size)
 		return err
 	}); err != nil {
-		if appErr, ok := apperr.As(err); ok {
-			return nil, appErr
-		}
-		return nil, apperr.ErrInternal.WithCause(err)
+		return nil, apperr.AsAppError(err)
 	}
 	out := make([]contracts.AccountInfo, 0, len(students))
 	for _, student := range students {
@@ -177,7 +168,7 @@ func (s *Service) GetTenant(ctx context.Context, tenantID int64) (contracts.Tena
 		t = row
 		return nil
 	}); err != nil {
-		return contracts.TenantSummary{}, apperr.ErrNotFound.WithCause(err)
+		return contracts.TenantSummary{}, mapIdentityLookupError(err)
 	}
 	return contracts.TenantSummary{TenantID: t.ID, Code: t.Code, Name: t.Name, Type: t.Type, Status: t.Status, DeployMode: t.DeployMode, ExpireAt: t.ExpireAt, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt}, nil
 }
@@ -219,14 +210,13 @@ func (s *Service) QueryAuditLogs(ctx context.Context, query contracts.AuditQuery
 	page, size := pagex.Normalize(int(query.Page), int(query.Size))
 	query.Page, query.Size = pagex.Int32(page, size)
 	var rows []AuditLogRow
-	var total int64
 	var facetRows []AuditFacetRow
 	read := func(ctx context.Context, tx TxStore) error {
-		list, n, err := tx.QueryAuditLogs(ctx, AuditQueryInput{TenantID: auditTenantFilter(query), ActorID: query.ActorID, Action: query.Action, TargetType: query.TargetType, From: query.From, To: query.To, Page: query.Page, Size: query.Size})
+		list, err := tx.QueryAuditLogs(ctx, AuditQueryInput{TenantID: auditTenantFilter(query), ActorID: query.ActorID, Action: query.Action, TargetType: query.TargetType, From: query.From, To: query.To, Page: query.Page, Size: query.Size})
 		if err != nil {
 			return err
 		}
-		rows, total = list, n
+		rows = list
 		facetRows, err = tx.QueryAuditActionFacets(ctx, AuditQueryInput{TenantID: auditTenantFilter(query), ActorID: query.ActorID, Action: query.Action, TargetType: query.TargetType, From: query.From, To: query.To})
 		if err != nil {
 			return err
@@ -246,11 +236,40 @@ func (s *Service) QueryAuditLogs(ctx context.Context, query contracts.AuditQuery
 	for _, row := range rows {
 		out = append(out, contracts.AuditLogEntry{ID: row.ID, TenantID: row.TenantID, ActorID: row.ActorID, ActorRole: row.ActorRole, Action: row.Action, TargetType: row.TargetType, TargetID: row.TargetID, Detail: row.Detail, IP: row.IP, TraceID: row.TraceID, CreatedAt: row.CreatedAt})
 	}
-	facets := map[string]map[string]int64{"action": {}}
+	byAction := pagex.FacetGroup{}
 	for _, row := range facetRows {
-		facets["action"][row.Action] = row.Count
+		byAction.Add(row.Action, row.Count)
 	}
-	return contracts.AuditQueryResult{List: out, Total: total, Page: query.Page, Size: query.Size, Facets: facets}, nil
+	return contracts.AuditQueryResult{List: out, Total: byAction.Total(query.Action), Page: query.Page, Size: query.Size, Facets: pagex.Facets{"action": byAction}.Map()}, nil
+}
+
+func (s *Service) tenantReadTx(ctx context.Context, tenantID int64, read func(context.Context, TxStore) error) error {
+	joined, err := s.store.TenantTxIfPresent(ctx, tenantID, read)
+	if joined || err != nil {
+		return err
+	}
+	return s.store.TenantTx(ctx, tenantID, read)
+}
+
+func (s *Service) accountReadTx(ctx context.Context, read func(context.Context, TxStore) error) error {
+	id, ok := tenant.FromContext(ctx)
+	if !ok || id.IsPlatform {
+		return s.store.PrivilegedTx(ctx, read)
+	}
+	if id.TenantID <= 0 {
+		return apperr.ErrCrossTenant
+	}
+	return s.tenantReadTx(ctx, id.TenantID, read)
+}
+
+func mapIdentityLookupError(err error) error {
+	if _, ok := apperr.As(err); ok {
+		return apperr.AsAppError(err)
+	}
+	if isNoRows(err) {
+		return apperr.ErrNotFound.WithCause(err)
+	}
+	return apperr.ErrInternal.WithCause(err)
 }
 
 // ensureAccountVisibleInContext 用调用方上下文收敛账号摘要读取范围,避免跨租户 ID 枚举。

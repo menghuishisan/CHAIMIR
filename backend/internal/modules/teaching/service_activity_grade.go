@@ -791,7 +791,7 @@ func (s *Service) buildGradeExportXLSX(ctx context.Context, req CourseGradeExpor
 		}
 	}
 	for r, grade := range grades {
-		values := []any{grade.CourseID, grade.StudentID, grade.AutoTotal, "", finalTotal(grade), grade.IsOverridden, grade.IsLocked}
+		values := []any{ids.Format(grade.CourseID), ids.Format(grade.StudentID), grade.AutoTotal, "", finalTotal(grade), grade.IsOverridden, grade.IsLocked}
 		if grade.IsOverridden {
 			values[3] = grade.OverrideTotal
 		}
@@ -819,7 +819,7 @@ func (s *Service) reconcileGradeExportRequest(ctx context.Context, req CourseGra
 		if errors.Is(err, apperr.ErrTransferTaskNotFound) {
 			return s.deleteGradeExportRequest(ctx, req)
 		}
-		return s.deferGradeExportRequest(ctx, req, timex.Now().Add(time.Duration(s.cfg.GradeExportWorkerPollMs)*time.Millisecond))
+		return errors.Join(err, s.deferGradeExportRequest(ctx, req, timex.Now().Add(time.Duration(s.cfg.GradeExportWorkerPollMs)*time.Millisecond)))
 	}
 	switch task.Status {
 	case transfer.StatusSucceeded, transfer.StatusFailed:

@@ -90,9 +90,6 @@ export function toolDraft(tool: SandboxToolRequest | undefined, builtinPrefix = 
   }
 }
 
-// 保留参数位置，空项由表单与服务端拒绝。
-const trimmed = (items: string[]) => items.map((item) => item.trim())
-
 /** 覆盖表单管理的字段，保留既有工作负载的其余声明。 */
 export function toolResourceSpec(draft: ToolDraft, base?: DynamicSpec): DynamicSpec {
   const kind = Number(draft.kind)
@@ -109,12 +106,12 @@ export function toolResourceSpec(draft: ToolDraft, base?: DynamicSpec): DynamicS
           ...component,
           name: draft.componentName.trim(),
           image_url: draft.componentImage.trim(),
-          command: trimmed(draft.componentCommand),
-          prepull_command: trimmed(draft.prepullCommand),
+          command: [...draft.componentCommand],
+          prepull_command: [...draft.prepullCommand],
         },
       ],
       command_policy: {
-        allowed_argv: draft.allowedArgv.map(trimmed),
+        allowed_argv: draft.allowedArgv.map((argv) => [...argv]),
         default_timeout_seconds: Number(draft.defaultTimeout),
         max_timeout_seconds: Number(draft.maxTimeout),
       },
@@ -137,7 +134,7 @@ export function toolResourceSpec(draft: ToolDraft, base?: DynamicSpec): DynamicS
           ...component,
           name: componentName,
           image_url: draft.webComponentImage.trim(),
-          prepull_command: trimmed(draft.prepullCommand),
+          prepull_command: [...draft.prepullCommand],
           ports: [
             {
               ...componentPort,

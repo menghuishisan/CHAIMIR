@@ -3,7 +3,9 @@ package contest
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -17,6 +19,8 @@ import (
 	"chaimir/internal/platform/netx"
 	"chaimir/pkg/apperr"
 )
+
+var errVulnForkInvalid = apperr.New(apperr.CodeContestVulnPrevalidateFailed, "请配置完整历史状态、固定链身份及工作区私有连接后重试")
 
 func validateContestRequest(req ContestRequest) (ContestRequest, error) {
 	req.Name = strings.TrimSpace(req.Name)
@@ -447,6 +451,117 @@ func vulnPrevalidateSpec(body map[string]any) (contracts.SandboxCompositionSpec,
 	}
 	spec.AccessProfile = contracts.SandboxAccessVulnerabilityPrevalidate
 	return spec, nil
+}
+
+// bindVulnForkIdentity 从已保存的私有连接提取历史身份，交由 M2 目录契约编译，不猜测运行时代码。
+func bindVulnForkIdentity(spec *contracts.SandboxCompositionSpec, body map[string]any) error {
+	switch body["fork_block"].(type) {
+	case int, int32, int64, float32, float64, json.Number:
+	default:
+		return errVulnForkInvalid
+	}
+	block := jsonx.Int64FromAny(body["fork_block"], -1)
+	if block < 0 {
+		return errVulnForkInvalid
+	}
+	var selected *contracts.CompositionLink
+	for index := range spec.Links {
+		link := &spec.Links[index]
+		if link.SourceComponent != spec.WorkspaceRuntimeInstance || link.ConfigBinding != "env:CHAIMIR_EVM_FORK_RPC_URL" {
+			continue
+		}
+		if selected != nil || link.SourceEndpoint != "rpc" || link.TargetEndpoint != "rpc" || link.Protocol != "http" || !link.RequiredAtStart || link.AccessScope != "sandbox" || link.TargetComponent == spec.WorkspaceRuntimeInstance {
+			return errVulnForkInvalid
+		}
+		selected = link
+	}
+	if selected == nil {
+		return errVulnForkInvalid
+	}
+	var workspace, history *contracts.CompositionRuntimeRef
+	for index := range spec.Runtimes {
+		ref := &spec.Runtimes[index]
+		if ref.InstanceCode == spec.WorkspaceRuntimeInstance {
+			workspace = ref
+		}
+		if ref.InstanceCode == selected.TargetComponent {
+			history = ref
+		}
+	}
+	if workspace == nil || history == nil {
+		return errVulnForkInvalid
+	}
+	identity := make(map[string]string, 4)
+	for _, key := range []string{"block_number", "block_hash", "state_root", "chain_id"} {
+		value, ok := history.Params["history_"+key].(string)
+		if !ok || value == "" {
+			return errVulnForkInvalid
+		}
+		identity[key] = value
+	}
+	if identity["block_number"] != strconv.FormatUint(uint64(block), 10) {
+		return errVulnForkInvalid
+	}
+	chain, ok := new(big.Int).SetString(identity["chain_id"], 10)
+	if !ok || chain.Sign() <= 0 || chain.BitLen() > 256 || chain.String() != identity["chain_id"] {
+		return errVulnForkInvalid
+	}
+	for _, key := range []string{"block_hash", "state_root"} {
+		value := identity[key]
+		if len(value) != 66 || !strings.HasPrefix(value, "0x") || strings.Trim(value[2:], "0") == "" {
+			return errVulnForkInvalid
+		}
+		for _, ch := range value[2:] {
+			if !(ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'f') {
+				return errVulnForkInvalid
+			}
+		}
+	}
+	if workspace.Params == nil {
+		workspace.Params = make(map[string]any, 4)
+	}
+	for key, value := range identity {
+		name := "fork_" + key
+		if stored, exists := workspace.Params[name]; exists && stored != value {
+			return errVulnForkInvalid
+		}
+		workspace.Params[name] = value
+	}
+	return nil
+}
+
+func validateVulnForkSnapshot(item VulnProblem) error {
+	if item.CompositionSnapshot == nil || item.CompositionDigest == "" || item.CompositionSnapshot.Digest != item.CompositionDigest {
+		return errVulnForkInvalid
+	}
+	expected, err := vulnPrevalidateSpec(item.DraftBody)
+	if err != nil {
+		return errVulnForkInvalid.WithCause(err)
+	}
+	if err := bindVulnForkIdentity(&expected, item.DraftBody); err != nil {
+		return err
+	}
+	expected.ID = item.CompositionSnapshot.Spec.ID
+	want, err := contracts.CanonicalDigest(expected)
+	if err != nil {
+		return errVulnForkInvalid.WithCause(err)
+	}
+	actualSpec := item.CompositionSnapshot.Spec
+	actualSpec.Infra = nil
+	for _, ref := range item.CompositionSnapshot.Spec.Infra {
+		if ref.Selection != "auto" {
+			actualSpec.Infra = append(actualSpec.Infra, ref)
+		}
+	}
+	actual, err := contracts.CanonicalDigest(actualSpec)
+	if err != nil || actual != want {
+		return errVulnForkInvalid.WithCause(err)
+	}
+	digest, err := contracts.CanonicalSnapshotDigest(*item.CompositionSnapshot)
+	if err != nil || digest != item.CompositionDigest {
+		return errVulnForkInvalid.WithCause(err)
+	}
+	return nil
 }
 
 func stableContestCode(problem VulnProblem) string {

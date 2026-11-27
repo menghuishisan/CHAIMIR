@@ -18,6 +18,7 @@ import (
 
 // Store 定义 service 所需的 sim 持久化能力,不暴露 sqlc 行类型。
 type Store interface {
+	AuthorizationTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error, notify func(context.Context) error) error
 	PlatformTx(ctx context.Context, fn func(context.Context, TxStore) error) error
 	PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error
 	TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
@@ -112,6 +113,16 @@ func (s *store) TenantTx(ctx context.Context, tenantID int64, fn func(context.Co
 	return s.database.WithTenantTxID(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
 	})
+}
+
+// AuthorizationTx 只为共享授权写入借用调用方事务，撤权广播延后到持有者成功提交。
+func (s *store) AuthorizationTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error, notify func(context.Context) error) error {
+	if s == nil || s.database == nil {
+		return apperr.ErrInternal.WithCause(fmt.Errorf("sim store 未初始化"))
+	}
+	return s.database.WithTenantMutationTxID(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
+	}, notify)
 }
 
 // GetPackageByCodeVersion 按 code/version 查询包。

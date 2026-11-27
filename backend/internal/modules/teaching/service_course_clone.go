@@ -32,6 +32,7 @@ func (s *Service) CloneCourse(ctx context.Context, courseID int64, req CloneCour
 		return CourseDTO{}, err
 	}
 	var clone courseClone
+	var source Course
 	var out CourseDTO
 	commitAttempted := false
 	sourceMissing := false
@@ -40,25 +41,30 @@ func (s *Service) CloneCourse(ctx context.Context, courseID int64, req CloneCour
 			sourceMissing = isNoRows(err)
 			return err
 		}
-		source, err := tx.GetCloneableCourse(ctx, courseID, id.TenantID)
+		current, err := tx.GetCloneableCourse(ctx, courseID, id.TenantID)
 		if err != nil {
 			return err
 		}
+		source = current
 		clone, err = s.prepareCourseClone(ctx, tx, source, id.TenantID, id.AccountID, req.Name)
 		return err
 	})
 	if sourceMissing {
 		err = s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-			source, err := tx.GetCloneableCourse(ctx, courseID, id.TenantID)
+			current, err := tx.GetCloneableCourse(ctx, courseID, id.TenantID)
 			if err != nil {
 				return err
 			}
+			source = current
 			if source.TenantID == id.TenantID {
 				return apperr.ErrTeachingCourseNotFound
 			}
 			clone, err = s.prepareCourseClone(ctx, tx, source, id.TenantID, id.AccountID, req.Name)
 			return err
 		})
+	}
+	if err == nil {
+		err = s.prepareClonedDependencies(ctx, source, &clone)
 	}
 	if err == nil {
 		err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -117,9 +123,6 @@ func (s *Service) prepareCourseClone(ctx context.Context, tx TxStore, source Cou
 		return clone, err
 	}
 	if err := s.prepareClonedAssignments(ctx, tx, source, &clone, chapters); err != nil {
-		return clone, err
-	}
-	if err := s.prepareClonedDependencies(ctx, source, &clone); err != nil {
 		return clone, err
 	}
 	return clone, nil

@@ -180,7 +180,15 @@ func NewHub(policy OriginPolicy, options HubOptions) (*Hub, error) {
 
 // ReadJSON 从客户端读取一条 JSON 消息。
 func (c *Conn) ReadJSON(v any) error {
-	if err := c.socket.ReadJSON(v); err != nil {
+	_, data, err := c.socket.ReadMessage()
+	if err == nil {
+		if len(data) == 0 {
+			err = io.EOF
+		} else {
+			err = jsonx.DecodeStrict(data, v)
+		}
+	}
+	if err != nil {
 		c.close(err)
 		return err
 	}

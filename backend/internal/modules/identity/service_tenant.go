@@ -47,7 +47,7 @@ func (s *Service) UpdateTenantConfigByAdmin(ctx context.Context, req TenantConfi
 	}
 	var row Tenant
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		current, err := tx.GetTenantByID(ctx, id.TenantID)
+		current, err := tx.GetTenantForUpdate(ctx, id.TenantID)
 		if err != nil {
 			return err
 		}
@@ -64,12 +64,12 @@ func (s *Service) UpdateTenantConfigByAdmin(ctx context.Context, req TenantConfi
 			return err
 		}
 		row = item
-		return nil
+		if _, err := ToTenantDTO(row); err != nil {
+			return err
+		}
+		return s.auditTenantOperation(ctx, id, "tenant.config.update", "identity.tenant", id.TenantID, map[string]any{"auth_mode": req.AuthMode, "enable_activation_code": req.EnableActivationCode})
 	}); err != nil {
 		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
-	}
-	if err := s.auditTenantOperation(ctx, id, "tenant.config.update", "identity.tenant", id.TenantID, map[string]any{"auth_mode": req.AuthMode, "enable_activation_code": req.EnableActivationCode}); err != nil {
-		return TenantDTO{}, err
 	}
 	return s.tenantDTOWithLogo(ctx, id.TenantID, row)
 }

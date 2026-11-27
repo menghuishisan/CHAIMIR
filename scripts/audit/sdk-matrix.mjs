@@ -126,3 +126,5 @@ for (const [mod, list] of [...byModule].sort()) {
     for (const h of f.hits) console.log(`  ${f.name.padEnd(34)} ${h.method.padEnd(6)} ${h.path.padEnd(62)} ${h.guards}`)
   }
 }
+
+if (miss || bad) process.exitCode = 1

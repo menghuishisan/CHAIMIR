@@ -1,4 +1,3 @@
-// sandbox service_k8s_orchestrator 文件负责把 M2 编排计划转换为受限 Kubernetes 资源。
 package sandbox
 
 import (
@@ -23,10 +22,8 @@ import (
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/limitio"
-	"chaimir/pkg/logging"
 	"chaimir/pkg/terminal"
 
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	netv1 "k8s.io/api/networking/v1"
@@ -40,14 +37,12 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	podresource "k8s.io/component-helpers/resource"
 )
 
 var errMetricsUnavailable = errors.New("kubernetes metrics api unavailable")
 
 const sandboxWorkloadServiceAccount = "sandbox-workload"
-
-const runtimeSelftestNamespacePrefix = "sbx-selftest-"
-const selftestCleanupAfterAnnotation = "chaimir.io/selftest-cleanup-after"
 
 // K8sOrchestrator 使用 client-go 创建、回收和预拉取沙箱资源。
 type K8sOrchestrator struct {
@@ -121,128 +116,15 @@ func (o *K8sOrchestrator) CreateSandboxResources(ctx context.Context, plan Creat
 			return fmt.Errorf("创建沙箱 Service %s 失败: %w", service.Name, err)
 		}
 	}
-	if err := createPodsInStartupOrder(plan, orderedPods, func(pod *corev1.Pod) error {
-		if err := createOrVerifyPod(ctx, cs, pod); err != nil {
-			return fmt.Errorf("创建沙箱 Pod 失败: %w", err)
-		}
-		return nil
-	}, func(names []string) error {
-		return o.waitPodsReady(ctx, cs, plan.Sandbox.Namespace, names)
-	}); err != nil {
+	created, err := createPodsInStartupOrder(plan, orderedPods, func(pod *corev1.Pod) (*corev1.Pod, error) {
+		return createOrVerifyPod(ctx, cs, pod)
+	}, func(pods []*corev1.Pod) error {
+		return o.waitPodsReady(ctx, cs, pods)
+	})
+	if err != nil {
 		return err
 	}
-	return o.waitPodsReady(ctx, cs, plan.Sandbox.Namespace, runtimePodNames(plan, orderedPods))
-}
-
-// DestroySandboxResources 删除普通沙箱资源。
-func (o *K8sOrchestrator) DestroySandboxResources(ctx context.Context, sb Sandbox) error {
-	if err := o.client.Clientset().CoreV1().Namespaces().Delete(ctx, sb.Namespace, namespaceDeleteOptions()); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("删除沙箱 Namespace 失败: %w", err)
-	}
-	return waitNamespaceDeleted(ctx, o.client.Clientset(), sb.Namespace, o.cfg.ReadyPollIntervalSeconds)
-}
-
-// CleanupExpiredRuntimeSelftests 清理请求中断后遗留的运行时自检 Namespace。
-// 仅接受后端创建的 tenant=0 自检命名空间，不能把普通租户沙箱作为补偿目标。
-func (o *K8sOrchestrator) CleanupExpiredRuntimeSelftests(ctx context.Context) error {
-	return cleanupExpiredRuntimeSelftestNamespaces(ctx, o.client.Clientset(), o.cfg.ReadyPollIntervalSeconds, time.Now())
-}
-
-func cleanupExpiredRuntimeSelftestNamespaces(ctx context.Context, cs kubernetes.Interface, pollSeconds int, now time.Time) error {
-	if cs == nil || pollSeconds <= 0 {
-		return fmt.Errorf("运行时自检补偿清理配置不正确")
-	}
-	namespaces, err := cs.CoreV1().Namespaces().List(ctx, metav1.ListOptions{LabelSelector: "app=chaimir,module=sandbox,chaimir.io/managed-by=chaimir-backend,chaimir.io/sandbox=true,chaimir.io/tenant-id=0"})
-	if err != nil {
-		return fmt.Errorf("列出运行时自检 Namespace 失败: %w", err)
-	}
-	var cleanupErrs []error
-	for index := range namespaces.Items {
-		namespace := &namespaces.Items[index]
-		expired, err := runtimeSelftestNamespaceExpired(namespace, now)
-		if err != nil {
-			cleanupErrs = append(cleanupErrs, err)
-			continue
-		}
-		if !expired {
-			continue
-		}
-		if err := cs.CoreV1().Namespaces().Delete(ctx, namespace.Name, namespaceDeleteOptions()); err != nil && !apierrors.IsNotFound(err) {
-			cleanupErrs = append(cleanupErrs, fmt.Errorf("删除过期运行时自检 Namespace(%s)失败: %w", namespace.Name, err))
-			continue
-		}
-		if err := waitNamespaceDeleted(ctx, cs, namespace.Name, pollSeconds); err != nil {
-			cleanupErrs = append(cleanupErrs, fmt.Errorf("等待过期运行时自检 Namespace(%s)删除失败: %w", namespace.Name, err))
-		}
-	}
-	return errors.Join(cleanupErrs...)
-}
-
-// runtimeSelftestNamespaceExpired 严格匹配平台自检资源，防止后台任务清理到普通租户沙箱。
-func runtimeSelftestNamespaceExpired(namespace *corev1.Namespace, now time.Time) (bool, error) {
-	if namespace == nil || namespace.CreationTimestamp.IsZero() || namespace.DeletionTimestamp != nil {
-		return false, nil
-	}
-	name := strings.TrimSpace(namespace.Name)
-	if !strings.HasPrefix(name, runtimeSelftestNamespacePrefix) {
-		return false, nil
-	}
-	sandboxID := strings.TrimPrefix(name, runtimeSelftestNamespacePrefix)
-	labels := namespace.Labels
-	if sandboxID == "" || labels["app"] != "chaimir" || labels["module"] != "sandbox" || labels["chaimir.io/managed-by"] != "chaimir-backend" || labels["chaimir.io/sandbox"] != "true" || labels["chaimir.io/tenant-id"] != "0" || labels["chaimir.io/sandbox-id"] != sandboxID {
-		return false, nil
-	}
-	cleanupAfter, err := time.Parse(time.RFC3339Nano, namespace.Annotations[selftestCleanupAfterAnnotation])
-	if err != nil {
-		return false, fmt.Errorf("自检 Namespace %s 清理期限缺失或无效: %w", name, err)
-	}
-	if !cleanupAfter.After(namespace.CreationTimestamp.Time) {
-		return false, fmt.Errorf("自检 Namespace %s 清理期限早于资源创建", name)
-	}
-	return !cleanupAfter.After(now), nil
-}
-
-// namespaceDeleteOptions 使用后台级联触发命名空间回收;调用方仍需等待对象消失,保证业务状态不先行。
-func namespaceDeleteOptions() metav1.DeleteOptions {
-	policy := metav1.DeletePropagationBackground
-	return metav1.DeleteOptions{PropagationPolicy: &policy}
-}
-
-// StopComputeKeepSnapshot 释放计算工作负载但保留快照命名空间和 PVC。
-func (o *K8sOrchestrator) StopComputeKeepSnapshot(ctx context.Context, sb Sandbox) error {
-	if err := o.StopSandboxCompute(ctx, sb); err != nil {
-		return err
-	}
-	if sb.SnapshotRef != "" {
-		if err := o.cleanupSupersededSnapshots(ctx, sb); err != nil {
-			return err
-		}
-	}
-	return o.cleanupSnapshotRetainedNamespace(ctx, o.client.Clientset(), sb)
-}
-
-// StopSandboxCompute 等待所有计算 Pod 正常退出后再允许归档或快照。
-func (o *K8sOrchestrator) StopSandboxCompute(ctx context.Context, sb Sandbox) error {
-	ctx, cancel := context.WithTimeout(ctx, timeDurationSeconds(o.cfg.ReadyTimeoutSeconds))
-	defer cancel()
-	cs := o.client.Clientset()
-	selector := "chaimir.io/sandbox-id=" + ids.Format(sb.ID)
-	pods, err := cs.CoreV1().Pods(sb.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("列出快照沙箱计算 Pod 失败: %w", err)
-	}
-	if err := cs.CoreV1().Pods(sb.Namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: selector}); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("删除快照沙箱计算 Pod 失败: %w", err)
-	}
-	for _, pod := range pods.Items {
-		if err := waitPodDeleted(ctx, cs, sb.Namespace, pod.Name, o.cfg.ReadyPollIntervalSeconds); err != nil {
-			return err
-		}
-	}
-	return nil
+	return o.waitPodsReady(ctx, cs, runtimePods(plan, created))
 }
 
 // CreateSnapshot 创建 CSI VolumeSnapshot 并返回 namespaced 引用。
@@ -275,14 +157,14 @@ func (o *K8sOrchestrator) CreateSnapshot(ctx context.Context, plan CreateSandbox
 	for _, domain := range domains {
 		name := volumeSnapshotName(plan.Sandbox, domain)
 		obj := volumeSnapshotObject(plan.Sandbox, domain, name, retention, o.cfg.VolumeSnapshotClassName)
-		snapshot, err := createOrVerifyVolumeSnapshot(ctx, client, obj)
+		snapshot, newlyCreated, err := createOrVerifyVolumeSnapshot(ctx, client, obj)
+		if newlyCreated && snapshot != nil {
+			created = append(created, snapshot)
+		}
 		if err != nil {
 			return SnapshotResult{}, fmt.Errorf("创建 VolumeSnapshot 失败: %w", err)
 		}
-		if snapshot != nil {
-			created = append(created, snapshot)
-		}
-		if err := o.waitVolumeSnapshotReady(ctx, gvr, plan.Sandbox.Namespace, name); err != nil {
+		if err := o.waitVolumeSnapshotReady(ctx, gvr, snapshot); err != nil {
 			return SnapshotResult{}, err
 		}
 	}
@@ -317,17 +199,31 @@ func (o *K8sOrchestrator) cleanupSupersededSnapshots(ctx context.Context, sb San
 }
 
 // waitVolumeSnapshotReady 等待 CSI 快照 readyToUse,避免记录尚不可恢复的快照引用。
-func (o *K8sOrchestrator) waitVolumeSnapshotReady(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) error {
+func (o *K8sOrchestrator) waitVolumeSnapshotReady(ctx context.Context, gvr schema.GroupVersionResource, accepted *unstructured.Unstructured) error {
 	if o.cfg.ReadyPollIntervalSeconds <= 0 {
 		return fmt.Errorf("SANDBOX_READY_POLL_INTERVAL_SECONDS 必须大于 0")
 	}
 	contentGVR := schema.GroupVersionResource{Group: "snapshot.storage.k8s.io", Version: "v1", Resource: "volumesnapshotcontents"}
 	ticker := time.NewTicker(time.Duration(o.cfg.ReadyPollIntervalSeconds) * time.Second)
 	defer ticker.Stop()
+	namespace, name := accepted.GetNamespace(), accepted.GetName()
 	for {
 		current, err := o.client.Dynamic().Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return fmt.Errorf("查询 VolumeSnapshot 状态失败: %w", err)
+		}
+		if current.GetUID() != accepted.GetUID() {
+			return fmt.Errorf("VolumeSnapshot %s 在等待期间已被替换或修改", name)
+		}
+		if err := verifyVolumeSnapshot(current, accepted); err != nil {
+			return err
+		}
+		if class, found, err := unstructured.NestedString(current.Object, "spec", "volumeSnapshotClassName"); err == nil && found {
+			// 控制器可补齐默认类；一旦观察到选择结果，后续轮询固定为该类。
+			accepted = accepted.DeepCopy()
+			if err := unstructured.SetNestedField(accepted.Object, class, "spec", "volumeSnapshotClassName"); err != nil {
+				return fmt.Errorf("记录 VolumeSnapshot 默认类失败: %w", err)
+			}
 		}
 		contentName, _, err := unstructured.NestedString(current.Object, "status", "boundVolumeSnapshotContentName")
 		if err != nil {
@@ -407,9 +303,10 @@ func (o *K8sOrchestrator) ResourceUsage(ctx context.Context, sb Sandbox) (contra
 		return usage, fmt.Errorf("查询沙箱 Pod 资源失败: %w", err)
 	}
 	for _, pod := range pods.Items {
-		for _, container := range pod.Spec.Containers {
-			addResourceUsage(&usage, container.Resources)
-		}
+		addResourceUsage(&usage, corev1.ResourceRequirements{
+			Requests: podresource.PodRequests(&pod, podresource.PodResourcesOptions{}),
+			Limits:   podresource.PodLimits(&pod, podresource.PodResourcesOptions{}),
+		})
 		if pod.Status.Phase != corev1.PodRunning {
 			continue
 		}
@@ -496,7 +393,7 @@ func (o *K8sOrchestrator) PrepareWorkspaceArchive(ctx context.Context, plan Crea
 	expectedPVC := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: VolumeDomainWorkspace, Labels: map[string]string{
 		"app": "chaimir", "module": "sandbox", "chaimir.io/sandbox-id": ids.Format(plan.Sandbox.ID), "chaimir.io/volume": VolumeDomainWorkspace,
 	}}}
-	if err := verifyManagedLabels(pvc, expectedPVC); err != nil {
+	if err := platformk8s.VerifyManagedLabels(pvc, expectedPVC); err != nil {
 		return err
 	}
 	if err := o.StopSandboxCompute(ctx, plan.Sandbox); err != nil {
@@ -511,11 +408,10 @@ func (o *K8sOrchestrator) PrepareWorkspaceArchive(ctx context.Context, plan Crea
 	podName, containerName = splitExecTarget(workspaceArchiveExecTarget(plan.Sandbox))
 	automount, serviceLinks := false, false
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: plan.Sandbox.Namespace, Labels: map[string]string{
-			"app": "chaimir", "module": "sandbox", "chaimir.io/sandbox-id": ids.Format(plan.Sandbox.ID),
-		}},
+		ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: plan.Sandbox.Namespace, Labels: sandboxPodRoleLabels(plan.Sandbox, podName)},
 		Spec: corev1.PodSpec{
 			AutomountServiceAccountToken: &automount, EnableServiceLinks: &serviceLinks,
+			ImagePullSecrets: imagePullSecrets(o.cfg.ImagePullSecretNames),
 			RuntimeClassName: &o.cfg.RuntimeClass, ServiceAccountName: sandboxWorkloadServiceAccount,
 			RestartPolicy: corev1.RestartPolicyNever, SecurityContext: podSecurityContext(),
 			NodeSelector: copyStringMap(o.cfg.SandboxNodeSelector), Tolerations: sandboxTolerations(o.cfg.SandboxNodeTolerations),
@@ -523,17 +419,18 @@ func (o *K8sOrchestrator) PrepareWorkspaceArchive(ctx context.Context, plan Crea
 				Name: containerName, Image: component.ImageURL, ImagePullPolicy: corev1.PullIfNotPresent,
 				Command: []string{"sleep", "2147483647"}, Resources: resources(component.Resources, o.cfg),
 				SecurityContext: containerSecurityContext(true),
-				VolumeMounts:    []corev1.VolumeMount{{Name: VolumeDomainWorkspace, MountPath: runtime.Runtime.AdapterSpec.WorkspaceDir}},
+				VolumeMounts:    []corev1.VolumeMount{{Name: VolumeDomainWorkspace, MountPath: runtime.Runtime.AdapterSpec.WorkspaceDir, ReadOnly: true}},
 			}},
 			Volumes: []corev1.Volume{{Name: VolumeDomainWorkspace, VolumeSource: corev1.VolumeSource{
 				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: VolumeDomainWorkspace},
 			}}},
 		},
 	}
-	if err := createOrVerifyPod(ctx, cs, pod); err != nil {
+	created, err := createOrVerifyPod(ctx, cs, pod)
+	if err != nil {
 		return fmt.Errorf("创建工作区归档 Pod 失败: %w", err)
 	}
-	return o.waitPodsReady(ctx, cs, plan.Sandbox.Namespace, []string{podName})
+	return o.waitPodsReady(ctx, cs, []*corev1.Pod{created})
 }
 
 func workspaceArchiveExecTarget(sb Sandbox) string {
@@ -583,116 +480,6 @@ func execInputReader(stdin []byte) io.Reader {
 func (o *K8sOrchestrator) ExecStream(ctx context.Context, namespace, container string, command []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, tty bool, sizes terminal.SizeQueue) error {
 	podName, containerName := splitExecTarget(container)
 	return o.client.ExecStream(ctx, namespace, podName, containerName, command, stdin, stdout, stderr, tty, sizes)
-}
-
-// PrepullImage 创建或更新预拉取 DaemonSet 并等待工作负载镜像集合在真实节点 Ready。
-func (o *K8sOrchestrator) PrepullImage(ctx context.Context, image RuntimeImage, compositionDigest string, specs []PrepullImageSpec) (PrepullResult, error) {
-	imageURLs := prepullSpecImageURLs(specs)
-	ds := o.prepullDaemonSet(image, compositionDigest, specs)
-	cs := o.client.Clientset()
-	if err := o.ensureImagePullSecrets(ctx, o.cfg.PrepullNamespace); err != nil {
-		return PrepullResult{DaemonSet: ds.Name}, err
-	}
-	client := cs.AppsV1().DaemonSets(o.cfg.PrepullNamespace)
-	existing, err := client.Get(ctx, ds.Name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		if _, err := client.Create(ctx, ds, metav1.CreateOptions{}); err != nil {
-			return PrepullResult{DaemonSet: ds.Name}, fmt.Errorf("创建预拉取 DaemonSet 失败: %w", err)
-		}
-	} else if err != nil {
-		return PrepullResult{DaemonSet: ds.Name}, fmt.Errorf("查询预拉取 DaemonSet 失败: %w", err)
-	} else {
-		ds.ResourceVersion = existing.ResourceVersion
-		if _, err := client.Update(ctx, ds, metav1.UpdateOptions{}); err != nil {
-			return PrepullResult{DaemonSet: ds.Name}, fmt.Errorf("更新预拉取 DaemonSet 失败: %w", err)
-		}
-	}
-	ticker := time.NewTicker(time.Duration(o.cfg.PrepullPollIntervalSeconds) * time.Second)
-	defer ticker.Stop()
-	timeout := time.NewTimer(time.Duration(o.cfg.PrepullTimeoutSeconds) * time.Second)
-	defer timeout.Stop()
-	for {
-		current, err := client.Get(ctx, ds.Name, metav1.GetOptions{})
-		if err != nil {
-			return PrepullResult{DaemonSet: ds.Name}, fmt.Errorf("查询预拉取状态失败: %w", err)
-		}
-		detail, err := jsonBytes(map[string]any{
-			"desired_nodes":       current.Status.DesiredNumberScheduled,
-			"ready_nodes":         current.Status.NumberReady,
-			"daemonset":           ds.Name,
-			"generation":          current.Generation,
-			"observed_generation": current.Status.ObservedGeneration,
-			"image_count":         len(imageURLs),
-			"images":              imageURLs,
-		})
-		if err != nil {
-			return PrepullResult{DaemonSet: ds.Name}, fmt.Errorf("编码预拉取状态失败: %w", err)
-		}
-		result := PrepullResult{
-			DesiredNodes: current.Status.DesiredNumberScheduled,
-			ReadyNodes:   current.Status.NumberReady,
-			DaemonSet:    ds.Name,
-			Detail:       detail,
-		}
-		pods, err := cs.CoreV1().Pods(o.cfg.PrepullNamespace).List(ctx, metav1.ListOptions{LabelSelector: metav1.FormatLabelSelector(ds.Spec.Selector)})
-		if err != nil {
-			return result, fmt.Errorf("查询预拉取 Pod 状态失败: %w", err)
-		}
-		if err := imagePullFailureFromPods(pods.Items); err != nil {
-			detail, encodeErr := jsonBytes(map[string]any{"error": logging.SanitizeError(err.Error()), "daemonset": ds.Name})
-			if encodeErr != nil {
-				return result, fmt.Errorf("编码预拉取失败详情失败: %w", encodeErr)
-			}
-			result.Detail = detail
-			return result, err
-		}
-		if err := containerRuntimeFailureFromPods(pods.Items); err != nil {
-			detail, encodeErr := jsonBytes(map[string]any{"error": logging.SanitizeError(err.Error()), "daemonset": ds.Name})
-			if encodeErr != nil {
-				return result, fmt.Errorf("编码预拉取失败详情失败: %w", encodeErr)
-			}
-			result.Detail = detail
-			return result, err
-		}
-		if prepullDaemonSetReady(current) {
-			return result, nil
-		}
-		select {
-		case <-ctx.Done():
-			return result, ctx.Err()
-		case <-timeout.C:
-			return result, fmt.Errorf("预拉取等待超时")
-		case <-ticker.C:
-		}
-	}
-}
-
-// prepullDaemonSetReady 只接受控制器已观察当前模板且全部目标节点运行当前版本的 DaemonSet。
-func prepullDaemonSetReady(ds *appsv1.DaemonSet) bool {
-	if ds == nil || ds.Status.ObservedGeneration < ds.Generation || ds.Status.DesiredNumberScheduled <= 0 {
-		return false
-	}
-	desired := ds.Status.DesiredNumberScheduled
-	return ds.Status.UpdatedNumberScheduled == desired &&
-		ds.Status.NumberReady == desired &&
-		ds.Status.NumberAvailable == desired &&
-		ds.Status.NumberUnavailable == 0 &&
-		ds.Status.NumberMisscheduled == 0
-}
-
-// DeletePrepullDaemonSet 删除镜像预拉取 DaemonSet,NotFound 视为幂等成功。
-func (o *K8sOrchestrator) DeletePrepullDaemonSet(ctx context.Context, image RuntimeImage) error {
-	client := o.client.Clientset().AppsV1().DaemonSets(o.cfg.PrepullNamespace)
-	list, err := client.List(ctx, metav1.ListOptions{LabelSelector: "runtime_image_id=" + ids.Format(image.ID)})
-	if err != nil {
-		return fmt.Errorf("查询镜像预拉取 DaemonSet 失败: %w", err)
-	}
-	for _, item := range list.Items {
-		if err := client.Delete(ctx, item.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("删除预拉取 DaemonSet 失败: %w", err)
-		}
-	}
-	return nil
 }
 
 // imagePullFailureFromPods 从预拉取 Pod 状态中识别真实镜像拉取失败,避免等待超时才暴露错误。
@@ -778,7 +565,7 @@ func containerRuntimeFailureFromContainerStatuses(podName string, statuses []cor
 	return nil
 }
 
-func (o *K8sOrchestrator) waitPodsReady(ctx context.Context, cs kubernetes.Interface, namespace string, podNames []string) error {
+func (o *K8sOrchestrator) waitPodsReady(ctx context.Context, cs kubernetes.Interface, expected []*corev1.Pod) error {
 	if o.cfg.ReadyPollIntervalSeconds <= 0 {
 		return fmt.Errorf("SANDBOX_READY_POLL_INTERVAL_SECONDS 必须大于 0")
 	}
@@ -786,14 +573,26 @@ func (o *K8sOrchestrator) waitPodsReady(ctx context.Context, cs kubernetes.Inter
 	defer ticker.Stop()
 	for {
 		ready := true
-		for _, podName := range podNames {
-			pod, err := cs.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+		for _, accepted := range expected {
+			if accepted == nil || accepted.UID == "" {
+				return fmt.Errorf("沙箱 Pod 缺少已受理身份")
+			}
+			pod, err := cs.CoreV1().Pods(accepted.Namespace).Get(ctx, accepted.Name, metav1.GetOptions{})
 			if err != nil && !apierrors.IsNotFound(err) {
 				return fmt.Errorf("查询沙箱 Pod 状态失败: %w", err)
 			}
 			if err == nil {
+				if pod.UID != accepted.UID {
+					return fmt.Errorf("沙箱 Pod %s 的 UID 已改变", accepted.Name)
+				}
+				if err := platformk8s.VerifyManagedLabels(pod, accepted); err != nil {
+					return err
+				}
+				if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodSucceeded || !platformk8s.SamePodExecutionSpec(pod.Spec, accepted.Spec) {
+					return fmt.Errorf("沙箱 Pod %s 已终止、正在删除或执行规格改变", accepted.Name)
+				}
 				if failed := podFailureReason(pod); failed != "" {
-					return fmt.Errorf("沙箱 Pod %s 失败: %s", podName, failed)
+					return fmt.Errorf("沙箱 Pod %s 失败: %s", accepted.Name, failed)
 				}
 			}
 			ready = err == nil && sandboxPodReady(pod) && ready
@@ -920,7 +719,7 @@ func (o *K8sOrchestrator) ToolReady(ctx context.Context, sb Sandbox, tool Tool) 
 }
 
 // toolServiceEndpointsReady 同时核对当前 Service、Pod 和目标端口，拒绝同名旧切片。
-func (o *K8sOrchestrator) toolServiceEndpointsReady(ctx context.Context, namespace string, service workload.ServiceSpec, pod *corev1.Pod, targetPorts map[string]int32) error {
+func (o *K8sOrchestrator) toolServiceEndpointsReady(ctx context.Context, namespace string, service workload.ServiceSpec, pod *corev1.Pod, targetPorts map[string]workload.PortSpec) error {
 	current, err := o.client.Clientset().CoreV1().Services(namespace).Get(ctx, service.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return fmt.Errorf("%w: 工具Service %s 不存在", errToolNotReady, service.Name)
@@ -961,7 +760,7 @@ func (o *K8sOrchestrator) toolServiceEndpointsReady(ctx context.Context, namespa
 					protocol = *endpointPort.Protocol
 				}
 				if endpointPort.Name != nil && *endpointPort.Name == port.Name && endpointPort.Port != nil &&
-					*endpointPort.Port == targetPorts[port.TargetPort.StrVal] && *endpointPort.Port > 0 && protocol == port.Protocol {
+					*endpointPort.Port == targetPorts[port.TargetPort.StrVal].ContainerPort && *endpointPort.Port > 0 && protocol == port.Protocol {
 					portFound = true
 					break
 				}
@@ -1053,137 +852,36 @@ func volumeSnapshotClassAllowsDeletion(class *unstructured.Unstructured) bool {
 	return strings.EqualFold(strings.TrimSpace(policy), "Delete")
 }
 
-// waitNamespaceDeleted 等待动态沙箱 Namespace 真正消失,避免数据库状态先行标记 destroyed 后存储仍残留。
-func waitNamespaceDeleted(ctx context.Context, cs kubernetes.Interface, namespace string, pollSeconds int) error {
-	if pollSeconds <= 0 {
-		return fmt.Errorf("SANDBOX_READY_POLL_INTERVAL_SECONDS 必须大于 0")
-	}
-	ticker := time.NewTicker(time.Duration(pollSeconds) * time.Second)
-	defer ticker.Stop()
-	for {
-		if _, err := cs.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{}); apierrors.IsNotFound(err) {
-			return nil
-		} else if err != nil {
-			return fmt.Errorf("查询沙箱 Namespace 删除状态失败: %w", err)
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("等待沙箱 Namespace 删除超时: %w", ctx.Err())
-		case <-ticker.C:
-		}
-	}
-}
-
-// cleanupSnapshotRetainedNamespace 只保留快照恢复所需的 PVC 与 VolumeSnapshot,其余运行资源立即释放。
-func (o *K8sOrchestrator) cleanupSnapshotRetainedNamespace(ctx context.Context, cs kubernetes.Interface, sb Sandbox) error {
-	if err := deleteServices(ctx, cs, sb.Namespace); err != nil {
-		return err
-	}
-	if err := cs.CoreV1().ConfigMaps(sb.Namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=chaimir,module=sandbox"}); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("删除快照沙箱 ConfigMap 失败: %w", err)
-	}
-	if err := cs.CoreV1().Secrets(sb.Namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=chaimir,module=sandbox"}); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("删除快照沙箱 Secret 失败: %w", err)
-	}
-	if err := cs.NetworkingV1().NetworkPolicies(sb.Namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{}); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("删除快照沙箱 NetworkPolicy 失败: %w", err)
-	}
-	if err := cs.CoreV1().ResourceQuotas(sb.Namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{}); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("删除快照沙箱 ResourceQuota 失败: %w", err)
-	}
-	if err := cs.CoreV1().LimitRanges(sb.Namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{}); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("删除快照沙箱 LimitRange 失败: %w", err)
-	}
-	if err := cs.CoreV1().ServiceAccounts(sb.Namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=chaimir,module=sandbox"}); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("删除快照沙箱 ServiceAccount 失败: %w", err)
-	}
-	return nil
-}
-
-// deleteServices 显式逐个删除 Service;client-go 的 ServiceInterface 不提供 DeleteCollection。
-func deleteServices(ctx context.Context, cs kubernetes.Interface, namespace string) error {
-	services, err := cs.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("列出快照沙箱 Service 失败: %w", err)
-	}
-	for _, svc := range services.Items {
-		if err := cs.CoreV1().Services(namespace).Delete(ctx, svc.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("删除快照沙箱 Service 失败: %w", err)
-		}
-	}
-	return nil
-}
-
-// namespaceObject 构造带平台所有权标签的动态沙箱 Namespace。
-func namespaceObject(name string, sb Sandbox) *corev1.Namespace {
-	return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name: name,
-		Labels: map[string]string{
-			"app":                                "chaimir",
-			"app.kubernetes.io/part-of":          "chaimir",
-			"module":                             "sandbox",
-			"policy.sigstore.dev/include":        "true",
-			"chaimir.io/sandbox":                 "true",
-			"chaimir.io/managed-by":              "chaimir-backend",
-			"chaimir.io/tenant-id":               ids.Format(sb.TenantID),
-			"chaimir.io/sandbox-id":              ids.Format(sb.ID),
-			"pod-security.kubernetes.io/enforce": "restricted",
-		},
-	}}
-}
-
-// createOrVerifyNamespace 创建或核对沙箱 Namespace,拒绝复用其他沙箱或旧安全标签的对象。
-func createOrVerifyNamespace(ctx context.Context, cs kubernetes.Interface, desired *corev1.Namespace) error {
-	client := cs.CoreV1().Namespaces()
-	if _, err := client.Create(ctx, desired, metav1.CreateOptions{}); err == nil {
-		return nil
-	} else if !apierrors.IsAlreadyExists(err) {
-		return err
-	}
-	existing, err := client.Get(ctx, desired.Name, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("读取已存在 Namespace 失败: %w", err)
-	}
-	return verifyManagedLabels(existing, desired)
-}
-
 // createOrVerifyPod 创建或核对 Pod,防止旧 Pod 以相同名称承载不同镜像或挂载配置。
-func createOrVerifyPod(ctx context.Context, cs kubernetes.Interface, desired *corev1.Pod) error {
+func createOrVerifyPod(ctx context.Context, cs kubernetes.Interface, desired *corev1.Pod) (*corev1.Pod, error) {
 	client := cs.CoreV1().Pods(desired.Namespace)
-	if _, err := client.Create(ctx, desired, metav1.CreateOptions{}); err == nil {
-		return nil
-	} else if !apierrors.IsAlreadyExists(err) {
-		return err
+	existing, err := client.Create(ctx, desired, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		existing, err = client.Get(ctx, desired.Name, metav1.GetOptions{})
 	}
-	existing, err := client.Get(ctx, desired.Name, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("读取已存在 Pod 失败: %w", err)
+		return nil, err
 	}
-	if err := verifyManagedLabels(existing, desired); err != nil {
-		return err
+	if err := platformk8s.VerifyManagedResource(existing, desired); err != nil {
+		return nil, err
 	}
-	if !sameSandboxPodSpec(existing.Spec, desired.Spec) {
-		return fmt.Errorf("已存在 Pod %s 的工作负载规格与当前组合不一致", desired.Name)
+	if !platformk8s.SamePodExecutionSpec(existing.Spec, desired.Spec) {
+		return nil, fmt.Errorf("已存在 Pod %s 的工作负载规格与当前组合不一致", desired.Name)
 	}
-	return nil
+	return existing, nil
 }
 
 // createOrVerifyResourceQuota 创建或核对 Namespace 资源硬限,不接受旧配额继续承载新组合。
 func createOrVerifyResourceQuota(ctx context.Context, cs kubernetes.Interface, desired *corev1.ResourceQuota) error {
 	client := cs.CoreV1().ResourceQuotas(desired.Namespace)
-	if _, err := client.Create(ctx, desired, metav1.CreateOptions{}); err == nil {
-		return nil
-	} else if !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("创建 ResourceQuota 失败: %w", err)
+	existing, err := client.Create(ctx, desired, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		existing, err = client.Get(ctx, desired.Name, metav1.GetOptions{})
 	}
-	existing, err := client.Get(ctx, desired.Name, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("读取已存在 ResourceQuota 失败: %w", err)
+		return fmt.Errorf("准备 ResourceQuota 失败: %w", err)
 	}
-	if err := verifyManagedLabels(existing, desired); err != nil {
+	if err := platformk8s.VerifyManagedResource(existing, desired); err != nil {
 		return err
 	}
 	if !apiequality.Semantic.DeepEqual(existing.Spec, desired.Spec) {
@@ -1195,16 +893,14 @@ func createOrVerifyResourceQuota(ctx context.Context, cs kubernetes.Interface, d
 // createOrVerifyLimitRange 创建或核对容器默认资源限制。
 func createOrVerifyLimitRange(ctx context.Context, cs kubernetes.Interface, desired *corev1.LimitRange) error {
 	client := cs.CoreV1().LimitRanges(desired.Namespace)
-	if _, err := client.Create(ctx, desired, metav1.CreateOptions{}); err == nil {
-		return nil
-	} else if !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("创建 LimitRange 失败: %w", err)
+	existing, err := client.Create(ctx, desired, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		existing, err = client.Get(ctx, desired.Name, metav1.GetOptions{})
 	}
-	existing, err := client.Get(ctx, desired.Name, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("读取已存在 LimitRange 失败: %w", err)
+		return fmt.Errorf("准备 LimitRange 失败: %w", err)
 	}
-	if err := verifyManagedLabels(existing, desired); err != nil {
+	if err := platformk8s.VerifyManagedResource(existing, desired); err != nil {
 		return err
 	}
 	if !apiequality.Semantic.DeepEqual(existing.Spec, desired.Spec) {
@@ -1217,8 +913,10 @@ func createOrVerifyLimitRange(ctx context.Context, cs kubernetes.Interface, desi
 func createOrVerifyPVC(ctx context.Context, cs kubernetes.Interface, desired *corev1.PersistentVolumeClaim, allowCreate bool) error {
 	client := cs.CoreV1().PersistentVolumeClaims(desired.Namespace)
 	existing, err := client.Get(ctx, desired.Name, metav1.GetOptions{})
+	created := false
 	if apierrors.IsNotFound(err) && allowCreate {
 		existing, err = client.Create(ctx, desired, metav1.CreateOptions{})
+		created = err == nil
 		if apierrors.IsAlreadyExists(err) {
 			existing, err = client.Get(ctx, desired.Name, metav1.GetOptions{})
 		}
@@ -1226,156 +924,158 @@ func createOrVerifyPVC(ctx context.Context, cs kubernetes.Interface, desired *co
 	if err != nil {
 		return fmt.Errorf("准备沙箱卷 PVC %s 失败: %w", desired.Name, err)
 	}
-	if existing.DeletionTimestamp != nil {
-		return fmt.Errorf("沙箱卷 PVC %s 正在删除", desired.Name)
-	}
-	if err := verifyManagedLabels(existing, desired); err != nil {
+	if err := platformk8s.VerifyManagedResource(existing, desired); err != nil {
 		return err
 	}
 	if !sameSandboxPVCSpec(existing.Spec, desired.Spec) {
 		return fmt.Errorf("已存在 PVC %s 的卷规格与当前组合不一致", desired.Name)
 	}
+	if created && !sameSandboxPVCSource(existing.Spec, desired.Spec, desired.Namespace) {
+		return fmt.Errorf("新建 PVC %s 的恢复来源与当前组合不一致", desired.Name)
+	}
 	return nil
 }
 
-// createOrVerifyService 创建或核对服务发现入口,忽略 Kubernetes 自动分配的 ClusterIP 字段。
+// createOrVerifyService 核对服务发现声明，允许服务器分配集群地址。
 func createOrVerifyService(ctx context.Context, cs kubernetes.Interface, desired *corev1.Service) error {
 	client := cs.CoreV1().Services(desired.Namespace)
-	if _, err := client.Create(ctx, desired, metav1.CreateOptions{}); err == nil {
-		return nil
-	} else if !apierrors.IsAlreadyExists(err) {
-		return err
+	existing, err := client.Create(ctx, desired, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		existing, err = client.Get(ctx, desired.Name, metav1.GetOptions{})
 	}
-	existing, err := client.Get(ctx, desired.Name, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("读取已存在 Service 失败: %w", err)
-	}
-	if err := verifyManagedLabels(existing, desired); err != nil {
 		return err
 	}
-	if existing.Spec.Type != desired.Spec.Type || !apiequality.Semantic.DeepEqual(existing.Spec.Selector, desired.Spec.Selector) ||
-		!apiequality.Semantic.DeepEqual(existing.Spec.Ports, desired.Spec.Ports) {
-		return fmt.Errorf("已存在 Service %s 的选择器或端口与当前组合不一致", desired.Name)
+	if err := platformk8s.VerifyManagedResource(existing, desired); err != nil {
+		return err
+	}
+	if !apiequality.Semantic.DeepEqual(normalizeSandboxServiceSpec(existing.Spec), normalizeSandboxServiceSpec(desired.Spec)) {
+		return fmt.Errorf("Service %s 的规格与当前组合不一致", desired.Name)
 	}
 	return nil
 }
 
-// createOrVerifyVolumeSnapshot 创建或核对快照对象,避免恢复到错误 PVC 或错误保留策略。
-func createOrVerifyVolumeSnapshot(ctx context.Context, client dynamic.ResourceInterface, desired *unstructured.Unstructured) (*unstructured.Unstructured, error) {
-	if created, err := client.Create(ctx, desired, metav1.CreateOptions{}); err == nil {
-		return created, nil
-	} else if !apierrors.IsAlreadyExists(err) {
-		return nil, err
+func normalizeSandboxServiceSpec(spec corev1.ServiceSpec) corev1.ServiceSpec {
+	spec = *spec.DeepCopy()
+	if spec.ClusterIP != corev1.ClusterIPNone {
+		spec.ClusterIP = ""
 	}
-	existing, err := client.Get(ctx, desired.GetName(), metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("读取已存在 VolumeSnapshot 失败: %w", err)
+	spec.ClusterIPs, spec.IPFamilies = nil, nil
+	if spec.Type == "" {
+		spec.Type = corev1.ServiceTypeClusterIP
 	}
-	if err := verifyManagedLabels(existing, desired); err != nil {
-		return nil, err
+	if spec.SessionAffinity == "" {
+		spec.SessionAffinity = corev1.ServiceAffinityNone
 	}
-	desiredSpec, _, desiredErr := unstructured.NestedFieldNoCopy(desired.Object, "spec")
-	existingSpec, _, existingErr := unstructured.NestedFieldNoCopy(existing.Object, "spec")
-	if desiredErr != nil || existingErr != nil || !apiequality.Semantic.DeepEqual(existingSpec, desiredSpec) {
-		return nil, fmt.Errorf("已存在 VolumeSnapshot %s 的来源与当前组合不一致", desired.GetName())
+	if spec.InternalTrafficPolicy == nil {
+		policy := corev1.ServiceInternalTrafficPolicyCluster
+		spec.InternalTrafficPolicy = &policy
 	}
-	return nil, nil
-}
-
-// verifyManagedLabels 核对平台管理对象的不可变身份标签,避免名称复用跨沙箱资源。
-func verifyManagedLabels(existing, desired metav1.Object) error {
-	for key, value := range desired.GetLabels() {
-		if existing.GetLabels()[key] != value {
-			return fmt.Errorf("已存在对象 %s 的管理标签 %s 不一致", desired.GetName(), key)
+	if spec.IPFamilyPolicy == nil {
+		policy := corev1.IPFamilyPolicySingleStack
+		spec.IPFamilyPolicy = &policy
+	}
+	for index := range spec.Ports {
+		port := &spec.Ports[index]
+		if port.Protocol == "" {
+			port.Protocol = corev1.ProtocolTCP
+		}
+		if port.TargetPort == intstr.FromInt32(0) || port.TargetPort == intstr.FromString("") {
+			port.TargetPort = intstr.FromInt32(port.Port)
 		}
 	}
-	return nil
-}
-
-// sameSandboxPodSpec 比较沙箱 Pod 的安全、镜像、挂载、网络和调度语义,忽略 API Server 自动填充字段。
-func sameSandboxPodSpec(current, desired corev1.PodSpec) bool {
-	current = normalizeSandboxPodSpecForComparison(current)
-	desired = normalizeSandboxPodSpecForComparison(desired)
-	return current.ServiceAccountName == desired.ServiceAccountName &&
-		apiequality.Semantic.DeepEqual(current.AutomountServiceAccountToken, desired.AutomountServiceAccountToken) &&
-		apiequality.Semantic.DeepEqual(current.EnableServiceLinks, desired.EnableServiceLinks) &&
-		current.RestartPolicy == desired.RestartPolicy &&
-		apiequality.Semantic.DeepEqual(current.RuntimeClassName, desired.RuntimeClassName) &&
-		apiequality.Semantic.DeepEqual(current.SecurityContext, desired.SecurityContext) &&
-		apiequality.Semantic.DeepEqual(current.InitContainers, desired.InitContainers) &&
-		apiequality.Semantic.DeepEqual(current.Containers, desired.Containers) &&
-		apiequality.Semantic.DeepEqual(current.Volumes, desired.Volumes) &&
-		apiequality.Semantic.DeepEqual(current.NodeSelector, desired.NodeSelector) &&
-		apiequality.Semantic.DeepEqual(current.Tolerations, desired.Tolerations) &&
-		apiequality.Semantic.DeepEqual(current.Affinity, desired.Affinity)
-}
-
-// normalizeSandboxPodSpecForComparison 去除 Kubernetes 在持久化 Pod 时补齐的等价默认值,
-// 保留镜像、安全上下文、资源、挂载和探针等真正属于组合契约的字段。
-func normalizeSandboxPodSpecForComparison(spec corev1.PodSpec) corev1.PodSpec {
-	for index := range spec.InitContainers {
-		normalizeSandboxContainerForComparison(&spec.InitContainers[index])
-	}
-	for index := range spec.Containers {
-		normalizeSandboxContainerForComparison(&spec.Containers[index])
-	}
-	spec.Tolerations = normalizeSandboxTolerationsForComparison(spec.Tolerations)
 	return spec
 }
 
-// normalizeSandboxTolerationsForComparison 去除 Kubernetes 自动补齐的默认节点不可用容忍,
-// 保留平台显式声明的其他调度约束,避免二阶段幂等核对把同一 Pod 误判为规格漂移。
-func normalizeSandboxTolerationsForComparison(items []corev1.Toleration) []corev1.Toleration {
-	if len(items) == 0 {
-		return nil
+// createOrVerifyVolumeSnapshot 创建或核对快照对象,避免恢复到错误 PVC 或错误保留策略。
+func createOrVerifyVolumeSnapshot(ctx context.Context, client dynamic.ResourceInterface, desired *unstructured.Unstructured) (*unstructured.Unstructured, bool, error) {
+	existing, err := client.Create(ctx, desired, metav1.CreateOptions{})
+	created := err == nil
+	if apierrors.IsAlreadyExists(err) {
+		existing, err = client.Get(ctx, desired.GetName(), metav1.GetOptions{})
 	}
-	out := make([]corev1.Toleration, 0, len(items))
-	for _, item := range items {
-		if isKubernetesDefaultSandboxToleration(item) {
-			continue
-		}
-		out = append(out, item)
+	if err != nil {
+		return nil, false, err
 	}
-	if len(out) == 0 {
-		return nil
+	if err := platformk8s.VerifyManagedResource(existing, desired); err != nil {
+		return nil, false, err
 	}
-	return out
+	return existing, created, verifyVolumeSnapshot(existing, desired)
 }
 
-// isKubernetesDefaultSandboxToleration 识别 API Server 为未配置 Pod 自动加入的两条默认容忍。
-func isKubernetesDefaultSandboxToleration(item corev1.Toleration) bool {
-	if item.Operator != corev1.TolerationOpExists || item.Effect != corev1.TaintEffectNoExecute || item.Value != "" || item.TolerationSeconds == nil || *item.TolerationSeconds != 300 {
-		return false
+func verifyVolumeSnapshot(existing, desired *unstructured.Unstructured) error {
+	if err := platformk8s.VerifyManagedResource(existing, desired); err != nil {
+		return err
 	}
-	return item.Key == "node.kubernetes.io/not-ready" || item.Key == "node.kubernetes.io/unreachable"
-}
-
-// normalizeSandboxContainerForComparison 忽略 API Server 为容器补齐的终止消息字段,
-// 以及等价于未设置的递归只读挂载默认值,避免同一组合的二次幂等核对误报规格漂移。
-func normalizeSandboxContainerForComparison(container *corev1.Container) {
-	container.TerminationMessagePath = ""
-	container.TerminationMessagePolicy = ""
-	for index := range container.VolumeMounts {
-		mount := &container.VolumeMounts[index]
-		if mount.RecursiveReadOnly != nil && *mount.RecursiveReadOnly == corev1.RecursiveReadOnlyDisabled {
-			mount.RecursiveReadOnly = nil
-		}
-		if mount.MountPropagation != nil && *mount.MountPropagation == corev1.MountPropagationNone {
-			mount.MountPropagation = nil
+	for key, value := range desired.GetAnnotations() {
+		if existing.GetAnnotations()[key] != value {
+			return fmt.Errorf("VolumeSnapshot %s 的保留策略不一致", desired.GetName())
 		}
 	}
+	desiredSpec, desiredFound, desiredErr := unstructured.NestedMap(desired.Object, "spec")
+	existingSpec, existingFound, existingErr := unstructured.NestedMap(existing.Object, "spec")
+	if _, specified := desiredSpec["volumeSnapshotClassName"]; !specified {
+		if class, found := existingSpec["volumeSnapshotClassName"]; found {
+			if value, valid := class.(string); !valid || strings.TrimSpace(value) == "" {
+				return fmt.Errorf("VolumeSnapshot %s 的默认快照类无效", desired.GetName())
+			}
+			delete(existingSpec, "volumeSnapshotClassName")
+		}
+	}
+	if desiredErr != nil || existingErr != nil || !desiredFound || !existingFound || !apiequality.Semantic.DeepEqual(existingSpec, desiredSpec) {
+		return fmt.Errorf("VolumeSnapshot %s 的来源与当前组合不一致", desired.GetName())
+	}
+	return nil
 }
 
 // sameSandboxPVCSpec 核对可复用规格；快照数据源只记录卷最初的创建来源，不代表当前内容。
 func sameSandboxPVCSpec(current, desired corev1.PersistentVolumeClaimSpec) bool {
-	if !apiequality.Semantic.DeepEqual(current.AccessModes, desired.AccessModes) ||
-		!apiequality.Semantic.DeepEqual(current.Resources.Requests, desired.Resources.Requests) {
-		return false
+	current, desired = *current.DeepCopy(), *desired.DeepCopy()
+	current.DataSource, desired.DataSource = nil, nil
+	current.DataSourceRef, desired.DataSourceRef = nil, nil
+	if desired.StorageClassName == nil {
+		current.StorageClassName = nil
 	}
-	if desired.StorageClassName != nil && !apiequality.Semantic.DeepEqual(current.StorageClassName, desired.StorageClassName) {
-		return false
+	if desired.VolumeName == "" {
+		current.VolumeName = ""
 	}
-	return true
+	filesystem := corev1.PersistentVolumeFilesystem
+	if current.VolumeMode == nil {
+		current.VolumeMode = &filesystem
+	}
+	if desired.VolumeMode == nil {
+		desired.VolumeMode = &filesystem
+	}
+	return apiequality.Semantic.DeepEqual(current, desired)
+}
+
+func sameSandboxPVCSource(current, desired corev1.PersistentVolumeClaimSpec, namespace string) bool {
+	currentSource, currentValid := sandboxPVCSource(current, namespace)
+	desiredSource, desiredValid := sandboxPVCSource(desired, namespace)
+	return currentValid && desiredValid && apiequality.Semantic.DeepEqual(currentSource, desiredSource)
+}
+
+// sandboxPVCSource 合并 API Server 自动互补的本地来源字段，保留跨命名空间来源边界。
+func sandboxPVCSource(spec corev1.PersistentVolumeClaimSpec, namespace string) (*corev1.TypedObjectReference, bool) {
+	normalize := func(source *corev1.TypedObjectReference) *corev1.TypedObjectReference {
+		if source == nil {
+			return nil
+		}
+		source = source.DeepCopy()
+		if source.Namespace != nil && (*source.Namespace == "" || *source.Namespace == namespace) {
+			source.Namespace = nil
+		}
+		if source.APIGroup != nil && *source.APIGroup == "" {
+			source.APIGroup = nil
+		}
+		return source
+	}
+	reference := normalize(spec.DataSourceRef)
+	if spec.DataSource == nil {
+		return reference, true
+	}
+	local := normalize(&corev1.TypedObjectReference{APIGroup: spec.DataSource.APIGroup, Kind: spec.DataSource.Kind, Name: spec.DataSource.Name})
+	return local, reference == nil || apiequality.Semantic.DeepEqual(local, reference)
 }
 
 // applySandboxServiceAccount 创建无权限工作负载账号,避免依赖 Kubernetes 默认 SA 异步生成。
@@ -1397,27 +1097,40 @@ func (o *K8sOrchestrator) applySandboxServiceAccount(ctx context.Context, cs kub
 	}
 	client := cs.CoreV1().ServiceAccounts(plan.Sandbox.Namespace)
 	existing, err := client.Get(ctx, sandboxWorkloadServiceAccount, metav1.GetOptions{})
+	created := false
 	if apierrors.IsNotFound(err) {
-		if _, err := client.Create(ctx, sa, metav1.CreateOptions{}); err != nil {
-			return fmt.Errorf("创建沙箱 ServiceAccount 失败: %w", err)
+		existing, err = client.Create(ctx, sa, metav1.CreateOptions{})
+		created = err == nil
+		if apierrors.IsAlreadyExists(err) {
+			existing, err = client.Get(ctx, sa.Name, metav1.GetOptions{})
 		}
-		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("查询沙箱 ServiceAccount 失败: %w", err)
+		return fmt.Errorf("准备沙箱 ServiceAccount 失败: %w", err)
 	}
-	if err := verifyManagedLabels(existing, sa); err != nil {
+	if err := platformk8s.VerifyManagedResource(existing, sa); err != nil {
 		return err
 	}
-	if !slices.Equal(existing.ImagePullSecrets, refs) ||
+	if !created && (!slices.Equal(existing.ImagePullSecrets, refs) ||
 		existing.AutomountServiceAccountToken == nil ||
-		*existing.AutomountServiceAccountToken {
+		*existing.AutomountServiceAccountToken) {
 		updated := existing.DeepCopy()
 		updated.ImagePullSecrets = refs
 		updated.AutomountServiceAccountToken = &automount
-		if _, err := client.Update(ctx, updated, metav1.UpdateOptions{}); err != nil {
+		accepted, err := client.Update(ctx, updated, metav1.UpdateOptions{})
+		if err != nil {
 			return fmt.Errorf("更新沙箱 ServiceAccount 失败: %w", err)
 		}
+		if accepted.UID != existing.UID {
+			return fmt.Errorf("沙箱 ServiceAccount %s 在更新期间已被替换", sa.Name)
+		}
+		existing = accepted
+	}
+	if err := platformk8s.VerifyManagedResource(existing, sa); err != nil {
+		return err
+	}
+	if !slices.Equal(existing.ImagePullSecrets, refs) || existing.AutomountServiceAccountToken == nil || *existing.AutomountServiceAccountToken {
+		return fmt.Errorf("沙箱 ServiceAccount %s 的凭据策略与当前配置不一致", sa.Name)
 	}
 	return nil
 }
@@ -1535,7 +1248,7 @@ func (o *K8sOrchestrator) applyLimitRange(ctx context.Context, cs kubernetes.Int
 // applyNetworkPolicies 创建默认拒绝、控制面入口和清单声明的同沙箱 Pod 互通策略。
 func (o *K8sOrchestrator) applyNetworkPolicies(ctx context.Context, cs kubernetes.Interface, plan CreateSandboxPlan) error {
 	deny := &netv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "sandbox-deny-all", Namespace: plan.Sandbox.Namespace, Labels: sandboxPolicyLabels(plan.Sandbox)},
+		ObjectMeta: metav1.ObjectMeta{Name: "sandbox-deny-all", Namespace: plan.Sandbox.Namespace, Labels: sandboxManagedLabels(plan.Sandbox)},
 		Spec: netv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{},
 			PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeIngress, netv1.PolicyTypeEgress},
@@ -1572,16 +1285,14 @@ func createOrVerifyNetworkPolicy(ctx context.Context, cs kubernetes.Interface, d
 		return fmt.Errorf("NetworkPolicy 声明不完整")
 	}
 	policies := cs.NetworkingV1().NetworkPolicies(desired.Namespace)
-	if _, err := policies.Create(ctx, desired, metav1.CreateOptions{}); err == nil {
-		return nil
-	} else if !apierrors.IsAlreadyExists(err) {
-		return err
+	existing, err := policies.Create(ctx, desired, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		existing, err = policies.Get(ctx, desired.Name, metav1.GetOptions{})
 	}
-	existing, err := policies.Get(ctx, desired.Name, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("读取已存在 NetworkPolicy 失败: %w", err)
+		return fmt.Errorf("准备 NetworkPolicy 失败: %w", err)
 	}
-	if err := verifyManagedLabels(existing, desired); err != nil {
+	if err := platformk8s.VerifyManagedResource(existing, desired); err != nil {
 		return err
 	}
 	if !apiequality.Semantic.DeepEqual(existing.Spec, desired.Spec) {
@@ -1596,7 +1307,7 @@ func (o *K8sOrchestrator) dnsEgressPolicy(sb Sandbox) *netv1.NetworkPolicy {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "sandbox-allow-dns-egress",
 			Namespace: sb.Namespace,
-			Labels:    sandboxPolicyLabels(sb),
+			Labels:    sandboxManagedLabels(sb),
 		},
 		Spec: netv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{},
@@ -1622,11 +1333,6 @@ func sandboxManagedLabels(sb Sandbox) map[string]string {
 		"chaimir.io/tenant-id":      ids.Format(sb.TenantID),
 		"chaimir.io/sandbox-id":     ids.Format(sb.ID),
 	}
-}
-
-// sandboxPolicyLabels 与部署层动态沙箱 NetworkPolicy 审计模板保持一致,并绑定当前沙箱。
-func sandboxPolicyLabels(sb Sandbox) map[string]string {
-	return sandboxManagedLabels(sb)
 }
 
 // allowControlPlanePolicies 只允许后端控制面按 Pod 角色访问运行时和工具各自声明的端口。
@@ -1656,7 +1362,7 @@ func (o *K8sOrchestrator) allowControlPlanePolicies(plan CreateSandboxPlan) []*n
 // controlPlaneIngressPolicy 构造控制面到单个 Pod 角色的最小入口策略。
 func (o *K8sOrchestrator) controlPlaneIngressPolicy(sb Sandbox, name, role string, ports []netv1.NetworkPolicyPort) *netv1.NetworkPolicy {
 	return &netv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: sb.Namespace, Labels: sandboxPolicyLabels(sb)},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: sb.Namespace, Labels: sandboxManagedLabels(sb)},
 		Spec: netv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(sb, role)},
 			PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeIngress},
@@ -1690,7 +1396,7 @@ func (o *K8sOrchestrator) allowSandboxPodLinkPolicies(plan CreateSandboxPlan) []
 // sandboxPodIngressPolicy 允许来源 Pod 访问目标 Pod 的声明端口。
 func sandboxPodIngressPolicy(plan CreateSandboxPlan, rule workload.NetworkRuleSpec, ports []netv1.NetworkPolicyPort) *netv1.NetworkPolicy {
 	return &netv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: networkPolicyRuleName("sandbox-allow", rule, "ingress"), Namespace: plan.Sandbox.Namespace, Labels: sandboxPolicyLabels(plan.Sandbox)},
+		ObjectMeta: metav1.ObjectMeta{Name: networkPolicyRuleName("sandbox-allow", rule, "ingress"), Namespace: plan.Sandbox.Namespace, Labels: sandboxManagedLabels(plan.Sandbox)},
 		Spec: netv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, rule.To)},
 			PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeIngress},
@@ -1705,7 +1411,7 @@ func sandboxPodIngressPolicy(plan CreateSandboxPlan, rule workload.NetworkRuleSp
 // sandboxPodEgressPolicy 允许来源 Pod 出站访问目标 Pod 的声明端口。
 func sandboxPodEgressPolicy(plan CreateSandboxPlan, rule workload.NetworkRuleSpec, ports []netv1.NetworkPolicyPort) *netv1.NetworkPolicy {
 	return &netv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: networkPolicyRuleName("sandbox-allow", rule, "egress"), Namespace: plan.Sandbox.Namespace, Labels: sandboxPolicyLabels(plan.Sandbox)},
+		ObjectMeta: metav1.ObjectMeta{Name: networkPolicyRuleName("sandbox-allow", rule, "egress"), Namespace: plan.Sandbox.Namespace, Labels: sandboxManagedLabels(plan.Sandbox)},
 		Spec: netv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, rule.From)},
 			PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeEgress},
@@ -1737,7 +1443,7 @@ func toolPodIngressPolicy(plan CreateSandboxPlan, tool Tool, rule workload.Netwo
 	fromRole := toolComponentPodName(tool.Code, rule.From)
 	toRole := toolNetworkRuleTargetRole(tool, rule.To)
 	return &netv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: networkPolicyRuleName("sandbox-allow-tool", workload.NetworkRuleSpec{Name: rule.Name, From: fromRole, To: toRole, Ports: rule.Ports}, "ingress"), Namespace: plan.Sandbox.Namespace, Labels: sandboxPolicyLabels(plan.Sandbox)},
+		ObjectMeta: metav1.ObjectMeta{Name: networkPolicyRuleName("sandbox-allow-tool", workload.NetworkRuleSpec{Name: rule.Name, From: fromRole, To: toRole, Ports: rule.Ports}, "ingress"), Namespace: plan.Sandbox.Namespace, Labels: sandboxManagedLabels(plan.Sandbox)},
 		Spec: netv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, toRole)},
 			PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeIngress},
@@ -1754,7 +1460,7 @@ func toolPodEgressPolicy(plan CreateSandboxPlan, tool Tool, rule workload.Networ
 	fromRole := toolComponentPodName(tool.Code, rule.From)
 	toRole := toolNetworkRuleTargetRole(tool, rule.To)
 	return &netv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: networkPolicyRuleName("sandbox-allow-tool", workload.NetworkRuleSpec{Name: rule.Name, From: fromRole, To: toRole, Ports: rule.Ports}, "egress"), Namespace: plan.Sandbox.Namespace, Labels: sandboxPolicyLabels(plan.Sandbox)},
+		ObjectMeta: metav1.ObjectMeta{Name: networkPolicyRuleName("sandbox-allow-tool", workload.NetworkRuleSpec{Name: rule.Name, From: fromRole, To: toRole, Ports: rule.Ports}, "egress"), Namespace: plan.Sandbox.Namespace, Labels: sandboxManagedLabels(plan.Sandbox)},
 		Spec: netv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, fromRole)},
 			PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeEgress},
@@ -1800,7 +1506,7 @@ func networkPolicyRuleName(prefix string, rule workload.NetworkRuleSpec, directi
 func networkPolicyPortIdentity(ports []workload.NetworkPortRef) string {
 	items := make([]string, 0, len(ports))
 	for _, port := range ports {
-		items = append(items, strings.TrimSpace(port.Name)+"="+strconv.Itoa(int(port.Port)))
+		items = append(items, strings.TrimSpace(port.Name)+"="+strconv.Itoa(int(port.Port))+"/"+valueOrDefault(port.Protocol, "TCP"))
 	}
 	return strings.Join(items, ",")
 }
@@ -1963,7 +1669,7 @@ func deferredToolPods(plan CreateSandboxPlan) (map[string]bool, error) {
 }
 
 // createPodsInStartupOrder 先创建独立组件，再逐组创建依赖组件；同组 Pod 必须全部创建后才能等待就绪。
-func createPodsInStartupOrder(plan CreateSandboxPlan, pods []*corev1.Pod, create func(*corev1.Pod) error, waitReady func([]string) error) error {
+func createPodsInStartupOrder(plan CreateSandboxPlan, pods []*corev1.Pod, create func(*corev1.Pod) (*corev1.Pod, error), waitReady func([]*corev1.Pod) error) ([]*corev1.Pod, error) {
 	order := []string{""}
 	required := make(map[string]bool)
 	for _, runtime := range plan.Runtimes {
@@ -1989,28 +1695,31 @@ func createPodsInStartupOrder(plan CreateSandboxPlan, pods []*corev1.Pod, create
 			}
 		}
 		if code == "" {
-			return fmt.Errorf("沙箱 Pod %s 不属于声明的运行时或工具", pod.Name)
+			return nil, fmt.Errorf("沙箱 Pod %s 不属于声明的运行时或工具", pod.Name)
 		}
 		if !required[code] {
 			code = ""
 		}
 		groups[code] = append(groups[code], pod)
 	}
+	var created []*corev1.Pod
 	for _, code := range order {
-		var names []string
+		var group []*corev1.Pod
 		for _, pod := range groups[code] {
-			if err := create(pod); err != nil {
-				return err
+			accepted, err := create(pod)
+			if err != nil {
+				return nil, fmt.Errorf("创建沙箱 Pod %s 失败: %w", pod.Name, err)
 			}
-			names = append(names, pod.Name)
+			group = append(group, accepted)
 		}
-		if code != "" && len(names) > 0 {
-			if err := waitReady(names); err != nil {
-				return err
+		if code != "" && len(group) > 0 {
+			if err := waitReady(group); err != nil {
+				return nil, err
 			}
 		}
+		created = append(created, group...)
 	}
-	return nil
+	return created, nil
 }
 
 // podGroupForPlan 返回运行时声明的 Pod 组;未声明时按 runtime_container + infra_sidecars 生成单 Pod 拓扑。
@@ -2112,6 +1821,7 @@ func (o *K8sOrchestrator) podFromSpec(plan CreateSandboxPlan, spec workload.PodS
 		Spec: corev1.PodSpec{
 			AutomountServiceAccountToken: &automount,
 			EnableServiceLinks:           &enableServiceLinks,
+			ImagePullSecrets:             imagePullSecrets(o.cfg.ImagePullSecretNames),
 			RuntimeClassName:             &o.cfg.RuntimeClass,
 			ServiceAccountName:           sandboxWorkloadServiceAccount,
 			RestartPolicy:                corev1.RestartPolicyNever,
@@ -2149,6 +1859,7 @@ func (o *K8sOrchestrator) toolPodForPlan(plan CreateSandboxPlan, tool Tool, comp
 		Spec: corev1.PodSpec{
 			AutomountServiceAccountToken: &automount,
 			EnableServiceLinks:           &enableServiceLinks,
+			ImagePullSecrets:             imagePullSecrets(o.cfg.ImagePullSecretNames),
 			RuntimeClassName:             &o.cfg.RuntimeClass,
 			ServiceAccountName:           sandboxWorkloadServiceAccount,
 			RestartPolicy:                corev1.RestartPolicyNever,
@@ -2564,12 +2275,9 @@ func servicesForPlan(plan CreateSandboxPlan) ([]*corev1.Service, error) {
 
 // sandboxPodRoleLabels 返回 NetworkPolicy 和 Service 共同使用的受控 Pod 选择标签。
 func sandboxPodRoleLabels(sb Sandbox, role string) map[string]string {
-	return map[string]string{
-		"app":                   "chaimir",
-		"module":                "sandbox",
-		"chaimir.io/sandbox-id": ids.Format(sb.ID),
-		"chaimir.io/pod-role":   role,
-	}
+	labels := sandboxManagedLabels(sb)
+	labels["chaimir.io/pod-role"] = role
+	return labels
 }
 
 // servicePortsForPod 汇总运行时 Pod 中显式声明的端口,用于内部服务发现。
@@ -2650,10 +2358,13 @@ func toolControlPlanePorts(tool Tool) map[string][]netv1.NetworkPolicyPort {
 				continue
 			}
 			port := componentPorts[service.Component][servicePort.TargetPort]
-			if port <= 0 || slices.ContainsFunc(rolePorts[role], func(existing netv1.NetworkPolicyPort) bool { return existing.Port.IntVal == port }) {
+			protocol := corev1.Protocol(valueOrDefault(port.Protocol, "TCP"))
+			if port.ContainerPort <= 0 || slices.ContainsFunc(rolePorts[role], func(existing netv1.NetworkPolicyPort) bool {
+				return existing.Port.IntVal == port.ContainerPort && existing.Protocol != nil && *existing.Protocol == protocol
+			}) {
 				continue
 			}
-			rolePorts[role] = append(rolePorts[role], networkPolicyPort(port))
+			rolePorts[role] = append(rolePorts[role], networkPolicyPort(port.ContainerPort, port.Protocol))
 		}
 	}
 	return rolePorts
@@ -2664,25 +2375,28 @@ func toolComponentPodName(toolCode, componentName string) string {
 	return boundedSandboxName("tool-"+strings.TrimSpace(toolCode)+"-"+strings.TrimSpace(componentName), 63)
 }
 
-// runtimePodNames 只等待本阶段的运行时和基础设施;其他工具按当前状态开放入口。
-func runtimePodNames(plan CreateSandboxPlan, created []*corev1.Pod) []string {
+// runtimePods 只等待本阶段受理的运行时和基础设施；其他工具按当前状态开放入口。
+func runtimePods(plan CreateSandboxPlan, created []*corev1.Pod) []*corev1.Pod {
 	pods := podGroupForPlan(plan)
-	var names []string
+	waitFor := make(map[string]bool, len(pods))
 	for _, pod := range pods {
-		names = append(names, pod.Name)
+		waitFor[pod.Name] = true
 	}
 	for _, tool := range plan.Tools {
 		if tool.Category != "infra" {
 			continue
 		}
 		for _, component := range tool.ResourceSpec.Components {
-			name := toolComponentPodName(tool.Code, component.Name)
-			if slices.ContainsFunc(created, func(pod *corev1.Pod) bool { return pod.Name == name }) {
-				names = append(names, name)
-			}
+			waitFor[toolComponentPodName(tool.Code, component.Name)] = true
 		}
 	}
-	return names
+	var ready []*corev1.Pod
+	for _, pod := range created {
+		if waitFor[pod.Name] {
+			ready = append(ready, pod)
+		}
+	}
+	return ready
 }
 
 // runtimeComputePodNames 选择包含运行时主容器的 Pod,学生工作区独立 Pod 不参与链重置。
@@ -2703,29 +2417,6 @@ func runtimeComputePodNames(plan CreateSandboxPlan, runtimeInstance string) []st
 	return result
 }
 
-// waitPodDeleted 等待同名 Pod 消失后再允许重建。
-func waitPodDeleted(ctx context.Context, cs kubernetes.Interface, namespace, name string, pollSeconds int) error {
-	if pollSeconds <= 0 {
-		return fmt.Errorf("SANDBOX_READY_POLL_INTERVAL_SECONDS 必须大于 0")
-	}
-	ticker := time.NewTicker(sandboxPodReadyPollInterval(pollSeconds))
-	defer ticker.Stop()
-	for {
-		_, err := cs.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("查询待删除的 Pod %s 失败: %w", name, err)
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("等待 Pod %s 删除超时: %w", name, ctx.Err())
-		case <-ticker.C:
-		}
-	}
-}
-
 // splitExecTarget 把内部执行目标拆成 pod/container,未带 Pod 时使用单 Pod 拓扑名称。
 func splitExecTarget(target string) (string, string) {
 	parts := strings.Split(strings.TrimSpace(target), "/")
@@ -2736,203 +2427,6 @@ func splitExecTarget(target string) (string, string) {
 }
 
 // prepullDaemonSet 构造镜像预拉取 DaemonSet。
-func (o *K8sOrchestrator) prepullDaemonSet(image RuntimeImage, compositionDigest string, specs []PrepullImageSpec) *appsv1.DaemonSet {
-	labels := map[string]string{"app": "chaimir", "module": "sandbox", "runtime_image_id": ids.Format(image.ID)}
-	digestPrefix := strings.TrimPrefix(strings.TrimSpace(compositionDigest), "sha256:")
-	if len(digestPrefix) > 16 {
-		digestPrefix = digestPrefix[:16]
-	}
-	if digestPrefix == "" {
-		digestPrefix = "unknown"
-	}
-	labels["composition_digest"] = digestPrefix
-	automount := false
-	initContainers := make([]corev1.Container, 0, len(specs))
-	for idx, spec := range specs {
-		if spec.Hold {
-			continue
-		}
-		initContainers = append(initContainers, corev1.Container{
-			Name:            prepullContainerName(idx, spec.ImageURL),
-			Image:           spec.ImageURL,
-			ImagePullPolicy: corev1.PullIfNotPresent,
-			Command:         spec.Command,
-			Resources: corev1.ResourceRequirements{
-				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(o.cfg.PrepullRequestCPU), corev1.ResourceMemory: resource.MustParse(o.cfg.PrepullRequestMemory)},
-				Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(o.cfg.PrepullLimitCPU), corev1.ResourceMemory: resource.MustParse(o.cfg.PrepullLimitMemory)},
-			},
-			SecurityContext: containerSecurityContext(true),
-			VolumeMounts:    prepullVolumeMounts(spec),
-		})
-	}
-	holdSpec := prepullHoldSpec(specs)
-	hold := corev1.Container{
-		Name:            "prepull-ready",
-		Image:           holdSpec.ImageURL,
-		ImagePullPolicy: corev1.PullIfNotPresent,
-		Command:         prepullHoldCommand(holdSpec.Command),
-		Resources: corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(o.cfg.PrepullRequestCPU), corev1.ResourceMemory: resource.MustParse(o.cfg.PrepullRequestMemory)},
-			Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(o.cfg.PrepullLimitCPU), corev1.ResourceMemory: resource.MustParse(o.cfg.PrepullLimitMemory)},
-		},
-		SecurityContext: containerSecurityContext(true),
-		VolumeMounts:    prepullVolumeMounts(holdSpec),
-	}
-	return &appsv1.DaemonSet{
-		ObjectMeta: metav1.ObjectMeta{Name: "chaimir-prepull-" + ids.Format(image.ID) + "-" + digestPrefix, Namespace: o.cfg.PrepullNamespace, Labels: labels},
-		Spec: appsv1.DaemonSetSpec{
-			Selector: &metav1.LabelSelector{MatchLabels: labels},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
-				Spec: corev1.PodSpec{
-					AutomountServiceAccountToken: &automount,
-					RestartPolicy:                corev1.RestartPolicyAlways,
-					ImagePullSecrets:             imagePullSecrets(o.cfg.ImagePullSecretNames),
-					NodeSelector:                 copyStringMap(o.cfg.SandboxNodeSelector),
-					Tolerations:                  sandboxTolerations(o.cfg.SandboxNodeTolerations),
-					InitContainers:               initContainers,
-					Containers:                   []corev1.Container{hold},
-					SecurityContext:              podSecurityContext(),
-					Volumes:                      prepullVolumes(specs),
-				},
-			},
-		},
-	}
-}
-
-// prepullHoldCommand 先执行镜像自检,成功后让保持容器持续运行以维持节点就绪。
-func prepullHoldCommand(command []string) []string {
-	parts := make([]string, 0, len(command))
-	for _, part := range command {
-		parts = append(parts, shellQuote(part))
-	}
-	return []string{"sh", "-lc", strings.Join(parts, " ") + " && exec sleep 2147483647"}
-}
-
-// shellQuote 将受控 argv 参数编码为单引号 shell 字面量。
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
-}
-
-// prepullVolumeMounts 提供镜像自检所需的最小临时工作目录,并复用镜像清单声明的临时可写目录。
-func prepullVolumeMounts(spec PrepullImageSpec) []corev1.VolumeMount {
-	mounts := []corev1.VolumeMount{
-		{Name: "prepull-workspace", MountPath: "/workspace"},
-		{Name: "prepull-tmp", MountPath: "/tmp"},
-	}
-	seenPaths := map[string]struct{}{"/workspace": {}, "/tmp": {}}
-	for _, mount := range spec.EphemeralMounts {
-		mountPath := path.Clean(strings.TrimSpace(mount.MountPath))
-		if !strings.HasPrefix(mountPath, "/") {
-			continue
-		}
-		if _, exists := seenPaths[mountPath]; exists {
-			continue
-		}
-		seenPaths[mountPath] = struct{}{}
-		mounts = append(mounts, corev1.VolumeMount{
-			Name:      prepullExtraVolumeName(mount),
-			MountPath: mountPath,
-		})
-	}
-	return mounts
-}
-
-// prepullVolumes 为预拉取容器提供只在当前 Pod 生命周期内存在的临时卷。
-func prepullVolumes(specs []PrepullImageSpec) []corev1.Volume {
-	volumes := []corev1.Volume{
-		{Name: "prepull-workspace", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-		{Name: "prepull-tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-	}
-	seen := map[string]struct{}{"prepull-workspace": {}, "prepull-tmp": {}}
-	for _, spec := range specs {
-		for _, mount := range spec.EphemeralMounts {
-			if mountPath := path.Clean(strings.TrimSpace(mount.MountPath)); !strings.HasPrefix(mountPath, "/") {
-				continue
-			}
-			name := prepullExtraVolumeName(mount)
-			if _, exists := seen[name]; exists {
-				continue
-			}
-			seen[name] = struct{}{}
-			volumes = append(volumes, corev1.Volume{
-				Name:         name,
-				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
-			})
-		}
-	}
-	return volumes
-}
-
-// prepullExtraVolumeName 为预拉取临时挂载生成稳定卷名,避免长名称和同名路径冲突。
-func prepullExtraVolumeName(mount workload.EphemeralMountSpec) string {
-	key := strings.TrimSpace(mount.Name) + "\x00" + strings.TrimSpace(mount.MountPath)
-	sum := sha256.Sum256([]byte(key))
-	suffix := hex.EncodeToString(sum[:4])
-	base := "prepull-" + strings.TrimSpace(mount.Name)
-	base = strings.ToLower(base)
-	var b strings.Builder
-	for _, r := range base {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
-			b.WriteRune(r)
-			continue
-		}
-		b.WriteByte('-')
-	}
-	base = strings.Trim(b.String(), "-")
-	if base == "" || base == "prepull" {
-		base = "prepull-mount"
-	}
-	maxBase := 63 - len(suffix) - 1
-	if len(base) > maxBase {
-		base = base[:maxBase]
-	}
-	return strings.TrimRight(base, "-") + "-" + suffix
-}
-
-// prepullHoldSpec 选择运行时声明的长期保持容器,确保 DaemonSet Ready 后新节点会持续补拉。
-func prepullHoldSpec(specs []PrepullImageSpec) PrepullImageSpec {
-	for _, spec := range specs {
-		if spec.Hold {
-			return spec
-		}
-	}
-	return PrepullImageSpec{}
-}
-
-// prepullSpecImageURLs 提取预拉取状态响应中的镜像 URL 列表。
-func prepullSpecImageURLs(specs []PrepullImageSpec) []string {
-	out := make([]string, 0, len(specs))
-	seen := map[string]struct{}{}
-	for _, spec := range specs {
-		imageURL := strings.TrimSpace(spec.ImageURL)
-		if imageURL == "" {
-			continue
-		}
-		if _, exists := seen[imageURL]; exists {
-			continue
-		}
-		seen[imageURL] = struct{}{}
-		out = append(out, imageURL)
-	}
-	return out
-}
-
-// prepullContainerName 基于镜像位置生成稳定容器名,避免多镜像预拉取时名称冲突。
-func prepullContainerName(index int, imageURL string) string {
-	sum := sha256.Sum256([]byte(imageURL))
-	name := strings.NewReplacer("/", "-", ":", "-", "@", "-").Replace(strings.TrimSpace(imageURL))
-	name = strings.ToLower(name)
-	if len(name) > 36 {
-		name = name[len(name)-36:]
-	}
-	name = strings.Trim(name, "-.")
-	if name == "" {
-		name = "image"
-	}
-	return fmt.Sprintf("prepull-%02d-%s-%s", index, name, hex.EncodeToString(sum[:3]))
-}
-
 // imagePullSecrets 把配置中的 registry 拉取凭据名称转换为 Kubernetes 引用。
 func imagePullSecrets(names []string) []corev1.LocalObjectReference {
 	if len(names) == 0 {
@@ -3064,7 +2558,6 @@ func resources(spec workload.ResourceSpec, cfg config.SandboxConfig) corev1.Reso
 	}
 }
 
-// addResourceUsage 把单容器资源声明累加到沙箱资源摘要。
 func addResourceUsage(usage *contracts.SandboxResourceUsage, resources corev1.ResourceRequirements) {
 	if cpu, ok := resources.Requests[corev1.ResourceCPU]; ok {
 		usage.CPURequestMilli += cpu.MilliValue()
@@ -3103,10 +2596,9 @@ func probe(spec workload.ProbeSpec) *corev1.Probe {
 	return p
 }
 
-// networkPolicyPort 构造 TCP 网络策略端口。
-func networkPolicyPort(port int32) netv1.NetworkPolicyPort {
-	protocol := corev1.ProtocolTCP
-	return netv1.NetworkPolicyPort{Protocol: &protocol, Port: &intstr.IntOrString{Type: intstr.Int, IntVal: port}}
+func networkPolicyPort(port int32, protocol string) netv1.NetworkPolicyPort {
+	transport := corev1.Protocol(valueOrDefault(protocol, "TCP"))
+	return netv1.NetworkPolicyPort{Protocol: &transport, Port: &intstr.IntOrString{Type: intstr.Int, IntVal: port}}
 }
 
 // dnsNetworkPolicyPorts 返回 Kubernetes DNS 所需的 UDP/TCP 端口集合。
@@ -3122,15 +2614,16 @@ func dnsNetworkPolicyPorts(port int32) []netv1.NetworkPolicyPort {
 // networkPolicyPortsForPodGroup 汇总运行时 Pod 组声明端口,用于控制面精确访问。
 func networkPolicyPortsForPodGroup(pods []workload.PodSpec) []netv1.NetworkPolicyPort {
 	ports := []netv1.NetworkPolicyPort{}
-	seen := map[int32]struct{}{}
+	seen := map[workload.NetworkPortRef]bool{}
 	for _, pod := range pods {
 		for _, container := range pod.Containers {
 			for _, port := range container.Ports {
-				if _, ok := seen[port.ContainerPort]; ok {
+				identity := workload.NetworkPortRef{Port: port.ContainerPort, Protocol: valueOrDefault(port.Protocol, "TCP")}
+				if seen[identity] {
 					continue
 				}
-				seen[port.ContainerPort] = struct{}{}
-				ports = append(ports, networkPolicyPort(port.ContainerPort))
+				seen[identity] = true
+				ports = append(ports, networkPolicyPort(port.ContainerPort, port.Protocol))
 			}
 		}
 	}
@@ -3146,7 +2639,7 @@ func networkPolicyPortsForSinglePod(pod workload.PodSpec) []netv1.NetworkPolicyP
 func networkPolicyPortsForRefs(refs []workload.NetworkPortRef) []netv1.NetworkPolicyPort {
 	ports := make([]netv1.NetworkPolicyPort, 0, len(refs))
 	for _, ref := range refs {
-		ports = append(ports, networkPolicyPort(ref.Port))
+		ports = append(ports, networkPolicyPort(ref.Port, ref.Protocol))
 	}
 	return ports
 }

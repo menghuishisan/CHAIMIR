@@ -25,12 +25,10 @@ type Querier interface {
 	CreateSandboxEvent(ctx context.Context, arg CreateSandboxEventParams) (SandboxEvent, error)
 	CreateSandboxRecycleOutbox(ctx context.Context, arg CreateSandboxRecycleOutboxParams) (SandboxRecycleOutbox, error)
 	DeleteCompositionPrepullByRuntimeImage(ctx context.Context, runtimeImageID int64) error
-	DeleteCompositionSnapshot(ctx context.Context, compositionDigest string) error
 	DisableRuntimeImage(ctx context.Context, arg DisableRuntimeImageParams) (RuntimeImage, error)
 	EnsureRuntime(ctx context.Context, arg EnsureRuntimeParams) error
 	EnsureTenantQuota(ctx context.Context, arg EnsureTenantQuotaParams) (EnsureTenantQuotaRow, error)
 	EnsureTool(ctx context.Context, arg EnsureToolParams) error
-	FinishCompositionPrepull(ctx context.Context, arg FinishCompositionPrepullParams) (SandboxCompositionPrepull, error)
 	// 只允许仍处于接入中的同一自检批次写回,防止旧结果覆盖并发配置更新或停用。
 	FinishRuntimeSelftest(ctx context.Context, arg FinishRuntimeSelftestParams) (Runtime, error)
 	GetCompositionPrepullForUpdate(ctx context.Context, arg GetCompositionPrepullForUpdateParams) (SandboxCompositionPrepull, error)
@@ -84,6 +82,7 @@ type Querier interface {
 	// 自检启动时写入唯一批次并退回接入中,并发契约更新或停用可使旧批次自然失效。
 	StartRuntimeSelftest(ctx context.Context, arg StartRuntimeSelftestParams) (Runtime, error)
 	StatsByTenant(ctx context.Context, tenantID int64) (StatsByTenantRow, error)
+	UpdateCompositionPrepull(ctx context.Context, arg UpdateCompositionPrepullParams) (SandboxCompositionPrepull, error)
 	UpdateRuntime(ctx context.Context, arg UpdateRuntimeParams) (Runtime, error)
 	UpdateSandboxAuthorizedAccounts(ctx context.Context, arg UpdateSandboxAuthorizedAccountsParams) (Sandbox, error)
 	UpdateSandboxCode(ctx context.Context, arg UpdateSandboxCodeParams) (Sandbox, error)

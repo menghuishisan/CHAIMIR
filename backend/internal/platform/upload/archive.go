@@ -19,6 +19,7 @@ type ArchiveLimits struct {
 }
 
 // ArchiveFile 表示已通过路径、类型和配额校验的普通归档成员。
+// Reader 仅在回调期间有效，不得保留或异步读取。
 type ArchiveFile struct {
 	Name   string
 	Size   int64
@@ -101,31 +102,24 @@ func TAREntryNames(r *tar.Reader, limits ArchiveLimits) ([]string, error) {
 
 // SafeArchiveTar 校验 ZIP/TAR 归档并重打为只含普通文件的安全 TAR。
 func SafeArchiveTar(name string, data []byte, limits ArchiveLimits) ([]byte, error) {
-	format, err := DetectArchiveFormat(name, data)
-	if err != nil {
+	var out bytes.Buffer
+	tw := tar.NewWriter(&out)
+	if err := WalkArchiveFiles(name, data, limits, func(file ArchiveFile) error {
+		if err := tw.WriteHeader(&tar.Header{Name: file.Name, Mode: 0600, Size: file.Size, Typeflag: tar.TypeReg}); err != nil {
+			return err
+		}
+		return copyExactArchiveEntry(tw, file.Reader, file.Size, limits.MaxUnpackedBytes)
+	}); err != nil {
 		return nil, err
 	}
-	switch format {
-	case ArchiveFormatZIP:
-		zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
-		if err != nil {
-			return nil, err
-		}
-		if _, err := ZIPEntryNames(zr, limits); err != nil {
-			return nil, err
-		}
-		return zipToSafeTar(zr, limits)
-	case ArchiveFormatTAR:
-		if _, err := TAREntryNames(tar.NewReader(bytes.NewReader(data)), limits); err != nil {
-			return nil, err
-		}
-		return tarToSafeTar(tar.NewReader(bytes.NewReader(data)), limits)
-	default:
-		return nil, fmt.Errorf("归档格式不支持")
+	if err := tw.Close(); err != nil {
+		return nil, err
 	}
+	return out.Bytes(), nil
 }
 
 // WalkArchiveFiles 校验 ZIP/TAR 后按普通文件逐个回调,供模块复用统一归档安全边界。
+// 回调成功后读完剩余内容，跳过文件仍校验长度和校验和。
 func WalkArchiveFiles(name string, data []byte, limits ArchiveLimits, visit func(ArchiveFile) error) error {
 	if visit == nil {
 		return fmt.Errorf("归档文件访问回调不能为空")
@@ -140,11 +134,10 @@ func WalkArchiveFiles(name string, data []byte, limits ArchiveLimits, visit func
 		if err != nil {
 			return err
 		}
-		names, err := ZIPEntryNames(zr, limits)
-		if err != nil {
+		if _, err := ZIPEntryNames(zr, limits); err != nil {
 			return err
 		}
-		return walkSafeZIPFiles(zr, names, visit)
+		return walkSafeZIPFiles(zr, visit)
 	case ArchiveFormatTAR:
 		if _, err := TAREntryNames(tar.NewReader(bytes.NewReader(data)), limits); err != nil {
 			return err
@@ -185,52 +178,11 @@ func ReadArchiveFileContent(file ArchiveFile, maxBytes int64) ([]byte, error) {
 	return out, nil
 }
 
-func zipToSafeTar(zr *zip.Reader, limits ArchiveLimits) ([]byte, error) {
-	var out bytes.Buffer
-	tw := tar.NewWriter(&out)
+func walkSafeZIPFiles(zr *zip.Reader, visit func(ArchiveFile) error) error {
 	seen := map[string]struct{}{}
 	for _, file := range zr.File {
 		name, ok := SafeArchiveEntryName(file.Name, seen)
 		if !ok || file.FileInfo().IsDir() {
-			continue
-		}
-		seen[name] = struct{}{}
-		size, err := archiveSizeFromUint64(file.UncompressedSize64)
-		if err != nil {
-			return nil, err
-		}
-		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0600, Size: size, Typeflag: tar.TypeReg}); err != nil {
-			return nil, err
-		}
-		rc, err := file.Open()
-		if err != nil {
-			return nil, err
-		}
-		if err := copyExactArchiveEntry(tw, rc, size, limits.MaxUnpackedBytes); err != nil {
-			return nil, errors.Join(err, closeArchiveReader(rc))
-		}
-		if err := rc.Close(); err != nil {
-			return nil, err
-		}
-	}
-	if err := tw.Close(); err != nil {
-		return nil, err
-	}
-	return out.Bytes(), nil
-}
-
-func walkSafeZIPFiles(zr *zip.Reader, safeNames []string, visit func(ArchiveFile) error) error {
-	allowed := make(map[string]struct{}, len(safeNames))
-	for _, name := range safeNames {
-		allowed[name] = struct{}{}
-	}
-	seen := map[string]struct{}{}
-	for _, file := range zr.File {
-		name, ok := SafeArchiveEntryName(file.Name, seen)
-		if !ok || file.FileInfo().IsDir() {
-			continue
-		}
-		if _, ok := allowed[name]; !ok {
 			continue
 		}
 		seen[name] = struct{}{}
@@ -243,9 +195,10 @@ func walkSafeZIPFiles(zr *zip.Reader, safeNames []string, visit func(ArchiveFile
 			return errors.Join(sizeErr, rc.Close())
 		}
 		err = visit(ArchiveFile{Name: name, Size: size, Reader: rc})
-		if closeErr := rc.Close(); closeErr != nil && err == nil {
-			err = closeErr
+		if err == nil {
+			_, err = io.Copy(io.Discard, rc)
 		}
+		err = errors.Join(err, closeArchiveReader(rc))
 		if err != nil {
 			return err
 		}
@@ -284,42 +237,6 @@ func walkSafeTARFiles(tr *tar.Reader, visit func(ArchiveFile) error) error {
 	}
 }
 
-func tarToSafeTar(tr *tar.Reader, limits ArchiveLimits) ([]byte, error) {
-	var out bytes.Buffer
-	tw := tar.NewWriter(&out)
-	seen := map[string]struct{}{}
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-		if header.Typeflag == tar.TypeDir {
-			continue
-		}
-		if header.Typeflag != tar.TypeReg {
-			return nil, fmt.Errorf("TAR 归档包含不受支持的成员类型: %s", header.Name)
-		}
-		name, ok := SafeArchiveEntryName(header.Name, seen)
-		if !ok {
-			return nil, fmt.Errorf("TAR 归档成员路径非法: %s", header.Name)
-		}
-		seen[name] = struct{}{}
-		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0600, Size: header.Size, Typeflag: tar.TypeReg}); err != nil {
-			return nil, err
-		}
-		if err := copyExactArchiveEntry(tw, tr, header.Size, limits.MaxUnpackedBytes); err != nil {
-			return nil, err
-		}
-	}
-	if err := tw.Close(); err != nil {
-		return nil, err
-	}
-	return out.Bytes(), nil
-}
-
 func closeArchiveReader(reader io.Closer) error {
 	if err := reader.Close(); err != nil {
 		return fmt.Errorf("关闭归档成员读取流失败: %w", err)
@@ -354,8 +271,9 @@ func walkEntries(hintCount int, limits ArchiveLimits, iter func(func(name string
 		return nil, fmt.Errorf("归档展开大小上限必须大于 0")
 	}
 
-	seen := make(map[string]struct{}, max(hintCount, 1))
-	names := make([]string, 0, max(hintCount, 1))
+	capacity := min(max(hintCount, 1), limits.MaxFiles)
+	seen := make(map[string]struct{}, capacity)
+	names := make([]string, 0, capacity)
 	var total int64
 	count := 0
 	err := iter(func(name string, size int64) error {

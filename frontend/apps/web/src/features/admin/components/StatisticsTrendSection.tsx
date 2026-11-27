@@ -15,7 +15,7 @@ import {
   type TrendSeries,
 } from '@chaimir/ui'
 import { useAsyncResource, useUrlState } from '../../../hooks'
-import { formatDate } from '../../../utils/formatters'
+import { formatCalendarDate } from '../../../utils/formatters'
 import { statisticsMetricLabel } from '../../../utils/labels/admin'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
 import {
@@ -88,7 +88,7 @@ export function StatisticsTrendSection({ load, idPrefix, description }: Statisti
           </h2>
           <p className="mt-0.5 text-sm text-ink-sub">
             {description}
-            {latest ? ` 最新快照 ${formatDate(latest.date)},共 ${snapshots.length} 天数据。` : ''}
+            {latest ? ` 最新快照 ${formatCalendarDate(latest.date)},共 ${snapshots.length} 天数据。` : ''}
           </p>
         </div>
         <SegmentedControl
@@ -172,7 +172,7 @@ function trendGroups(snapshots: Statistics[]): TrendGroup[] {
       keys,
       series: keys.map((key) => ({ key, name: statisticsMetricLabel(key) ?? key })),
       data: snapshots.map((snapshot) => {
-        const row: Record<string, string | number> = { date: formatDate(snapshot.date) }
+        const row: Record<string, string | number> = { date: formatCalendarDate(snapshot.date) }
         for (const key of keys) {
           const value = snapshot.metrics[key]
           if (typeof value === 'number') row[key] = value

@@ -6,7 +6,7 @@
 // 而漂移的表现是"同一个 seed 在两个宿主跑出两条过程",回放、分享与判分随之失效。
 //
 // 只装配平台内置包:教师与第三方扩展包在后端隔离容器内运行,归档字节从不下发浏览器
-// (理由见 docs/04-仿真可视化引擎/07-安全设计.md §2)。
+// (理由见 docs/04-仿真可视化引擎/06-安全设计.md §2)。
 
 import { SimEngine } from './engine';
 import { blockedCapability, installDeterminismGuards, sealGlobal } from './guards';

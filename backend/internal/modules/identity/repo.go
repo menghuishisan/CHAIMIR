@@ -4,6 +4,7 @@ package identity
 import (
 	"chaimir/internal/contracts"
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -26,18 +27,22 @@ type Store interface {
 
 // TxStore 定义单个事务内可调用的 identity 数据访问能力。
 type TxStore interface {
+	// ImportRowTx 在保存点中执行一行导入；首个错误表示已回滚的行失败，第二个错误要求中止整批。
+	ImportRowTx(ctx context.Context, fn func(context.Context, TxStore) error) (rowErr, transactionErr error)
 	AlertRecipients(context.Context, int64) ([]int64, error)
 	ReadAlertMetrics(context.Context, contracts.AlertMetricQuery) (map[string]float64, error)
 	UseTenant(ctx context.Context, tenantID int64) error
 	GetPlatformAdminByUsername(ctx context.Context, username string) (PlatformAdmin, error)
 	GetPlatformAdminByID(ctx context.Context, id int64) (PlatformAdmin, error)
+	LockPlatformAdmin(ctx context.Context, id int64) error
 	BatchGetPlatformAdminNames(ctx context.Context, ids []int64) ([]PlatformAdmin, error)
 	CreatePlatformAdminIfNotExists(ctx context.Context, input CreatePlatformAdminInput) error
 	UpdatePlatformAdminPassword(ctx context.Context, adminID int64, passwordHash string) error
 	GetTenantByCode(ctx context.Context, code string) (Tenant, error)
 	GetTenantByID(ctx context.Context, id int64) (Tenant, error)
+	GetTenantForUpdate(ctx context.Context, id int64) (Tenant, error)
 	ListAllTenants(ctx context.Context) ([]Tenant, error)
-	ListTenants(ctx context.Context, query TenantListQuery) ([]Tenant, int64, error)
+	ListTenants(ctx context.Context, query TenantListQuery) ([]Tenant, error)
 	CountTenantsByStatus(ctx context.Context, keyword string) (pagex.FacetGroup, error)
 	CreateTenant(ctx context.Context, input CreateTenantInput) (Tenant, error)
 	CreateTenantProvisionOutbox(ctx context.Context, item TenantProvisionOutbox) (TenantProvisionOutbox, error)
@@ -55,11 +60,12 @@ type TxStore interface {
 	CreateAccount(ctx context.Context, input CreateAccountInput) (Account, error)
 	GetAccount(ctx context.Context, id int64) (Account, error)
 	LockAccount(ctx context.Context, tenantID, id int64) error
+	LockSchoolAdministrationScope(ctx context.Context, tenantID int64) error
 	BatchGetAccounts(ctx context.Context, ids []int64) ([]Account, error)
 	ListAccountsByPhoneHash(ctx context.Context, phoneHash string) ([]LoginCandidate, error)
 	GetAccountByPhoneHash(ctx context.Context, tenantID int64, phoneHash string) (Account, error)
 	GetAccountByNo(ctx context.Context, no string) (Account, error)
-	ListAccounts(ctx context.Context, query AccountQuery) ([]Account, int64, error)
+	ListAccounts(ctx context.Context, query AccountQuery) ([]Account, error)
 	CountAccountsByStatus(ctx context.Context, query AccountQuery) (pagex.FacetGroup, error)
 	ListClassStudents(ctx context.Context, tenantID, classID int64, page, size int) ([]Account, int64, error)
 	UpdateAccountEditable(ctx context.Context, tenantID, accountID int64, req UpdateAccountRequest) (Account, error)
@@ -104,7 +110,7 @@ type TxStore interface {
 	CreateImportBatch(ctx context.Context, input CreateImportBatchInput) (ImportBatch, error)
 	ListImportBatches(ctx context.Context, tenantID int64) ([]ImportBatch, error)
 	WriteAudit(ctx context.Context, input WriteAuditInput) error
-	QueryAuditLogs(ctx context.Context, query AuditQueryInput) ([]AuditLogRow, int64, error)
+	QueryAuditLogs(ctx context.Context, query AuditQueryInput) ([]AuditLogRow, error)
 	QueryAuditActionFacets(ctx context.Context, query AuditQueryInput) ([]AuditFacetRow, error)
 	PlatformStats(ctx context.Context) (StatsRow, error)
 	TenantStats(ctx context.Context, tenantID int64) (StatsRow, error)
@@ -156,7 +162,7 @@ func isUniqueViolation(err error) bool {
 	return db.IsUniqueViolation(err)
 }
 
-// UseTenant 在当前事务中注入 RLS 租户变量,用于平台审核创建租户后的同事务首管账号写入。
+// UseTenant 在当前事务中注入 RLS 租户变量,用于平台审核或私有化初始化的首管账号及事件写入。
 func (t *txStore) UseTenant(ctx context.Context, tenantID int64) error {
 	if t == nil || t.tx == nil {
 		return fmt.Errorf("identity tx store 未初始化")
@@ -168,6 +174,30 @@ func (t *txStore) UseTenant(ctx context.Context, tenantID int64) error {
 		return fmt.Errorf("注入 app.tenant_id 失败: %w", err)
 	}
 	return nil
+}
+
+// ImportRowTx 隔离单行的部分写入和SQL错误，保存点故障不能当作普通坏行继续。
+func (t *txStore) ImportRowTx(ctx context.Context, fn func(context.Context, TxStore) error) (rowErr, transactionErr error) {
+	if t == nil || t.tx == nil || fn == nil {
+		return nil, fmt.Errorf("导入行事务参数不完整")
+	}
+	row, err := t.tx.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("开启导入行保存点失败: %w", err)
+	}
+	defer func() {
+		if err := row.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+			transactionErr = errors.Join(rowErr, transactionErr, fmt.Errorf("回滚导入行保存点失败: %w", err))
+			rowErr = nil
+		}
+	}()
+	if rowErr = fn(ctx, &txStore{q: sqlcgen.New(row), tx: row}); rowErr != nil {
+		return rowErr, nil
+	}
+	if err := row.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("释放导入行保存点失败: %w", err)
+	}
+	return nil, nil
 }
 
 // PlatformTx 在应用连接中访问平台级表和平台管理员路径。

@@ -5,9 +5,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"strings"
 
+	"chaimir/pkg/jsonvalue"
 	"chaimir/pkg/privacy"
 	"chaimir/pkg/textx"
 )
@@ -101,9 +101,9 @@ func Check(assertion Assertion, actual map[string]any) (Result, error) {
 	passed := false
 	switch assertion.Op {
 	case OperationEq, "":
-		passed = exists && reflect.DeepEqual(actualValue, assertion.Value)
+		passed = exists && jsonvalue.Equal(actualValue, assertion.Value)
 	case OperationNe:
-		passed = exists && !reflect.DeepEqual(actualValue, assertion.Value)
+		passed = exists && !jsonvalue.Equal(actualValue, assertion.Value)
 	case OperationContains:
 		passed = exists && strings.Contains(fmt.Sprint(actualValue), fmt.Sprint(assertion.Value))
 	case OperationExists:

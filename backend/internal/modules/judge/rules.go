@@ -2,6 +2,7 @@
 package judge
 
 import (
+	"encoding/json"
 	"reflect"
 	"regexp"
 	"strings"
@@ -93,7 +94,7 @@ func sanitizeReplayMap(input map[string]any) map[string]any {
 // sanitizeReplayValue 只保留 JSON 基础类型,避免把运行时对象或未校验指针写入回放。
 func sanitizeReplayValue(value any) (any, bool) {
 	switch typed := value.(type) {
-	case nil, bool, float64, int, int32, int64, string:
+	case nil, bool, float64, int, int32, int64, string, json.Number:
 		return typed, true
 	case map[string]any:
 		return sanitizeReplayMap(typed), true
