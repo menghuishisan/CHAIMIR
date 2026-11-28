@@ -14,7 +14,7 @@ import (
 
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/jsonx"
-	"chaimir/internal/platform/response"
+
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
 
@@ -171,13 +171,17 @@ func (b *natsBus) Publish(ctx context.Context, subject string, payload any) erro
 	if !concreteSubject(subject) || subject == b.cfg.deadPrefix || strings.HasPrefix(subject, b.cfg.deadPrefix+".") {
 		return fmt.Errorf("业务事件主题非法")
 	}
-	data, err := marshalEventPayload(ctx, payload)
+	data, eventID, err := marshalEventPayload(ctx, payload)
 	if err != nil {
 		return fmt.Errorf("事件序列化失败: %w", err)
 	}
 	requestCtx, cancel := b.requestContext(ctx)
 	defer cancel()
-	if _, err := b.js.Publish(requestCtx, subject, data, jetstream.WithExpectStream(b.cfg.stream)); err != nil {
+	opts := []jetstream.PublishOpt{jetstream.WithExpectStream(b.cfg.stream)}
+	if eventID != "" {
+		opts = append(opts, jetstream.WithMsgID(subject+":"+eventID))
+	}
+	if _, err := b.js.Publish(requestCtx, subject, data, opts...); err != nil {
 		return fmt.Errorf("持久发布事件 %s 失败: %w", subject, err)
 	}
 	return nil
@@ -361,31 +365,33 @@ type eventMetadata struct {
 }
 
 // marshalEventPayload 校验事件载荷必须携带真实租户与 trace,并把当前请求 trace 写入事件。
-func marshalEventPayload(ctx context.Context, payload any) ([]byte, error) {
+func marshalEventPayload(ctx context.Context, payload any) ([]byte, string, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	obj, err := jsonx.ObjectMapStrict(raw)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if _, ok := obj["tenant_id"]; !ok {
-		return nil, fmt.Errorf("事件载荷缺少 tenant_id")
+		return nil, "", fmt.Errorf("事件载荷缺少 tenant_id")
 	}
-	tenantID, ok := numericTenantID(obj["tenant_id"])
-	if !ok || tenantID < 0 {
-		return nil, fmt.Errorf("事件载荷 tenant_id 非法")
+	_, ok := numericTenantID(obj["tenant_id"])
+	if !ok {
+		return nil, "", fmt.Errorf("事件载荷 tenant_id 非法")
 	}
 	traceID, _ := obj["trace_id"].(string)
-	if traceID == "" {
-		traceID = response.TraceFromContext(ctx)
+	if strings.TrimSpace(traceID) == "" {
+		traceID = logging.TraceFromContext(ctx)
 	}
-	if traceID == "" {
-		return nil, fmt.Errorf("事件载荷缺少 trace_id")
+	if strings.TrimSpace(traceID) == "" {
+		return nil, "", fmt.Errorf("事件载荷缺少 trace_id")
 	}
 	obj["trace_id"] = traceID
-	return json.Marshal(obj)
+	eventID, _ := obj["event_id"].(string)
+	data, err := json.Marshal(obj)
+	return data, eventID, err
 }
 
 // eventContext 从事件载荷中提取真实租户和 trace,供消费失败日志和 handler 继续传递。
@@ -393,12 +399,12 @@ func eventContext(ctx context.Context, data []byte) (context.Context, error) {
 	meta, ok := extractEventMetadata(data)
 	if !ok {
 		traceID := uuid.NewString()
-		ctx = response.WithTrace(ctx, traceID)
-		ctx = logging.WithAttrs(ctx, slog.String("trace_id", traceID), slog.Int64("tenant_id", 0), slog.String("operation_scope", "event_metadata_validation"))
+		ctx = logging.WithTrace(ctx, traceID)
+		ctx = logging.WithAttrs(ctx, slog.Int64("tenant_id", 0), slog.String("operation_scope", "event_metadata_validation"))
 		return ctx, fmt.Errorf("事件载荷缺少真实 tenant_id 或 trace_id")
 	}
-	ctx = response.WithTrace(ctx, meta.TraceID)
-	return logging.WithAttrs(ctx, slog.String("trace_id", meta.TraceID), slog.Int64("tenant_id", meta.TenantID)), nil
+	ctx = logging.WithTrace(ctx, meta.TraceID)
+	return logging.WithAttrs(ctx, slog.Int64("tenant_id", meta.TenantID)), nil
 }
 
 // extractEventMetadata 只从真实存在的事件字段提取排障上下文,不为缺失字段制造默认值。
@@ -410,7 +416,7 @@ func extractEventMetadata(data []byte) (eventMetadata, bool) {
 	tenantValue, hasTenant := obj["tenant_id"]
 	traceID, hasTrace := obj["trace_id"].(string)
 	tenantID, tenantOK := numericTenantID(tenantValue)
-	if !hasTenant || !tenantOK || !hasTrace || traceID == "" {
+	if !hasTenant || !tenantOK || !hasTrace || strings.TrimSpace(traceID) == "" {
 		return eventMetadata{}, false
 	}
 	return eventMetadata{TenantID: tenantID, TraceID: traceID}, true
@@ -418,6 +424,10 @@ func extractEventMetadata(data []byte) (eventMetadata, bool) {
 
 // numericTenantID 处理 JSON 解码后的数字形态,只用于验证事件字段真实存在且可解析。
 func numericTenantID(v any) (int64, bool) {
-	tenantID := jsonx.Int64FromAny(v, -1)
-	return tenantID, tenantID >= 0
+	number, ok := v.(json.Number)
+	if !ok {
+		return 0, false
+	}
+	tenantID, err := number.Int64()
+	return tenantID, err == nil && tenantID >= 0
 }

@@ -14,9 +14,9 @@ import (
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
-	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 )
 
 type contestEnvContext struct {
@@ -689,7 +689,7 @@ func (s *Service) pushLeaderboard(ctx context.Context, tenantID, contestID int64
 		if err != nil {
 			return apperr.ErrContestNotifyFailed.WithCause(err)
 		}
-		evt := contracts.NotifyPushRequestedEvent{TenantID: tenantID, TraceID: response.TraceFromContext(ctx), Topic: leaderboardTopic(tenantID, contestID), Payload: payload}
+		evt := contracts.NotifyPushRequestedEvent{TenantID: tenantID, TraceID: logging.TraceFromContext(ctx), Topic: leaderboardTopic(tenantID, contestID), Payload: payload}
 		if err := s.bus.Publish(ctx, contracts.SubjectNotifyPushRequested, evt); err != nil {
 			return apperr.ErrContestNotifyFailed.WithCause(err)
 		}

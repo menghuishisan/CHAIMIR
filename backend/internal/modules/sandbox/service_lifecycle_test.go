@@ -1,7 +1,7 @@
 package sandbox
 
 import (
-	"chaimir/internal/platform/response"
+	"chaimir/pkg/logging"
 	"context"
 	"encoding/json"
 	"errors"
@@ -398,7 +398,7 @@ func (bus outboxErrorBus) Publish(ctx context.Context, subject string, payload a
 	}
 	item := b.items[len(b.sent)]
 	expected := contracts.SandboxRecycledEvent{TenantID: item.TenantID, TraceID: item.TraceID, SandboxID: item.SandboxID, SourceRef: item.SourceRef, ScopeRef: item.ScopeRef, Reason: item.Reason, RecycledAt: item.RecycledAt}
-	if event != expected || response.TraceFromContext(ctx) != item.TraceID {
+	if event != expected || logging.TraceFromContext(ctx) != item.TraceID {
 		b.t.Fatalf("outbox payload or trace changed: got=%+v want=%+v", event, expected)
 	}
 	b.sent = append(b.sent, item.ID)

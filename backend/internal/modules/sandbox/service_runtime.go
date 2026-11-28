@@ -15,7 +15,7 @@ import (
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/prepull"
-	"chaimir/internal/platform/response"
+
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/jsonvalue"
@@ -389,7 +389,7 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 		detail := runtimeSelftestStoredDetail{Result: "passed", AttemptID: attemptID}
 		if err != nil {
 			status, runtimeStatus = RuntimeSelftestFailed, RuntimeStatusOnboarding
-			detail.Result, detail.Stage, detail.TraceID = "failed", failureStage, response.TraceFromContext(ctx)
+			detail.Result, detail.Stage, detail.TraceID = "failed", failureStage, logging.TraceFromContext(ctx)
 			logging.ErrorContext(ctx, "sandbox runtime selftest failed", apperr.ErrSandboxSelftestFailed.WithCause(err).LogString(), slog.Int64("tenant_id", 0))
 		}
 		rawDetail, encodeErr := jsonBytes(detail)
@@ -408,7 +408,7 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 	}
 	if publishErr := s.bus.Publish(persistCtx, contracts.SubjectSandboxRuntimeSelftestCompleted, contracts.SandboxRuntimeSelftestCompletedEvent{
 		TenantID:       0,
-		TraceID:        response.TraceFromContext(persistCtx),
+		TraceID:        logging.TraceFromContext(persistCtx),
 		RuntimeID:      runtimeID,
 		RuntimeCode:    runtime.Code,
 		SelftestStatus: updated.SelftestStatus,

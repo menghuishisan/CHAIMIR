@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS transfer_task (
     id BIGINT PRIMARY KEY,
-    tenant_id BIGINT NOT NULL,
+    tenant_id BIGINT,
     account_id BIGINT NOT NULL,
     channel VARCHAR(16) NOT NULL,
     subject VARCHAR(128) NOT NULL,
@@ -18,23 +18,23 @@ CREATE TABLE IF NOT EXISTS transfer_task (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     completed_at TIMESTAMPTZ,
     next_attempt_after TIMESTAMPTZ,
-	lease_token VARCHAR(64) NOT NULL DEFAULT '',
-	lease_until TIMESTAMPTZ,
+    lease_token VARCHAR(64) NOT NULL DEFAULT '',
+    lease_until TIMESTAMPTZ,
     CONSTRAINT transfer_task_channel_check CHECK (channel IN ('import', 'export')),
     CONSTRAINT transfer_task_status_check CHECK (status IN ('pending', 'running', 'retrying', 'succeeded', 'failed')),
-    CONSTRAINT transfer_task_tenant_check CHECK (tenant_id >= 0),
+    CONSTRAINT transfer_task_tenant_fk FOREIGN KEY (tenant_id) REFERENCES tenant(id),
     CONSTRAINT transfer_task_attempts_check CHECK (attempt_count >= 0 AND max_attempts > 0),
     CONSTRAINT transfer_task_artifact_size_check CHECK (artifact_size >= 0)
 );
 
 CREATE INDEX IF NOT EXISTS idx_transfer_task_tenant_account_status ON transfer_task(tenant_id, account_id, status);
 CREATE INDEX IF NOT EXISTS idx_transfer_task_tenant_created ON transfer_task(tenant_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_transfer_task_failed_window ON transfer_task(tenant_id, updated_at DESC) WHERE status='failed';
+CREATE INDEX IF NOT EXISTS idx_transfer_task_failed_window ON transfer_task(tenant_id, completed_at DESC) WHERE status = 'failed';
 CREATE INDEX IF NOT EXISTS idx_transfer_task_due ON transfer_task(status, next_attempt_after) WHERE next_attempt_after IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_transfer_task_lease ON transfer_task(status, lease_until) WHERE lease_until IS NOT NULL;
 
 ALTER TABLE transfer_task ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS transfer_task_tenant_rls ON transfer_task;
-CREATE POLICY transfer_task_tenant_rls ON transfer_task USING (
-    tenant_id = COALESCE(NULLIF(current_setting('app.tenant_id', true), '')::BIGINT, 0)
-);
+ALTER TABLE transfer_task FORCE ROW LEVEL SECURITY;
+CREATE POLICY transfer_task_tenant_rls ON transfer_task
+    USING (tenant_id = current_setting('app.tenant_id')::bigint)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::bigint);

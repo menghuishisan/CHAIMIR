@@ -173,10 +173,7 @@ func (s *store) PlatformTx(ctx context.Context, fn func(context.Context, TxStore
 	if s == nil || s.database == nil {
 		return fmt.Errorf("contest store 未初始化")
 	}
-	return s.database.WithAppTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', '0', true)"); err != nil {
-			return fmt.Errorf("设置漏洞源平台事务标识失败: %w", err)
-		}
+	return s.database.WithPlatformTx(ctx, "contest", func(ctx context.Context, tx pgx.Tx) error {
 		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
 	})
 }

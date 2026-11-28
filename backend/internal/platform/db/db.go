@@ -19,7 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// DB 封装应用池和可选特权池。
+// DB 封装应用池和独立特权池。
 type DB struct {
 	app  *pgxpool.Pool
 	priv *pgxpool.Pool
@@ -28,23 +28,21 @@ type DB struct {
 // TxFunc 是在事务内执行的函数签名。
 type TxFunc func(ctx context.Context, tx pgx.Tx) error
 
-// New 创建 app 与可选 priv 连接池,并在启动阶段检查连通性。
+// New 创建独立的应用池和特权池，并在启动阶段检查连通性。
 func New(ctx context.Context, cfg config.PostgresConfig) (*DB, error) {
+	if strings.TrimSpace(cfg.PrivUser) == "" || strings.TrimSpace(cfg.PrivPassword) == "" || strings.TrimSpace(cfg.PrivUser) == strings.TrimSpace(cfg.User) {
+		return nil, fmt.Errorf("必须提供独立的 PostgreSQL 特权角色及密码")
+	}
 	app, err := openPool(ctx, cfg, cfg.User, cfg.Password, cfg.AppMaxConns, cfg.AppMinConns)
 	if err != nil {
 		return nil, fmt.Errorf("创建 app 连接池失败: %w", err)
 	}
-	database := &DB{app: app}
-
-	if strings.TrimSpace(cfg.PrivUser) != "" {
-		priv, err := openPool(ctx, cfg, cfg.PrivUser, cfg.PrivPassword, cfg.PrivMaxConns, cfg.PrivMinConns)
-		if err != nil {
-			app.Close()
-			return nil, fmt.Errorf("创建 priv 连接池失败: %w", err)
-		}
-		database.priv = priv
+	priv, err := openPool(ctx, cfg, cfg.PrivUser, cfg.PrivPassword, cfg.PrivMaxConns, cfg.PrivMinConns)
+	if err != nil {
+		app.Close()
+		return nil, fmt.Errorf("创建 priv 连接池失败: %w", err)
 	}
-	return database, nil
+	return &DB{app: app, priv: priv}, nil
 }
 
 // WaitForPostgres 使用单连接执行有界就绪等待,避免迁移启动阶段占用应用连接预算。
@@ -111,13 +109,11 @@ func (d *DB) WithTenantTxID(ctx context.Context, tenantID int64, fn TxFunc) erro
 	return nil
 }
 
-// WithAppTx 在应用连接池中开启普通事务,用于访问无需 RLS 的平台级表。
-func (d *DB) WithAppTx(ctx context.Context, fn TxFunc) error {
-	if d == nil {
-		return fmt.Errorf("数据库未初始化")
-	}
-	return runTx(ctx, d.app, func(ctx context.Context, tx pgx.Tx) error {
-		return fn(context.WithValue(ctx, transactionContextKey{}, transactionContext{database: d, tx: tx}), tx)
+// WithPlatformTx 以模块角色执行已获授权的平台操作，并允许同事务写入共享审计。
+func (d *DB) WithPlatformTx(ctx context.Context, module string, fn TxFunc) error {
+	return d.withRoleTx(ctx, module, func(ctx context.Context, tx pgx.Tx) error {
+		current := transactionContext{database: d, tx: tx}
+		return fn(context.WithValue(ctx, transactionContextKey{}, current), tx)
 	})
 }
 
@@ -129,11 +125,15 @@ func (d *DB) WithPrivilegedTx(ctx context.Context, fn TxFunc) error {
 	if d.priv == nil {
 		return fmt.Errorf("未配置特权连接(PG_PRIV_USER),无法执行跨租户查询")
 	}
-	return runTx(context.WithValue(ctx, transactionContextKey{}, false), d.priv, fn)
+	return runTx(context.WithValue(ctx, transactionContextKey{}, maintenanceTransaction{}), d.priv, fn)
 }
 
 // WithPrivilegedModuleTx 以数据库维护角色强制模块表边界后执行跨租户事务。
 func (d *DB) WithPrivilegedModuleTx(ctx context.Context, module string, fn TxFunc) error {
+	return d.withRoleTx(ctx, module, fn)
+}
+
+func (d *DB) withRoleTx(ctx context.Context, module string, fn TxFunc) error {
 	if d == nil {
 		return fmt.Errorf("数据库未初始化")
 	}
@@ -144,7 +144,7 @@ func (d *DB) WithPrivilegedModuleTx(ctx context.Context, module string, fn TxFun
 	if d.priv == nil {
 		return fmt.Errorf("未配置特权连接(PG_PRIV_USER),无法执行模块维护任务")
 	}
-	return runTx(context.WithValue(ctx, transactionContextKey{}, false), d.priv, func(ctx context.Context, tx pgx.Tx) error {
+	return runTx(context.WithValue(ctx, transactionContextKey{}, maintenanceTransaction{}), d.priv, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "SET LOCAL ROLE "+pgx.Identifier{policy.Role}.Sanitize()); err != nil {
 			return fmt.Errorf("切换模块维护角色失败: %w", err)
 		}

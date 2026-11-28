@@ -24,10 +24,10 @@ type Store interface {
 	GetTask(ctx context.Context, tenantID, taskID int64) (Task, error)
 	// ListTasks 返回当前页、总数与「按类型」分段计数(套用状态筛选,不套用类型筛选),三者同一事务读取
 	ListTasks(ctx context.Context, query ListTasksQuery) ([]Task, int64, pagex.FacetGroup, error)
-	ClaimTask(ctx context.Context, task Task) (Task, error)
-	RenewTaskLease(ctx context.Context, tenantID, taskID int64, leaseToken string, leaseUntil time.Time) (bool, error)
-	CompleteTask(ctx context.Context, task Task, leaseToken string) (Task, error)
-	FailTask(ctx context.Context, task Task, leaseToken string) (Task, error)
+	ClaimTask(ctx context.Context, tenantID, taskID int64, leaseToken string, leaseDuration time.Duration) (Task, error)
+	RenewTaskLease(ctx context.Context, tenantID, taskID int64, leaseToken string, leaseDuration time.Duration) (bool, error)
+	CompleteTask(ctx context.Context, task Task, artifact Artifact) (Task, error)
+	FailTask(ctx context.Context, task Task, reason string, retryDelay time.Duration) (Task, error)
 }
 
 // ListTasksQuery 描述当前账号查询统一导入导出任务的分页与过滤条件。
@@ -45,8 +45,11 @@ type store struct {
 }
 
 // NewStore 构造统一导入导出任务持久化入口。
-func NewStore(database *db.DB) Store {
-	return &store{db: database}
+func NewStore(database *db.DB) (Store, error) {
+	if database == nil {
+		return nil, fmt.Errorf("transfer store 缺少数据库")
+	}
+	return &store{db: database}, nil
 }
 
 // taskAttemptCounts 验证任务重试计数可写入数据库 int4 列。
@@ -61,9 +64,6 @@ func taskAttemptCounts(task Task) (int32, int32, error) {
 
 // CreateTask 在租户 RLS 边界内创建导入导出任务。
 func (s *store) CreateTask(ctx context.Context, task Task) (Task, error) {
-	if s.db == nil {
-		return Task{}, fmt.Errorf("transfer store 缺少 database")
-	}
 	attemptCount, maxAttempts, err := taskAttemptCounts(task)
 	if err != nil {
 		return Task{}, err
@@ -107,9 +107,6 @@ func (s *store) CreateTask(ctx context.Context, task Task) (Task, error) {
 
 // GetTask 读取租户内单个导入导出任务。
 func (s *store) GetTask(ctx context.Context, tenantID, taskID int64) (Task, error) {
-	if s.db == nil {
-		return Task{}, fmt.Errorf("transfer store 缺少 database")
-	}
 	var out Task
 	err := s.withTaskTx(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		row, err := sqlcgen.New(tx).GetTransferTask(ctx, sqlcgen.GetTransferTaskParams{TenantID: tenantID, ID: taskID})
@@ -128,21 +125,18 @@ func (s *store) GetTask(ctx context.Context, tenantID, taskID int64) (Task, erro
 // ListTasks 查询当前账号名下的导入导出任务,并在同一事务内取回符合条件的总数。
 // 总数与当前页在同一事务读取:分两次请求容易在任务状态推进时给出自相矛盾的分页。
 func (s *store) ListTasks(ctx context.Context, query ListTasksQuery) ([]Task, int64, pagex.FacetGroup, error) {
-	if s.db == nil {
-		return nil, 0, nil, fmt.Errorf("transfer store 缺少 database")
-	}
 	var out []Task
 	var total int64
 	byChannel := pagex.FacetGroup{}
 	err := s.withTaskTx(ctx, query.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		queries := sqlcgen.New(tx)
 		rows, err := queries.ListTransferTasks(ctx, sqlcgen.ListTransferTasksParams{
-			TenantID:  query.TenantID,
-			AccountID: query.AccountID,
-			Column3:   string(query.Channel),
-			Column4:   string(query.Status),
-			Limit:     query.Limit,
-			Offset:    query.Offset,
+			TenantID:   query.TenantID,
+			AccountID:  query.AccountID,
+			Channel:    string(query.Channel),
+			Status:     string(query.Status),
+			PageLimit:  query.Limit,
+			PageOffset: query.Offset,
 		})
 		if err != nil {
 			return err
@@ -150,8 +144,8 @@ func (s *store) ListTasks(ctx context.Context, query ListTasksQuery) ([]Task, in
 		total, err = queries.CountTransferTasks(ctx, sqlcgen.CountTransferTasksParams{
 			TenantID:  query.TenantID,
 			AccountID: query.AccountID,
-			Column3:   string(query.Channel),
-			Column4:   string(query.Status),
+			Channel:   string(query.Channel),
+			Status:    string(query.Status),
 		})
 		if err != nil {
 			return err
@@ -177,18 +171,11 @@ func (s *store) ListTasks(ctx context.Context, query ListTasksQuery) ([]Task, in
 }
 
 // ClaimTask 使用 task ID 和状态条件原子领取模块 worker 的任务。
-func (s *store) ClaimTask(ctx context.Context, task Task) (Task, error) {
-	if s.db == nil {
-		return Task{}, fmt.Errorf("transfer store 缺少 database")
-	}
+func (s *store) ClaimTask(ctx context.Context, tenantID, taskID int64, leaseToken string, leaseDuration time.Duration) (Task, error) {
 	var out Task
-	err := s.withTaskTx(ctx, task.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.withTaskTx(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		row, err := sqlcgen.New(tx).ClaimTransferTask(ctx, sqlcgen.ClaimTransferTaskParams{
-			TenantID:   task.TenantID,
-			ID:         task.TaskID,
-			LeaseToken: task.LeaseToken,
-			UpdatedAt:  timex.RequiredTimestamptz(task.UpdatedAt),
-			LeaseUntil: timex.RequiredTimestamptz(task.LeaseUntil),
+			TenantID: tenantID, ID: taskID, LeaseToken: leaseToken, LeaseMs: leaseDuration.Milliseconds(),
 		})
 		// 未领取也须等事务成功，不能用未命中掩盖提交失败。
 		if db.IsNoRows(err) {
@@ -203,22 +190,19 @@ func (s *store) ClaimTask(ctx context.Context, task Task) (Task, error) {
 	if err != nil {
 		return Task{}, mapTransitionError(err)
 	}
-	if out.TaskID == 0 {
+	if out.Status != StatusRunning {
 		return Task{}, ErrTaskNotClaimable
 	}
 	return out, nil
 }
 
 // RenewTaskLease 仅允许当前持有者延长仍有效的任务租约。
-func (s *store) RenewTaskLease(ctx context.Context, tenantID, taskID int64, leaseToken string, leaseUntil time.Time) (bool, error) {
-	if s.db == nil {
-		return false, fmt.Errorf("transfer store 缺少 database")
-	}
+func (s *store) RenewTaskLease(ctx context.Context, tenantID, taskID int64, leaseToken string, leaseDuration time.Duration) (bool, error) {
 	var renewed bool
 	err := s.withTaskTx(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := sqlcgen.New(tx).RenewTransferTaskLease(ctx, sqlcgen.RenewTransferTaskLeaseParams{
 			TenantID: tenantID, ID: taskID, LeaseToken: leaseToken,
-			LeaseUntil: timex.RequiredTimestamptz(leaseUntil),
+			LeaseMs: leaseDuration.Milliseconds(),
 		})
 		if err != nil {
 			return err
@@ -230,17 +214,13 @@ func (s *store) RenewTaskLease(ctx context.Context, tenantID, taskID int64, leas
 }
 
 // CompleteTask 仅允许持有有效租约的 worker 提交产物。
-func (s *store) CompleteTask(ctx context.Context, task Task, leaseToken string) (Task, error) {
-	if s.db == nil {
-		return Task{}, fmt.Errorf("transfer store 缺少 database")
-	}
+func (s *store) CompleteTask(ctx context.Context, task Task, artifact Artifact) (Task, error) {
 	var out Task
 	err := s.withTaskTx(ctx, task.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		row, err := sqlcgen.New(tx).CompleteTransferTask(ctx, sqlcgen.CompleteTransferTaskParams{
-			TenantID: task.TenantID, ID: task.TaskID, LeaseToken: leaseToken,
-			ArtifactRef: task.Artifact.ObjectRef, ArtifactSize: task.Artifact.Size,
-			ArtifactContentType: task.Artifact.ContentType, ArtifactFileName: task.Artifact.FileName,
-			UpdatedAt: timex.RequiredTimestamptz(task.UpdatedAt), CompletedAt: timex.RequiredTimestamptz(task.CompletedAt),
+			TenantID: task.TenantID, ID: task.TaskID, LeaseToken: task.LeaseToken,
+			ArtifactRef: artifact.ObjectRef, ArtifactSize: artifact.Size,
+			ArtifactContentType: artifact.ContentType, ArtifactFileName: artifact.FileName,
 		})
 		if err != nil {
 			return err
@@ -255,15 +235,12 @@ func (s *store) CompleteTask(ctx context.Context, task Task, leaseToken string) 
 }
 
 // FailTask 仅允许持有有效租约的 worker 进入重试或最终失败状态。
-func (s *store) FailTask(ctx context.Context, task Task, leaseToken string) (Task, error) {
-	if s.db == nil {
-		return Task{}, fmt.Errorf("transfer store 缺少 database")
-	}
+func (s *store) FailTask(ctx context.Context, task Task, reason string, retryDelay time.Duration) (Task, error) {
 	var out Task
 	err := s.withTaskTx(ctx, task.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		row, err := sqlcgen.New(tx).FailTransferTask(ctx, sqlcgen.FailTransferTaskParams{
-			TenantID: task.TenantID, ID: task.TaskID, LeaseToken: leaseToken, LastError: task.LastError,
-			UpdatedAt: timex.RequiredTimestamptz(task.UpdatedAt), CompletedAt: timex.Timestamptz(task.CompletedAt), NextAttemptAfter: timex.Timestamptz(task.NextAttemptAfter),
+			TenantID: task.TenantID, ID: task.TaskID, LeaseToken: task.LeaseToken, LastError: reason,
+			RetryMs: retryDelay.Milliseconds(),
 		})
 		if err != nil {
 			return err
@@ -283,10 +260,10 @@ func (s *store) withTaskTx(ctx context.Context, tenantID int64, fn func(context.
 		return apperr.ErrTransferTaskInvalid
 	}
 	if tenantID == 0 {
-		if joined, err := s.db.WithAppTxIfPresent(ctx, fn); joined || err != nil {
+		if joined, err := s.db.WithPlatformTxIfPresent(ctx, fn); joined || err != nil {
 			return err
 		}
-		return s.db.WithAppTx(ctx, fn)
+		return s.db.WithPlatformTx(ctx, "transfer", fn)
 	}
 	if joined, err := s.db.WithTenantTxIfPresent(ctx, tenantID, fn); joined || err != nil {
 		return err
@@ -321,7 +298,7 @@ func (s *store) CountFailures(ctx context.Context, q contracts.AlertMetricQuery)
 	var n int64
 	err := s.withTaskTx(ctx, q.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		n, err = sqlcgen.New(tx).CountFailedTransfers(ctx, sqlcgen.CountFailedTransfersParams{TenantID: q.TenantID, UpdatedAt: timex.RequiredTimestamptz(q.From), UpdatedAt_2: timex.RequiredTimestamptz(q.To)})
+		n, err = sqlcgen.New(tx).CountFailedTransfers(ctx, sqlcgen.CountFailedTransfersParams{TenantID: q.TenantID, WindowStart: timex.RequiredTimestamptz(q.From), WindowEnd: timex.RequiredTimestamptz(q.To)})
 		return err
 	})
 	return n, err

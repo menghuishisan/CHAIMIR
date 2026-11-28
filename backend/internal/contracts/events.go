@@ -224,6 +224,7 @@ type SimSessionChangedEvent struct {
 
 // TenantProvisionedEvent 是新租户创建完成后发布的跨模块初始化事件。
 type TenantProvisionedEvent struct {
+	EventID       string    `json:"event_id"`
 	TenantID      int64     `json:"tenant_id"`
 	TraceID       string    `json:"trace_id"`
 	DeployMode    int16     `json:"deploy_mode"`

@@ -5,9 +5,10 @@ import "strings"
 
 // MaintenancePolicy 描述一个模块维护角色及其唯一允许访问的表集合。
 type MaintenancePolicy struct {
-	Module string
-	Role   string
-	Tables []string
+	Module      string
+	Role        string
+	Tables      []string
+	WritesAudit bool
 }
 
 var maintenancePolicies = []MaintenancePolicy{
@@ -16,13 +17,13 @@ var maintenancePolicies = []MaintenancePolicy{
 		"department", "major", "class", "account", "account_role", "account_profile", "auth_session",
 		"sms_code", "activation_code", "sso_config", "import_preview", "import_batch", "audit_log",
 	}},
-	{Module: "sandbox", Role: "chaimir_maintenance_sandbox", Tables: []string{
-		"runtime", "runtime_image", "tool", "sandbox", "sandbox_event", "sandbox_recycle_outbox", "tenant_quota",
+	{Module: "sandbox", Role: "chaimir_maintenance_sandbox", WritesAudit: true, Tables: []string{
+		"runtime", "runtime_image", "tool", "sandbox_composition", "sandbox_composition_prepull", "sandbox", "sandbox_event", "sandbox_recycle_outbox", "tenant_quota",
 	}},
-	{Module: "judge", Role: "chaimir_maintenance_judge", Tables: []string{
+	{Module: "judge", Role: "chaimir_maintenance_judge", WritesAudit: true, Tables: []string{
 		"judger", "judge_task", "judge_result", "judge_event_outbox", "submission_fingerprint",
 	}},
-	{Module: "sim", Role: "chaimir_maintenance_sim", Tables: []string{}},
+	{Module: "sim", Role: "chaimir_maintenance_sim", WritesAudit: true, Tables: []string{"sim_package", "sim_package_review"}},
 	{Module: "teaching", Role: "chaimir_maintenance_teaching", Tables: []string{
 		"course", "chapter", "lesson", "course_member", "assignment", "assignment_item", "submission",
 		"submission_judge_outbox", "submission_draft", "lesson_progress", "discussion_post", "announcement",
@@ -32,20 +33,21 @@ var maintenancePolicies = []MaintenancePolicy{
 		"experiment", "experiment_group", "group_member", "experiment_instance", "checkpoint_result",
 		"experiment_report", "experiment_event_outbox",
 	}},
-	{Module: "contest", Role: "chaimir_maintenance_contest", Tables: []string{
+	{Module: "contest", Role: "chaimir_maintenance_contest", WritesAudit: true, Tables: []string{
 		"contest", "contest_problem", "team", "team_member", "solve_submission", "battle_entry", "battle_match",
 		"contest_access_grant", "ladder_rank", "contest_ladder_snapshot", "cheat_record", "vuln_source", "vuln_problem",
 	}},
-	{Module: "notify", Role: "chaimir_maintenance_notify", Tables: []string{
+	{Module: "notify", Role: "chaimir_maintenance_notify", WritesAudit: true, Tables: []string{
 		"notification", "notification_template", "notification_preference", "system_announcement", "announcement_read",
 	}},
 	{Module: "grade", Role: "chaimir_maintenance_grade", Tables: []string{
 		"grade_level_config", "semester", "grade_review", "grade_lock_outbox", "student_semester_grade",
 		"grade_appeal", "grade_update_cursor", "academic_warning", "transcript_record",
 	}},
-	{Module: "admin", Role: "chaimir_maintenance_admin", Tables: []string{
-		"audit_export_request", "alert_rule", "alert_evaluation", "alert_event",
+	{Module: "admin", Role: "chaimir_maintenance_admin", WritesAudit: true, Tables: []string{
+		"audit_export_request", "alert_rule", "alert_evaluation", "alert_event", "platform_statistics", "backup_record", "transfer_task",
 	}},
+	{Module: "transfer", Role: "chaimir_maintenance_transfer", Tables: []string{"transfer_task"}},
 }
 
 // MaintenancePolicies 返回模块维护策略副本,供部署期授权与测试共同校验。

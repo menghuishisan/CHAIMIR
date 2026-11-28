@@ -13,10 +13,10 @@ import (
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
-	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
+	"chaimir/pkg/logging"
 	"chaimir/pkg/question"
 )
 
@@ -657,7 +657,7 @@ func safeStoredError(ctx context.Context, err error) string {
 	if ae == nil {
 		return ""
 	}
-	return fmt.Sprintf("code=%s message=%s trace_id=%s", ae.UserCode(), ae.UserMessage(), response.TraceFromContext(ctx))
+	return fmt.Sprintf("code=%s message=%s trace_id=%s", ae.UserCode(), ae.UserMessage(), logging.TraceFromContext(ctx))
 }
 
 // HandleJudgeCompleted 处理 M3 判题完成事件。

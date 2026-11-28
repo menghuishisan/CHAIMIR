@@ -15,8 +15,8 @@ import (
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/eventbus"
-	"chaimir/internal/platform/response"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 	"chaimir/pkg/snowflake"
 
 	"github.com/jackc/pgx/v5"
@@ -25,6 +25,7 @@ import (
 
 // simIdentityStub 为共享账号校验提供最小身份契约桩。
 type simIdentityStub struct {
+	contracts.IdentityService
 	accounts []contracts.AccountInfo
 	err      error
 }
@@ -38,12 +39,12 @@ func (s simIdentityStub) EnabledTenantModules(context.Context, int64) ([]string,
 }
 
 // GetAccount 不参与本组测试。
-func (s simIdentityStub) GetAccount(context.Context, int64) (contracts.AccountInfo, error) {
+func (s simIdentityStub) GetAccount(context.Context, int64, int64) (contracts.AccountInfo, error) {
 	return contracts.AccountInfo{}, nil
 }
 
 // BatchGetAccounts 返回测试指定的账号摘要或错误。
-func (s simIdentityStub) BatchGetAccounts(context.Context, []int64) ([]contracts.AccountInfo, error) {
+func (s simIdentityStub) BatchGetAccounts(context.Context, int64, []int64) ([]contracts.AccountInfo, error) {
 	return s.accounts, s.err
 }
 
@@ -93,7 +94,7 @@ func TestConcurrentIsolatedSessionCreationHonorsTenantQuota(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx = response.WithTrace(ctx, "sim-quota-test")
+	ctx = logging.WithTrace(ctx, "sim-quota-test")
 	start := make(chan struct{})
 	results := make(chan error, 2)
 	for i := 0; i < 2; i++ {
@@ -248,7 +249,7 @@ func TestArchivedIsolatedSessionCleanupCanResumeAfterReleaseFailure(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx = response.WithTrace(ctx, "sim-recycle-test")
+	ctx = logging.WithTrace(ctx, "sim-recycle-test")
 	req := contracts.SimRecycleRequest{TenantID: 7, SourceRef: "experiment:2026:instance:55", ScopeRef: "experiment:2026:instance:55:run:1"}
 	if err := service.RecycleByScopeRef(ctx, req); err == nil {
 		t.Fatal("first release should preserve its failure")
@@ -272,7 +273,7 @@ func TestArchivedSingleSessionCleanupCanResumeAfterReleaseFailure(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx = response.WithTrace(ctx, "sim-destroy-test")
+	ctx = logging.WithTrace(ctx, "sim-destroy-test")
 	req := contracts.SimDestroySessionRequest{TenantID: 7, SessionID: 91, SourceRef: "experiment:2026:instance:55"}
 	if err := service.DestroySession(ctx, req); err == nil {
 		t.Fatal("first release should fail")

@@ -7,7 +7,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
-	"chaimir/internal/platform/response"
+
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
 )
@@ -39,7 +39,7 @@ func (s *Service) publishInstanceChanged(ctx context.Context, tenantID, instance
 	if s.bus == nil {
 		return
 	}
-	event := contracts.NotifyPushRequestedEvent{TenantID: tenantID, TraceID: response.TraceFromContext(ctx), Topic: instanceProgressTopic(tenantID, instanceID), Payload: json.RawMessage(`{"type":"instance.changed"}`)}
+	event := contracts.NotifyPushRequestedEvent{TenantID: tenantID, TraceID: logging.TraceFromContext(ctx), Topic: instanceProgressTopic(tenantID, instanceID), Payload: json.RawMessage(`{"type":"instance.changed"}`)}
 	if err := s.bus.Publish(ctx, contracts.SubjectNotifyPushRequested, event); err != nil {
 		logging.ErrorContext(ctx, "experiment progress publish failed", err.Error(), slog.Int64("tenant_id", tenantID), slog.Int64("instance_id", instanceID))
 	}

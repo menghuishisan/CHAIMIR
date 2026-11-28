@@ -10,7 +10,7 @@ import (
 
 type TransferTask struct {
 	ID                  int64              `json:"id"`
-	TenantID            int64              `json:"tenant_id"`
+	TenantID            pgtype.Int8        `json:"tenant_id"`
 	AccountID           int64              `json:"account_id"`
 	Channel             string             `json:"channel"`
 	Subject             string             `json:"subject"`

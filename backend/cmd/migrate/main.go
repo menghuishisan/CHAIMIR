@@ -16,10 +16,8 @@ import (
 	"chaimir/db/migrations"
 	"chaimir/internal/modules/identity"
 	"chaimir/internal/modules/sim"
-	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
-	"chaimir/internal/platform/redis"
 	"chaimir/internal/platform/storage"
 	"chaimir/pkg/logging"
 	"chaimir/pkg/snowflake"
@@ -52,6 +50,9 @@ BEGIN
   LOOP
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I TO %I', table_name, maintenance_role);
   END LOOP;
+  IF current_setting('chaimir.migration.maintenance_audit')::boolean THEN
+    EXECUTE format('GRANT INSERT ON TABLE audit_log TO %I', maintenance_role);
+  END IF;
   EXECUTE format('GRANT %I TO %I', maintenance_role, session_user);
 END $$;`
 
@@ -76,7 +77,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	logging.Setup(cfg.Server.LogLevel, cfg.Server.LogFormat)
+	logging.Setup(cfg.Server.Logging)
 	ctx := context.Background()
 	switch os.Args[1] {
 	case "migrate":
@@ -113,11 +114,11 @@ func grantMaintenanceRoles(ctx context.Context, pg config.PostgresConfig) (resul
 	if pg.GrantTimeoutSeconds <= 0 {
 		return fmt.Errorf("PG_GRANT_TIMEOUT_SECONDS 必须大于 0")
 	}
-	privilegedRole := strings.TrimSpace(privilegedUser(pg))
+	privilegedRole := strings.TrimSpace(pg.PrivUser)
 	if privilegedRole == "" {
 		return fmt.Errorf("模块维护角色授权缺少 PG_PRIV_USER")
 	}
-	sqlDB, err := sql.Open("pgx", postgresURL(pg, privilegedRole, privilegedPassword(pg)))
+	sqlDB, err := sql.Open("pgx", postgresURL(pg, privilegedRole, pg.PrivPassword))
 	if err != nil {
 		return fmt.Errorf("打开模块维护角色授权连接失败: %w", err)
 	}
@@ -140,7 +141,8 @@ func grantMaintenanceRoles(ctx context.Context, pg config.PostgresConfig) (resul
 		}
 		if _, err := tx.ExecContext(grantCtx, `SELECT
   set_config('chaimir.migration.maintenance_role', $1, true),
-  set_config('chaimir.migration.maintenance_tables', $2, true)`, policy.Role, string(tablesJSON)); err != nil {
+  set_config('chaimir.migration.maintenance_tables', $2, true),
+  set_config('chaimir.migration.maintenance_audit', $3::boolean::text, true)`, policy.Role, string(tablesJSON), policy.WritesAudit); err != nil {
 			return fmt.Errorf("设置模块维护角色 %s 授权参数失败: %w", policy.Module, err)
 		}
 		if _, err := tx.ExecContext(grantCtx, grantMaintenanceRoleSQL); err != nil {
@@ -160,23 +162,16 @@ func closeSQLDatabase(sqlDB *sql.DB, message string, resultErr *error) {
 	}
 }
 
-// closeRedisClient 关闭部署期 Redis 客户端，并把关闭错误合并到原始返回错误中。
-func closeRedisClient(client *redis.Client, message string, resultErr *error) {
-	if err := client.Close(); err != nil {
-		*resultErr = errors.Join(*resultErr, fmt.Errorf("%s: %w", message, err))
-	}
-}
-
 // runMigrations 等待 PostgreSQL 就绪后使用 golang-migrate 执行嵌入的版本化 SQL。
 func runMigrations(ctx context.Context, pg config.PostgresConfig) (resultErr error) {
-	if err := db.WaitForPostgres(ctx, pg, privilegedUser(pg), privilegedPassword(pg)); err != nil {
+	if err := db.WaitForPostgres(ctx, pg, pg.PrivUser, pg.PrivPassword); err != nil {
 		return fmt.Errorf("等待迁移数据库就绪失败: %w", err)
 	}
 	source, err := iofs.New(migrations.FS, ".")
 	if err != nil {
 		return fmt.Errorf("创建迁移源失败: %w", err)
 	}
-	sqlDB, err := sql.Open("pgx", postgresURL(pg, privilegedUser(pg), privilegedPassword(pg)))
+	sqlDB, err := sql.Open("pgx", postgresURL(pg, pg.PrivUser, pg.PrivPassword))
 	if err != nil {
 		return fmt.Errorf("打开迁移数据库连接失败: %w", err)
 	}
@@ -203,31 +198,57 @@ func grantApplicationRole(ctx context.Context, pg config.PostgresConfig) (result
 	if pg.GrantTimeoutSeconds <= 0 {
 		return fmt.Errorf("PG_GRANT_TIMEOUT_SECONDS 必须大于 0")
 	}
-	sqlDB, err := sql.Open("pgx", postgresURL(pg, privilegedUser(pg), privilegedPassword(pg)))
+	sqlDB, err := sql.Open("pgx", postgresURL(pg, pg.PrivUser, pg.PrivPassword))
 	if err != nil {
 		return fmt.Errorf("打开授权数据库连接失败: %w", err)
 	}
 	defer closeSQLDatabase(sqlDB, "关闭授权数据库连接失败", &resultErr)
 	grantCtx, cancel := context.WithTimeout(ctx, time.Duration(pg.GrantTimeoutSeconds)*time.Second)
 	defer cancel()
-	if _, err := sqlDB.ExecContext(grantCtx, "SELECT 1"); err != nil {
-		return fmt.Errorf("授权数据库连通性检查失败: %w", err)
+	tx, err := sqlDB.BeginTx(grantCtx, nil)
+	if err != nil {
+		return fmt.Errorf("开始应用角色授权事务失败: %w", err)
 	}
-	if _, err := sqlDB.ExecContext(grantCtx, `DO $$
+	defer func() {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+			resultErr = errors.Join(resultErr, rollbackErr)
+		}
+	}()
+	if _, err := tx.ExecContext(grantCtx, `DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'chaimir_app') THEN
-    CREATE ROLE chaimir_app LOGIN;
+    CREATE ROLE chaimir_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
   ELSE
-    ALTER ROLE chaimir_app LOGIN;
+    ALTER ROLE chaimir_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
   END IF;
 END $$;`); err != nil {
 		return fmt.Errorf("创建应用角色失败: %w", err)
 	}
-	passwordLiteral, err := quoteRolePasswordLiteral(grantCtx, sqlDB, pg.Password)
+	if _, err := tx.ExecContext(grantCtx, `DO $$
+DECLARE app_oid oid := 'chaimir_app'::regrole;
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_auth_members WHERE member = app_oid) THEN
+    RAISE EXCEPTION 'chaimir_app must not be a member of another role';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_shdepend
+    WHERE refclassid = 'pg_authid'::regclass AND refobjid = app_oid AND deptype = 'o'
+      AND (dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+           OR (classid = 'pg_database'::regclass AND objid = (SELECT oid FROM pg_database WHERE datname = current_database())))
+  ) THEN
+    RAISE EXCEPTION 'chaimir_app must not own database objects';
+  END IF;
+  IF has_schema_privilege('chaimir_app', 'public', 'CREATE') THEN
+    RAISE EXCEPTION 'chaimir_app must not have CREATE on schema public';
+  END IF;
+END $$;`); err != nil {
+		return fmt.Errorf("应用数据库角色不满足隔离要求: %w", err)
+	}
+	passwordLiteral, err := quoteRolePasswordLiteral(grantCtx, tx, pg.Password)
 	if err != nil {
 		return err
 	}
-	if _, err := sqlDB.ExecContext(grantCtx, "ALTER ROLE chaimir_app WITH PASSWORD "+passwordLiteral); err != nil {
+	if _, err := tx.ExecContext(grantCtx, "ALTER ROLE chaimir_app WITH PASSWORD "+passwordLiteral); err != nil {
 		return fmt.Errorf("更新应用角色密码失败: %w", err)
 	}
 	statements := []string{
@@ -235,21 +256,23 @@ END $$;`); err != nil {
 		"GRANT USAGE ON SCHEMA public TO chaimir_app",
 		"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO chaimir_app",
 		"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO chaimir_app",
-		"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO chaimir_app",
+		"ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM chaimir_app",
+		"REVOKE ALL ON TABLE platform_admin, platform_auth_session, tenant_application, tenant_provision_outbox, schema_migrations FROM chaimir_app, PUBLIC",
+		"REVOKE INSERT, DELETE ON tenant FROM chaimir_app, PUBLIC",
 		"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO chaimir_app",
 	}
 	for _, stmt := range statements {
-		if _, err := sqlDB.ExecContext(grantCtx, stmt); err != nil {
+		if _, err := tx.ExecContext(grantCtx, stmt); err != nil {
 			return fmt.Errorf("执行授权语句失败: %w", err)
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // quoteRolePasswordLiteral 使用 PostgreSQL 自身的字面量转义规则生成角色密码片段。
-func quoteRolePasswordLiteral(ctx context.Context, db *sql.DB, password string) (string, error) {
+func quoteRolePasswordLiteral(ctx context.Context, tx *sql.Tx, password string) (string, error) {
 	var literal string
-	if err := db.QueryRowContext(ctx, "SELECT quote_literal($1)", password).Scan(&literal); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT quote_literal($1)", password).Scan(&literal); err != nil {
 		return "", fmt.Errorf("转义应用角色密码失败: %w", err)
 	}
 	if strings.TrimSpace(literal) == "" {
@@ -266,11 +289,6 @@ func seed(ctx context.Context, cfg *config.Config) (resultErr error) {
 		return err
 	}
 	defer database.Close()
-	redisClient, err := redis.New(ctx, cfg.Redis)
-	if err != nil {
-		return err
-	}
-	defer closeRedisClient(redisClient, "关闭初始化 Redis 客户端失败", &resultErr)
 	objectStore, err := storage.New(ctx, cfg.ObjectStorage)
 	if err != nil {
 		return err
@@ -288,36 +306,11 @@ func seed(ctx context.Context, cfg *config.Config) (resultErr error) {
 	if err := seedPlatformCatalog(ctx, database); err != nil {
 		return err
 	}
-	authManager := auth.NewManager(cfg.Auth)
-	smsSender, err := identity.NewSMSSender(cfg.SMS)
+	store, err := identity.NewStore(database)
 	if err != nil {
 		return err
 	}
-	identityFiles, err := storage.NewServiceFromConfig(cfg.Auth, cfg.ObjectStorage, cfg.Upload)
-	if err != nil {
-		return err
-	}
-	identitySvc, err := identity.NewService(identity.ServiceDeps{
-		Store:          identity.NewStore(database),
-		Auth:           authManager,
-		Redis:          redisClient,
-		IDs:            ids,
-		AuthConfig:     cfg.Auth,
-		IdentityConfig: cfg.Identity,
-		UploadConfig:   cfg.Upload,
-		Objects:        objectStore,
-		FileService:    identityFiles,
-		DeployConfig:   cfg.Deploy,
-		SMSSender:      smsSender,
-	})
-	if err != nil {
-		return err
-	}
-	if cfg.Deploy.PlatformEnabled {
-		return identitySvc.BootstrapPlatformAdmin(ctx, cfg.Bootstrap)
-	}
-	_, err = identitySvc.BootstrapSchoolTenant(ctx, cfg.Bootstrap)
-	return err
+	return identity.Bootstrap(ctx, store, ids, cfg.Deploy, cfg.Auth, cfg.Bootstrap)
 }
 
 // seedBuiltinSimPackages 调用 M4 模块入口同步内置仿真包标准库。
@@ -332,22 +325,6 @@ func seedBuiltinSimPackages(ctx context.Context, database *db.DB, ids snowflake.
 		slog.Int("upserted", result.Upserted),
 		slog.Int("archived", len(result.Archived)))
 	return nil
-}
-
-// privilegedUser 返回迁移/授权使用的数据库特权用户。
-func privilegedUser(pg config.PostgresConfig) string {
-	if strings.TrimSpace(pg.PrivUser) != "" {
-		return pg.PrivUser
-	}
-	return pg.User
-}
-
-// privilegedPassword 返回迁移/授权使用的数据库特权用户密码。
-func privilegedPassword(pg config.PostgresConfig) string {
-	if strings.TrimSpace(pg.PrivUser) != "" {
-		return pg.PrivPassword
-	}
-	return pg.Password
 }
 
 // postgresURL 通过结构化字段构造 DSN,避免凭据特殊字符破坏连接串。

@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"chaimir/internal/platform/jsonx"
-	"chaimir/internal/platform/response"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 )
 
 // Entry 表示一条要写入 M1 audit_log 的审计记录。
@@ -58,6 +58,6 @@ func BuildEntry(ctx context.Context, tenantID, actorID int64, actorRole int16, a
 		TargetID:   targetID,
 		Detail:     string(detailJSON),
 		IP:         ip,
-		TraceID:    response.TraceFromContext(ctx),
+		TraceID:    logging.TraceFromContext(ctx),
 	}, nil
 }

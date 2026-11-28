@@ -168,32 +168,41 @@ func leaseClient(t *testing.T, server *miniredis.Miniredis) *Client {
 	return client
 }
 
-func TestRateRefundDoesNotRecreateExpiredCounter(t *testing.T) {
+func TestQuotaRefundOnlyRemovesItsOwnReservation(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := leaseClient(t, server)
 	ctx := context.Background()
-	if count, err := client.IncrWithTTL(ctx, "daily", time.Second); err != nil || count != 1 {
-		t.Fatalf("reserve=%d error=%v", count, err)
+	reserve := func(token string, want bool) {
+		t.Helper()
+		if ok, err := client.ReserveQuota(ctx, "daily", token, 2, time.Second); err != nil || ok != want {
+			t.Fatalf("reserve %q = %t, %v; want %t", token, ok, err, want)
+		}
 	}
+	refund := func(token string) {
+		t.Helper()
+		if err := client.RefundQuota(ctx, "daily", token); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reserve("first", true)
+	reserve("first", true)
+	reserve("second", true)
+	reserve("rejected", false)
+	refund("rejected")
+	reserve("third", false)
+	refund("first")
+	refund("first")
+	reserve("third", true)
+	reserve("fourth", false)
 	server.FastForward(2 * time.Second)
-	if count, err := client.Decr(ctx, "daily"); err != nil || count != 0 {
-		t.Fatalf("refund=%d error=%v", count, err)
-	}
+	refund("second")
 	if server.Exists("daily") {
-		t.Fatal("refund recreated an expired counter")
+		t.Fatal("refund recreated an expired quota window")
 	}
-	if count, err := client.IncrWithTTL(ctx, "daily", time.Second); err != nil || count != 1 {
-		t.Fatalf("next reservation=%d error=%v", count, err)
-	}
-	if _, err := client.Decr(ctx, "daily"); err != nil {
-		t.Fatal(err)
-	}
-	if count, err := client.Decr(ctx, "daily"); err != nil || count != 0 {
-		t.Fatalf("double refund=%d error=%v", count, err)
-	}
-	if server.TTL("daily") <= 0 {
-		t.Fatal("refund removed active counter expiry")
-	}
+	reserve("fourth", true)
+	reserve("fifth", true)
+	refund("third")
+	reserve("sixth", false)
 }
 
 func TestLeaseExcludesOtherClientsAndReleasesAfterWork(t *testing.T) {

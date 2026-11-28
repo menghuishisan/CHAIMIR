@@ -237,7 +237,7 @@ func (s *Service) JoinCourseByInvite(ctx context.Context, req JoinCourseRequest)
 	if code == "" {
 		return MemberDTO{}, apperr.ErrTeachingInviteInvalid
 	}
-	profile, err := s.identity.GetAccount(ctx, id.AccountID)
+	profile, err := s.identity.GetAccount(ctx, id.TenantID, id.AccountID)
 	if err != nil {
 		return MemberDTO{}, apperr.ErrTeachingMemberInvalid.WithCause(err)
 	}
@@ -340,7 +340,7 @@ func (s *Service) ListCourseMembers(ctx context.Context, courseID int64, page, s
 	}); err != nil {
 		return nil, 0, 0, 0, mapCourseError(err)
 	}
-	profiles, err := s.memberProfiles(ctx, members)
+	profiles, err := s.memberProfiles(ctx, id.TenantID, members)
 	if err != nil {
 		return nil, 0, 0, 0, err
 	}
@@ -348,7 +348,7 @@ func (s *Service) ListCourseMembers(ctx context.Context, courseID int64, page, s
 }
 
 // memberProfiles 按当前页成员一次批量解析账号档案,避免逐条查询形成 N+1。
-func (s *Service) memberProfiles(ctx context.Context, members []CourseMember) (map[int64]contracts.AccountInfo, error) {
+func (s *Service) memberProfiles(ctx context.Context, tenantID int64, members []CourseMember) (map[int64]contracts.AccountInfo, error) {
 	if len(members) == 0 {
 		return map[int64]contracts.AccountInfo{}, nil
 	}
@@ -356,7 +356,7 @@ func (s *Service) memberProfiles(ctx context.Context, members []CourseMember) (m
 	for _, member := range members {
 		ids = append(ids, member.StudentID)
 	}
-	accounts, err := s.identity.BatchGetAccounts(ctx, ids)
+	accounts, err := s.identity.BatchGetAccounts(ctx, tenantID, ids)
 	if err != nil {
 		return nil, apperr.ErrTeachingMemberInvalid.WithCause(err)
 	}
@@ -428,7 +428,7 @@ func (s *Service) GetCourseOutline(ctx context.Context, courseID int64) (Outline
 		return OutlineDTO{}, mapCourseError(err)
 	}
 	// 课程详情页头要写授课教师;教师档案在 identity 模块,事务外经契约读取
-	teachers, err := s.courseTeachers(ctx, []Course{course})
+	teachers, err := s.courseTeachers(ctx, id.TenantID, []Course{course})
 	if err != nil {
 		return OutlineDTO{}, err
 	}

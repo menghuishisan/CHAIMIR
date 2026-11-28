@@ -148,7 +148,7 @@ func platformAdminFromRow(row sqlcgen.PlatformAdmin) PlatformAdmin {
 
 // departmentFromRow 转换院系 sqlc 行为领域模型。
 func departmentFromRow(row sqlcgen.Department) Department {
-	return Department{ID: row.ID, TenantID: row.TenantID, Name: row.Name, Code: pgtypex.TextValue(row.Code)}
+	return Department{ID: row.ID, TenantID: row.TenantID, Name: row.Name, Code: row.Code}
 }
 
 // majorFromRow 转换专业 sqlc 行为领域模型。

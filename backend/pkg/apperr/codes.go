@@ -32,8 +32,6 @@ const (
 	CodeQueryParamInvalid = "11012"
 	// CodeAuditWriteFailed 表示统一审计写入失败。
 	CodeAuditWriteFailed = "11013"
-	// CodeUnhandledFailure 表示未分类失败折叠码。
-	CodeUnhandledFailure = "11501"
 	// CodePanicRecovered 表示 panic 恢复后的统一错误码。
 	CodePanicRecovered = "11502"
 	// CodeHTTPRouterMissing 表示 HTTP 路由装配缺少 router。
@@ -100,8 +98,6 @@ var (
 	ErrQueryParamInvalid = New(CodeQueryParamInvalid, "查询条件格式不正确,请检查后重试")
 	// ErrAuditWriteFailed 表示统一审计写入失败。
 	ErrAuditWriteFailed = New(CodeAuditWriteFailed, "操作记录暂时无法保存,请稍后重试")
-	// ErrUnhandledFailure 表示未分类失败折叠码。
-	ErrUnhandledFailure = New(CodeUnhandledFailure, "服务暂时无法处理请求,请稍后重试")
 	// ErrPanicRecovered 表示 panic 恢复后的统一错误码。
 	ErrPanicRecovered = New(CodePanicRecovered, "服务暂时无法处理请求,请稍后重试")
 	// ErrHTTPRouterMissing 表示 HTTP 路由装配缺少 router。

@@ -123,4 +123,5 @@ CREATE POLICY platform_statistics_tenant_rls ON platform_statistics
         OR (scope = 2 AND tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT)
     );
 CREATE POLICY audit_export_request_tenant_rls ON audit_export_request
-    USING (tenant_id = COALESCE(NULLIF(current_setting('app.tenant_id', true), '')::BIGINT, 0));
+    USING (tenant_id = current_setting('app.tenant_id')::bigint)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::bigint);

@@ -74,7 +74,7 @@ type transferService interface {
 	ClaimTask(context.Context, int64, int64) (transfer.Task, error)
 	RunWithLease(context.Context, transfer.Task, func(context.Context) error) error
 	CompleteTask(context.Context, transfer.Task, transfer.CompleteTaskRequest) (transfer.Task, error)
-	FailTask(context.Context, transfer.Task, error, time.Time) (transfer.Task, error)
+	FailTask(context.Context, transfer.Task, error) (transfer.Task, error)
 }
 
 // ServiceDeps 是 teaching service 的装配依赖集合。

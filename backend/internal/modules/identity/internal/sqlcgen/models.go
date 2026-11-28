@@ -78,7 +78,7 @@ type Department struct {
 	ID        int64              `json:"id"`
 	TenantID  int64              `json:"tenant_id"`
 	Name      string             `json:"name"`
-	Code      pgtype.Text        `json:"code"`
+	Code      string             `json:"code"`
 	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
 }
 
@@ -207,4 +207,5 @@ type TenantProvisionOutbox struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	LeaseToken    string             `json:"lease_token"`
 	LeaseUntil    pgtype.Timestamptz `json:"lease_until"`
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
 }

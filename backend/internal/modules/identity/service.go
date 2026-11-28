@@ -110,11 +110,16 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.FileService == nil {
 		return nil, fmt.Errorf("identity service 缺少统一文件服务")
 	}
-	key, err := base64.StdEncoding.DecodeString(deps.AuthConfig.EncryptionKey)
-	if err != nil {
-		return nil, fmt.Errorf("解析 APP_ENCRYPTION_KEY 失败: %w", err)
+	if deps.Redis == nil || deps.EventBus == nil {
+		return nil, fmt.Errorf("identity service 缺少 Redis 或事件总线")
 	}
-	cipher, err := crypto.NewCipher(key)
+	if deps.UploadConfig.VirusScanRequired && deps.Scanner == nil {
+		return nil, fmt.Errorf("identity service 缺少必需的扫描器")
+	}
+	if deps.SMSSender == nil {
+		return nil, fmt.Errorf("identity service 缺少短信发送器")
+	}
+	cipher, err := newPhoneCipher(deps.AuthConfig.EncryptionKey)
 	if err != nil {
 		return nil, err
 	}
@@ -135,12 +140,17 @@ func NewService(deps ServiceDeps) (*Service, error) {
 		sms:       deps.SMSSender,
 		bus:       deps.EventBus,
 	}
-	if s.sms == nil {
-		return nil, fmt.Errorf("identity service 缺少短信发送器")
-	}
 	s.auditWriter = &AuditWriter{store: deps.Store, ids: deps.IDs}
 	deps.Auth.SetSessionValidator(s)
 	return s, nil
+}
+
+func newPhoneCipher(encodedKey string) (*crypto.Cipher, error) {
+	key, err := base64.StdEncoding.DecodeString(encodedKey)
+	if err != nil {
+		return nil, fmt.Errorf("解析 APP_ENCRYPTION_KEY 失败: %w", err)
+	}
+	return crypto.NewCipher(key)
 }
 
 // ServiceDeps 是 identity service 的装配依赖集合。

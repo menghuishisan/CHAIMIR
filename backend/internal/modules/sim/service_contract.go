@@ -88,7 +88,7 @@ func (s *Service) validateSessionSharedAccounts(ctx context.Context, tenantID in
 	if len(accountIDs) == 0 {
 		return nil
 	}
-	accounts, err := s.identity.BatchGetAccounts(ctx, accountIDs)
+	accounts, err := s.identity.BatchGetAccounts(ctx, tenantID, accountIDs)
 	if err != nil {
 		return apperr.ErrSimSessionInvalid.WithCause(err)
 	}

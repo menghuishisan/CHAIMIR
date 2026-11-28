@@ -9,8 +9,8 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/intx"
-	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
+	"chaimir/pkg/logging"
 )
 
 // AdvanceCourseStatusesOnce 推进到期课程，再投递已经提交的结课回收请求。
@@ -54,7 +54,7 @@ func (s *Service) RunCourseEndedEventsOnce(ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("领取课程回收事件失败: %w", err)
 			}
-			event.TraceID = response.TraceFromContext(ctx)
+			event.TraceID = logging.TraceFromContext(ctx)
 			if err := s.bus.Publish(ctx, contracts.SubjectTeachingCourseEnded, event); err != nil {
 				return fmt.Errorf("发布课程回收事件失败: tenant_id=%d course_id=%d: %w", event.TenantID, event.CourseID, err)
 			}

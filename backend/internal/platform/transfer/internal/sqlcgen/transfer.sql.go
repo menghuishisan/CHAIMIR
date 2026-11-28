@@ -12,56 +12,45 @@ import (
 )
 
 const claimTransferTask = `-- name: ClaimTransferTask :one
-WITH expire_exhausted AS (
-    UPDATE transfer_task AS task
-    SET status = 'failed',
-        last_error = '执行租约已过期',
-        updated_at = $1::timestamptz,
-        completed_at = $1::timestamptz,
-        next_attempt_after = NULL,
-        lease_token = '',
-        lease_until = NULL
-    WHERE task.tenant_id = $4
-      AND task.id = $5
-      AND task.status = 'running'
-      AND task.lease_until <= $1::timestamptz
-      AND task.attempt_count >= task.max_attempts
+WITH locked AS MATERIALIZED (
+    SELECT owned.id, owned.status, owned.attempt_count, owned.max_attempts, owned.next_attempt_after, owned.lease_until
+    FROM transfer_task AS owned
+    WHERE (owned.tenant_id = $3::bigint OR ($3::bigint = 0 AND owned.tenant_id IS NULL))
+      AND owned.id = $4
+      AND owned.status IN ('pending', 'retrying', 'running')
+    FOR UPDATE OF owned
+), claim_time AS MATERIALIZED (
+    SELECT locked.id, locked.status, locked.attempt_count, locked.max_attempts, locked.next_attempt_after, locked.lease_until, clock_timestamp() AS at FROM locked
 )
 UPDATE transfer_task AS task
-SET status = 'running',
-    attempt_count = attempt_count + 1,
-    last_error = '',
-    updated_at = $1::timestamptz,
-    completed_at = NULL,
+SET status = CASE WHEN task.attempt_count < task.max_attempts THEN 'running' ELSE 'failed' END,
+    attempt_count = CASE WHEN task.attempt_count < task.max_attempts THEN task.attempt_count + 1 ELSE task.attempt_count END,
+    last_error = CASE WHEN task.attempt_count < task.max_attempts THEN '' ELSE '执行租约已过期' END,
+    updated_at = claim_time.at,
+    completed_at = CASE WHEN task.attempt_count < task.max_attempts THEN NULL ELSE claim_time.at END,
     next_attempt_after = NULL,
-    lease_token = $2,
-    lease_until = $3::timestamptz
-WHERE task.tenant_id = $4
-  AND task.id = $5
-  AND task.attempt_count < task.max_attempts
+    lease_token = CASE WHEN task.attempt_count < task.max_attempts THEN $1::text ELSE '' END,
+    lease_until = CASE WHEN task.attempt_count < task.max_attempts THEN claim_time.at + $2::bigint * interval '1 ms' ELSE NULL END
+FROM claim_time
+WHERE task.id = claim_time.id
   AND (
-      (task.status IN ('pending', 'retrying') AND (task.next_attempt_after IS NULL OR task.next_attempt_after <= $1::timestamptz))
-      OR (task.status = 'running' AND task.lease_until <= $1::timestamptz)
+      (claim_time.status IN ('pending', 'retrying') AND claim_time.attempt_count < claim_time.max_attempts AND (claim_time.next_attempt_after IS NULL OR claim_time.next_attempt_after <= claim_time.at))
+      OR (claim_time.status = 'running' AND claim_time.lease_until <= claim_time.at)
   )
-RETURNING id, tenant_id, account_id, channel, subject, status, content_type, file_name,
-          attempt_count, max_attempts, last_error, artifact_ref, artifact_size,
-          artifact_content_type, artifact_file_name, created_at, updated_at,
-          completed_at, next_attempt_after, lease_token, lease_until
+RETURNING task.id, task.tenant_id, task.account_id, task.channel, task.subject, task.status, task.content_type, task.file_name, task.attempt_count, task.max_attempts, task.last_error, task.artifact_ref, task.artifact_size, task.artifact_content_type, task.artifact_file_name, task.created_at, task.updated_at, task.completed_at, task.next_attempt_after, task.lease_token, task.lease_until
 `
 
 type ClaimTransferTaskParams struct {
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
-	LeaseToken string             `json:"lease_token"`
-	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
-	TenantID   int64              `json:"tenant_id"`
-	ID         int64              `json:"id"`
+	LeaseToken string `json:"lease_token"`
+	LeaseMs    int64  `json:"lease_ms"`
+	TenantID   int64  `json:"tenant_id"`
+	ID         int64  `json:"id"`
 }
 
 func (q *Queries) ClaimTransferTask(ctx context.Context, arg ClaimTransferTaskParams) (TransferTask, error) {
 	row := q.db.QueryRow(ctx, claimTransferTask,
-		arg.UpdatedAt,
 		arg.LeaseToken,
-		arg.LeaseUntil,
+		arg.LeaseMs,
 		arg.TenantID,
 		arg.ID,
 	)
@@ -96,10 +85,10 @@ const completeTransferTask = `-- name: CompleteTransferTask :one
 WITH current_lease AS MATERIALIZED (
     SELECT owned.id, owned.lease_until
     FROM transfer_task AS owned
-    WHERE owned.tenant_id = $7
-      AND owned.id = $8
+    WHERE (owned.tenant_id = $5::bigint OR ($5::bigint = 0 AND owned.tenant_id IS NULL))
+      AND owned.id = $6
       AND owned.status = 'running'
-      AND owned.lease_token = $9
+      AND owned.lease_token = $7
     FOR UPDATE OF owned
 )
 UPDATE transfer_task AS t
@@ -109,13 +98,13 @@ SET status = 'succeeded',
     artifact_size = $2,
     artifact_content_type = $3,
     artifact_file_name = $4,
-    updated_at = $5::timestamptz,
-    completed_at = $6::timestamptz,
+    updated_at = updated.at,
+    completed_at = updated.at,
     next_attempt_after = NULL,
     lease_token = '',
     lease_until = NULL
-FROM current_lease l
-WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+FROM (SELECT id, lease_until, clock_timestamp() AS at FROM current_lease) AS updated
+WHERE t.id = updated.id AND updated.lease_until > updated.at
 RETURNING t.id, t.tenant_id, t.account_id, t.channel, t.subject, t.status, t.content_type, t.file_name,
           t.attempt_count, t.max_attempts, t.last_error, t.artifact_ref, t.artifact_size,
           t.artifact_content_type, t.artifact_file_name, t.created_at, t.updated_at,
@@ -123,15 +112,13 @@ RETURNING t.id, t.tenant_id, t.account_id, t.channel, t.subject, t.status, t.con
 `
 
 type CompleteTransferTaskParams struct {
-	ArtifactRef         string             `json:"artifact_ref"`
-	ArtifactSize        int64              `json:"artifact_size"`
-	ArtifactContentType string             `json:"artifact_content_type"`
-	ArtifactFileName    string             `json:"artifact_file_name"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
-	CompletedAt         pgtype.Timestamptz `json:"completed_at"`
-	TenantID            int64              `json:"tenant_id"`
-	ID                  int64              `json:"id"`
-	LeaseToken          string             `json:"lease_token"`
+	ArtifactRef         string `json:"artifact_ref"`
+	ArtifactSize        int64  `json:"artifact_size"`
+	ArtifactContentType string `json:"artifact_content_type"`
+	ArtifactFileName    string `json:"artifact_file_name"`
+	TenantID            int64  `json:"tenant_id"`
+	ID                  int64  `json:"id"`
+	LeaseToken          string `json:"lease_token"`
 }
 
 func (q *Queries) CompleteTransferTask(ctx context.Context, arg CompleteTransferTaskParams) (TransferTask, error) {
@@ -140,8 +127,6 @@ func (q *Queries) CompleteTransferTask(ctx context.Context, arg CompleteTransfer
 		arg.ArtifactSize,
 		arg.ArtifactContentType,
 		arg.ArtifactFileName,
-		arg.UpdatedAt,
-		arg.CompletedAt,
 		arg.TenantID,
 		arg.ID,
 		arg.LeaseToken,
@@ -174,17 +159,19 @@ func (q *Queries) CompleteTransferTask(ctx context.Context, arg CompleteTransfer
 }
 
 const countFailedTransfers = `-- name: CountFailedTransfers :one
-SELECT count(*)::bigint FROM transfer_task WHERE tenant_id=$1 AND status='failed' AND updated_at BETWEEN $2 AND $3
+SELECT count(*)::bigint FROM transfer_task
+WHERE (tenant_id = $1::bigint OR ($1::bigint = 0 AND tenant_id IS NULL))
+  AND status = 'failed' AND completed_at BETWEEN $2 AND $3
 `
 
 type CountFailedTransfersParams struct {
 	TenantID    int64              `json:"tenant_id"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	UpdatedAt_2 pgtype.Timestamptz `json:"updated_at_2"`
+	WindowStart pgtype.Timestamptz `json:"window_start"`
+	WindowEnd   pgtype.Timestamptz `json:"window_end"`
 }
 
 func (q *Queries) CountFailedTransfers(ctx context.Context, arg CountFailedTransfersParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countFailedTransfers, arg.TenantID, arg.UpdatedAt, arg.UpdatedAt_2)
+	row := q.db.QueryRow(ctx, countFailedTransfers, arg.TenantID, arg.WindowStart, arg.WindowEnd)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -193,25 +180,25 @@ func (q *Queries) CountFailedTransfers(ctx context.Context, arg CountFailedTrans
 const countTransferTasks = `-- name: CountTransferTasks :one
 SELECT count(*)::bigint
 FROM transfer_task
-WHERE tenant_id = $1
+WHERE (tenant_id = $1::bigint OR ($1::bigint = 0 AND tenant_id IS NULL))
   AND account_id = $2
-  AND ($3::varchar = '' OR channel = $3)
-  AND ($4::varchar = '' OR status = $4)
+  AND ($3::varchar = '' OR channel = $3::varchar)
+  AND ($4::varchar = '' OR status = $4::varchar)
 `
 
 type CountTransferTasksParams struct {
 	TenantID  int64  `json:"tenant_id"`
 	AccountID int64  `json:"account_id"`
-	Column3   string `json:"column_3"`
-	Column4   string `json:"column_4"`
+	Channel   string `json:"channel"`
+	Status    string `json:"status"`
 }
 
 func (q *Queries) CountTransferTasks(ctx context.Context, arg CountTransferTasksParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countTransferTasks,
 		arg.TenantID,
 		arg.AccountID,
-		arg.Column3,
-		arg.Column4,
+		arg.Channel,
+		arg.Status,
 	)
 	var column_1 int64
 	err := row.Scan(&column_1)
@@ -221,7 +208,7 @@ func (q *Queries) CountTransferTasks(ctx context.Context, arg CountTransferTasks
 const countTransferTasksByChannel = `-- name: CountTransferTasksByChannel :many
 SELECT channel, count(*)::bigint AS count
 FROM transfer_task
-WHERE tenant_id = $1::bigint
+WHERE (tenant_id = $1::bigint OR ($1::bigint = 0 AND tenant_id IS NULL))
   AND account_id = $2::bigint
   AND ($3::varchar = '' OR status = $3::varchar)
 GROUP BY channel
@@ -266,10 +253,12 @@ INSERT INTO transfer_task (
     artifact_content_type, artifact_file_name, created_at, updated_at,
     completed_at, next_attempt_after, lease_token, lease_until
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8,
-    $9, $10, $11, $12, $13,
-    $14, $15, $16, $17,
-    $18, $19, $20, $21
+    $1, NULLIF($2::bigint, 0), $3, $4,
+    $5, $6, $7, $8,
+    $9, $10, $11, $12,
+    $13, $14, $15,
+    $16, $17, $18, $19,
+    $20, $21
 )
 RETURNING id, tenant_id, account_id, channel, subject, status, content_type, file_name,
           attempt_count, max_attempts, last_error, artifact_ref, artifact_size,
@@ -356,22 +345,22 @@ const failTransferTask = `-- name: FailTransferTask :one
 WITH current_lease AS MATERIALIZED (
     SELECT owned.id, owned.lease_until
     FROM transfer_task AS owned
-    WHERE owned.tenant_id = $5
-      AND owned.id = $6
+    WHERE (owned.tenant_id = $3::bigint OR ($3::bigint = 0 AND owned.tenant_id IS NULL))
+      AND owned.id = $4
       AND owned.status = 'running'
-      AND owned.lease_token = $7
+      AND owned.lease_token = $5
     FOR UPDATE OF owned
 )
 UPDATE transfer_task AS t
 SET status = CASE WHEN attempt_count < max_attempts THEN 'retrying' ELSE 'failed' END,
     last_error = $1,
-    updated_at = $2::timestamptz,
-    completed_at = CASE WHEN attempt_count < max_attempts THEN NULL ELSE $3::timestamptz END,
-    next_attempt_after = CASE WHEN attempt_count < max_attempts THEN $4::timestamptz ELSE NULL END,
+    updated_at = updated.at,
+    completed_at = CASE WHEN attempt_count < max_attempts THEN NULL ELSE updated.at END,
+    next_attempt_after = CASE WHEN attempt_count < max_attempts THEN updated.at + $2::bigint * interval '1 ms' ELSE NULL END,
     lease_token = '',
     lease_until = NULL
-FROM current_lease l
-WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+FROM (SELECT id, lease_until, clock_timestamp() AS at FROM current_lease) AS updated
+WHERE t.id = updated.id AND updated.lease_until > updated.at
 RETURNING t.id, t.tenant_id, t.account_id, t.channel, t.subject, t.status, t.content_type, t.file_name,
           t.attempt_count, t.max_attempts, t.last_error, t.artifact_ref, t.artifact_size,
           t.artifact_content_type, t.artifact_file_name, t.created_at, t.updated_at,
@@ -379,21 +368,17 @@ RETURNING t.id, t.tenant_id, t.account_id, t.channel, t.subject, t.status, t.con
 `
 
 type FailTransferTaskParams struct {
-	LastError        string             `json:"last_error"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
-	NextAttemptAfter pgtype.Timestamptz `json:"next_attempt_after"`
-	TenantID         int64              `json:"tenant_id"`
-	ID               int64              `json:"id"`
-	LeaseToken       string             `json:"lease_token"`
+	LastError  string `json:"last_error"`
+	RetryMs    int64  `json:"retry_ms"`
+	TenantID   int64  `json:"tenant_id"`
+	ID         int64  `json:"id"`
+	LeaseToken string `json:"lease_token"`
 }
 
 func (q *Queries) FailTransferTask(ctx context.Context, arg FailTransferTaskParams) (TransferTask, error) {
 	row := q.db.QueryRow(ctx, failTransferTask,
 		arg.LastError,
-		arg.UpdatedAt,
-		arg.CompletedAt,
-		arg.NextAttemptAfter,
+		arg.RetryMs,
 		arg.TenantID,
 		arg.ID,
 		arg.LeaseToken,
@@ -431,7 +416,8 @@ SELECT id, tenant_id, account_id, channel, subject, status, content_type, file_n
        artifact_content_type, artifact_file_name, created_at, updated_at,
        completed_at, next_attempt_after, lease_token, lease_until
 FROM transfer_task
-WHERE tenant_id = $1 AND id = $2
+WHERE (tenant_id = $1::bigint OR ($1::bigint = 0 AND tenant_id IS NULL))
+  AND id = $2
 `
 
 type GetTransferTaskParams struct {
@@ -474,31 +460,31 @@ SELECT id, tenant_id, account_id, channel, subject, status, content_type, file_n
        artifact_content_type, artifact_file_name, created_at, updated_at,
        completed_at, next_attempt_after, lease_token, lease_until
 FROM transfer_task
-WHERE tenant_id = $1
+WHERE (tenant_id = $1::bigint OR ($1::bigint = 0 AND tenant_id IS NULL))
   AND account_id = $2
-  AND ($3::varchar = '' OR channel = $3)
-  AND ($4::varchar = '' OR status = $4)
+  AND ($3::varchar = '' OR channel = $3::varchar)
+  AND ($4::varchar = '' OR status = $4::varchar)
 ORDER BY created_at DESC
-LIMIT $5 OFFSET $6
+LIMIT $6 OFFSET $5
 `
 
 type ListTransferTasksParams struct {
-	TenantID  int64  `json:"tenant_id"`
-	AccountID int64  `json:"account_id"`
-	Column3   string `json:"column_3"`
-	Column4   string `json:"column_4"`
-	Limit     int32  `json:"limit"`
-	Offset    int32  `json:"offset"`
+	TenantID   int64  `json:"tenant_id"`
+	AccountID  int64  `json:"account_id"`
+	Channel    string `json:"channel"`
+	Status     string `json:"status"`
+	PageOffset int32  `json:"page_offset"`
+	PageLimit  int32  `json:"page_limit"`
 }
 
 func (q *Queries) ListTransferTasks(ctx context.Context, arg ListTransferTasksParams) ([]TransferTask, error) {
 	rows, err := q.db.Query(ctx, listTransferTasks,
 		arg.TenantID,
 		arg.AccountID,
-		arg.Column3,
-		arg.Column4,
-		arg.Limit,
-		arg.Offset,
+		arg.Channel,
+		arg.Status,
+		arg.PageOffset,
+		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -544,27 +530,26 @@ const renewTransferTaskLease = `-- name: RenewTransferTaskLease :execrows
 WITH current_lease AS MATERIALIZED (
     SELECT owned.id, owned.lease_until
     FROM transfer_task AS owned
-    WHERE owned.tenant_id = $2 AND owned.id = $3
+    WHERE (owned.tenant_id = $2::bigint OR ($2::bigint = 0 AND owned.tenant_id IS NULL)) AND owned.id = $3
       AND owned.status = 'running' AND owned.lease_token = $4
     FOR UPDATE OF owned
 )
 UPDATE transfer_task AS t
-SET lease_until = $1::timestamptz
-FROM current_lease l
-WHERE t.id = l.id AND l.lease_until > clock_timestamp()
-  AND $1::timestamptz > clock_timestamp()
+SET lease_until = greatest(updated.lease_until, updated.at + $1::bigint * interval '1 ms')
+FROM (SELECT id, lease_until, clock_timestamp() AS at FROM current_lease) AS updated
+WHERE t.id = updated.id AND updated.lease_until > updated.at
 `
 
 type RenewTransferTaskLeaseParams struct {
-	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
-	TenantID   int64              `json:"tenant_id"`
-	ID         int64              `json:"id"`
-	LeaseToken string             `json:"lease_token"`
+	LeaseMs    int64  `json:"lease_ms"`
+	TenantID   int64  `json:"tenant_id"`
+	ID         int64  `json:"id"`
+	LeaseToken string `json:"lease_token"`
 }
 
 func (q *Queries) RenewTransferTaskLease(ctx context.Context, arg RenewTransferTaskLeaseParams) (int64, error) {
 	result, err := q.db.Exec(ctx, renewTransferTaskLease,
-		arg.LeaseUntil,
+		arg.LeaseMs,
 		arg.TenantID,
 		arg.ID,
 		arg.LeaseToken,

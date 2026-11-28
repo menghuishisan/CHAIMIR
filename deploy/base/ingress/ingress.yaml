@@ -4,7 +4,7 @@
 #   /          → 前端静态(chaimir-frontend)
 #   /api       → 后端控制面与 M10 统一 WebSocket Hub(chaimir-backend,需 upgrade)
 # 注:/platform 不是独立路径,平台管理员前端为 SPA 由 / 提供;平台层关闭由
-#   PLATFORM_LAYER_ENABLED + 后端鉴权 + 前端路由控制(prod-school overlay)。
+#   DEPLOY_MODE 决定后端入口与前端路由(prod-school overlay)。
 # 用户入口固定为 www.chaimir.io,各环境分别提供同名 chaimir-tls Secret。
 ---
 apiVersion: networking.k8s.io/v1

@@ -76,18 +76,18 @@ func (a downloadAPI) download(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	if grant.Mode != DownloadModeStream {
-		if err := consumeDownloadGrant(c.Request.Context(), a.consumer, grant, timex.Now()); err != nil {
-			response.Fail(c, err)
-			return
-		}
-	}
 	reader, size, contentType, err := a.objects.OpenDownload(c.Request.Context(), grant.Object.Bucket, grant.Object.Key)
 	if err != nil {
 		response.Fail(c, apperr.ErrDownloadObjectUnavailable.WithCause(err))
 		return
 	}
 	defer logging.CloseContext(c.Request.Context(), "close downloaded object", reader)
+	if grant.Mode != DownloadModeStream {
+		if err := consumeDownloadGrant(c.Request.Context(), a.consumer, grant, timex.Now()); err != nil {
+			response.Fail(c, err)
+			return
+		}
+	}
 	fileName := downloadFileName(grant.Object.Key)
 	if grant.Mode == DownloadModeStream {
 		if strings.TrimSpace(contentType) == "" {
@@ -124,12 +124,12 @@ func consumeDownloadGrant(ctx context.Context, consumer grantConsumer, grant Dow
 	}
 	payload, err := json.Marshal(downloadGrantTokenPayloadFromGrant(grant))
 	if err != nil {
-		return apperr.ErrDownloadGrantInvalid.WithCause(fmt.Errorf("编码下载授权消费标识失败: %w", err))
+		return fmt.Errorf("编码下载授权消费标识失败: %w", err)
 	}
 	key := "storage:download-grant:" + pkgcrypto.SHA256Hex(payload)
 	ok, err := consumer.SetNX(ctx, key, ttl)
 	if err != nil {
-		return apperr.ErrDownloadObjectUnavailable.WithCause(fmt.Errorf("记录下载授权消费状态失败: %w", err))
+		return fmt.Errorf("记录下载授权消费状态失败: %w", err)
 	}
 	if !ok {
 		return apperr.ErrDownloadGrantConsumed

@@ -27,7 +27,7 @@ type Querier interface {
 	DeleteCompositionPrepullByRuntimeImage(ctx context.Context, runtimeImageID int64) error
 	DisableRuntimeImage(ctx context.Context, arg DisableRuntimeImageParams) (RuntimeImage, error)
 	EnsureRuntime(ctx context.Context, arg EnsureRuntimeParams) error
-	EnsureTenantQuota(ctx context.Context, arg EnsureTenantQuotaParams) (EnsureTenantQuotaRow, error)
+	EnsureTenantQuota(ctx context.Context, arg EnsureTenantQuotaParams) error
 	EnsureTool(ctx context.Context, arg EnsureToolParams) error
 	// 只允许仍处于接入中的同一自检批次写回,防止旧结果覆盖并发配置更新或停用。
 	FinishRuntimeSelftest(ctx context.Context, arg FinishRuntimeSelftestParams) (Runtime, error)

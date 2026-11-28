@@ -68,31 +68,35 @@ INSERT INTO tenant (id, code, name, type, status, deploy_mode, expire_at, logo_r
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now(), now())
 RETURNING id, code, name, type, status, deploy_mode, expire_at, logo_ref, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at;
 
--- name: CreateTenantProvisionOutbox :one
+-- name: CreateTenantProvisionOutbox :exec
 INSERT INTO tenant_provision_outbox (id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
-VALUES ($1, $2, $3, $4, $5, 1, 0, NULL, now(), now(), '', NULL)
-RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
+VALUES ($1, $2, $3, $4, $5, 1, 0, NULL, now(), now(), '', NULL);
 
--- name: ClaimTenantProvisionOutbox :many
-WITH exhausted AS (
-    UPDATE tenant_provision_outbox AS expired
-    SET status = 4, last_error = 'provision lease expired after retry limit', updated_at = now(), lease_token = '', lease_until = NULL
-    WHERE expired.status = 2 AND expired.lease_until <= @stale_before::timestamptz AND expired.retry_count >= @max_attempts
-    RETURNING expired.id
-), candidates AS (
+-- name: ClaimTenantProvisionOutbox :one
+WITH candidate AS MATERIALIZED (
     SELECT o.id
     FROM tenant_provision_outbox o
-    WHERE (o.status IN (1, 4) OR (o.status = 2 AND o.lease_until <= @stale_before::timestamptz))
-      AND o.retry_count < @max_attempts
-    ORDER BY o.created_at ASC, o.id ASC
-    LIMIT @page_limit
+    WHERE o.status = 1
+       OR (o.status = 4 AND (o.next_attempt_at <= statement_timestamp() OR o.retry_count >= sqlc.arg(max_attempts)::int))
+       OR (o.status = 2 AND o.lease_until <= statement_timestamp())
+    ORDER BY COALESCE(o.next_attempt_at, o.lease_until, o.created_at), o.id
+    LIMIT 1
     FOR UPDATE SKIP LOCKED
+), claim_clock AS MATERIALIZED (
+    SELECT candidate.*, clock_timestamp() AS claimed_at FROM candidate
 )
 UPDATE tenant_provision_outbox AS outbox
-SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_token = @lease_token, lease_until = @lease_until::timestamptz
-FROM candidates
-WHERE outbox.id = candidates.id
-RETURNING outbox.id, outbox.tenant_id, outbox.deploy_mode, outbox.trace_id, outbox.provisioned_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until;
+SET status = CASE WHEN outbox.retry_count >= sqlc.arg(max_attempts)::int THEN 5 ELSE 2 END,
+    retry_count = CASE WHEN outbox.retry_count >= sqlc.arg(max_attempts)::int THEN outbox.retry_count ELSE outbox.retry_count + 1 END,
+    last_error = CASE WHEN outbox.status = 2 AND outbox.retry_count >= sqlc.arg(max_attempts)::int
+        THEN COALESCE(outbox.last_error, 'provision lease expired after retry limit') ELSE outbox.last_error END,
+    next_attempt_at = NULL,
+    updated_at = claim_clock.claimed_at,
+    lease_token = CASE WHEN outbox.retry_count >= sqlc.arg(max_attempts)::int THEN '' ELSE sqlc.arg(lease_token)::varchar END,
+    lease_until = CASE WHEN outbox.retry_count < sqlc.arg(max_attempts)::int THEN claim_clock.claimed_at + sqlc.arg(lease_ms)::bigint * interval '1 millisecond' END
+FROM claim_clock
+WHERE outbox.id = claim_clock.id
+RETURNING outbox.*;
 
 -- name: MarkTenantProvisionOutboxPublished :one
 WITH current_lease AS MATERIALIZED (
@@ -102,10 +106,10 @@ WITH current_lease AS MATERIALIZED (
     FOR UPDATE OF owned
 )
 UPDATE tenant_provision_outbox AS t
-SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
+SET status = 3, last_error = NULL, updated_at = clock_timestamp(), lease_token = '', lease_until = NULL
 FROM current_lease l
 WHERE t.id = l.id AND l.lease_until > clock_timestamp()
-RETURNING t.id, t.tenant_id, t.deploy_mode, t.trace_id, t.provisioned_at, t.status, t.retry_count, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until;
+RETURNING t.id;
 
 -- name: MarkTenantProvisionOutboxFailed :one
 WITH current_lease AS MATERIALIZED (
@@ -115,10 +119,12 @@ WITH current_lease AS MATERIALIZED (
     FOR UPDATE OF owned
 )
 UPDATE tenant_provision_outbox AS t
-SET status = 4, last_error = sqlc.arg(last_error), updated_at = now(), lease_token = '', lease_until = NULL
+SET status = CASE WHEN t.retry_count >= sqlc.arg(max_attempts)::int THEN 5 ELSE 4 END,
+    next_attempt_at = CASE WHEN t.retry_count < sqlc.arg(max_attempts)::int THEN clock_timestamp() + sqlc.arg(retry_ms)::bigint * interval '1 millisecond' END,
+    last_error = sqlc.arg(last_error), updated_at = clock_timestamp(), lease_token = '', lease_until = NULL
 FROM current_lease l
 WHERE t.id = l.id AND l.lease_until > clock_timestamp()
-RETURNING t.id, t.tenant_id, t.deploy_mode, t.trace_id, t.provisioned_at, t.status, t.retry_count, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until;
+RETURNING t.id;
 
 -- name: UpdateTenantConfig :one
 UPDATE tenant
@@ -175,13 +181,13 @@ SELECT pg_advisory_xact_lock(hashtextextended('identity.school_administration', 
 -- name: CreateDepartment :one
 INSERT INTO department (id, tenant_id, name, code)
 VALUES ($1, $2, $3, $4)
-ON CONFLICT (tenant_id, code) WHERE deleted_at IS NULL AND code IS NOT NULL DO NOTHING
+ON CONFLICT (tenant_id, code) WHERE deleted_at IS NULL DO NOTHING
 RETURNING id, tenant_id, name, code, deleted_at;
 
 -- name: ListDepartments :many
 SELECT id, tenant_id, name, code, deleted_at
 FROM department
-WHERE deleted_at IS NULL
+WHERE tenant_id = $1 AND deleted_at IS NULL
 ORDER BY name, id;
 
 -- name: UpdateDepartment :one
@@ -214,7 +220,7 @@ RETURNING id, tenant_id, department_id, name, deleted_at;
 -- name: ListMajors :many
 SELECT id, tenant_id, department_id, name, deleted_at
 FROM major
-WHERE deleted_at IS NULL AND ($1::bigint = 0 OR department_id = $1)
+WHERE tenant_id = sqlc.arg(tenant_id) AND deleted_at IS NULL AND (sqlc.arg(department_id)::bigint = 0 OR department_id = sqlc.arg(department_id))
 ORDER BY name, id;
 
 -- name: MajorExists :one
@@ -239,7 +245,7 @@ RETURNING id, tenant_id, major_id, name, enrollment_year, status, deleted_at;
 -- name: ListClasses :many
 SELECT id, tenant_id, major_id, name, enrollment_year, status, deleted_at
 FROM class
-WHERE deleted_at IS NULL AND ($1::bigint = 0 OR major_id = $1)
+WHERE tenant_id = sqlc.arg(tenant_id) AND deleted_at IS NULL AND (sqlc.arg(major_id)::bigint = 0 OR major_id = sqlc.arg(major_id))
 ORDER BY enrollment_year DESC, name, id;
 
 -- name: ClassExists :one
@@ -345,7 +351,7 @@ SELECT a.id, a.tenant_id, a.phone_enc, a.phone_hash, a.password_hash, a.name, a.
 FROM account a
 LEFT JOIN account_profile p ON p.account_id = a.id AND p.tenant_id = a.tenant_id
 LEFT JOIN account_role ar ON ar.account_id = a.id AND ar.tenant_id = a.tenant_id
-WHERE a.id = $1 AND a.deleted_at IS NULL
+WHERE a.id = $1 AND a.tenant_id = $2 AND a.deleted_at IS NULL
 GROUP BY a.id, p.no, p.org_id, p.enrollment_year, p.title;
 
 -- name: BatchGetAccounts :many
@@ -356,8 +362,12 @@ SELECT a.id, a.tenant_id, a.phone_enc, a.phone_hash, a.password_hash, a.name, a.
 FROM account a
 LEFT JOIN account_profile p ON p.account_id = a.id AND p.tenant_id = a.tenant_id
 LEFT JOIN account_role ar ON ar.account_id = a.id AND ar.tenant_id = a.tenant_id
-WHERE a.id = ANY($1::bigint[]) AND a.deleted_at IS NULL
+WHERE a.id = ANY(sqlc.arg(account_ids)::bigint[]) AND a.tenant_id = sqlc.arg(tenant_id) AND a.deleted_at IS NULL
 GROUP BY a.id, p.no, p.org_id, p.enrollment_year, p.title;
+
+-- name: PlatformAccountNames :many
+SELECT id, name FROM account
+WHERE id = ANY(sqlc.arg(account_ids)::bigint[]) AND deleted_at IS NULL;
 
 -- name: ListAccountsByPhoneHashPrivileged :many
 SELECT a.id, a.tenant_id, a.phone_enc, a.phone_hash, a.password_hash, a.name, a.base_identity, a.status,
@@ -387,7 +397,7 @@ SELECT a.id, a.tenant_id, a.phone_enc, a.phone_hash, a.password_hash, a.name, a.
 FROM account a
 JOIN account_profile p ON p.account_id = a.id AND p.tenant_id = a.tenant_id
 LEFT JOIN account_role ar ON ar.account_id = a.id AND ar.tenant_id = a.tenant_id
-WHERE p.no = $1 AND a.deleted_at IS NULL
+WHERE p.no = $1 AND a.tenant_id = $2 AND a.deleted_at IS NULL
 GROUP BY a.id, p.no, p.org_id, p.enrollment_year, p.title;
 
 -- name: ListAccounts :many
@@ -398,7 +408,7 @@ SELECT a.id, a.tenant_id, a.phone_enc, a.phone_hash, a.password_hash, a.name, a.
 FROM account a
 LEFT JOIN account_profile p ON p.account_id = a.id AND p.tenant_id = a.tenant_id
 LEFT JOIN account_role ar ON ar.account_id = a.id AND ar.tenant_id = a.tenant_id
-WHERE a.deleted_at IS NULL
+WHERE a.tenant_id = $8 AND a.deleted_at IS NULL
   AND ($1::smallint = 0 OR a.status = $1)
   AND ($2::smallint = 0 OR a.base_identity = $2)
   AND ($3::bigint = 0 OR p.org_id = $3)
@@ -413,7 +423,7 @@ LIMIT $5 OFFSET $6;
 SELECT a.status, COUNT(*)::bigint AS count
 FROM account a
 LEFT JOIN account_profile p ON p.account_id = a.id AND p.tenant_id = a.tenant_id
-WHERE a.deleted_at IS NULL
+WHERE a.tenant_id = sqlc.arg(tenant_id) AND a.deleted_at IS NULL
   AND (sqlc.arg(base_identity)::smallint = 0 OR a.base_identity = sqlc.arg(base_identity)::smallint)
   AND (sqlc.arg(class_id)::bigint = 0 OR p.org_id = sqlc.arg(class_id)::bigint)
   AND (sqlc.arg(keyword)::text = '' OR a.name ILIKE '%' || sqlc.arg(keyword)::text || '%' OR p.no ILIKE '%' || sqlc.arg(keyword)::text || '%'
@@ -448,7 +458,7 @@ WHERE a.tenant_id = $1
 -- name: UpdateAccountStatus :one
 UPDATE account
 SET status = $3, deleted_at = $4, updated_at = now()
-WHERE id = $1 AND tenant_id = $2
+WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
 RETURNING id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, pwd_failed_count, locked_until, activated_at, deleted_at, created_at, updated_at;
 
 -- name: UpdateAccountBasic :exec
@@ -484,7 +494,7 @@ SET pwd_failed_count = LEAST(pwd_failed_count::integer + 1, sqlc.arg(max_failure
     locked_until = CASE WHEN pwd_failed_count::integer + 1 >= sqlc.arg(max_failures)::smallint
                         THEN sqlc.narg(lock_until)::timestamptz ELSE locked_until END,
     updated_at = now()
-WHERE id = sqlc.arg(account_id)::bigint AND tenant_id = sqlc.arg(tenant_id)::bigint
+WHERE id = sqlc.arg(account_id)::bigint AND tenant_id = sqlc.arg(tenant_id)::bigint AND deleted_at IS NULL
 RETURNING id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, pwd_failed_count, locked_until, activated_at, deleted_at, created_at, updated_at;
 
 -- name: ClearPasswordFailure :exec
@@ -651,28 +661,27 @@ FROM import_batch
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id DESC;
 
--- name: CreateAuditLog :one
+-- name: CreateAuditLog :exec
 INSERT INTO audit_log (id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
-RETURNING id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id, created_at;
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now());
 
 -- name: QueryAuditLogs :many
 SELECT id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id, created_at
 FROM audit_log
-WHERE ($1::bigint = -1 OR ($1::bigint <> -1 AND ($1::bigint = 0 OR tenant_id = $1)))
-  AND ($2::bigint = 0 OR actor_id = $2)
-  AND ($3::text = '' OR action = $3)
-  AND ($4::text = '' OR target_type = $4)
-  AND ($5::timestamptz IS NULL OR created_at >= $5)
-  AND ($6::timestamptz IS NULL OR created_at <= $6)
+WHERE (sqlc.arg(all_tenants)::boolean OR tenant_id = sqlc.arg(tenant_id)::bigint)
+  AND (sqlc.arg(actor_id)::bigint = 0 OR actor_id = sqlc.arg(actor_id)::bigint)
+  AND (sqlc.arg(action)::text = '' OR action = sqlc.arg(action)::text)
+  AND (sqlc.arg(target_type)::text = '' OR target_type = sqlc.arg(target_type)::text)
+  AND (sqlc.narg(from_at)::timestamptz IS NULL OR created_at >= sqlc.narg(from_at)::timestamptz)
+  AND (sqlc.narg(to_at)::timestamptz IS NULL OR created_at <= sqlc.narg(to_at)::timestamptz)
 ORDER BY created_at DESC, id DESC
-LIMIT $7 OFFSET $8;
+LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- name: QueryAuditActionFacets :many
 -- 动作下拉的分组计数:套用学校、操作人、对象类型与时间范围,不套用动作筛选(接口总览「分段计数」)。
 SELECT action, COUNT(*)::bigint AS count
 FROM audit_log
-WHERE (sqlc.arg(tenant_id)::bigint = -1 OR (sqlc.arg(tenant_id)::bigint <> -1 AND (sqlc.arg(tenant_id)::bigint = 0 OR tenant_id = sqlc.arg(tenant_id)::bigint)))
+WHERE (sqlc.arg(all_tenants)::boolean OR tenant_id = sqlc.arg(tenant_id)::bigint)
   AND (sqlc.arg(actor_id)::bigint = 0 OR actor_id = sqlc.arg(actor_id)::bigint)
   AND (sqlc.arg(target_type)::text = '' OR target_type = sqlc.arg(target_type)::text)
   AND (sqlc.narg(from_at)::timestamptz IS NULL OR created_at >= sqlc.narg(from_at)::timestamptz)

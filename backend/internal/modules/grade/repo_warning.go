@@ -7,8 +7,8 @@ import (
 	"chaimir/internal/modules/grade/internal/sqlcgen"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
-	"chaimir/internal/platform/response"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 )
 
 // CreateAcademicWarning 首次创建预警；已有范围仅更新详情，保留确认和投递状态。
@@ -17,7 +17,7 @@ func (t *txStore) CreateAcademicWarning(ctx context.Context, id, tenantID, stude
 	if err != nil {
 		return WarningDTO{}, err
 	}
-	row, err := t.q.CreateAcademicWarning(ctx, sqlcgen.CreateAcademicWarningParams{ID: id, TenantID: tenantID, StudentID: studentID, SemesterID: semesterID, Type: typ, Detail: data, NotifyTraceID: response.TraceFromContext(ctx)})
+	row, err := t.q.CreateAcademicWarning(ctx, sqlcgen.CreateAcademicWarningParams{ID: id, TenantID: tenantID, StudentID: studentID, SemesterID: semesterID, Type: typ, Detail: data, NotifyTraceID: logging.TraceFromContext(ctx)})
 	if err != nil {
 		return WarningDTO{}, err
 	}

@@ -210,7 +210,7 @@ func seedAcceptance(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	includeIsolationTenant := cfg.Deploy.PlatformEnabled
+	includeIsolationTenant := cfg.Deploy.IsSaaS()
 	tenantDeployMode := identity.DeployModeSaaS
 	if cfg.Deploy.IsSchool() {
 		tenantDeployMode = identity.DeployModeSchool

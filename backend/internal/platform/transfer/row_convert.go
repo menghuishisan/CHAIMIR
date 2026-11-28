@@ -2,6 +2,7 @@
 package transfer
 
 import (
+	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/transfer/internal/sqlcgen"
 )
@@ -10,7 +11,7 @@ import (
 func taskFromRow(row sqlcgen.TransferTask) Task {
 	return Task{
 		TaskID:           row.ID,
-		TenantID:         row.TenantID,
+		TenantID:         pgtypex.Int8Value(row.TenantID),
 		AccountID:        row.AccountID,
 		Channel:          Channel(row.Channel),
 		Subject:          row.Subject,

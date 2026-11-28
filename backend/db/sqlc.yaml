@@ -156,7 +156,7 @@ sql:
         omit_unused_structs: true
   - engine: "postgresql"
     schema:
-      - "migrations/0012_transfer.up.sql"
+      - "migrations"
     queries:
       - "queries/transfer.sql"
     gen:

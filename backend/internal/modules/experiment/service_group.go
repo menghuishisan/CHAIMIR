@@ -37,7 +37,7 @@ func (s *Service) CreateGroup(ctx context.Context, experimentID int64, req Creat
 		if err != nil {
 			return err
 		}
-		profiles, err = s.groupMemberProfiles(ctx, []ExperimentGroup{group})
+		profiles, err = s.groupMemberProfiles(ctx, id.TenantID, []ExperimentGroup{group})
 		if err != nil {
 			return err
 		}
@@ -106,7 +106,7 @@ func (s *Service) UpsertGroupMember(ctx context.Context, groupID int64, req Upse
 				return err
 			}
 		}
-		profiles, err = s.groupMemberProfiles(ctx, []ExperimentGroup{group})
+		profiles, err = s.groupMemberProfiles(ctx, id.TenantID, []ExperimentGroup{group})
 		if err != nil {
 			return err
 		}
@@ -178,7 +178,7 @@ func (s *Service) RemoveGroupMember(ctx context.Context, groupID, studentID int6
 				return err
 			}
 		}
-		profiles, err = s.groupMemberProfiles(ctx, []ExperimentGroup{group})
+		profiles, err = s.groupMemberProfiles(ctx, id.TenantID, []ExperimentGroup{group})
 		if err != nil {
 			return err
 		}
@@ -235,7 +235,7 @@ func (s *Service) ListGroups(ctx context.Context, experimentID int64) ([]GroupDT
 	}); err != nil {
 		return nil, err
 	}
-	profiles, err := s.groupMemberProfiles(ctx, groups)
+	profiles, err := s.groupMemberProfiles(ctx, id.TenantID, groups)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +249,7 @@ func (s *Service) ListGroups(ctx context.Context, experimentID int64) ([]GroupDT
 // groupMemberProfiles 把给定小组的全部成员一次批量解析为账号档案。
 // 成员表只存 student_id,而编组界面必须显示人名;经 M1 契约批量取回,
 // 既不跨模块查表(铁律 3),也不逐组逐人调用形成 N+1。
-func (s *Service) groupMemberProfiles(ctx context.Context, groups []ExperimentGroup) (map[int64]contracts.AccountInfo, error) {
+func (s *Service) groupMemberProfiles(ctx context.Context, tenantID int64, groups []ExperimentGroup) (map[int64]contracts.AccountInfo, error) {
 	seen := make(map[int64]struct{})
 	accountIDs := make([]int64, 0)
 	for _, group := range groups {
@@ -264,7 +264,7 @@ func (s *Service) groupMemberProfiles(ctx context.Context, groups []ExperimentGr
 	if len(accountIDs) == 0 {
 		return map[int64]contracts.AccountInfo{}, nil
 	}
-	accounts, err := s.roles.BatchGetAccounts(ctx, accountIDs)
+	accounts, err := s.roles.BatchGetAccounts(ctx, tenantID, accountIDs)
 	if err != nil {
 		return nil, apperr.ErrExperimentGroupInvalid.WithCause(err)
 	}
@@ -313,7 +313,7 @@ func (s *Service) GetGroup(ctx context.Context, groupID int64) (GroupDTO, error)
 	}); err != nil {
 		return GroupDTO{}, err
 	}
-	profiles, err := s.groupMemberProfiles(ctx, []ExperimentGroup{group})
+	profiles, err := s.groupMemberProfiles(ctx, id.TenantID, []ExperimentGroup{group})
 	if err != nil {
 		return GroupDTO{}, err
 	}

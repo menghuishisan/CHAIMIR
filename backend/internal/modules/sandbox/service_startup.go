@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/response"
+
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
@@ -94,7 +94,7 @@ func (s *Service) startSandbox(ctx context.Context, tenantID, sandboxID int64) (
 	}
 	plan.Sandbox.Phase, plan.Sandbox.Status = bootstrapPhase, SandboxStatusReady
 	if needsInitialization {
-		s.broadcastProgress(ctx, current.TenantID, current.ID, bootstrapPhase, SandboxStatusReady, response.TraceFromContext(ctx))
+		s.broadcastProgress(ctx, current.TenantID, current.ID, bootstrapPhase, SandboxStatusReady, logging.TraceFromContext(ctx))
 		stage = "init"
 		advanced, err = s.advanceStartupState(ctx, plan.Sandbox, SandboxPhaseInitializing, SandboxStatusRunning, map[string]any{"phase": SandboxPhaseInitializing}, SandboxStatusReady)
 		if err != nil {
@@ -104,7 +104,7 @@ func (s *Service) startSandbox(ctx context.Context, tenantID, sandboxID int64) (
 			return apperr.ErrSandboxStateInvalid
 		}
 		plan.Sandbox.Status = SandboxStatusRunning
-		s.broadcastProgress(ctx, current.TenantID, current.ID, SandboxPhaseInitializing, SandboxStatusRunning, response.TraceFromContext(ctx))
+		s.broadcastProgress(ctx, current.TenantID, current.ID, SandboxPhaseInitializing, SandboxStatusRunning, logging.TraceFromContext(ctx))
 		if strings.TrimSpace(current.InitCodeRef) != "" {
 			if err := s.restoreArchiveToWorkspace(ctx, plan.Sandbox, workspaceRuntimeForPlan(plan), current.InitCodeRef, "", "."); err != nil {
 				return err
@@ -145,7 +145,7 @@ func (s *Service) startSandbox(ctx context.Context, tenantID, sandboxID int64) (
 	}); err != nil {
 		return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 	}
-	s.broadcastProgress(persistCtx, current.TenantID, current.ID, plan.Sandbox.Phase, plan.Sandbox.Status, response.TraceFromContext(ctx))
+	s.broadcastProgress(persistCtx, current.TenantID, current.ID, plan.Sandbox.Phase, plan.Sandbox.Status, logging.TraceFromContext(ctx))
 	return nil
 }
 
@@ -244,10 +244,10 @@ func (s *Service) markStartupFailed(ctx context.Context, sb Sandbox, stage strin
 	if !shouldBroadcast {
 		return nil
 	}
-	s.broadcastProgress(persistCtx, sb.TenantID, sb.ID, broadcastPhase, SandboxStatusFailed, response.TraceFromContext(ctx))
+	s.broadcastProgress(persistCtx, sb.TenantID, sb.ID, broadcastPhase, SandboxStatusFailed, logging.TraceFromContext(ctx))
 	err := s.bus.Publish(persistCtx, contracts.SubjectSandboxFailed, contracts.SandboxFailedEvent{
 		TenantID:  sb.TenantID,
-		TraceID:   response.TraceFromContext(ctx),
+		TraceID:   logging.TraceFromContext(ctx),
 		SandboxID: sb.ID,
 		SourceRef: sb.SourceRef,
 		ScopeRef:  sb.ScopeRef,

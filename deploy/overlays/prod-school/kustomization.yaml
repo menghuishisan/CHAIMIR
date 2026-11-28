@@ -26,5 +26,4 @@ configMapGenerator:
     behavior: merge
     literals:
       - DEPLOY_MODE=school
-      - PLATFORM_LAYER_ENABLED=false
       - SCHOOL_TENANT_ID=1001

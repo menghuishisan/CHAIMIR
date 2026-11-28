@@ -55,9 +55,11 @@ type IdentityService interface {
 	// GetAccount 读取单个账号摘要,供平台鉴权、审计与聚合逻辑复用。
 	// 未命中返回NotFound，存储故障返回Internal；应用错误及完整原因链保留。
 	// 普通租户读取复用已有同数据库、同租户事务；无外层事务时走应用连接。
-	GetAccount(ctx context.Context, accountID int64) (AccountInfo, error)
+	GetAccount(ctx context.Context, tenantID, accountID int64) (AccountInfo, error)
 	// BatchGetAccounts 批量读取账号摘要,避免上层形成 N+1 查询。
-	BatchGetAccounts(ctx context.Context, accountIDs []int64) ([]AccountInfo, error)
+	BatchGetAccounts(ctx context.Context, tenantID int64, accountIDs []int64) ([]AccountInfo, error)
+	// PlatformAccountNames 只供已认证的平台管理员查看跨校审核提交者姓名。
+	PlatformAccountNames(ctx context.Context, accountIDs []int64) (map[int64]string, error)
 	// HasRole 判断账号是否具备指定角色,供平台守卫和聚合入口复用。
 	HasRole(ctx context.Context, accountID int64, role string) (bool, error)
 	// ListClassStudents 读取指定班级的在校学生摘要,供 M6 按班级批量选课使用。
@@ -102,15 +104,14 @@ type IdentityStatsService interface {
 
 // AuditQuery 是统一审计查询中心使用的只读过滤条件。
 type AuditQuery struct {
-	TenantID        int64     `json:"tenant_id"`
-	ActorID         int64     `json:"actor_id"`
-	Action          string    `json:"action"`
-	TargetType      string    `json:"target_type"`
-	From            time.Time `json:"from"`
-	To              time.Time `json:"to"`
-	Page            int32     `json:"page"`
-	Size            int32     `json:"size"`
-	IncludePlatform bool      `json:"include_platform"`
+	TenantID   int64     `json:"tenant_id"`
+	ActorID    int64     `json:"actor_id"`
+	Action     string    `json:"action"`
+	TargetType string    `json:"target_type"`
+	From       time.Time `json:"from"`
+	To         time.Time `json:"to"`
+	Page       int32     `json:"page"`
+	Size       int32     `json:"size"`
 }
 
 // AuditQueryResult 是审计查询中心统一返回的分页结果。
@@ -124,6 +125,6 @@ type AuditQueryResult struct {
 
 // IdentityAuditReadService 是 M1 对 M9 审计中心开放的审计只读契约。
 type IdentityAuditReadService interface {
-	// QueryAuditLogs 按条件分页查询共享 audit_log,遵循调用侧权限范围。
+	// QueryAuditLogs 按已认证的上下文身份限定范围。平台身份可指定学校或省略学校查询全平台。
 	QueryAuditLogs(ctx context.Context, query AuditQuery) (AuditQueryResult, error)
 }

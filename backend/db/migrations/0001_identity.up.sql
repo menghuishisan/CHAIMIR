@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS platform_admin (
     username VARCHAR(64) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     name VARCHAR(64) NOT NULL,
-    status SMALLINT NOT NULL,
+    status SMALLINT NOT NULL CHECK (status IN (1, 2)),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -15,18 +15,20 @@ CREATE TABLE IF NOT EXISTS platform_auth_session (
     refresh_token_hash VARCHAR(64) NOT NULL UNIQUE,
     device_info VARCHAR(255),
     ip VARCHAR(64),
-    status SMALLINT NOT NULL,
+    status SMALLINT NOT NULL CHECK (status IN (1, 2)),
     expire_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE INDEX IF NOT EXISTS idx_platform_auth_session_admin_status ON platform_auth_session(platform_admin_id, status);
 
 CREATE TABLE IF NOT EXISTS tenant (
     id BIGINT PRIMARY KEY,
     code VARCHAR(32) NOT NULL UNIQUE,
     name VARCHAR(128) NOT NULL,
-    type SMALLINT NOT NULL,
-    status SMALLINT NOT NULL,
-    deploy_mode SMALLINT NOT NULL,
+    type SMALLINT NOT NULL CHECK (type BETWEEN 1 AND 4),
+    status SMALLINT NOT NULL CHECK (status IN (1, 2, 3)),
+    deploy_mode SMALLINT NOT NULL CHECK (deploy_mode IN (1, 2)),
     expire_at TIMESTAMPTZ,
     logo_ref VARCHAR(255),
     display_name VARCHAR(128),
@@ -40,16 +42,18 @@ CREATE TABLE IF NOT EXISTS tenant (
 CREATE TABLE IF NOT EXISTS tenant_provision_outbox (
     id BIGINT PRIMARY KEY,
     tenant_id BIGINT NOT NULL REFERENCES tenant(id),
-    deploy_mode SMALLINT NOT NULL,
+    deploy_mode SMALLINT NOT NULL CHECK (deploy_mode IN (1, 2)),
     trace_id VARCHAR(128) NOT NULL,
     provisioned_at TIMESTAMPTZ NOT NULL,
-    status SMALLINT NOT NULL DEFAULT 1 CHECK (status IN (1, 2, 3, 4)),
+    status SMALLINT NOT NULL DEFAULT 1 CHECK (status IN (1, 2, 3, 4, 5)),
     retry_count INT NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
     last_error VARCHAR(255),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     lease_token VARCHAR(64) NOT NULL DEFAULT '',
     lease_until TIMESTAMPTZ,
+    next_attempt_at TIMESTAMPTZ,
+    CONSTRAINT tenant_provision_outbox_retry_time_check CHECK ((status = 4) = (next_attempt_at IS NOT NULL)),
     UNIQUE (tenant_id)
 );
 CREATE INDEX IF NOT EXISTS idx_tenant_provision_outbox_lease ON tenant_provision_outbox(status, lease_until) WHERE status = 2;
@@ -57,11 +61,11 @@ CREATE INDEX IF NOT EXISTS idx_tenant_provision_outbox_lease ON tenant_provision
 CREATE TABLE IF NOT EXISTS tenant_application (
     id BIGINT PRIMARY KEY,
     school_name VARCHAR(128) NOT NULL,
-    school_type SMALLINT NOT NULL,
+    school_type SMALLINT NOT NULL CHECK (school_type BETWEEN 1 AND 4),
     contact_name VARCHAR(64) NOT NULL,
     contact_phone VARCHAR(32) NOT NULL,
     contact_email VARCHAR(128) NOT NULL,
-    status SMALLINT NOT NULL,
+    status SMALLINT NOT NULL CHECK (status IN (1, 2, 3)),
     reject_reason VARCHAR(255),
     reviewed_by BIGINT REFERENCES platform_admin(id),
     tenant_id BIGINT REFERENCES tenant(id),
@@ -79,13 +83,13 @@ CREATE TABLE IF NOT EXISTS department (
     id BIGINT PRIMARY KEY,
     tenant_id BIGINT NOT NULL REFERENCES tenant(id),
     name VARCHAR(128) NOT NULL,
-    code VARCHAR(32),
+    code VARCHAR(32) NOT NULL CHECK (code ~ '[^[:space:]]'),
     deleted_at TIMESTAMPTZ,
     UNIQUE (tenant_id, id)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_department_code ON department(tenant_id, code)
-    WHERE deleted_at IS NULL AND code IS NOT NULL;
+    WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS major (
     id BIGINT PRIMARY KEY,
@@ -103,7 +107,7 @@ CREATE TABLE IF NOT EXISTS class (
     major_id BIGINT NOT NULL,
     name VARCHAR(128) NOT NULL,
     enrollment_year SMALLINT NOT NULL,
-    status SMALLINT NOT NULL,
+    status SMALLINT NOT NULL CHECK (status IN (1, 2)),
     deleted_at TIMESTAMPTZ,
     UNIQUE (tenant_id, id),
     FOREIGN KEY (tenant_id, major_id) REFERENCES major(tenant_id, id)
@@ -116,10 +120,10 @@ CREATE TABLE IF NOT EXISTS account (
     phone_hash VARCHAR(64) NOT NULL,
     password_hash VARCHAR(255),
     name VARCHAR(64) NOT NULL,
-    base_identity SMALLINT NOT NULL,
-    status SMALLINT NOT NULL,
+    base_identity SMALLINT NOT NULL CHECK (base_identity IN (1, 2)),
+    status SMALLINT NOT NULL CHECK (status IN (1, 2, 3, 4, 5)),
     must_change_pwd BOOLEAN NOT NULL DEFAULT false,
-    pwd_failed_count SMALLINT NOT NULL DEFAULT 0,
+    pwd_failed_count SMALLINT NOT NULL DEFAULT 0 CHECK (pwd_failed_count >= 0),
     locked_until TIMESTAMPTZ,
     activated_at TIMESTAMPTZ,
     deleted_at TIMESTAMPTZ,
@@ -155,7 +159,7 @@ CREATE TABLE IF NOT EXISTS auth_session (
     refresh_token_hash VARCHAR(64) NOT NULL UNIQUE,
     device_info VARCHAR(255),
     ip VARCHAR(64),
-    status SMALLINT NOT NULL,
+    status SMALLINT NOT NULL CHECK (status IN (1, 2)),
     expire_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     FOREIGN KEY (tenant_id, account_id) REFERENCES account(tenant_id, id)
@@ -242,17 +246,13 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_auth_session_account_status ON auth_session(account_id, status);
 CREATE INDEX IF NOT EXISTS idx_auth_session_tenant_account_status ON auth_session(tenant_id, account_id, status);
-CREATE INDEX IF NOT EXISTS idx_auth_session_refresh ON auth_session(refresh_token_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS uk_department_tenant_name_active ON department(tenant_id, name) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_major_tenant_department ON major(tenant_id, department_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uk_major_tenant_department_name_active ON major(tenant_id, department_id, name) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_class_tenant_major ON class(tenant_id, major_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uk_class_tenant_major_name_active ON class(tenant_id, major_id, name) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_account_tenant_phone_active ON account(tenant_id, phone_hash) WHERE deleted_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_account_role_tenant_account ON account_role(tenant_id, account_id);
-CREATE INDEX IF NOT EXISTS idx_account_profile_tenant_account ON account_profile(tenant_id, account_id);
 CREATE INDEX IF NOT EXISTS idx_activation_code_tenant_account ON activation_code(tenant_id, account_id);
 CREATE INDEX IF NOT EXISTS idx_sms_code_lookup ON sms_code(tenant_id, phone_hash, scene, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_log_tenant_created ON audit_log(tenant_id, created_at DESC);
@@ -324,8 +324,14 @@ ALTER TABLE sso_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE import_preview ENABLE ROW LEVEL SECURITY;
 ALTER TABLE import_batch ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_log FORCE ROW LEVEL SECURITY;
 ALTER TABLE tenant_provision_outbox ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant FORCE ROW LEVEL SECURITY;
 
+CREATE POLICY tenant_scope_rls ON tenant
+    USING (id = current_setting('app.tenant_id')::bigint)
+    WITH CHECK (id = current_setting('app.tenant_id')::bigint);
 CREATE POLICY department_tenant_rls ON department USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY major_tenant_rls ON major USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY class_tenant_rls ON class USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
@@ -340,5 +346,5 @@ CREATE POLICY import_preview_tenant_rls ON import_preview USING (tenant_id = cur
 CREATE POLICY import_batch_tenant_rls ON import_batch USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY tenant_provision_outbox_tenant_rls ON tenant_provision_outbox USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY audit_log_tenant_rls ON audit_log
-    USING (tenant_id IS NULL OR tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT)
-    WITH CHECK (tenant_id IS NULL OR tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT);
+    USING (tenant_id = current_setting('app.tenant_id')::bigint)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::bigint);

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"chaimir/internal/platform/jsonx"
+	"chaimir/pkg/logging"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 )
@@ -43,11 +44,10 @@ type Config struct {
 	Snowflake     SnowflakeConfig
 }
 
-// DeployConfig 描述部署形态和平台管理员层开关。
+// DeployConfig 描述部署形态与私有化固定租户。
 type DeployConfig struct {
-	Mode            string
-	PlatformEnabled bool
-	SchoolTenantID  int64
+	Mode           string
+	SchoolTenantID int64
 }
 
 // DeployModeSaaS 是 DEPLOY_MODE 表示多租户 SaaS 部署的取值。
@@ -56,9 +56,14 @@ const DeployModeSaaS = "saas"
 // DeployModeSchool 是 DEPLOY_MODE 表示学校私有化部署的取值,业务模块按它判断部署形态,不各写字面量。
 const DeployModeSchool = "school"
 
-// IsSchool 判断当前是否为学校私有化部署,并确认固定租户已配置。
+// IsSchool 判断当前是否为学校私有化部署。
 func (d DeployConfig) IsSchool() bool {
-	return strings.EqualFold(strings.TrimSpace(d.Mode), DeployModeSchool) && d.SchoolTenantID > 0
+	return d.Mode == DeployModeSchool
+}
+
+// IsSaaS 判断当前是否开放平台层。
+func (d DeployConfig) IsSaaS() bool {
+	return d.Mode == DeployModeSaaS
 }
 
 // ServerConfig 描述 HTTP、WebSocket 与日志运行边界。
@@ -68,8 +73,7 @@ type ServerConfig struct {
 	WSPath                         string
 	WSAllowedOrigins               []string
 	TrustedProxies                 []string
-	LogLevel                       string
-	LogFormat                      string
+	Logging                        logging.Settings
 	AppEnv                         string
 	HealthTimeoutSeconds           int
 	ReadinessProbeTimeoutSeconds   int
@@ -89,7 +93,7 @@ type ServerConfig struct {
 	WSReadLimitBytes               int64
 }
 
-// PostgresConfig 描述 PostgreSQL 连接池和可选特权连接。
+// PostgresConfig 描述 PostgreSQL 应用池和独立特权池。
 type PostgresConfig struct {
 	Host                             string
 	Port                             int
@@ -180,7 +184,6 @@ type AuthConfig struct {
 
 // BootstrapConfig 描述 migrate/seed 所需的首个租户与管理员参数。
 type BootstrapConfig struct {
-	SchoolTenantID        int64
 	SchoolTenantCode      string
 	SchoolName            string
 	SchoolType            int16
@@ -411,8 +414,7 @@ type SandboxConfig struct {
 type SandboxRBACProvisionerConfig struct {
 	KubeconfigPath          string
 	PollIntervalSeconds     int
-	LogLevel                string
-	LogFormat               string
+	Logging                 logging.Settings
 	ServiceAccountNamespace string
 	ServiceAccountName      string
 }
@@ -432,11 +434,11 @@ func LoadSandboxRBACProvisioner() (SandboxRBACProvisionerConfig, error) {
 	if err != nil || interval <= 0 {
 		errs = append(errs, fmt.Sprintf("环境变量 SANDBOX_RBAC_PROVISIONER_POLL_INTERVAL_SECONDS 必须是大于 0 的整数,实际=%q", intervalRaw))
 	}
+	logSettings := loadLogging(&errs)
 	cfg := SandboxRBACProvisionerConfig{
 		KubeconfigPath:          strings.TrimSpace(os.Getenv("KUBECONFIG_PATH")),
 		PollIntervalSeconds:     interval,
-		LogLevel:                required("LOG_LEVEL"),
-		LogFormat:               required("LOG_FORMAT"),
+		Logging:                 logSettings,
 		ServiceAccountNamespace: required("SANDBOX_RBAC_BACKEND_SERVICE_ACCOUNT_NAMESPACE"),
 		ServiceAccountName:      required("SANDBOX_RBAC_BACKEND_SERVICE_ACCOUNT_NAME"),
 	}
@@ -444,6 +446,14 @@ func LoadSandboxRBACProvisioner() (SandboxRBACProvisionerConfig, error) {
 		return SandboxRBACProvisionerConfig{}, fmt.Errorf("加载沙箱 RBAC 预配器配置失败: %s", strings.Join(errs, "; "))
 	}
 	return cfg, nil
+}
+
+func loadLogging(errs *[]string) logging.Settings {
+	settings, err := logging.ParseSettings(os.Getenv("LOG_LEVEL"), os.Getenv("LOG_FORMAT"))
+	if err != nil {
+		*errs = append(*errs, err.Error())
+	}
+	return settings
 }
 
 // SandboxToleration 描述沙箱工作负载允许调度到带污点节点的最小配置。
@@ -576,9 +586,8 @@ func Load() (*Config, error) {
 	}
 	// 第二步:按配置域分组装载环境变量,保持 deploy/server/db/... 的职责边界清晰。
 	c.Deploy = DeployConfig{
-		Mode:            req("DEPLOY_MODE"),
-		PlatformEnabled: reqBool("PLATFORM_LAYER_ENABLED"),
-		SchoolTenantID:  optInt64("SCHOOL_TENANT_ID"),
+		Mode:           strings.ToLower(strings.TrimSpace(req("DEPLOY_MODE"))),
+		SchoolTenantID: optInt64("SCHOOL_TENANT_ID"),
 	}
 	c.Server = ServerConfig{
 		Addr:                           req("HTTP_ADDR"),
@@ -586,8 +595,7 @@ func Load() (*Config, error) {
 		WSPath:                         req("WS_PATH"),
 		WSAllowedOrigins:               getCSV("WS_ALLOWED_ORIGINS"),
 		TrustedProxies:                 getCSV("HTTP_TRUSTED_PROXIES"),
-		LogLevel:                       req("LOG_LEVEL"),
-		LogFormat:                      req("LOG_FORMAT"),
+		Logging:                        loadLogging(&errs),
 		AppEnv:                         req("APP_ENV"),
 		HealthTimeoutSeconds:           reqInt("HEALTH_CHECK_TIMEOUT_SECONDS"),
 		ReadinessProbeTimeoutSeconds:   reqInt("HTTP_READINESS_PROBE_TIMEOUT_SECONDS"),
@@ -617,8 +625,8 @@ func Load() (*Config, error) {
 		AppMinConns:                      reqInt("PG_APP_MIN_CONNS"),
 		PrivMaxConns:                     reqInt("PG_PRIV_MAX_CONNS"),
 		PrivMinConns:                     reqInt("PG_PRIV_MIN_CONNS"),
-		PrivUser:                         os.Getenv("PG_PRIV_USER"),
-		PrivPassword:                     os.Getenv("PG_PRIV_PASSWORD"),
+		PrivUser:                         strings.TrimSpace(req("PG_PRIV_USER")),
+		PrivPassword:                     req("PG_PRIV_PASSWORD"),
 		StartupTimeoutSeconds:            reqInt("PG_STARTUP_TIMEOUT_SECONDS"),
 		StartupRetryIntervalMilliseconds: reqInt("PG_STARTUP_RETRY_INTERVAL_MILLISECONDS"),
 		GrantTimeoutSeconds:              reqInt("PG_GRANT_TIMEOUT_SECONDS"),
@@ -682,7 +690,6 @@ func Load() (*Config, error) {
 		ServiceAuthMaxSkewSeconds: reqInt("SERVICE_AUTH_MAX_SKEW_SECONDS"),
 	}
 	c.Bootstrap = BootstrapConfig{
-		SchoolTenantID:        c.Deploy.SchoolTenantID,
 		SchoolTenantCode:      os.Getenv("BOOTSTRAP_SCHOOL_TENANT_CODE"),
 		SchoolName:            os.Getenv("BOOTSTRAP_SCHOOL_NAME"),
 		SchoolType:            optInt16("BOOTSTRAP_SCHOOL_TYPE"),
@@ -953,12 +960,14 @@ func Load() (*Config, error) {
 	if c.Postgres.PrivMaxConns <= 0 || c.Postgres.PrivMinConns < 0 || c.Postgres.PrivMinConns > c.Postgres.PrivMaxConns {
 		errs = append(errs, "PG_PRIV_MAX_CONNS 与 PG_PRIV_MIN_CONNS 配置无效")
 	}
-	deployMode := strings.ToLower(strings.TrimSpace(c.Deploy.Mode))
-	if deployMode != DeployModeSaaS && deployMode != DeployModeSchool {
+	if !c.Deploy.IsSaaS() && !c.Deploy.IsSchool() {
 		errs = append(errs, "DEPLOY_MODE 必须为 saas 或 school")
 	}
-	if deployMode == DeployModeSchool && c.Deploy.SchoolTenantID == 0 {
-		errs = append(errs, "DEPLOY_MODE=school 时必须设置 SCHOOL_TENANT_ID")
+	if c.Deploy.IsSchool() && c.Deploy.SchoolTenantID <= 0 {
+		errs = append(errs, "DEPLOY_MODE=school 时 SCHOOL_TENANT_ID 必须为正整数")
+	}
+	if strings.TrimSpace(c.Postgres.User) == c.Postgres.PrivUser && c.Postgres.PrivUser != "" {
+		errs = append(errs, "PG_PRIV_USER 必须与 PG_USER 不同")
 	}
 	if c.Auth.ServiceAuthMaxSkewSeconds <= 0 {
 		errs = append(errs, "SERVICE_AUTH_MAX_SKEW_SECONDS 必须大于 0")

@@ -128,7 +128,7 @@ func (s *Service) SubmitReport(ctx context.Context, instanceID int64, req Report
 			}
 			shouldPublish = true
 		}
-		profiles, err = s.reportProfiles(ctx, []ExperimentReport{report})
+		profiles, err = s.reportProfiles(ctx, id.TenantID, []ExperimentReport{report})
 		if err != nil {
 			return err
 		}
@@ -228,7 +228,7 @@ func (s *Service) deletePreviousReportObject(ctx context.Context, tenantID, inst
 }
 
 // reportProfiles 把报告提交者一次批量解析为账号档案,避免逐条调用形成 N+1。
-func (s *Service) reportProfiles(ctx context.Context, reports []ExperimentReport) (map[int64]contracts.AccountInfo, error) {
+func (s *Service) reportProfiles(ctx context.Context, tenantID int64, reports []ExperimentReport) (map[int64]contracts.AccountInfo, error) {
 	seen := make(map[int64]struct{}, len(reports))
 	accountIDs := make([]int64, 0, len(reports))
 	for _, report := range reports {
@@ -241,7 +241,7 @@ func (s *Service) reportProfiles(ctx context.Context, reports []ExperimentReport
 	if len(accountIDs) == 0 {
 		return map[int64]contracts.AccountInfo{}, nil
 	}
-	accounts, err := s.roles.BatchGetAccounts(ctx, accountIDs)
+	accounts, err := s.roles.BatchGetAccounts(ctx, tenantID, accountIDs)
 	if err != nil {
 		return nil, apperr.ErrExperimentReportInvalid.WithCause(err)
 	}
@@ -299,7 +299,7 @@ func (s *Service) ListReports(ctx context.Context, experimentID int64, status in
 	}); err != nil {
 		return nil, 0, 0, 0, nil, err
 	}
-	profiles, err := s.reportProfiles(ctx, items)
+	profiles, err := s.reportProfiles(ctx, id.TenantID, items)
 	if err != nil {
 		return nil, 0, 0, 0, nil, err
 	}
@@ -421,7 +421,7 @@ func (s *Service) GradeReport(ctx context.Context, reportID int64, req GradeRepo
 				}
 			}
 		}
-		profiles, err = s.reportProfiles(ctx, []ExperimentReport{report})
+		profiles, err = s.reportProfiles(ctx, id.TenantID, []ExperimentReport{report})
 		if err != nil {
 			return err
 		}

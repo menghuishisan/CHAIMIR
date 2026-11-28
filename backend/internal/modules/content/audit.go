@@ -35,7 +35,7 @@ func resolveAuditActor(ctx context.Context, identity audit.IdentityReader) (audi
 	if !ok || id.TenantID <= 0 || id.AccountID <= 0 || id.IsSystem || id.IsPlatform || identity == nil {
 		return auditActorSnapshot{}, apperr.ErrAuditActorResolveFailed
 	}
-	account, err := identity.GetAccount(ctx, id.AccountID)
+	account, err := identity.GetAccount(ctx, id.TenantID, id.AccountID)
 	if err != nil {
 		return auditActorSnapshot{}, apperr.ErrAuditActorResolveFailed.WithCause(err)
 	}

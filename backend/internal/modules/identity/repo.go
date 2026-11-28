@@ -10,7 +10,6 @@ import (
 
 	"chaimir/internal/modules/identity/internal/sqlcgen"
 	"chaimir/internal/platform/db"
-	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
 
 	"github.com/jackc/pgx/v5"
@@ -31,7 +30,7 @@ type TxStore interface {
 	ImportRowTx(ctx context.Context, fn func(context.Context, TxStore) error) (rowErr, transactionErr error)
 	AlertRecipients(context.Context, int64) ([]int64, error)
 	ReadAlertMetrics(context.Context, contracts.AlertMetricQuery) (map[string]float64, error)
-	UseTenant(ctx context.Context, tenantID int64) error
+
 	GetPlatformAdminByUsername(ctx context.Context, username string) (PlatformAdmin, error)
 	GetPlatformAdminByID(ctx context.Context, id int64) (PlatformAdmin, error)
 	LockPlatformAdmin(ctx context.Context, id int64) error
@@ -45,10 +44,10 @@ type TxStore interface {
 	ListTenants(ctx context.Context, query TenantListQuery) ([]Tenant, error)
 	CountTenantsByStatus(ctx context.Context, keyword string) (pagex.FacetGroup, error)
 	CreateTenant(ctx context.Context, input CreateTenantInput) (Tenant, error)
-	CreateTenantProvisionOutbox(ctx context.Context, item TenantProvisionOutbox) (TenantProvisionOutbox, error)
-	ClaimTenantProvisionOutbox(ctx context.Context, limit, maxAttempts int32, staleBefore, leaseUntil time.Time) ([]TenantProvisionOutbox, error)
-	MarkTenantProvisionOutboxPublished(ctx context.Context, id int64, leaseToken string) (TenantProvisionOutbox, error)
-	MarkTenantProvisionOutboxFailed(ctx context.Context, id int64, lastError, leaseToken string) (TenantProvisionOutbox, error)
+	CreateTenantProvisionOutbox(ctx context.Context, item TenantProvisionOutbox) error
+	ClaimTenantProvisionOutbox(ctx context.Context, maxAttempts int32, lease time.Duration) (TenantProvisionOutbox, error)
+	MarkTenantProvisionOutboxPublished(ctx context.Context, id int64, leaseToken string) error
+	MarkTenantProvisionOutboxFailed(ctx context.Context, id int64, lastError, leaseToken string, maxAttempts int32, retryDelay time.Duration) error
 	UpdateTenantConfig(ctx context.Context, input UpdateTenantConfigInput) (Tenant, error)
 	UpdateTenantStatus(ctx context.Context, input UpdateTenantStatusInput) (Tenant, error)
 	CreateTenantApplication(ctx context.Context, input CreateApplicationRequest, id int64) (TenantApplication, error)
@@ -62,6 +61,7 @@ type TxStore interface {
 	LockAccount(ctx context.Context, tenantID, id int64) error
 	LockSchoolAdministrationScope(ctx context.Context, tenantID int64) error
 	BatchGetAccounts(ctx context.Context, ids []int64) ([]Account, error)
+	PlatformAccountNames(ctx context.Context, ids []int64) (map[int64]string, error)
 	ListAccountsByPhoneHash(ctx context.Context, phoneHash string) ([]LoginCandidate, error)
 	GetAccountByPhoneHash(ctx context.Context, tenantID int64, phoneHash string) (Account, error)
 	GetAccountByNo(ctx context.Context, no string) (Account, error)
@@ -143,13 +143,17 @@ type store struct {
 
 // txStore 封装单事务 sqlc 查询对象。
 type txStore struct {
-	q  *sqlcgen.Queries
-	tx pgx.Tx
+	q        *sqlcgen.Queries
+	tx       pgx.Tx
+	tenantID int64
 }
 
 // NewStore 创建 identity 模块持久化入口,仅装配层应调用。
-func NewStore(database *db.DB) Store {
-	return &store{database: database}
+func NewStore(database *db.DB) (Store, error) {
+	if database == nil {
+		return nil, fmt.Errorf("identity store 缺少数据库")
+	}
+	return &store{database: database}, nil
 }
 
 // isNoRows 通过统一数据库边界识别未命中,避免 service 依赖 pgx 错误类型。
@@ -160,20 +164,6 @@ func isNoRows(err error) bool {
 // isUniqueViolation 通过统一数据库边界识别唯一约束冲突,供 service 映射稳定业务错误。
 func isUniqueViolation(err error) bool {
 	return db.IsUniqueViolation(err)
-}
-
-// UseTenant 在当前事务中注入 RLS 租户变量,用于平台审核或私有化初始化的首管账号及事件写入。
-func (t *txStore) UseTenant(ctx context.Context, tenantID int64) error {
-	if t == nil || t.tx == nil {
-		return fmt.Errorf("identity tx store 未初始化")
-	}
-	if tenantID <= 0 {
-		return fmt.Errorf("tenant_id 必须大于 0")
-	}
-	if _, err := t.tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", ids.Format(tenantID)); err != nil {
-		return fmt.Errorf("注入 app.tenant_id 失败: %w", err)
-	}
-	return nil
 }
 
 // ImportRowTx 隔离单行的部分写入和SQL错误，保存点故障不能当作普通坏行继续。
@@ -191,7 +181,7 @@ func (t *txStore) ImportRowTx(ctx context.Context, fn func(context.Context, TxSt
 			rowErr = nil
 		}
 	}()
-	if rowErr = fn(ctx, &txStore{q: sqlcgen.New(row), tx: row}); rowErr != nil {
+	if rowErr = fn(ctx, &txStore{q: sqlcgen.New(row), tx: row, tenantID: t.tenantID}); rowErr != nil {
 		return rowErr, nil
 	}
 	if err := row.Commit(ctx); err != nil {
@@ -200,51 +190,36 @@ func (t *txStore) ImportRowTx(ctx context.Context, fn func(context.Context, TxSt
 	return nil, nil
 }
 
-// PlatformTx 在应用连接中访问平台级表和平台管理员路径。
+// PlatformTx 使用 identity 模块角色访问平台数据。
 func (s *store) PlatformTx(ctx context.Context, fn func(context.Context, TxStore) error) error {
-	if s == nil || s.database == nil {
-		return fmt.Errorf("identity store 未初始化")
-	}
-	return s.database.WithAppTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	return s.database.WithPlatformTx(ctx, "identity", func(ctx context.Context, tx pgx.Tx) error {
 		return fn(ctx, &txStore{q: sqlcgen.New(tx), tx: tx})
 	})
 }
 
 // PlatformTxIfPresent 供跨模块审计复用调用方应用事务,没有外层事务时不执行回调。
 func (s *store) PlatformTxIfPresent(ctx context.Context, fn func(context.Context, TxStore) error) (bool, error) {
-	if s == nil || s.database == nil {
-		return false, fmt.Errorf("identity store 未初始化")
-	}
-	return s.database.WithAppTxIfPresent(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	return s.database.WithPlatformTxIfPresent(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		return fn(ctx, &txStore{q: sqlcgen.New(tx), tx: tx})
 	})
 }
 
 // TenantTx 在注入 RLS 租户变量后访问租户内自有表。
 func (s *store) TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error {
-	if s == nil || s.database == nil {
-		return fmt.Errorf("identity store 未初始化")
-	}
 	return s.database.WithTenantTxID(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		return fn(ctx, &txStore{q: sqlcgen.New(tx), tx: tx})
+		return fn(ctx, &txStore{q: sqlcgen.New(tx), tx: tx, tenantID: tenantID})
 	})
 }
 
 // TenantTxIfPresent 供跨模块审计复用同租户事务,没有外层事务时不执行回调。
 func (s *store) TenantTxIfPresent(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) (bool, error) {
-	if s == nil || s.database == nil {
-		return false, fmt.Errorf("identity store 未初始化")
-	}
 	return s.database.WithTenantTxIfPresent(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		return fn(ctx, &txStore{q: sqlcgen.New(tx), tx: tx})
+		return fn(ctx, &txStore{q: sqlcgen.New(tx), tx: tx, tenantID: tenantID})
 	})
 }
 
 // PrivilegedTx 用特权连接处理预认证定位和平台统计,不得作为普通业务路径使用。
 func (s *store) PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error {
-	if s == nil || s.database == nil {
-		return fmt.Errorf("identity store 未初始化")
-	}
 	return s.database.WithPrivilegedModuleTx(ctx, "identity", func(ctx context.Context, tx pgx.Tx) error {
 		return fn(ctx, &txStore{q: sqlcgen.New(tx), tx: tx})
 	})

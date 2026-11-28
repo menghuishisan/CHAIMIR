@@ -109,7 +109,7 @@ func (a transferAPI) isSchoolAdmin(c *gin.Context, accountID int64) (bool, error
 	}
 	ok, err := a.roles.HasRole(c.Request.Context(), accountID, contracts.RoleSchoolAdmin)
 	if err != nil {
-		return false, apperr.ErrTransferTaskForbidden.WithCause(err)
+		return false, apperr.AsAppError(err)
 	}
 	return ok, nil
 }

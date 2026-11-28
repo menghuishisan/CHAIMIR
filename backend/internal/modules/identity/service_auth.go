@@ -20,7 +20,7 @@ import (
 
 // LoginPlatform 校验平台管理员凭证并签发平台级 Token。
 func (s *Service) LoginPlatform(ctx context.Context, req LoginPlatformRequest, device, ip string) (LoginResponse, error) {
-	if !s.deploy.PlatformEnabled {
+	if !s.deploy.IsSaaS() {
 		return LoginResponse{}, apperr.ErrIdentityPlatformLoginDisabled
 	}
 	var admin PlatformAdmin
@@ -636,7 +636,7 @@ func (s *Service) refreshTenantSession(ctx context.Context, old AuthSession, dev
 
 // refreshPlatformSession 轮转平台管理员 Refresh 会话并签发新 Token。
 func (s *Service) refreshPlatformSession(ctx context.Context, old PlatformAuthSession, device, ip string) (LoginResponse, error) {
-	if !s.deploy.PlatformEnabled {
+	if !s.deploy.IsSaaS() {
 		return LoginResponse{}, apperr.ErrIdentitySessionInvalid
 	}
 	var out LoginResponse

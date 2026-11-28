@@ -3,6 +3,7 @@ package logging
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"regexp"
@@ -13,25 +14,63 @@ import (
 
 type attrsCtxKey struct{}
 
+const traceKey = "trace_id"
+
+// WithTrace 把追踪编号交给通用日志上下文保存。
+func WithTrace(ctx context.Context, traceID string) context.Context {
+	return WithAttrs(ctx, slog.String(traceKey, traceID))
+}
+
+// TraceFromContext 返回日志、事件和响应共用的追踪编号。
+func TraceFromContext(ctx context.Context) string {
+	attrs, _ := ctx.Value(attrsCtxKey{}).([]slog.Attr)
+	for _, attr := range attrs {
+		if attr.Key == traceKey && attr.Value.Kind() == slog.KindString {
+			return attr.Value.String()
+		}
+	}
+	return ""
+}
+
 type errorCloser interface {
 	Close() error
 }
 
-// Setup 按配置初始化全局 slog logger(json/text + level)。
-func Setup(level, format string) {
-	var lvl slog.Level
-	switch strings.ToLower(level) {
+type Settings struct {
+	level slog.Level
+	text  bool
+}
+
+// ParseSettings 校验各进程共用的日志配置。
+func ParseSettings(level, format string) (Settings, error) {
+	var cfg Settings
+	var levelErr, formatErr error
+	switch strings.ToLower(strings.TrimSpace(level)) {
 	case "debug":
-		lvl = slog.LevelDebug
+		cfg.level = slog.LevelDebug
+	case "info":
+		cfg.level = slog.LevelInfo
 	case "warn":
-		lvl = slog.LevelWarn
+		cfg.level = slog.LevelWarn
 	case "error":
-		lvl = slog.LevelError
+		cfg.level = slog.LevelError
 	default:
-		lvl = slog.LevelInfo
+		levelErr = errors.New("LOG_LEVEL 必须为 debug、info、warn 或 error")
 	}
-	opts := &slog.HandlerOptions{Level: lvl, ReplaceAttr: redactAttr}
-	if strings.EqualFold(format, "text") {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "json":
+	case "text":
+		cfg.text = true
+	default:
+		formatErr = errors.New("LOG_FORMAT 必须为 json 或 text")
+	}
+	return cfg, errors.Join(levelErr, formatErr)
+}
+
+// Setup 使用已校验的配置初始化全局 slog logger。
+func Setup(cfg Settings) {
+	opts := &slog.HandlerOptions{Level: cfg.level, ReplaceAttr: redactAttr}
+	if cfg.text {
 		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, opts)))
 		return
 	}
@@ -88,17 +127,9 @@ func CloseContext(ctx context.Context, msg string, closer errorCloser, attrs ...
 	}
 }
 
-type secretPattern struct {
-	re          *regexp.Regexp
-	replacement string
-}
-
 var (
 	credentialAssignmentPattern = regexp.MustCompile(`(?i)("?([a-z][a-z0-9_-]*)"?\s*[=:]\s*)("(?:[^"\\\r\n]|\\[^\r\n])*"|(?:(?:bearer|basic)\s+)?[^,\s;]+)`)
-	connectionSecretPatterns    = []secretPattern{
-		{regexp.MustCompile(`(?i)(postgres(?:ql)?://[^:\s/@]+:)([^@\s]+)(@)`), `${1}***${3}`},
-		{regexp.MustCompile(`(?i)(redis://[^:\s/@]+:)([^@\s]+)(@)`), `${1}***${3}`},
-	}
+	connectionSecretPattern     = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://[^:\s/@]*:)([^@/\s]+)(@)`)
 )
 
 var phonePattern = regexp.MustCompile(`\b1[3-9]\d{9}\b`)
@@ -106,9 +137,7 @@ var phonePattern = regexp.MustCompile(`\b1[3-9]\d{9}\b`)
 // SanitizeError 对日志错误文本做强制脱敏,覆盖 key/value、JSON 和常见连接串凭据形态。
 func SanitizeError(raw string) string {
 	masked := credentialAssignmentPattern.ReplaceAllStringFunc(raw, redactCredentialAssignment)
-	for _, pattern := range connectionSecretPatterns {
-		masked = pattern.re.ReplaceAllString(masked, pattern.replacement)
-	}
+	masked = connectionSecretPattern.ReplaceAllString(masked, `${1}***${3}`)
 	return phonePattern.ReplaceAllStringFunc(masked, privacy.MaskPhone)
 }
 
@@ -129,6 +158,15 @@ func redactCredentialAssignment(assignment string) string {
 func redactAttr(_ []string, attr slog.Attr) slog.Attr {
 	if privacy.IsCredentialKey(attr.Key) {
 		attr.Value = slog.StringValue("***")
+		return attr
+	}
+	switch attr.Value.Kind() {
+	case slog.KindString:
+		attr.Value = slog.StringValue(SanitizeError(attr.Value.String()))
+	case slog.KindAny:
+		if err, ok := attr.Value.Any().(error); ok {
+			attr.Value = slog.StringValue(SanitizeError(err.Error()))
+		}
 	}
 	return attr
 }

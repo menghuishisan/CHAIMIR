@@ -32,7 +32,10 @@ type IdentityModuleDeps struct {
 
 // RegisterIdentityModule 构造身份模块 store/service 并注册 HTTP 路由。
 func RegisterIdentityModule(deps IdentityModuleDeps) (*identity.Service, error) {
-	store := identity.NewStore(deps.Database)
+	store, err := identity.NewStore(deps.Database)
+	if err != nil {
+		return nil, err
+	}
 	smsSender, err := identity.NewSMSSender(deps.Config.SMS)
 	if err != nil {
 		return nil, err

@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"chaimir/internal/platform/response"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
 
@@ -133,9 +132,8 @@ func run(ctx context.Context, task Task) {
 
 func runOnce(ctx context.Context, task Task) {
 	traceID := uuid.NewString()
-	ctx = response.WithTrace(ctx, traceID)
+	ctx = logging.WithTrace(ctx, traceID)
 	ctx = logging.WithAttrs(ctx,
-		slog.String("trace_id", traceID),
 		slog.Int64("tenant_id", 0),
 		slog.String("task", task.Name),
 		slog.String("operation_scope", "system_background"),

@@ -19,7 +19,7 @@ func (t *txStore) CreateDepartment(ctx context.Context, tenantID, id int64, req 
 	if err := t.lockOrganizationScope(ctx, tenantID); err != nil {
 		return Department{}, err
 	}
-	row, err := t.q.CreateDepartment(ctx, sqlcgen.CreateDepartmentParams{ID: id, TenantID: tenantID, Name: req.Name, Code: pgtypex.Text(req.Code)})
+	row, err := t.q.CreateDepartment(ctx, sqlcgen.CreateDepartmentParams{ID: id, TenantID: tenantID, Name: req.Name, Code: req.Code})
 	if isNoRows(err) {
 		return Department{}, apperr.ErrIdentityOrgCodeConflict.WithCause(err)
 	}
@@ -31,7 +31,7 @@ func (t *txStore) CreateDepartment(ctx context.Context, tenantID, id int64, req 
 
 // ListDepartments 读取当前租户全部未删除院系。
 func (t *txStore) ListDepartments(ctx context.Context) ([]Department, error) {
-	rows, err := t.q.ListDepartments(ctx)
+	rows, err := t.q.ListDepartments(ctx, t.tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +59,7 @@ func (t *txStore) UpdateDepartment(ctx context.Context, tenantID, id int64, req 
 	if !exists {
 		return Department{}, apperr.ErrNotFound
 	}
-	row, err := t.q.UpdateDepartment(ctx, sqlcgen.UpdateDepartmentParams{ID: id, TenantID: tenantID, Name: req.Name, Code: pgtypex.Text(req.Code)})
+	row, err := t.q.UpdateDepartment(ctx, sqlcgen.UpdateDepartmentParams{ID: id, TenantID: tenantID, Name: req.Name, Code: req.Code})
 	if isNoRows(err) {
 		return Department{}, apperr.ErrIdentityOrgCodeConflict.WithCause(err)
 	}
@@ -105,7 +105,7 @@ func (t *txStore) CreateMajor(ctx context.Context, tenantID, id int64, req Major
 
 // ListMajors 读取专业列表,departmentID 为 0 时读取全部。
 func (t *txStore) ListMajors(ctx context.Context, departmentID int64) ([]Major, error) {
-	rows, err := t.q.ListMajors(ctx, departmentID)
+	rows, err := t.q.ListMajors(ctx, sqlcgen.ListMajorsParams{TenantID: t.tenantID, DepartmentID: departmentID})
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +172,7 @@ func (t *txStore) CreateClass(ctx context.Context, tenantID, id int64, req Class
 
 // ListClasses 读取班级列表,majorID 为 0 时读取全部。
 func (t *txStore) ListClasses(ctx context.Context, majorID int64) ([]Class, error) {
-	rows, err := t.q.ListClasses(ctx, majorID)
+	rows, err := t.q.ListClasses(ctx, sqlcgen.ListClassesParams{TenantID: t.tenantID, MajorID: majorID})
 	if err != nil {
 		return nil, err
 	}

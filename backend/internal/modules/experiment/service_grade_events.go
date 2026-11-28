@@ -13,7 +13,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
-	"chaimir/internal/platform/response"
+
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
@@ -35,7 +35,7 @@ func experimentMaximumScore(exp Experiment, memberCount int) float64 {
 func (s *Service) enqueueExperimentSourceEvent(ctx context.Context, tx TxStore, exp Experiment) error {
 	eventID := s.ids.Generate()
 	maxScore := experimentMaximumScore(exp, 1)
-	event := contracts.ExperimentCourseSourceChangedEvent{EventID: ids.Format(eventID), TenantID: exp.TenantID, TraceID: response.TraceFromContext(ctx), ExperimentID: exp.ID, ExperimentName: exp.Name, CourseID: exp.CourseID, SourceRevision: exp.UpdatedAt.UnixMicro(), Available: exp.Status == ExperimentStatusPublished, MaxScore: maxScore}
+	event := contracts.ExperimentCourseSourceChangedEvent{EventID: ids.Format(eventID), TenantID: exp.TenantID, TraceID: logging.TraceFromContext(ctx), ExperimentID: exp.ID, ExperimentName: exp.Name, CourseID: exp.CourseID, SourceRevision: exp.UpdatedAt.UnixMicro(), Available: exp.Status == ExperimentStatusPublished, MaxScore: maxScore}
 	if math.IsNaN(maxScore) || math.IsInf(maxScore, 0) || maxScore < 0 || event.TraceID == "" || event.SourceRevision <= 0 {
 		return apperr.ErrExperimentEventFailed
 	}
@@ -49,7 +49,7 @@ func (s *Service) enqueueExperimentSourceEvent(ctx context.Context, tx TxStore, 
 
 // enqueueExperimentEventOutbox 在实例锁内固化本次原始得分、课程和实际成员，SQL生成递增得分修订。
 func (s *Service) enqueueExperimentEventOutbox(ctx context.Context, tx TxStore, inst ExperimentInstance) error {
-	traceID := strings.TrimSpace(response.TraceFromContext(ctx))
+	traceID := strings.TrimSpace(logging.TraceFromContext(ctx))
 	if inst.TenantID <= 0 || inst.ExperimentID <= 0 || inst.ID <= 0 || inst.OwnerAccountID <= 0 || traceID == "" {
 		return apperr.ErrExperimentEventFailed
 	}
@@ -113,7 +113,7 @@ func (s *Service) RunExperimentEventOutboxOnce(ctx context.Context) error {
 
 // publishExperimentEvent 按原载荷发布并受租约保护回写状态，失败链不被回写错误覆盖。
 func (s *Service) publishExperimentEvent(ctx context.Context, item ExperimentEventOutbox) error {
-	eventCtx := response.WithTrace(ctx, item.TraceID)
+	eventCtx := logging.WithTrace(ctx, item.TraceID)
 	var publishErr error
 	if item.Subject != contracts.SubjectExperimentScored && item.Subject != contracts.SubjectExperimentCourseSourceChanged || !json.Valid(item.Payload) {
 		publishErr = apperr.ErrExperimentEventFailed.WithCause(fmt.Errorf("实验outbox主题或载荷无效: outbox_id=%d subject=%s", item.ID, item.Subject))

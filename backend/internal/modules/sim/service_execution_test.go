@@ -22,9 +22,9 @@ import (
 	"chaimir/internal/platform/eventbus"
 	platformk8s "chaimir/internal/platform/k8s"
 	platformredis "chaimir/internal/platform/redis"
-	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 	"chaimir/pkg/snowflake"
 
 	"github.com/alicebob/miniredis/v2"
@@ -1045,7 +1045,7 @@ func TestSessionChangesCloseStreamsAcrossReplicasUsingCurrentState(t *testing.T)
 	otherTenant := open(services[0].wsHub, 8, 12, scope)
 	otherScope := open(services[1].wsHub, 7, 12, simSessionSessionScope(92))
 	store.set(Session{ID: 91, TenantID: 7, OwnerAccountID: 11, SharedAccountIDs: []int64{13}, Status: SessionAvailable})
-	ctx := response.WithTrace(context.Background(), "sim-control-test")
+	ctx := logging.WithTrace(context.Background(), "sim-control-test")
 	if err := services[0].publishSessionChanged(ctx, 7, 91); err != nil {
 		t.Fatal(err)
 	}
@@ -1157,7 +1157,7 @@ type previewBatchBackend struct {
 }
 
 func (b *previewBatchBackend) Preview(ctx context.Context, pkg Package, runID int64, bundle *ExecutionBundle, frames int) (PreviewResult, error) {
-	if runID <= 0 || bundle != nil || frames != 1 || response.TraceFromContext(ctx) != "preview-batch" {
+	if runID <= 0 || bundle != nil || frames != 1 || logging.TraceFromContext(ctx) != "preview-batch" {
 		b.t.Fatal("preview changed native execution inputs or trace")
 	}
 	b.called = append(b.called, pkg.ID)
@@ -1199,7 +1199,7 @@ func TestPreviewBatchRetainsFailuresAndCancellation(t *testing.T) {
 	for _, mode := range []string{"success and rejected algorithm", "independent failures", "claim failure", "empty", "cancel before claim", "cancel claimed batch", "cancel empty claim", "claim failure and cancel", "cancel during report"} {
 		t.Run(mode, func(t *testing.T) {
 			service, store, backend := newPreviewFailureBatch(t)
-			ctx, cancel := context.WithCancel(response.WithTrace(context.Background(), "preview-batch"))
+			ctx, cancel := context.WithCancel(logging.WithTrace(context.Background(), "preview-batch"))
 			defer cancel()
 			causes := []error{errors.New("initial lease failure"), errors.New("preview execution failure"), errors.New("lease release failure"), errors.New("report write failure")}
 			wantRenewed := []int64{1, 2, 3, 4, 5, 6}
@@ -1293,7 +1293,7 @@ func TestPreviewLeaseLossRetainsExecutionFailure(t *testing.T) {
 	}
 	store.releaseErrors = map[int64]error{1: releaseErr}
 	backend.preview = func(ctx context.Context) (PreviewResult, error) { <-ctx.Done(); return PreviewResult{}, executeErr }
-	ctx := response.WithTrace(context.Background(), "preview-batch")
+	ctx := logging.WithTrace(context.Background(), "preview-batch")
 	err := service.previewPackageWithLease(ctx, store.packages[0], 3*time.Second)
 	for _, cause := range []error{renewErr, executeErr, releaseErr} {
 		if !errors.Is(err, cause) {

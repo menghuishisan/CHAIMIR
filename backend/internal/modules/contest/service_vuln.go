@@ -18,7 +18,7 @@ import (
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/netx"
 	"chaimir/internal/platform/pagex"
-	"chaimir/internal/platform/response"
+
 	"chaimir/internal/platform/secretmap"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
@@ -510,7 +510,7 @@ func (s *Service) runVulnPrevalidation(ctx context.Context, tenantID, accountID 
 	if err := s.sandbox.PrepareCompositions(ctx, []string{snapshot.Digest}); err != nil {
 		logging.ErrorContext(ctx, "vulnerability prevalidation composition preparation failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", tenantID), slog.Int64("problem_id", problem.ID))
 		detail["error"] = safeDetailError(err)
-		detail["trace_id"] = response.TraceFromContext(ctx)
+		detail["trace_id"] = logging.TraceFromContext(ctx)
 		return VulnPrevalidateFailed, detail
 	}
 	positive, err := s.runVulnValidationCase(ctx, tenantID, accountID, problem, snapshot, "positive", true)
@@ -518,7 +518,7 @@ func (s *Service) runVulnPrevalidation(ctx context.Context, tenantID, accountID 
 	if err != nil {
 		logging.ErrorContext(ctx, "vulnerability prevalidation failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", tenantID), slog.Int64("problem_id", problem.ID), slog.String("phase", "positive"))
 		detail["error"] = safeDetailError(err)
-		detail["trace_id"] = response.TraceFromContext(ctx)
+		detail["trace_id"] = logging.TraceFromContext(ctx)
 		return VulnPrevalidateFailed, detail
 	}
 	negative, err := s.runVulnValidationCase(ctx, tenantID, accountID, problem, snapshot, "negative", false)
@@ -526,7 +526,7 @@ func (s *Service) runVulnPrevalidation(ctx context.Context, tenantID, accountID 
 	if err != nil {
 		logging.ErrorContext(ctx, "vulnerability prevalidation failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", tenantID), slog.Int64("problem_id", problem.ID), slog.String("phase", "negative"))
 		detail["error"] = safeDetailError(err)
-		detail["trace_id"] = response.TraceFromContext(ctx)
+		detail["trace_id"] = logging.TraceFromContext(ctx)
 		return VulnPrevalidateFailed, detail
 	}
 	if !boolFromMap(positive, "passed") || !boolFromMap(negative, "passed") {

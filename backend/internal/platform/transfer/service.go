@@ -153,11 +153,7 @@ func (s *Service) ClaimTask(ctx context.Context, tenantID, taskID int64) (Task, 
 	if tenantID < 0 || taskID <= 0 {
 		return Task{}, apperr.ErrTransferTaskInvalid
 	}
-	claimed, err := s.manager.ClaimTask(Task{TaskID: taskID, TenantID: tenantID}, uuid.NewString(), timex.Now())
-	if err != nil {
-		return Task{}, apperr.ErrTransferTaskInvalid.WithCause(err)
-	}
-	return s.store.ClaimTask(ctx, claimed)
+	return s.store.ClaimTask(ctx, tenantID, taskID, uuid.NewString(), s.manager.Config.LeaseDuration)
 }
 
 // RunWithLease 在模块 worker 处理长任务期间续租,失去租约时取消执行上下文。
@@ -188,7 +184,7 @@ func (s *Service) RunWithLease(ctx context.Context, task Task, run func(context.
 
 // renewTaskLease 延长仍有效且由当前任务 token 持有的租约。
 func (s *Service) renewTaskLease(ctx context.Context, task Task, leaseDuration time.Duration) (bool, error) {
-	return s.store.RenewTaskLease(ctx, task.TenantID, task.TaskID, task.LeaseToken, timex.Now().Add(leaseDuration))
+	return s.store.RenewTaskLease(ctx, task.TenantID, task.TaskID, task.LeaseToken, leaseDuration)
 }
 
 // CompleteTask 完成已由当前租约领取的任务并登记统一文件服务对象引用。
@@ -196,23 +192,19 @@ func (s *Service) CompleteTask(ctx context.Context, task Task, req CompleteTaskR
 	if task.TenantID < 0 || task.TaskID <= 0 || task.Status != StatusRunning || strings.TrimSpace(task.LeaseToken) == "" {
 		return Task{}, apperr.ErrTransferTaskInvalid
 	}
-	completed, err := s.manager.CompleteTask(task, req)
-	if err != nil {
-		return Task{}, apperr.ErrTransferTaskInvalid.WithCause(err)
+	ref := strings.TrimSpace(req.ObjectRef)
+	if ref == "" || req.Size <= 0 {
+		return Task{}, apperr.ErrTransferTaskInvalid
 	}
-	return s.store.CompleteTask(ctx, completed, task.LeaseToken)
+	return s.store.CompleteTask(ctx, task, Artifact{ObjectRef: ref, Size: req.Size, ContentType: task.ContentType, FileName: task.FileName})
 }
 
 // FailTask 按统一重试策略记录当前租约内的任务失败。
-func (s *Service) FailTask(ctx context.Context, task Task, cause error, now time.Time) (Task, error) {
-	if task.TenantID < 0 || task.TaskID <= 0 || task.Status != StatusRunning || strings.TrimSpace(task.LeaseToken) == "" {
+func (s *Service) FailTask(ctx context.Context, task Task, cause error) (Task, error) {
+	if task.TenantID < 0 || task.TaskID <= 0 || task.Status != StatusRunning || strings.TrimSpace(task.LeaseToken) == "" || cause == nil {
 		return Task{}, apperr.ErrTransferTaskInvalid
 	}
-	failed, err := s.manager.FailTask(task, cause, now)
-	if err != nil {
-		return Task{}, apperr.ErrTransferTaskInvalid.WithCause(err)
-	}
-	return s.store.FailTask(ctx, failed, task.LeaseToken)
+	return s.store.FailTask(ctx, task, strings.TrimSpace(cause.Error()), s.manager.Config.RetryDelay)
 }
 
 // BuildDownloadGrant 校验任务归属，并把下载授权绑定到申请账号。
@@ -238,7 +230,7 @@ func (s *Service) BuildDownloadGrant(ctx context.Context, tenantID, taskID, acco
 		ResourceID:         ids.Format(task.TaskID),
 	})
 	if err != nil {
-		return DownloadGrantDTO{}, apperr.ErrTransferTaskNotDownloadable.WithCause(err)
+		return DownloadGrantDTO{}, apperr.AsAppError(err)
 	}
 	return DownloadGrantDTO{Token: token, Task: TaskToDTO(task), ExpiresAt: timex.RFC3339OrEmpty(grant.ExpiresAt)}, nil
 }

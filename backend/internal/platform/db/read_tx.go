@@ -10,6 +10,8 @@ import (
 
 type transactionContextKey struct{}
 
+type maintenanceTransaction struct{}
+
 type transactionContext struct {
 	database      *DB
 	tenantID      int64
@@ -46,17 +48,17 @@ func (d *DB) WithTenantTxIfPresent(ctx context.Context, tenantID int64, fn TxFun
 	return true, fn(ctx, current.tx)
 }
 
-// WithAppTxIfPresent 只在调用方已开启同数据库应用事务时执行 fn。
-func (d *DB) WithAppTxIfPresent(ctx context.Context, fn TxFunc) (bool, error) {
+// WithPlatformTxIfPresent 只在调用方已开启同数据库平台事务时执行 fn。
+func (d *DB) WithPlatformTxIfPresent(ctx context.Context, fn TxFunc) (bool, error) {
 	if d == nil || ctx == nil || fn == nil {
-		return false, fmt.Errorf("应用事务复用参数不完整")
+		return false, fmt.Errorf("平台事务复用参数不完整")
 	}
 	current, ok := ctx.Value(transactionContextKey{}).(transactionContext)
 	if !ok {
 		return false, nil
 	}
 	if current.database != d || current.tenantID != 0 || current.tx == nil {
-		return false, fmt.Errorf("应用事务不可跨数据库或租户复用")
+		return false, fmt.Errorf("平台事务不可跨数据库或租户复用")
 	}
 	return true, fn(ctx, current.tx)
 }

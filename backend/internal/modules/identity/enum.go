@@ -1,6 +1,10 @@
 // identity 枚举定义身份模块内部持久化状态、角色和导入类型的稳定取值。
 package identity
 
+func validSchoolType(value int16) bool {
+	return value >= 1 && value <= 4
+}
+
 const (
 	TenantStatusActive   int16 = 1
 	TenantStatusDisabled int16 = 2

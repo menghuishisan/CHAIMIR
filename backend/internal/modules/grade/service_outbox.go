@@ -10,7 +10,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/intx"
-	"chaimir/internal/platform/response"
+
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
@@ -25,7 +25,7 @@ func (s *Service) enqueueLockOutbox(ctx context.Context, tx TxStore, review Revi
 
 // createLockOutbox 保存本次权威锁修订,供同事务申诉精确引用因果边界。
 func (s *Service) createLockOutbox(ctx context.Context, tx TxStore, review ReviewDTO, locked bool, reason string) (GradeLockOutbox, error) {
-	traceID := strings.TrimSpace(response.TraceFromContext(ctx))
+	traceID := strings.TrimSpace(logging.TraceFromContext(ctx))
 	if review.TenantID <= 0 || review.ID <= 0 || review.CourseID <= 0 || traceID == "" || strings.TrimSpace(reason) == "" {
 		return GradeLockOutbox{}, apperr.ErrGradeEventPublishFailed
 	}
@@ -91,7 +91,7 @@ func (s *Service) publishLockOutboxItem(ctx context.Context, item GradeLockOutbo
 	if item.Revision <= 0 || item.ChangedAt.IsZero() {
 		return apperr.ErrGradeEventPublishFailed.WithCause(fmt.Errorf("成绩锁事件缺少权威修订或变更时间: outbox_id=%d", item.ID))
 	}
-	eventCtx := response.WithTrace(ctx, item.TraceID)
+	eventCtx := logging.WithTrace(ctx, item.TraceID)
 	payload := contracts.GradeReviewLockChangedEvent{TenantID: item.TenantID, TraceID: item.TraceID, ReviewID: item.ReviewID, CourseID: item.CourseID, Locked: item.Locked, Revision: item.Revision, Reason: item.Reason, ChangedAt: item.ChangedAt}
 	if err := s.bus.Publish(eventCtx, contracts.SubjectGradeReviewLockChanged, payload); err != nil {
 		markErr := s.recordLockOutboxFailure(eventCtx, item, err)

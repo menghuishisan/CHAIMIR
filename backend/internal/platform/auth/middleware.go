@@ -328,14 +328,14 @@ func AuthorizeTenantAnyRole(c *gin.Context, identity contracts.IdentityService, 
 
 func authorizeAccountRoles(c *gin.Context, identity contracts.IdentityService, accountID int64, roles []string) bool {
 	if identity == nil {
-		response.Fail(c, apperr.ErrForbidden)
+		response.Fail(c, apperr.ErrHTTPServiceMissing)
 		c.Abort()
 		return false
 	}
 	for _, role := range roles {
 		has, err := identity.HasRole(c.Request.Context(), accountID, role)
 		if err != nil {
-			response.Fail(c, apperr.ErrForbidden.WithCause(err))
+			response.Fail(c, err)
 			c.Abort()
 			return false
 		}
@@ -587,9 +587,9 @@ func (m *Manager) injectServiceIdentity(c *gin.Context) bool {
 	sourceRef := strings.TrimSpace(c.GetHeader(ServiceSourceRefHeader))
 	timestamp := strings.TrimSpace(c.GetHeader(ServiceTimestampHeader))
 	signature := strings.TrimSpace(c.GetHeader(ServiceSignatureHeader))
-	traceID := response.TraceFromGin(c)
+	traceID := strings.TrimSpace(c.GetHeader(response.TraceHeader))
 
-	if service == "" || tenantIDRaw == "" || sourceRef == "" || timestamp == "" || signature == "" || traceID == "" || len(m.hmacKey) == 0 {
+	if service == "" || tenantIDRaw == "" || sourceRef == "" || timestamp == "" || signature == "" || !response.ValidTraceID(traceID) || len(m.hmacKey) == 0 {
 		response.Fail(c, apperr.ErrServiceUnauthorized)
 		c.Abort()
 		return false
@@ -628,7 +628,7 @@ func (m *Manager) injectServiceIdentity(c *gin.Context) bool {
 		slog.String("service", service),
 		slog.String("source_ref", sourceRef),
 	)
-	c.Request = c.Request.WithContext(ctx)
+	response.SetRequestTrace(c, ctx, traceID)
 	return true
 }
 

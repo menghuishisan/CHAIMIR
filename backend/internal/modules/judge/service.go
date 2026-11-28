@@ -19,7 +19,7 @@ import (
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/jsonx"
-	"chaimir/internal/platform/response"
+
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/upload"
@@ -731,7 +731,7 @@ func (s *Service) publishProgress(ctx context.Context, tenantID, taskID int64, s
 		logging.ErrorContext(ctx, "judge progress serialization failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", tenantID), slog.Int64("task_id", taskID), slog.String("stage", stage))
 		return
 	}
-	evt := contracts.NotifyPushRequestedEvent{TenantID: tenantID, TraceID: response.TraceFromContext(ctx), Topic: judgeProgressTopic(tenantID, taskID), Payload: payload}
+	evt := contracts.NotifyPushRequestedEvent{TenantID: tenantID, TraceID: logging.TraceFromContext(ctx), Topic: judgeProgressTopic(tenantID, taskID), Payload: payload}
 	if err := s.bus.Publish(ctx, contracts.SubjectNotifyPushRequested, evt); err != nil {
 		logging.ErrorContext(ctx, "judge progress publish failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", tenantID), slog.Int64("task_id", taskID), slog.String("stage", stage))
 	}

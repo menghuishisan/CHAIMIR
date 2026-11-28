@@ -14,7 +14,7 @@ import (
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/pagex"
-	"chaimir/internal/platform/response"
+
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/transfer"
@@ -845,7 +845,7 @@ func (s *Service) reconcileGradeExportRequest(ctx context.Context, req CourseGra
 
 // failGradeExportRequest advances the leased task's retry state and synchronizes its next module scan.
 func (s *Service) failGradeExportRequest(ctx context.Context, req CourseGradeExportRequest, task transfer.Task, cause error) error {
-	failed, err := s.transfers.FailTask(ctx, task, cause, timex.Now())
+	failed, err := s.transfers.FailTask(ctx, task, cause)
 	if err != nil {
 		return errors.Join(cause, err, s.deferGradeExportRequest(ctx, req, timex.Now().Add(time.Duration(s.cfg.GradeExportWorkerPollMs)*time.Millisecond)))
 	}
@@ -921,7 +921,7 @@ func (s *Service) listCourseGradesForExport(ctx context.Context, tx TxStore, ten
 
 // enqueueTeachingGradeEventOutbox 在成绩写入同一事务内保存 M11 消费的成绩事件。
 func (s *Service) enqueueTeachingGradeEventOutbox(ctx context.Context, tx TxStore, tenantID, courseID, studentID int64) error {
-	traceID := strings.TrimSpace(response.TraceFromContext(ctx))
+	traceID := strings.TrimSpace(logging.TraceFromContext(ctx))
 	if tenantID <= 0 || courseID <= 0 || studentID <= 0 || traceID == "" {
 		return apperr.ErrTeachingGradeEventPublishFailed
 	}
@@ -973,7 +973,7 @@ func (s *Service) publishGradeEventOutboxItem(ctx context.Context, item Teaching
 	if item.Revision <= 0 || item.LockRevision < 0 || item.EventUpdatedAt.IsZero() {
 		return apperr.ErrTeachingGradeEventPublishFailed.WithCause(fmt.Errorf("成绩事件缺少权威修订或原始时间: outbox_id=%d", item.ID))
 	}
-	eventCtx := response.WithTrace(ctx, item.TraceID)
+	eventCtx := logging.WithTrace(ctx, item.TraceID)
 	payload := contracts.TeachingGradeUpdatedEvent{Revision: item.Revision, LockRevision: item.LockRevision, TenantID: item.TenantID, TraceID: item.TraceID, CourseID: item.CourseID, StudentID: item.StudentID, UpdatedAt: item.EventUpdatedAt}
 	if err := s.bus.Publish(eventCtx, contracts.SubjectTeachingGradeUpdated, payload); err != nil {
 		markErr := s.recordTeachingGradeEventOutboxFailure(eventCtx, item, err)

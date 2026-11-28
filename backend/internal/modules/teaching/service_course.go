@@ -56,7 +56,7 @@ func (s *Service) ListCourses(ctx context.Context, filter CourseListFilter) ([]C
 		return nil, 0, 0, 0, nil, mapCourseError(err)
 	}
 	// 教师档案在 identity 模块,事务外经契约一次批量读取
-	facts.teachers, err = s.courseTeachers(ctx, courses)
+	facts.teachers, err = s.courseTeachers(ctx, id.TenantID, courses)
 	if err != nil {
 		return nil, 0, 0, 0, nil, err
 	}

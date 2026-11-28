@@ -19,7 +19,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager) error {
 	api := r.Group("/api/v1")
 	registerAuthRoutes(api, svc, authn)
 	// 私有化部署没有平台层,直接不注册 /platform 路由,避免仅靠 handler 内部返回错误。
-	if svc.deploy.PlatformEnabled {
+	if svc.deploy.IsSaaS() {
 		registerPlatformRoutes(api, svc, authn)
 	}
 	registerTenantRoutes(api, svc, authn)

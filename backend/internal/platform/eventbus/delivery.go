@@ -55,6 +55,7 @@ func newDeliveryConfig(cfg config.NATSConfig) deliveryConfig {
 // handleMessage 单次投递仅调用一次handler,重试次数由broker持久记录。
 func (b *natsBus) handleMessage(ctx context.Context, subject, queue string, msg jetstream.Msg, handler Handler) {
 	eventCtx, eventErr := eventContext(ctx, msg.Data())
+	invalidMetadata := eventErr != nil
 	meta, err := msg.Metadata()
 	if err != nil {
 		logging.ErrorContext(eventCtx, "读取持久事件投递信息失败", err.Error(), slog.String("subject", subject), slog.String("queue", queue))
@@ -67,11 +68,9 @@ func (b *natsBus) handleMessage(ctx context.Context, subject, queue string, msg 
 	}
 	if eventErr == nil {
 		if meta.NumDelivered <= uint64(b.cfg.retryMax) {
-			handlerCtx, cancel := context.WithTimeout(eventCtx, b.cfg.ackWait)
+			ackReserve := min(b.cfg.requestTimeout, b.cfg.ackWait/2)
+			handlerCtx, cancel := context.WithTimeout(eventCtx, b.cfg.ackWait-ackReserve)
 			eventErr = invokeHandler(handlerCtx, msg.Data(), handler)
-			if eventErr == nil {
-				eventErr = handlerCtx.Err()
-			}
 			cancel()
 		} else {
 			// 上次死信写入失败后只重试持久死信,不再执行已耗尽的业务handler。
@@ -84,7 +83,7 @@ func (b *natsBus) handleMessage(ctx context.Context, subject, queue string, msg 
 	if eventErr != nil {
 		logging.ErrorContext(eventCtx, "持久事件处理失败", eventErr.Error(), slog.String("subject", subject),
 			slog.String("queue", queue), slog.Uint64("attempt_count", meta.NumDelivered), slog.Uint64("stream_sequence", meta.Sequence.Stream))
-		if meta.NumDelivered < uint64(b.cfg.retryMax) {
+		if !invalidMetadata && meta.NumDelivered < uint64(b.cfg.retryMax) {
 			b.retryDelivery(eventCtx, subject, queue, msg)
 			return
 		}
@@ -142,7 +141,7 @@ func (b *natsBus) publishDeadLetter(ctx context.Context, subject, queue string, 
 // requestContext 为所有管理/发布/确认请求设置上限,不延长调用方已有期限。
 func (b *natsBus) requestContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if ctx == nil {
-		ctx = b.ctx
+		ctx = context.Background()
 	}
 	return context.WithTimeout(ctx, b.cfg.requestTimeout)
 }

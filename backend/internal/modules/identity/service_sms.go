@@ -18,15 +18,12 @@ import (
 )
 
 // SendSMS 发送短信验证码,执行同号同场景重发间隔和每日上限。
-func (s *Service) SendSMS(ctx context.Context, req SendSMSRequest) error {
+func (s *Service) SendSMS(ctx context.Context, req SendSMSRequest) (sendErr error) {
 	if err := ValidatePhone(req.Phone); err != nil {
 		return err
 	}
 	if req.Scene != SMSSceneLogin && req.Scene != SMSSceneReset && req.Scene != SMSSceneChangePhone {
 		return apperr.ErrIdentitySMSSceneInvalid
-	}
-	if s.redis == nil {
-		return apperr.ErrInternal.WithCause(fmt.Errorf("短信限频依赖 Redis 未初始化"))
 	}
 	phone := strings.TrimSpace(req.Phone)
 	tenantID, err := s.resolveSMSSendTenant(ctx, phone, req.Scene, req.TenantID.Int64())
@@ -39,7 +36,8 @@ func (s *Service) SendSMS(ctx context.Context, req SendSMSRequest) error {
 	}
 	// 先写短间隔限频键,避免短信网关慢响应时同一号码被并发刷爆。
 	resendKey := fmt.Sprintf("identity:sms:resend:%s:%s:%d", ids.Format(tenantID), phoneHash, req.Scene)
-	reservation, err := s.redis.ObtainLease(ctx, resendKey, time.Duration(s.cfg.SMSResendSeconds)*time.Second)
+	resendWindow := time.Duration(s.cfg.SMSResendSeconds) * time.Second
+	reservation, err := s.redis.ObtainLease(ctx, resendKey, resendWindow)
 	if errors.Is(err, platformredis.ErrLeaseHeld) {
 		return apperr.ErrIdentitySMSTooFrequent
 	}
@@ -47,12 +45,28 @@ func (s *Service) SendSMS(ctx context.Context, req SendSMSRequest) error {
 		return apperr.ErrInternal.WithCause(err)
 	}
 	// 每日上限按手机号哈希统计,日志和 Redis key 都不暴露手机号明文。
-	dayKey := fmt.Sprintf("identity:sms:day:%s:%s:%s", ids.Format(tenantID), phoneHash, timex.Now().Format("20060102"))
-	count, err := s.redis.IncrWithTTL(ctx, dayKey, 24*time.Hour)
+	dayKey := fmt.Sprintf("identity:sms:daily:%s:%s:%s", ids.Format(tenantID), phoneHash, timex.Now().Format("20060102"))
+	defer func() {
+		if sendErr == nil {
+			return
+		}
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), resendWindow)
+		defer cancel()
+		// 请求结果丢失时仍可退还；占用标识不会匹配其他请求。
+		refundErr := s.redis.RefundQuota(cleanup, dayKey, reservation.Token())
+		releaseErr := reservation.Release(cleanup)
+		if errors.Is(releaseErr, platformredis.ErrLeaseNotHeld) {
+			releaseErr = nil
+		}
+		if refundErr != nil || releaseErr != nil {
+			sendErr = apperr.AsAppError(errors.Join(sendErr, refundErr, releaseErr))
+		}
+	}()
+	allowed, err := s.redis.ReserveQuota(ctx, dayKey, reservation.Token(), s.cfg.SMSDailyLimit, 24*time.Hour)
 	if err != nil {
 		return apperr.ErrInternal.WithCause(err)
 	}
-	if count > int64(s.cfg.SMSDailyLimit) {
+	if !allowed {
 		return apperr.ErrIdentitySMSDailyLimited
 	}
 	code, err := crypto.RandomToken(6)
@@ -78,23 +92,9 @@ func (s *Service) SendSMS(ctx context.Context, req SendSMSRequest) error {
 	}
 	// 先持久化哈希再发送明文验证码,避免用户收到数据库中不存在的验证码。
 	if err := s.sms.Send(ctx, phone, req.Scene, code); err != nil {
-		return apperr.ErrInternal.WithCause(errors.Join(err, s.rollbackSMSRateLimit(ctx, reservation.Release, dayKey)))
+		return apperr.AsAppError(err)
 	}
 	return nil
-}
-
-// rollbackSMSRateLimit 仅退还本次持有的窗口；调用取消后仍在原窗口预算内完成。
-func (s *Service) rollbackSMSRateLimit(ctx context.Context, release func(context.Context) error, dayKey string) error {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(s.cfg.SMSResendSeconds)*time.Second)
-	defer cancel()
-	var failures []error
-	if err := release(ctx); err != nil && !errors.Is(err, platformredis.ErrLeaseNotHeld) {
-		failures = append(failures, fmt.Errorf("回滚短信重发限频失败: %w", err))
-	}
-	if _, err := s.redis.Decr(ctx, dayKey); err != nil {
-		failures = append(failures, fmt.Errorf("回滚短信每日限额失败: %w", err))
-	}
-	return errors.Join(failures...)
 }
 
 // verifySMSCodeInTx 在调用方事务内完成验证码校验和一次性消费。

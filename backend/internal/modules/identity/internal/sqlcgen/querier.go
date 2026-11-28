@@ -13,10 +13,10 @@ type Querier interface {
 	ApproveTenantApplication(ctx context.Context, arg ApproveTenantApplicationParams) (TenantApplication, error)
 	ArchiveClassesByEnrollmentYear(ctx context.Context, arg ArchiveClassesByEnrollmentYearParams) error
 	ArchiveStudentAccountsByEnrollmentYear(ctx context.Context, arg ArchiveStudentAccountsByEnrollmentYearParams) error
-	BatchGetAccounts(ctx context.Context, dollar_1 []int64) ([]BatchGetAccountsRow, error)
+	BatchGetAccounts(ctx context.Context, arg BatchGetAccountsParams) ([]BatchGetAccountsRow, error)
 	// 平台操作记录(配置变更、场景审核)只存管理员编号;平台页面按一页编号一次解析姓名。
 	BatchGetPlatformAdminNames(ctx context.Context, ids []int64) ([]BatchGetPlatformAdminNamesRow, error)
-	ClaimTenantProvisionOutbox(ctx context.Context, arg ClaimTenantProvisionOutboxParams) ([]TenantProvisionOutbox, error)
+	ClaimTenantProvisionOutbox(ctx context.Context, arg ClaimTenantProvisionOutboxParams) (TenantProvisionOutbox, error)
 	ClassExists(ctx context.Context, arg ClassExistsParams) (bool, error)
 	ClearPasswordFailure(ctx context.Context, arg ClearPasswordFailureParams) error
 	// 账号管理列表的状态分段计数:套用身份、班级与关键词筛选,不套用状态筛选;口径同 ListAccounts(未删除)。
@@ -31,7 +31,7 @@ type Querier interface {
 	CreateAccountProfile(ctx context.Context, arg CreateAccountProfileParams) error
 	CreateAccountRole(ctx context.Context, arg CreateAccountRoleParams) error
 	CreateActivationCode(ctx context.Context, arg CreateActivationCodeParams) (ActivationCode, error)
-	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) (AuditLog, error)
+	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error
 	CreateAuthSession(ctx context.Context, arg CreateAuthSessionParams) (AuthSession, error)
 	CreateClass(ctx context.Context, arg CreateClassParams) (Class, error)
 	CreateDepartment(ctx context.Context, arg CreateDepartmentParams) (Department, error)
@@ -43,13 +43,13 @@ type Querier interface {
 	CreateSMSCode(ctx context.Context, arg CreateSMSCodeParams) (SmsCode, error)
 	CreateTenant(ctx context.Context, arg CreateTenantParams) (Tenant, error)
 	CreateTenantApplication(ctx context.Context, arg CreateTenantApplicationParams) (TenantApplication, error)
-	CreateTenantProvisionOutbox(ctx context.Context, arg CreateTenantProvisionOutboxParams) (TenantProvisionOutbox, error)
+	CreateTenantProvisionOutbox(ctx context.Context, arg CreateTenantProvisionOutboxParams) error
 	DeleteAccountRole(ctx context.Context, arg DeleteAccountRoleParams) error
 	DepartmentExists(ctx context.Context, arg DepartmentExistsParams) (bool, error)
 	// 明确放弃待提交预览时同步清除暂存原始内容,不影响已提交批次。
 	DiscardImportPreview(ctx context.Context, arg DiscardImportPreviewParams) (int64, error)
-	GetAccountByID(ctx context.Context, id int64) (GetAccountByIDRow, error)
-	GetAccountByNo(ctx context.Context, no string) (GetAccountByNoRow, error)
+	GetAccountByID(ctx context.Context, arg GetAccountByIDParams) (GetAccountByIDRow, error)
+	GetAccountByNo(ctx context.Context, arg GetAccountByNoParams) (GetAccountByNoRow, error)
 	GetAccountByPhoneHash(ctx context.Context, arg GetAccountByPhoneHashParams) (GetAccountByPhoneHashRow, error)
 	GetActivationCodeByHashPrivileged(ctx context.Context, codeHash string) (ActivationCode, error)
 	GetAuthSessionByID(ctx context.Context, arg GetAuthSessionByIDParams) (AuthSession, error)
@@ -75,10 +75,10 @@ type Querier interface {
 	// (学生的 org_id 必为同租户在用班级,由 0001 迁移的触发器保证),故按 org_id 过滤即为按班级。
 	// 只回在用学生:停用/归档/注销账号不该被加进新课程。
 	ListClassStudents(ctx context.Context, arg ListClassStudentsParams) ([]ListClassStudentsRow, error)
-	ListClasses(ctx context.Context, dollar_1 int64) ([]Class, error)
-	ListDepartments(ctx context.Context) ([]Department, error)
+	ListClasses(ctx context.Context, arg ListClassesParams) ([]Class, error)
+	ListDepartments(ctx context.Context, tenantID int64) ([]Department, error)
 	ListImportBatches(ctx context.Context, tenantID int64) ([]ImportBatch, error)
-	ListMajors(ctx context.Context, dollar_1 int64) ([]Major, error)
+	ListMajors(ctx context.Context, arg ListMajorsParams) ([]Major, error)
 	// 列表只读取公开预览结果,不取包含账号资料和密码哈希的原始rows。
 	ListPendingImportPreviews(ctx context.Context, arg ListPendingImportPreviewsParams) ([]ListPendingImportPreviewsRow, error)
 	ListPlatformAuthSessionsByAdmin(ctx context.Context, platformAdminID int64) ([]PlatformAuthSession, error)
@@ -93,8 +93,9 @@ type Querier interface {
 	MajorExists(ctx context.Context, arg MajorExistsParams) (bool, error)
 	MarkImportPreviewSubmitted(ctx context.Context, arg MarkImportPreviewSubmittedParams) (int64, error)
 	MarkSMSCodeUsed(ctx context.Context, arg MarkSMSCodeUsedParams) error
-	MarkTenantProvisionOutboxFailed(ctx context.Context, arg MarkTenantProvisionOutboxFailedParams) (TenantProvisionOutbox, error)
-	MarkTenantProvisionOutboxPublished(ctx context.Context, arg MarkTenantProvisionOutboxPublishedParams) (TenantProvisionOutbox, error)
+	MarkTenantProvisionOutboxFailed(ctx context.Context, arg MarkTenantProvisionOutboxFailedParams) (int64, error)
+	MarkTenantProvisionOutboxPublished(ctx context.Context, arg MarkTenantProvisionOutboxPublishedParams) (int64, error)
+	PlatformAccountNames(ctx context.Context, accountIds []int64) ([]PlatformAccountNamesRow, error)
 	PlatformStats(ctx context.Context) (PlatformStatsRow, error)
 	PromoteClassStudentProfiles(ctx context.Context, arg PromoteClassStudentProfilesParams) error
 	PromoteClasses(ctx context.Context, arg PromoteClassesParams) (int64, error)

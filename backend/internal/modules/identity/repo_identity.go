@@ -25,50 +25,41 @@ func (t *txStore) GetPlatformAdminByUsername(ctx context.Context, username strin
 }
 
 // CreateTenantProvisionOutbox 在租户创建事务内保存初始化事件。
-func (t *txStore) CreateTenantProvisionOutbox(ctx context.Context, item TenantProvisionOutbox) (TenantProvisionOutbox, error) {
-	row, err := t.q.CreateTenantProvisionOutbox(ctx, sqlcgen.CreateTenantProvisionOutboxParams{
+func (t *txStore) CreateTenantProvisionOutbox(ctx context.Context, item TenantProvisionOutbox) error {
+	return t.q.CreateTenantProvisionOutbox(ctx, sqlcgen.CreateTenantProvisionOutboxParams{
 		ID: item.ID, TenantID: item.TenantID, DeployMode: item.DeployMode, TraceID: item.TraceID,
 		ProvisionedAt: timex.RequiredTimestamptz(item.ProvisionedAt),
 	})
-	if err != nil {
-		return TenantProvisionOutbox{}, err
-	}
-	return tenantProvisionOutboxFromRow(row), nil
 }
 
 // ClaimTenantProvisionOutbox 跨租户领取待发布或超时的初始化事件。
-func (t *txStore) ClaimTenantProvisionOutbox(ctx context.Context, limit, maxAttempts int32, staleBefore, leaseUntil time.Time) ([]TenantProvisionOutbox, error) {
+func (t *txStore) ClaimTenantProvisionOutbox(ctx context.Context, maxAttempts int32, lease time.Duration) (TenantProvisionOutbox, error) {
 	leaseToken, err := pkgcrypto.RandomToken(48)
 	if err != nil {
-		return nil, err
+		return TenantProvisionOutbox{}, err
 	}
-	rows, err := t.q.ClaimTenantProvisionOutbox(ctx, sqlcgen.ClaimTenantProvisionOutboxParams{LeaseToken: leaseToken, LeaseUntil: timex.RequiredTimestamptz(leaseUntil), StaleBefore: timex.RequiredTimestamptz(staleBefore), PageLimit: limit, MaxAttempts: maxAttempts})
+	row, err := t.q.ClaimTenantProvisionOutbox(ctx, sqlcgen.ClaimTenantProvisionOutboxParams{LeaseToken: leaseToken, LeaseMs: lease.Milliseconds(), MaxAttempts: maxAttempts})
+	if isNoRows(err) {
+		return TenantProvisionOutbox{}, nil
+	}
 	if err != nil {
-		return nil, err
+		return TenantProvisionOutbox{}, err
 	}
-	out := make([]TenantProvisionOutbox, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, tenantProvisionOutboxFromRow(row))
-	}
-	return out, nil
+	return tenantProvisionOutboxFromRow(row), nil
 }
 
 // MarkTenantProvisionOutboxPublished 标记初始化事件已经发布。
-func (t *txStore) MarkTenantProvisionOutboxPublished(ctx context.Context, id int64, leaseToken string) (TenantProvisionOutbox, error) {
-	row, err := t.q.MarkTenantProvisionOutboxPublished(ctx, sqlcgen.MarkTenantProvisionOutboxPublishedParams{ID: id, LeaseToken: leaseToken})
-	if err != nil {
-		return TenantProvisionOutbox{}, err
-	}
-	return tenantProvisionOutboxFromRow(row), nil
+func (t *txStore) MarkTenantProvisionOutboxPublished(ctx context.Context, id int64, leaseToken string) error {
+	_, err := t.q.MarkTenantProvisionOutboxPublished(ctx, sqlcgen.MarkTenantProvisionOutboxPublishedParams{ID: id, LeaseToken: leaseToken})
+	return err
 }
 
 // MarkTenantProvisionOutboxFailed 记录初始化事件发布失败原因供后续重试。
-func (t *txStore) MarkTenantProvisionOutboxFailed(ctx context.Context, id int64, lastError, leaseToken string) (TenantProvisionOutbox, error) {
-	row, err := t.q.MarkTenantProvisionOutboxFailed(ctx, sqlcgen.MarkTenantProvisionOutboxFailedParams{ID: id, LastError: pgtypex.Text(lastError), LeaseToken: leaseToken})
-	if err != nil {
-		return TenantProvisionOutbox{}, err
-	}
-	return tenantProvisionOutboxFromRow(row), nil
+func (t *txStore) MarkTenantProvisionOutboxFailed(ctx context.Context, id int64, lastError, leaseToken string, maxAttempts int32, retryDelay time.Duration) error {
+	_, err := t.q.MarkTenantProvisionOutboxFailed(ctx, sqlcgen.MarkTenantProvisionOutboxFailedParams{
+		ID: id, LastError: pgtypex.Text(lastError), LeaseToken: leaseToken, MaxAttempts: maxAttempts, RetryMs: retryDelay.Milliseconds(),
+	})
+	return err
 }
 
 // LockPlatformAdmin 串行化同一平台账号的登录、刷新和凭据变更。
@@ -170,7 +161,7 @@ func (t *txStore) CountTenantsByStatus(ctx context.Context, keyword string) (pag
 
 // CountAccountsByStatus 按状态聚合本校账号(套用身份、班级与关键词,不套用状态)。
 func (t *txStore) CountAccountsByStatus(ctx context.Context, query AccountQuery) (pagex.FacetGroup, error) {
-	rows, err := t.q.CountAccountsByStatus(ctx, sqlcgen.CountAccountsByStatusParams{BaseIdentity: query.BaseIdentity, ClassID: query.ClassID, Keyword: query.Keyword, PhoneHash: query.PhoneHash})
+	rows, err := t.q.CountAccountsByStatus(ctx, sqlcgen.CountAccountsByStatusParams{TenantID: t.tenantID, BaseIdentity: query.BaseIdentity, ClassID: query.ClassID, Keyword: query.Keyword, PhoneHash: query.PhoneHash})
 	if err != nil {
 		return nil, err
 	}
@@ -414,7 +405,7 @@ func (t *txStore) LockAccount(ctx context.Context, tenantID, id int64) error {
 
 // GetAccount 读取单个账号聚合快照。
 func (t *txStore) GetAccount(ctx context.Context, id int64) (Account, error) {
-	row, err := t.q.GetAccountByID(ctx, id)
+	row, err := t.q.GetAccountByID(ctx, sqlcgen.GetAccountByIDParams{ID: id, TenantID: t.tenantID})
 	if err != nil {
 		return Account{}, err
 	}
@@ -423,7 +414,7 @@ func (t *txStore) GetAccount(ctx context.Context, id int64) (Account, error) {
 
 // BatchGetAccounts 批量读取账号聚合快照。
 func (t *txStore) BatchGetAccounts(ctx context.Context, ids []int64) ([]Account, error) {
-	rows, err := t.q.BatchGetAccounts(ctx, ids)
+	rows, err := t.q.BatchGetAccounts(ctx, sqlcgen.BatchGetAccountsParams{AccountIds: ids, TenantID: t.tenantID})
 	if err != nil {
 		return nil, err
 	}
@@ -490,7 +481,7 @@ func (t *txStore) GetAccountByPhoneHash(ctx context.Context, tenantID int64, pho
 
 // GetAccountByNo 按学号或工号读取账号。
 func (t *txStore) GetAccountByNo(ctx context.Context, no string) (Account, error) {
-	row, err := t.q.GetAccountByNo(ctx, no)
+	row, err := t.q.GetAccountByNo(ctx, sqlcgen.GetAccountByNoParams{No: no, TenantID: t.tenantID})
 	if err != nil {
 		return Account{}, err
 	}
@@ -520,13 +511,14 @@ func (t *txStore) GetAccountByNo(ctx context.Context, no string) (Account, error
 // ListAccounts 分页读取学校管理员账号列表。
 func (t *txStore) ListAccounts(ctx context.Context, query AccountQuery) ([]Account, error) {
 	rows, err := t.q.ListAccounts(ctx, sqlcgen.ListAccountsParams{
-		Column1: query.Status,
-		Column2: query.BaseIdentity,
-		Column3: query.ClassID,
-		Column4: query.Keyword,
-		Limit:   query.Size,
-		Offset:  (query.Page - 1) * query.Size,
-		Column7: query.PhoneHash,
+		Column1:  query.Status,
+		Column2:  query.BaseIdentity,
+		Column3:  query.ClassID,
+		Column4:  query.Keyword,
+		Limit:    query.Size,
+		Offset:   (query.Page - 1) * query.Size,
+		Column7:  query.PhoneHash,
+		TenantID: t.tenantID,
 	})
 	if err != nil {
 		return nil, err
@@ -556,6 +548,18 @@ func (t *txStore) ListAccounts(ctx context.Context, query AccountQuery) ([]Accou
 		})
 	}
 	return out, nil
+}
+
+func (t *txStore) PlatformAccountNames(ctx context.Context, ids []int64) (map[int64]string, error) {
+	rows, err := t.q.PlatformAccountNames(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	names := make(map[int64]string, len(rows))
+	for _, row := range rows {
+		names[row.ID] = row.Name
+	}
+	return names, nil
 }
 
 // ListClassStudents 读取指定班级的在校学生摘要。
@@ -1046,7 +1050,7 @@ func (t *txStore) ListImportBatches(ctx context.Context, tenantID int64) ([]Impo
 
 // WriteAudit 写入全平台唯一 audit_log。
 func (t *txStore) WriteAudit(ctx context.Context, input WriteAuditInput) error {
-	_, err := t.q.CreateAuditLog(ctx, sqlcgen.CreateAuditLogParams{
+	return t.q.CreateAuditLog(ctx, sqlcgen.CreateAuditLogParams{
 		ID:         input.ID,
 		TenantID:   pgtypex.Int8(input.TenantID),
 		ActorID:    input.ActorID,
@@ -1058,20 +1062,20 @@ func (t *txStore) WriteAudit(ctx context.Context, input WriteAuditInput) error {
 		Ip:         pgtypex.Text(input.IP),
 		TraceID:    pgtypex.Text(input.TraceID),
 	})
-	return err
 }
 
 // QueryAuditLogs 按条件分页查询共享审计日志。
 func (t *txStore) QueryAuditLogs(ctx context.Context, query AuditQueryInput) ([]AuditLogRow, error) {
 	rows, err := t.q.QueryAuditLogs(ctx, sqlcgen.QueryAuditLogsParams{
-		Column1: query.TenantID,
-		Column2: query.ActorID,
-		Column3: query.Action,
-		Column4: query.TargetType,
-		Column5: timex.Timestamptz(query.From),
-		Column6: timex.Timestamptz(query.To),
-		Limit:   query.Size,
-		Offset:  (query.Page - 1) * query.Size,
+		AllTenants: query.AllTenants,
+		TenantID:   query.TenantID,
+		ActorID:    query.ActorID,
+		Action:     query.Action,
+		TargetType: query.TargetType,
+		FromAt:     timex.Timestamptz(query.From),
+		ToAt:       timex.Timestamptz(query.To),
+		PageLimit:  query.Size,
+		PageOffset: (query.Page - 1) * query.Size,
 	})
 	if err != nil {
 		return nil, err
@@ -1099,7 +1103,7 @@ func (t *txStore) QueryAuditLogs(ctx context.Context, query AuditQueryInput) ([]
 // QueryAuditActionFacets 按与审计列表完全相同的权限和过滤条件统计动作。
 func (t *txStore) QueryAuditActionFacets(ctx context.Context, query AuditQueryInput) ([]AuditFacetRow, error) {
 	// 动作分组不套用动作筛选:选中一个动作后,下拉里其他动作的数字仍然可见
-	rows, err := t.q.QueryAuditActionFacets(ctx, sqlcgen.QueryAuditActionFacetsParams{TenantID: query.TenantID, ActorID: query.ActorID, TargetType: query.TargetType, FromAt: timex.Timestamptz(query.From), ToAt: timex.Timestamptz(query.To)})
+	rows, err := t.q.QueryAuditActionFacets(ctx, sqlcgen.QueryAuditActionFacetsParams{TenantID: query.TenantID, AllTenants: query.AllTenants, ActorID: query.ActorID, TargetType: query.TargetType, FromAt: timex.Timestamptz(query.From), ToAt: timex.Timestamptz(query.To)})
 	if err != nil {
 		return nil, err
 	}

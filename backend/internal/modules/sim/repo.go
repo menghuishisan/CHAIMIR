@@ -90,7 +90,7 @@ func (s *store) PlatformTx(ctx context.Context, fn func(context.Context, TxStore
 	if s == nil || s.database == nil {
 		return apperr.ErrInternal.WithCause(fmt.Errorf("sim store 未初始化"))
 	}
-	return s.database.WithAppTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	return s.database.WithPlatformTx(ctx, "sim", func(ctx context.Context, tx pgx.Tx) error {
 		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
 	})
 }

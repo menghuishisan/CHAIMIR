@@ -140,8 +140,8 @@ requireMatch(
 requireMatch(
   schoolOverlayPath,
   schoolOverlay,
-  /^\s*- PLATFORM_LAYER_ENABLED=false\s*$/m,
-  "私有化形态必须关闭平台层",
+  /^\s*- SCHOOL_TENANT_ID=[1-9][0-9]*\s*$/m,
+  "私有化形态必须配置正整数 SCHOOL_TENANT_ID",
 );
 
 for (const relativePath of ["backend/.env.example", deployConfigPath]) {

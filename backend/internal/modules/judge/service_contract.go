@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/response"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 )
 
 // SubmitJudgeTask 创建判题任务、输入快照和提交指纹。
@@ -50,7 +50,7 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 	if err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	}
-	traceID := response.TraceFromContext(ctx)
+	traceID := logging.TraceFromContext(ctx)
 	if strings.TrimSpace(traceID) == "" {
 		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeSubmitInvalid.WithCause(fmt.Errorf("判题提交缺少 trace_id"))
 	}

@@ -332,7 +332,7 @@ func (s *Service) ListReviews(ctx context.Context, result int16, page, size int)
 		submitterIDs = append(submitterIDs, item.SubmitterID)
 	}
 	// 提交人是各校教师,平台身份经身份契约一次批量解析姓名
-	names, err := s.accountNames(ctx, submitterIDs)
+	names, err := s.identity.PlatformAccountNames(ctx, submitterIDs)
 	if err != nil {
 		return nil, 0, page, size, nil, err
 	}
@@ -350,31 +350,6 @@ func (s *Service) ListReviews(ctx context.Context, result int16, page, size int)
 		return nil, 0, page, size, nil, err
 	}
 	return out, total, page, size, pagex.Facets{"result": resultGroup}, nil
-}
-
-// accountNames 一次批量解析账号姓名(去重);读不到的编号不在结果里。
-func (s *Service) accountNames(ctx context.Context, accountIDs []int64) (map[int64]string, error) {
-	seen := map[int64]struct{}{}
-	unique := make([]int64, 0, len(accountIDs))
-	for _, accountID := range accountIDs {
-		if _, ok := seen[accountID]; ok || accountID <= 0 {
-			continue
-		}
-		seen[accountID] = struct{}{}
-		unique = append(unique, accountID)
-	}
-	names := map[int64]string{}
-	if len(unique) == 0 {
-		return names, nil
-	}
-	accounts, err := s.identity.BatchGetAccounts(ctx, unique)
-	if err != nil {
-		return nil, apperr.ErrSimReviewQueryFailed.WithCause(err)
-	}
-	for _, account := range accounts {
-		names[account.AccountID] = account.Name
-	}
-	return names, nil
 }
 
 // ApproveReview 在运行门禁通过后由平台人工审核上架，保留扫描风险提示。

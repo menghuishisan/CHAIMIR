@@ -28,7 +28,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	logging.Setup(cfg.LogLevel, cfg.LogFormat)
+	logging.Setup(cfg.Logging)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	client, err := platformk8s.New(config.SandboxConfig{KubeconfigPath: cfg.KubeconfigPath})

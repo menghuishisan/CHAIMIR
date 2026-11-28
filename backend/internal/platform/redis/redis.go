@@ -26,13 +26,14 @@ end
 return n
 `)
 
-// Redis 7 没有只递减已有正计数的原生命令；同一脚本避免过期检查与退款竞争。
-var refundCounterScript = goredis.NewScript(`
-local value = redis.call("GET", KEYS[1])
-if not value then return 0 end
-local count = tonumber(value)
-if count and count <= 0 then return 0 end
-return redis.call("DECR", KEYS[1])
+var reserveQuotaScript = goredis.NewScript(`
+local token = ARGV[1]
+if redis.call("SISMEMBER", KEYS[1], token) == 1 then return 1 end
+local count = redis.call("SCARD", KEYS[1])
+if count >= tonumber(ARGV[2]) then return 0 end
+redis.call("SADD", KEYS[1], token)
+if count == 0 then redis.call("PEXPIRE", KEYS[1], ARGV[3]) end
+return 1
 `)
 
 // New 创建 Redis 客户端并用配置化超时 Ping,缓存依赖不可用时启动失败。
@@ -104,19 +105,24 @@ func (c *Client) IncrWithTTL(ctx context.Context, key string, ttl time.Duration)
 	return n, nil
 }
 
-// Decr 退还仍有效的正计数，保留原 TTL；过期或已归零的窗口不重建、不变负。
-func (c *Client) Decr(ctx context.Context, key string) (int64, error) {
-	if c == nil || c.rdb == nil {
-		return 0, fmt.Errorf("redis 客户端未初始化")
+// ReserveQuota 原子检查窗口限额；同一占用标识可安全重试。
+func (c *Client) ReserveQuota(ctx context.Context, key, token string, limit int, ttl time.Duration) (bool, error) {
+	if key == "" || token == "" || limit <= 0 || ttl < time.Millisecond {
+		return false, fmt.Errorf("redis 限额占用参数非法")
 	}
-	if key == "" {
-		return 0, fmt.Errorf("redis Decr 参数非法")
-	}
-	n, err := refundCounterScript.Run(ctx, c.rdb, []string{key}).Int64()
+	n, err := reserveQuotaScript.Run(ctx, c.rdb, []string{key}, token, limit, ttl.Milliseconds()).Int64()
 	if err != nil {
-		return 0, fmt.Errorf("redis Decr 失败: %w", err)
+		return false, fmt.Errorf("占用 Redis 限额失败: %w", err)
 	}
-	return n, nil
+	return n == 1, nil
+}
+
+// RefundQuota 仅删除本次占用；窗口过期或占用已退还时无副作用。
+func (c *Client) RefundQuota(ctx context.Context, key, token string) error {
+	if err := c.rdb.SRem(ctx, key, token).Err(); err != nil {
+		return fmt.Errorf("退还 Redis 限额失败: %w", err)
+	}
+	return nil
 }
 
 // GetInt64 读取整数缓存值,并显式区分缓存缺失与 Redis 错误。

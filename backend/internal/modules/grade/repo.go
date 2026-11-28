@@ -19,7 +19,7 @@ type roleReader interface {
 	// HasRole 判断账号是否具备指定角色。
 	HasRole(ctx context.Context, accountID int64, role string) (bool, error)
 	// BatchGetAccounts 批量读取账号摘要,供列表随记录下发姓名与学号。
-	BatchGetAccounts(ctx context.Context, accountIDs []int64) ([]contracts.AccountInfo, error)
+	BatchGetAccounts(ctx context.Context, tenantID int64, accountIDs []int64) ([]contracts.AccountInfo, error)
 }
 
 // Store 定义 M11 service 所需事务入口。

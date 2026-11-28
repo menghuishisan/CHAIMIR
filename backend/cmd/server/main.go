@@ -53,7 +53,7 @@ func run() (err error) {
 	if err != nil {
 		return err
 	}
-	logging.Setup(cfg.Server.LogLevel, cfg.Server.LogFormat)
+	logging.Setup(cfg.Server.Logging)
 	gin.SetMode(ginMode(cfg.Server.AppEnv))
 
 	infra, err := newInfrastructure(ctx, cfg)

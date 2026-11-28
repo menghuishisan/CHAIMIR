@@ -11,7 +11,7 @@ import (
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/background"
 	"chaimir/internal/platform/intx"
-	"chaimir/internal/platform/response"
+
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
@@ -195,7 +195,7 @@ func (s *Service) recycleOne(ctx context.Context, sb Sandbox, reason string) err
 	if err := s.completeRecycle(ctx, sb, reason); err != nil {
 		return errors.Join(err, s.markCleanupFailed(ctx, sb, err))
 	}
-	s.broadcastProgress(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusDestroyed, response.TraceFromContext(ctx))
+	s.broadcastProgress(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusDestroyed, logging.TraceFromContext(ctx))
 	s.drainSandboxRecycleOutboxBestEffort(ctx)
 	return nil
 }
@@ -277,7 +277,7 @@ func (s *Service) completeRecycle(ctx context.Context, sb Sandbox, reason string
 		if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), sb.TenantID, sb.ID, EventTypeRecycle, detail); err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 		}
-		if _, err := tx.CreateSandboxRecycleOutbox(ctx, s.ids.Generate(), sb, reason, response.TraceFromContext(ctx), timex.Now()); err != nil {
+		if _, err := tx.CreateSandboxRecycleOutbox(ctx, s.ids.Generate(), sb, reason, logging.TraceFromContext(ctx), timex.Now()); err != nil {
 			return apperr.ErrSandboxRecycleEventPublishFailed.WithCause(err)
 		}
 		return s.writeSystemAudit(ctx, sb.TenantID, "sandbox.recycle", "sandbox", sb.ID, map[string]any{"reason": reason, "source_ref": sb.SourceRef})
@@ -319,7 +319,7 @@ func (s *Service) RunSandboxRecycleOutboxOnce(ctx context.Context) error {
 }
 
 func (s *Service) publishSandboxRecycleOutboxItem(ctx context.Context, item SandboxRecycleOutbox) error {
-	eventCtx := response.WithTrace(ctx, item.TraceID)
+	eventCtx := logging.WithTrace(ctx, item.TraceID)
 	payload := contracts.SandboxRecycledEvent{TenantID: item.TenantID, TraceID: item.TraceID, SandboxID: item.SandboxID, SourceRef: item.SourceRef, ScopeRef: item.ScopeRef, Reason: item.Reason, RecycledAt: item.RecycledAt}
 	if err := s.bus.Publish(eventCtx, contracts.SubjectSandboxRecycled, payload); err != nil {
 		markErr := s.recordSandboxRecycleOutboxFailure(eventCtx, item, err)
@@ -447,7 +447,7 @@ func (s *Service) markCleanupFailed(ctx context.Context, sb Sandbox, cause error
 		return nil
 	}
 	if sb.Status == SandboxStatusRecycling {
-		s.broadcastProgress(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusRecycling, response.TraceFromContext(ctx))
+		s.broadcastProgress(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusRecycling, logging.TraceFromContext(ctx))
 	}
 	return nil
 }

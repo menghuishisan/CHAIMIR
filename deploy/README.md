@@ -64,7 +64,7 @@ Kustomize component 同时生成两个命名空间的 ConfigMap:
 - `chaimir-config`(chaimir-system)— 后端/migrate `envFrom` 注入。
 - `chaimir-data-config`(chaimir-data)— 中间件 Pod 引用(同源同值,无重复定义)。
 
-各 overlay 仅用 `behavior: merge` 覆盖差异键(如 `DEPLOY_MODE`、`PLATFORM_LAYER_ENABLED`、
+各 overlay 仅用 `behavior: merge` 覆盖差异键(如 `DEPLOY_MODE`、`SCHOOL_TENANT_ID`、
 中间件外接端点),不重写整份配置。
 
 `backend/.env`、`frontend/.env` 与 `config/secret.env` 都是被 Git 忽略的私有文件,不得提交。Kubernetes 运行中的后端不直接读取这些工作区文件:非密配置只由 `config/chaimir.env` 生成 ConfigMap,密钥统一由 External Secrets Operator 从受控 SecretStore 同步。`config/secret.env` 是私有化和验收密钥源的受控运维输入,也供浏览器验收读取账号凭据;它只更新 `chaimir-secrets/chaimir` 源 Secret,不会直接生成或注入应用 Secret。`frontend/.env` 仅作为前端镜像构建期的 `VITE_*` 输入;`VITE_*` 会进入浏览器静态资源,严禁放密码、token 或私钥。前端部署形态和工具 origin 由初始化容器从同一个 `chaimir-config` 生成 `/runtime-config.js`,不再维护 overlay 专用配置文件。

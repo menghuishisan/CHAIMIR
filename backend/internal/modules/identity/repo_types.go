@@ -190,6 +190,7 @@ type WriteAuditInput struct {
 // AuditQueryInput 描述审计查询过滤和分页字段。
 type AuditQueryInput struct {
 	TenantID   int64
+	AllTenants bool
 	ActorID    int64
 	Action     string
 	TargetType string

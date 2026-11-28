@@ -12,7 +12,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/intx"
-	"chaimir/internal/platform/response"
+
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
@@ -95,5 +95,5 @@ func (s *Service) sendWarningNotification(ctx context.Context, item WarningNotif
 		Receivers: []int64{item.StudentID}, Params: map[string]string{"gpa": fmt.Sprintf("%.3f", gpa)},
 		Link: "/student/alerts",
 	}
-	return s.bus.Publish(response.WithTrace(ctx, item.TraceID), contracts.SubjectNotifySendRequested, evt)
+	return s.bus.Publish(logging.WithTrace(ctx, item.TraceID), contracts.SubjectNotifySendRequested, evt)
 }

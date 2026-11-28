@@ -28,7 +28,10 @@ type TransferDeps struct {
 
 // RegisterTransfer 构造统一导入导出中心 store/service 并注册 HTTP 路由。
 func RegisterTransfer(deps TransferDeps) (*transfer.Service, error) {
-	store := transfer.NewStore(deps.Database)
+	store, err := transfer.NewStore(deps.Database)
+	if err != nil {
+		return nil, err
+	}
 	svc, err := transfer.NewService(transfer.ServiceDeps{
 		Store: store,
 		IDs:   deps.IDs,

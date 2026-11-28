@@ -14,7 +14,7 @@ import (
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/pagex"
-	"chaimir/internal/platform/response"
+
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -127,7 +127,7 @@ func (s *Service) RunAlertNotificationsOnce(ctx context.Context) error {
 	var result error
 	for _, item := range items {
 		if err := s.publishAlertNotification(ctx, item); err != nil {
-			logging.ErrorContext(response.WithTrace(ctx, item.TraceID), "admin alert delivery failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", item.TenantID), slog.Int64("alert_id", item.ID))
+			logging.ErrorContext(logging.WithTrace(ctx, item.TraceID), "admin alert delivery failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", item.TenantID), slog.Int64("alert_id", item.ID))
 			result = errors.Join(result, err)
 		}
 	}
@@ -136,7 +136,7 @@ func (s *Service) RunAlertNotificationsOnce(ctx context.Context) error {
 
 // publishAlertNotification 重试使用同一请求编号；失去租约不能确认新 worker 的结果。
 func (s *Service) publishAlertNotification(ctx context.Context, item AlertNotification) error {
-	ctx = response.WithTrace(ctx, item.TraceID)
+	ctx = logging.WithTrace(ctx, item.TraceID)
 	receivers, sendErr := s.recipients.AlertRecipients(ctx, item.TenantID)
 	if sendErr == nil && len(receivers) == 0 {
 		sendErr = fmt.Errorf("tenant has no active alert recipients: %d", item.TenantID)
@@ -294,7 +294,7 @@ func (s *Service) HandleAlertEvent(ctx context.Context, eventID int64, req Alert
 		} else {
 			evt := contracts.NotifyPushRequestedEvent{
 				TenantID: out.TenantID.Int64(),
-				TraceID:  response.TraceFromContext(ctx),
+				TraceID:  logging.TraceFromContext(ctx),
 				Topic:    "tenant:" + ids.Format(out.TenantID.Int64()) + ":alert",
 				Payload:  payload,
 			}

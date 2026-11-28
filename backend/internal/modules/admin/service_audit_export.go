@@ -139,7 +139,7 @@ func (s *Service) buildAuditExportCSV(ctx context.Context, req AuditExportReques
 	if req.TenantID > 0 {
 		hasRole, err := s.roles.HasRole(workerCtx, req.AccountID, contracts.RoleSchoolAdmin)
 		if err != nil {
-			return nil, apperr.ErrForbidden.WithCause(err)
+			return nil, apperr.AsAppError(err)
 		}
 		if !hasRole {
 			return nil, apperr.ErrForbidden
@@ -175,7 +175,7 @@ func (s *Service) reconcileAuditExportRequest(ctx context.Context, req AuditExpo
 
 // failAuditExportRequest advances the leased task retry state and synchronizes its next M9 scan.
 func (s *Service) failAuditExportRequest(ctx context.Context, req AuditExportRequest, task transfer.Task, cause error) error {
-	failed, err := s.transfers.FailTask(ctx, task, cause, timex.Now())
+	failed, err := s.transfers.FailTask(ctx, task, cause)
 	if err != nil {
 		return errors.Join(cause, err, s.deferAuditExportRequest(ctx, req, timex.Now().Add(time.Duration(s.cfg.AuditExportWorkerPollMs)*time.Millisecond)))
 	}

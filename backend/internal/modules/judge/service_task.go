@@ -10,7 +10,7 @@ import (
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
-	"chaimir/internal/platform/response"
+
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
@@ -223,7 +223,7 @@ func (s *Service) ManualScore(ctx context.Context, tenantID, taskID, scorerID in
 		if err != nil {
 			return apperr.ErrJudgeTaskPersistFailed.WithCause(err)
 		}
-		traceID := response.TraceFromContext(ctx)
+		traceID := logging.TraceFromContext(ctx)
 		if strings.TrimSpace(traceID) == "" {
 			return apperr.ErrJudgeTaskStateInvalid.WithCause(fmt.Errorf("人工评分缺少 trace_id"))
 		}

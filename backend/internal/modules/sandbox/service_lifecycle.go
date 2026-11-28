@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/response"
+
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
@@ -136,7 +136,7 @@ func (s *Service) PauseSandbox(ctx context.Context, req contracts.SandboxControl
 	}); err != nil {
 		return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 	}
-	s.broadcastProgress(ctx, tenantID, sandboxID, sb.Phase, SandboxStatusPaused, response.TraceFromContext(ctx))
+	s.broadcastProgress(ctx, tenantID, sandboxID, sb.Phase, SandboxStatusPaused, logging.TraceFromContext(ctx))
 	return nil
 }
 
@@ -176,7 +176,7 @@ func (s *Service) queueFailedPause(ctx context.Context, expected Sandbox, cause 
 		return apperr.ErrSandboxStatePersistFailed.WithCause(err)
 	}
 	if queued {
-		s.broadcastProgress(persistCtx, expected.TenantID, expected.ID, expected.Phase, SandboxStatusRecycling, response.TraceFromContext(ctx))
+		s.broadcastProgress(persistCtx, expected.TenantID, expected.ID, expected.Phase, SandboxStatusRecycling, logging.TraceFromContext(ctx))
 	}
 	return nil
 }
@@ -326,7 +326,7 @@ func (s *Service) transition(ctx context.Context, expected Sandbox, status int16
 	}); err != nil {
 		return err
 	}
-	s.broadcastProgress(ctx, tenantID, sandboxID, phase, status, response.TraceFromContext(ctx))
+	s.broadcastProgress(ctx, tenantID, sandboxID, phase, status, logging.TraceFromContext(ctx))
 	return nil
 }
 

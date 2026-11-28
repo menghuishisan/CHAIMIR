@@ -13,10 +13,10 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/config"
-	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
+	"chaimir/pkg/logging"
 )
 
 type selftestPlanStore struct {
@@ -256,7 +256,7 @@ func TestRuntimeSelftestWritesExecutionAndCleanupResult(t *testing.T) {
 			}
 			svc.store, svc.orchestrator = store, orchestrator
 			svc.cfg = runtimeSelftestConfig(base.image.ImageURL)
-			ctx := response.WithTrace(context.Background(), "selftest-trace")
+			ctx := logging.WithTrace(context.Background(), "selftest-trace")
 			_, err := svc.RunRuntimeSelftest(ctx, base.runtime.ID)
 			if !errors.Is(err, finishErr) {
 				t.Fatal(err)
@@ -302,8 +302,8 @@ func (s *platformSelftestStore) TenantTx(ctx context.Context, _ int64, fn func(c
 	return fn(ctx, s)
 }
 
-func (s *platformSelftestStore) EnsureTenantQuota(_ context.Context, quota TenantQuota) (TenantQuota, error) {
-	return quota, nil
+func (s *platformSelftestStore) EnsureTenantQuota(context.Context, TenantQuota) error {
+	return nil
 }
 
 func (s *platformSelftestStore) GetTenantQuotaForUpdate(context.Context, int64) (TenantQuota, error) {
@@ -449,7 +449,7 @@ func TestSandboxCreationReturnsAcceptedSnapshot(t *testing.T) {
 				req.CompositionSnapshot.Digest = platformSnapshotDigest(t, req.CompositionSnapshot)
 			}
 			store.readErr = errors.New("detail unavailable after commit")
-			info, err := svc.CreateSandbox(response.WithTrace(context.Background(), "create-trace"), req)
+			info, err := svc.CreateSandbox(logging.WithTrace(context.Background(), "create-trace"), req)
 			if err != nil {
 				t.Fatalf("accepted creation reported failure: %v", err)
 			}

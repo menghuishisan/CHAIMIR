@@ -4,6 +4,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
+	"chaimir/pkg/snowflake"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -25,7 +27,7 @@ func (s *Service) CreateApplication(ctx context.Context, req CreateApplicationRe
 	if err := s.ensurePlatformLayerEnabled(); err != nil {
 		return TenantApplication{}, err
 	}
-	if strings.TrimSpace(req.SchoolName) == "" || strings.TrimSpace(req.ContactName) == "" {
+	if strings.TrimSpace(req.SchoolName) == "" || !validSchoolType(req.SchoolType) || strings.TrimSpace(req.ContactName) == "" {
 		return TenantApplication{}, apperr.ErrIdentityApplicationInvalid
 	}
 	if err := ValidatePhone(req.ContactPhone); err != nil {
@@ -105,16 +107,14 @@ func (s *Service) ApproveApplication(ctx context.Context, appID int64, req Revie
 		if _, err := tx.ApproveTenantApplication(ctx, appID, id.AccountID, tenantID); err != nil {
 			return err
 		}
-		if err := tx.UseTenant(ctx, tenantID); err != nil {
-			return err
-		}
+
 		_, code, err := s.createBootstrapAdminInTx(ctx, tx, tenantID, req.AdminName, req.AdminPhone)
 		if err != nil {
 			return err
 		}
 		// 首管账号创建失败会回滚租户和申请状态,激活码明文只在审核结果中返回一次。
 		activation = code
-		if err := s.enqueueTenantProvision(ctx, tx, t); err != nil {
+		if err := enqueueTenantProvision(ctx, tx, s.ids, t); err != nil {
 			return err
 		}
 		entry, err := audit.BuildEntry(ctx, 0, id.AccountID, contracts.RoleNumPlatformAdmin, "tenant.application.approve", "identity.tenant_application", appID, map[string]any{"tenant_id": t.ID})
@@ -297,32 +297,53 @@ func (s *Service) UpdateTenantStatusByPlatform(ctx context.Context, tenantID int
 	return out, nil
 }
 
-// BootstrapSchoolTenant 为私有化初始化创建固定学校租户和首个学校管理员。
-func (s *Service) BootstrapSchoolTenant(ctx context.Context, cfg config.BootstrapConfig) (TenantDTO, error) {
-	if s.deploy.PlatformEnabled {
-		return TenantDTO{}, apperr.ErrIdentityPlatformLayerDisabled
+// Bootstrap 初始化当前部署的首个管理员，学校资源开通交由在线 outbox worker。
+func Bootstrap(ctx context.Context, store Store, ids snowflake.Generator, deploy config.DeployConfig, authCfg config.AuthConfig, cfg config.BootstrapConfig) error {
+	if store == nil || ids == nil {
+		return fmt.Errorf("identity bootstrap 缺少 store 或 ID 生成器")
+	}
+	if deploy.IsSaaS() {
+		return bootstrapPlatformAdmin(ctx, store, ids, cfg)
+	}
+	if !deploy.IsSchool() {
+		return apperr.ErrIdentityPlatformLayerDisabled
 	}
 	if err := validateBootstrapConfig(cfg); err != nil {
-		return TenantDTO{}, err
+		return err
 	}
-	tenantID := cfg.SchoolTenantID
+	tenantID := deploy.SchoolTenantID
 	if tenantID <= 0 {
-		tenantID = s.ids.Generate()
+		return fmt.Errorf("SCHOOL_TENANT_ID 必须为正整数")
 	}
 	passwordHash, err := crypto.HashPassword(cfg.AdminPassword)
 	if err != nil {
-		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
+		return apperr.ErrInternal.WithCause(err)
 	}
-	phoneEnc, phoneHash, err := s.protectPhone(cfg.AdminPhone)
+	cipher, err := newPhoneCipher(authCfg.EncryptionKey)
 	if err != nil {
-		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
+		return err
 	}
-	var out TenantDTO
-	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+	phoneEnc, phoneHash, err := crypto.ProtectPhone(cipher, []byte(authCfg.HMACKey), cfg.AdminPhone)
+	if err != nil {
+		return err
+	}
+	writer := AuditWriter{store: store, ids: ids}
+	return store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		code := strings.TrimSpace(cfg.SchoolTenantCode)
+		existing, err := tx.GetTenantByID(ctx, tenantID)
+		if err == nil {
+			if existing.DeployMode != DeployModeSchool || existing.Code != code {
+				return apperr.ErrIdentityBootstrapInvalid
+			}
+			return nil
+		}
+		if !isNoRows(err) {
+			return err
+		}
 		// 私有化初始化直接创建学校租户,不经过 SaaS 入驻申请状态机。
 		row, err := tx.CreateTenant(ctx, CreateTenantInput{
 			ID:                   tenantID,
-			Code:                 strings.TrimSpace(cfg.SchoolTenantCode),
+			Code:                 code,
 			Name:                 strings.TrimSpace(cfg.SchoolName),
 			Type:                 cfg.SchoolType,
 			Status:               TenantStatusActive,
@@ -334,15 +355,8 @@ func (s *Service) BootstrapSchoolTenant(ctx context.Context, cfg config.Bootstra
 		if err != nil {
 			return err
 		}
-		out, err = ToTenantDTO(row)
-		if err != nil {
-			return err
-		}
-		if err := tx.UseTenant(ctx, tenantID); err != nil {
-			return err
-		}
 		// 首个学校管理员仍不写虚假组织档案,真实院系由其登录后维护。
-		adminID := s.ids.Generate()
+		adminID := ids.Generate()
 		if _, err := tx.CreateAccount(ctx, CreateAccountInput{
 			ID:            adminID,
 			TenantID:      tenantID,
@@ -355,13 +369,13 @@ func (s *Service) BootstrapSchoolTenant(ctx context.Context, cfg config.Bootstra
 			MustChangePwd: true,
 			ActivatedAt:   ptrTime(timex.Now()),
 			Roles: []RoleCreateInput{
-				{ID: s.ids.Generate(), Role: contracts.RoleNumTeacher},
-				{ID: s.ids.Generate(), Role: contracts.RoleNumSchoolAdmin},
+				{ID: ids.Generate(), Role: contracts.RoleNumTeacher},
+				{ID: ids.Generate(), Role: contracts.RoleNumSchoolAdmin},
 			},
 		}); err != nil {
 			return err
 		}
-		if err := s.enqueueTenantProvision(ctx, tx, row); err != nil {
+		if err := enqueueTenantProvision(ctx, tx, ids, row); err != nil {
 			return err
 		}
 		// 初始化由系统任务触发,审计 actor 使用系统角色而不是伪造平台管理员。
@@ -369,19 +383,12 @@ func (s *Service) BootstrapSchoolTenant(ctx context.Context, cfg config.Bootstra
 		if err != nil {
 			return err
 		}
-		return s.auditWriter.writeInTx(ctx, tx, entry)
-	}); err != nil {
-		return TenantDTO{}, apperr.AsAppError(err)
-	}
-	s.drainTenantProvisionOutboxBestEffort(ctx)
-	return out, nil
+		return writer.writeInTx(ctx, tx, entry)
+	})
 }
 
-// BootstrapPlatformAdmin 为 SaaS 初始化首个平台管理员,已存在同名账号时保持原密码不变。
-func (s *Service) BootstrapPlatformAdmin(ctx context.Context, cfg config.BootstrapConfig) error {
-	if !s.deploy.PlatformEnabled {
-		return apperr.ErrIdentityPlatformLayerDisabled
-	}
+// bootstrapPlatformAdmin 为 SaaS 初始化首个平台管理员,已存在同名账号时保持原密码不变。
+func bootstrapPlatformAdmin(ctx context.Context, store Store, ids snowflake.Generator, cfg config.BootstrapConfig) error {
 	username := strings.TrimSpace(cfg.PlatformAdminUser)
 	name := strings.TrimSpace(cfg.PlatformAdminName)
 	if username == "" || name == "" {
@@ -394,10 +401,10 @@ func (s *Service) BootstrapPlatformAdmin(ctx context.Context, cfg config.Bootstr
 	if err != nil {
 		return apperr.ErrInternal.WithCause(err)
 	}
-	return s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+	return store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		// SaaS bootstrap 只在账号不存在时写入,避免重复运行迁移覆盖生产管理员口令。
 		return tx.CreatePlatformAdminIfNotExists(ctx, CreatePlatformAdminInput{
-			ID:           s.ids.Generate(),
+			ID:           ids.Generate(),
 			Username:     username,
 			PasswordHash: passwordHash,
 			Name:         name,
@@ -436,7 +443,7 @@ func (s *Service) createBootstrapAdminInTx(ctx context.Context, tx TxStore, tena
 
 // ensurePlatformLayerEnabled 校验 SaaS 平台层是否启用,私有化部署所有平台能力都必须关闭。
 func (s *Service) ensurePlatformLayerEnabled() error {
-	if !s.deploy.PlatformEnabled {
+	if !s.deploy.IsSaaS() {
 		return apperr.ErrIdentityPlatformLayerDisabled
 	}
 	return nil
@@ -447,7 +454,7 @@ func validateBootstrapConfig(cfg config.BootstrapConfig) error {
 	if err := ValidateTenantCode(cfg.SchoolTenantCode); err != nil {
 		return err
 	}
-	if strings.TrimSpace(cfg.SchoolName) == "" || cfg.SchoolType <= 0 || strings.TrimSpace(cfg.AdminName) == "" {
+	if strings.TrimSpace(cfg.SchoolName) == "" || !validSchoolType(cfg.SchoolType) || strings.TrimSpace(cfg.AdminName) == "" {
 		return apperr.ErrIdentityBootstrapInvalid
 	}
 	if err := ValidatePhone(cfg.AdminPhone); err != nil {

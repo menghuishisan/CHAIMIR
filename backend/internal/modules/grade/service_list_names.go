@@ -18,7 +18,7 @@ type listNames struct {
 func (s *Service) loadListNames(ctx context.Context, tenantID int64, accountIDs, courseIDs []int64) (listNames, error) {
 	names := listNames{accounts: map[int64]contracts.AccountInfo{}, courses: map[int64]string{}}
 	if ids := distinctIDs(accountIDs); len(ids) > 0 {
-		accounts, err := s.roles.BatchGetAccounts(ctx, ids)
+		accounts, err := s.roles.BatchGetAccounts(ctx, tenantID, ids)
 		if err != nil {
 			return listNames{}, err
 		}

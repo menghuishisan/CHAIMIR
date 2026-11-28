@@ -16,7 +16,7 @@ const (
 // IdentityReader 是解析审计主体时所需的最小只读身份契约。
 type IdentityReader interface {
 	// GetAccount 读取指定账号摘要,用于确定审计角色。
-	GetAccount(context.Context, int64) (contracts.AccountInfo, error)
+	GetAccount(context.Context, int64, int64) (contracts.AccountInfo, error)
 }
 
 // ResolveActor 从服务端身份上下文与账号摘要解析操作者 ID 和审计角色。
@@ -34,7 +34,7 @@ func ResolveActor(ctx context.Context, identity IdentityReader) (int64, int16, e
 	if identity == nil {
 		return 0, 0, apperr.ErrAuditActorResolveFailed
 	}
-	account, err := identity.GetAccount(ctx, id.AccountID)
+	account, err := identity.GetAccount(ctx, id.TenantID, id.AccountID)
 	if err != nil {
 		return 0, 0, apperr.ErrAuditActorResolveFailed.WithCause(err)
 	}

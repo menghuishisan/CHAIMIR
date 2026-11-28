@@ -78,7 +78,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	logging.Setup(cfg.Server.LogLevel, cfg.Server.LogFormat)
+	logging.Setup(cfg.Server.Logging)
 	database, err := db.New(ctx, cfg.Postgres)
 	if err != nil {
 		return err

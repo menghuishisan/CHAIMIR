@@ -9,8 +9,8 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
-	"chaimir/internal/platform/response"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 )
 
 // CourseGradeSource 是课程可选成绩来源的权威最小投影。
@@ -78,7 +78,7 @@ func (s *Service) HandleExperimentSourceChanged(ctx context.Context, event contr
 	if err := validateExperimentSourceEvent(event); err != nil {
 		return err
 	}
-	ctx = response.WithTrace(ctx, event.TraceID)
+	ctx = logging.WithTrace(ctx, event.TraceID)
 	return s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error { return tx.UpsertCourseExperimentSource(ctx, event) })
 }
 
@@ -101,7 +101,7 @@ func (s *Service) HandleExperimentScored(ctx context.Context, event contracts.Ex
 	if !seen[event.StudentID] {
 		return apperr.ErrTeachingGradeInvalid
 	}
-	ctx = response.WithTrace(ctx, event.TraceID)
+	ctx = logging.WithTrace(ctx, event.TraceID)
 	return s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
 		if err := tx.UpsertCourseExperimentSource(ctx, source); err != nil {
 			return err

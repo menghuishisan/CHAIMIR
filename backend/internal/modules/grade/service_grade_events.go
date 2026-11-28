@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"chaimir/internal/contracts"
-	"chaimir/internal/platform/response"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 )
 
 // HandleGradeUpdated 只消费更新修订;课程/学生串行锁内重读状态,避免旧事件完成新申诉。
@@ -16,7 +16,7 @@ func (s *Service) HandleGradeUpdated(ctx context.Context, evt contracts.Teaching
 	if evt.TenantID <= 0 || evt.CourseID <= 0 || evt.StudentID <= 0 || evt.Revision <= 0 || evt.LockRevision < 0 || evt.UpdatedAt.IsZero() || strings.TrimSpace(evt.TraceID) == "" {
 		return apperr.ErrGradeAggregationFailed
 	}
-	ctx = response.WithTrace(ctx, evt.TraceID)
+	ctx = logging.WithTrace(ctx, evt.TraceID)
 	err := s.store.TenantTx(ctx, evt.TenantID, func(ctx context.Context, tx TxStore) error {
 		if err := tx.LockGradeCourseScope(ctx, evt.TenantID, evt.CourseID); err != nil {
 			return err

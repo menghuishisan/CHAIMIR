@@ -18,7 +18,7 @@ func (s *Service) QueryAudit(ctx context.Context, query contracts.AuditQuery) (c
 	query = scopedAuditQuery(id, query)
 	result, err := s.auditRead.QueryAuditLogs(ctx, query)
 	if err != nil {
-		return contracts.AuditQueryResult{}, apperr.ErrAdminAuditQueryInvalid.WithCause(err)
+		return contracts.AuditQueryResult{}, apperr.AsAppError(err)
 	}
 	return result, nil
 }
@@ -37,7 +37,7 @@ func (s *Service) QueryAuditPage(ctx context.Context, query contracts.AuditQuery
 		return contracts.AuditQueryResult{}, nil, err
 	}
 	id, _ := tenant.FromContext(ctx)
-	actors, err := s.auditActors(ctx, id.IsPlatform, result.List)
+	actors, err := s.auditActors(ctx, id, result.List)
 	if err != nil {
 		return contracts.AuditQueryResult{}, nil, err
 	}
@@ -45,12 +45,12 @@ func (s *Service) QueryAuditPage(ctx context.Context, query contracts.AuditQuery
 }
 
 // auditActors 按身份范围批量解析当前页操作人:平台视角只取平台管理员,学校视角只取本校账号。
-func (s *Service) auditActors(ctx context.Context, platform bool, entries []contracts.AuditLogEntry) (map[int64]AuditActor, error) {
+func (s *Service) auditActors(ctx context.Context, id tenant.Identity, entries []contracts.AuditLogEntry) (map[int64]AuditActor, error) {
 	seen := map[int64]struct{}{}
 	wanted := make([]int64, 0, len(entries))
 	for _, entry := range entries {
 		platformAdmin := entry.ActorRole == contracts.RoleNumPlatformAdmin
-		if _, ok := seen[entry.ActorID]; ok || entry.ActorID <= 0 || platformAdmin != platform {
+		if _, ok := seen[entry.ActorID]; ok || entry.ActorID <= 0 || platformAdmin != id.IsPlatform {
 			continue
 		}
 		seen[entry.ActorID] = struct{}{}
@@ -60,7 +60,7 @@ func (s *Service) auditActors(ctx context.Context, platform bool, entries []cont
 	if len(wanted) == 0 {
 		return actors, nil
 	}
-	if platform {
+	if id.IsPlatform {
 		names, err := s.identity.PlatformAdminNames(ctx, wanted)
 		if err != nil {
 			return nil, apperr.ErrInternal.WithCause(err)
@@ -70,7 +70,7 @@ func (s *Service) auditActors(ctx context.Context, platform bool, entries []cont
 		}
 		return actors, nil
 	}
-	accounts, err := s.accounts.BatchGetAccounts(ctx, wanted)
+	accounts, err := s.accounts.BatchGetAccounts(ctx, id.TenantID, wanted)
 	if err != nil {
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
@@ -84,10 +84,8 @@ func (s *Service) auditActors(ctx context.Context, platform bool, entries []cont
 // 平台身份可按学校筛选(TenantID 非 0 只读该校,为 0 读全平台含平台自身记录);学校身份永远固定在本校。
 func scopedAuditQuery(id tenant.Identity, query contracts.AuditQuery) contracts.AuditQuery {
 	if id.IsPlatform {
-		query.IncludePlatform = true
 		return query
 	}
 	query.TenantID = id.TenantID
-	query.IncludePlatform = false
 	return query
 }

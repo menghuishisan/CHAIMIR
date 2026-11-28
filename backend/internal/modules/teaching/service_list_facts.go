@@ -81,7 +81,7 @@ func loadCourseFacts(ctx context.Context, tx TxStore, tenantID, studentID int64,
 }
 
 // courseTeachers 一次批量解析当前页课程的授课教师档案;账号已注销读不到时该课不显示姓名。
-func (s *Service) courseTeachers(ctx context.Context, courses []Course) (map[int64]contracts.AccountInfo, error) {
+func (s *Service) courseTeachers(ctx context.Context, tenantID int64, courses []Course) (map[int64]contracts.AccountInfo, error) {
 	seen := map[int64]struct{}{}
 	teacherIDs := make([]int64, 0, len(courses))
 	for _, course := range courses {
@@ -94,7 +94,7 @@ func (s *Service) courseTeachers(ctx context.Context, courses []Course) (map[int
 	if len(teacherIDs) == 0 {
 		return map[int64]contracts.AccountInfo{}, nil
 	}
-	accounts, err := s.identity.BatchGetAccounts(ctx, teacherIDs)
+	accounts, err := s.identity.BatchGetAccounts(ctx, tenantID, teacherIDs)
 	if err != nil {
 		return nil, apperr.ErrTeachingCourseInvalid.WithCause(err)
 	}

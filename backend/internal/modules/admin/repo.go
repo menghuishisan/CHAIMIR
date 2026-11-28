@@ -10,7 +10,6 @@ import (
 	"chaimir/internal/modules/admin/internal/sqlcgen"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/pagex"
-	"chaimir/internal/platform/tenant"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -23,7 +22,7 @@ type roleReader interface {
 
 // accountReader 批量解析本校账号姓名(审计操作人)。
 type accountReader interface {
-	BatchGetAccounts(ctx context.Context, accountIDs []int64) ([]contracts.AccountInfo, error)
+	BatchGetAccounts(ctx context.Context, tenantID int64, accountIDs []int64) ([]contracts.AccountInfo, error)
 }
 
 // Store 定义 M9 service 使用的持久化入口。
@@ -71,12 +70,7 @@ func (s *store) PlatformTx(ctx context.Context, fn func(context.Context, TxStore
 	if s == nil || s.database == nil {
 		return fmt.Errorf("admin store 未初始化")
 	}
-	return s.database.WithAppTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if id, ok := tenant.FromContext(ctx); ok && id.IsPlatform {
-			if _, err := tx.Exec(ctx, "SELECT set_config('app.admin_platform', 'true', true)"); err != nil {
-				return err
-			}
-		}
+	return s.database.WithPlatformTx(ctx, "admin", func(ctx context.Context, tx pgx.Tx) error {
 		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
 	})
 }

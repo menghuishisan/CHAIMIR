@@ -12,8 +12,8 @@ import (
 )
 
 // GetAccount 读取账号摘要,供审计、鉴权和聚合只读调用。
-func (s *Service) GetAccount(ctx context.Context, accountID int64) (contracts.AccountInfo, error) {
-	account, err := s.readAccount(ctx, accountID)
+func (s *Service) GetAccount(ctx context.Context, tenantID, accountID int64) (contracts.AccountInfo, error) {
+	account, err := s.readAccount(ctx, tenantID, accountID)
 	if err != nil {
 		return contracts.AccountInfo{}, err
 	}
@@ -24,9 +24,9 @@ func (s *Service) GetAccount(ctx context.Context, accountID int64) (contracts.Ac
 	return ToContractAccount(account, phone), nil
 }
 
-func (s *Service) readAccount(ctx context.Context, accountID int64) (Account, error) {
+func (s *Service) readAccount(ctx context.Context, tenantID, accountID int64) (Account, error) {
 	var account Account
-	if err := s.accountReadTx(ctx, func(ctx context.Context, tx TxStore) error {
+	if err := s.tenantReadTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		account, err = tx.GetAccount(ctx, accountID)
 		if err != nil {
@@ -40,9 +40,9 @@ func (s *Service) readAccount(ctx context.Context, accountID int64) (Account, er
 }
 
 // BatchGetAccounts 批量读取账号摘要,避免高层模块形成 N+1 查询。
-func (s *Service) BatchGetAccounts(ctx context.Context, accountIDs []int64) ([]contracts.AccountInfo, error) {
+func (s *Service) BatchGetAccounts(ctx context.Context, tenantID int64, accountIDs []int64) ([]contracts.AccountInfo, error) {
 	var accounts []Account
-	if err := s.accountReadTx(ctx, func(ctx context.Context, tx TxStore) error {
+	if err := s.tenantReadTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		rows, err := tx.BatchGetAccounts(ctx, accountIDs)
 		if err != nil {
 			return err
@@ -66,6 +66,30 @@ func (s *Service) BatchGetAccounts(ctx context.Context, accountIDs []int64) ([]c
 		out = append(out, ToContractAccount(account, phone))
 	}
 	return out, nil
+}
+
+// PlatformAccountNames 为已认证的平台管理员解析跨校审核提交者姓名。
+func (s *Service) PlatformAccountNames(ctx context.Context, accountIDs []int64) (map[int64]string, error) {
+	id, ok := tenant.FromContext(ctx)
+	if !ok || id.AccountID <= 0 {
+		return nil, apperr.ErrUnauthorized
+	}
+	if !id.IsPlatform || id.IsSystem {
+		return nil, apperr.ErrForbidden
+	}
+	if len(accountIDs) == 0 {
+		return map[int64]string{}, nil
+	}
+	var names map[int64]string
+	err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		names, err = tx.PlatformAccountNames(ctx, accountIDs)
+		return err
+	})
+	if err != nil {
+		return nil, apperr.AsAppError(err)
+	}
+	return names, nil
 }
 
 // ListClassStudents 读取指定班级的在校学生摘要,实现 M6 按班级批量选课所需的契约。
@@ -105,7 +129,11 @@ func (s *Service) HasRole(ctx context.Context, accountID int64, role string) (bo
 	if !ok {
 		return false, nil
 	}
-	account, err := s.readAccount(ctx, accountID)
+	id, ok := tenant.FromContext(ctx)
+	if !ok {
+		return false, apperr.ErrUnauthorized
+	}
+	account, err := s.readAccount(ctx, id.TenantID, accountID)
 	if err != nil {
 		return false, err
 	}
@@ -207,30 +235,36 @@ func (s *Service) TenantStats(ctx context.Context, tenantID int64) (contracts.Id
 
 // QueryAuditLogs 按权限范围查询共享审计日志。
 func (s *Service) QueryAuditLogs(ctx context.Context, query contracts.AuditQuery) (contracts.AuditQueryResult, error) {
+	id, ok := tenant.FromContext(ctx)
+	if !ok || id.AccountID <= 0 {
+		return contracts.AuditQueryResult{}, apperr.ErrUnauthorized
+	}
+	if query.TenantID < 0 || (!id.IsPlatform && (query.TenantID <= 0 || query.TenantID != id.TenantID)) {
+		return contracts.AuditQueryResult{}, apperr.ErrCrossTenant
+	}
+	allTenants := id.IsPlatform && query.TenantID == 0
 	page, size := pagex.Normalize(int(query.Page), int(query.Size))
 	query.Page, query.Size = pagex.Int32(page, size)
+	filter := AuditQueryInput{TenantID: query.TenantID, AllTenants: allTenants, ActorID: query.ActorID, Action: query.Action, TargetType: query.TargetType, From: query.From, To: query.To, Page: query.Page, Size: query.Size}
 	var rows []AuditLogRow
 	var facetRows []AuditFacetRow
 	read := func(ctx context.Context, tx TxStore) error {
-		list, err := tx.QueryAuditLogs(ctx, AuditQueryInput{TenantID: auditTenantFilter(query), ActorID: query.ActorID, Action: query.Action, TargetType: query.TargetType, From: query.From, To: query.To, Page: query.Page, Size: query.Size})
+		list, err := tx.QueryAuditLogs(ctx, filter)
 		if err != nil {
 			return err
 		}
 		rows = list
-		facetRows, err = tx.QueryAuditActionFacets(ctx, AuditQueryInput{TenantID: auditTenantFilter(query), ActorID: query.ActorID, Action: query.Action, TargetType: query.TargetType, From: query.From, To: query.To})
-		if err != nil {
-			return err
-		}
-		return nil
+		facetRows, err = tx.QueryAuditActionFacets(ctx, filter)
+		return err
 	}
 	var err error
-	if query.IncludePlatform {
-		err = s.store.PrivilegedTx(ctx, read)
+	if allTenants {
+		err = s.store.PlatformTx(ctx, read)
 	} else {
 		err = s.store.TenantTx(ctx, query.TenantID, read)
 	}
 	if err != nil {
-		return contracts.AuditQueryResult{}, apperr.ErrInternal.WithCause(err)
+		return contracts.AuditQueryResult{}, apperr.AsAppError(err)
 	}
 	out := make([]contracts.AuditLogEntry, 0, len(rows))
 	for _, row := range rows {
@@ -244,22 +278,14 @@ func (s *Service) QueryAuditLogs(ctx context.Context, query contracts.AuditQuery
 }
 
 func (s *Service) tenantReadTx(ctx context.Context, tenantID int64, read func(context.Context, TxStore) error) error {
+	if id, ok := tenant.FromContext(ctx); tenantID <= 0 || (ok && !id.IsPlatform && id.TenantID != tenantID) {
+		return apperr.ErrCrossTenant
+	}
 	joined, err := s.store.TenantTxIfPresent(ctx, tenantID, read)
 	if joined || err != nil {
 		return err
 	}
 	return s.store.TenantTx(ctx, tenantID, read)
-}
-
-func (s *Service) accountReadTx(ctx context.Context, read func(context.Context, TxStore) error) error {
-	id, ok := tenant.FromContext(ctx)
-	if !ok || id.IsPlatform {
-		return s.store.PrivilegedTx(ctx, read)
-	}
-	if id.TenantID <= 0 {
-		return apperr.ErrCrossTenant
-	}
-	return s.tenantReadTx(ctx, id.TenantID, read)
 }
 
 func mapIdentityLookupError(err error) error {
@@ -282,14 +308,6 @@ func ensureAccountVisibleInContext(ctx context.Context, accountTenantID int64) e
 		return apperr.ErrCrossTenant
 	}
 	return nil
-}
-
-// auditTenantFilter 把平台级审计范围转换为 repo 层全量查询,租户路径固定收敛到本租户。
-func auditTenantFilter(query contracts.AuditQuery) int64 {
-	if query.IncludePlatform && query.TenantID == 0 {
-		return -1
-	}
-	return query.TenantID
 }
 
 // AlertMetrics 供 M9 只读聚合，不暴露业务明细。

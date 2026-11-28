@@ -16,8 +16,6 @@ import (
 	"github.com/google/uuid"
 )
 
-type traceCtxKey struct{}
-
 // TraceHeader 是回传/透传 trace_id 的 HTTP 头。
 const TraceHeader = "X-Trace-Id"
 
@@ -38,35 +36,17 @@ type Page struct {
 	Facets map[string]map[string]int64 `json:"facets,omitempty"`
 }
 
-// WithTrace 把 trace_id 写入 context。
-func WithTrace(ctx context.Context, traceID string) context.Context {
-	return context.WithValue(ctx, traceCtxKey{}, traceID)
-}
-
-// TraceFromContext 从 context 取 trace_id。
-func TraceFromContext(ctx context.Context) string {
-	if v, ok := ctx.Value(traceCtxKey{}).(string); ok {
-		return v
-	}
-	return ""
-}
-
-// TraceFromGin 返回当前 HTTP 请求在 context 中的追踪编号。
-func TraceFromGin(c *gin.Context) string {
-	return TraceFromContext(c.Request.Context())
+// SetRequestTrace 同时更新请求上下文与响应头。上游编号必须先通过内部鉴权。
+func SetRequestTrace(c *gin.Context, ctx context.Context, traceID string) {
+	c.Request = c.Request.WithContext(logging.WithTrace(ctx, traceID))
+	c.Header(TraceHeader, traceID)
 }
 
 // TraceMiddleware 设置请求追踪编号并通过响应头回传。
 func TraceMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		traceID := strings.TrimSpace(c.GetHeader(TraceHeader))
-		if !isSafeTraceID(traceID) {
-			traceID = uuid.NewString()
-		}
-		ctx := WithTrace(c.Request.Context(), traceID)
-		ctx = logging.WithAttrs(ctx, slog.String("trace_id", traceID), slog.String("method", c.Request.Method), requestPathAttr(c.FullPath(), c.Request.URL.Path))
-		c.Request = c.Request.WithContext(ctx)
-		c.Header(TraceHeader, traceID)
+		ctx := logging.WithAttrs(c.Request.Context(), slog.String("method", c.Request.Method), requestPathAttr(c.FullPath(), c.Request.URL.Path))
+		SetRequestTrace(c, ctx, uuid.NewString())
 		c.Next()
 	}
 }
@@ -87,7 +67,7 @@ func RecoveryMiddleware() gin.HandlerFunc {
 
 // OK 写出统一成功信封。
 func OK(c *gin.Context, data any) {
-	c.JSON(http.StatusOK, Envelope{Code: apperr.CodeOK, Message: apperr.MessageOK, Data: data, TraceID: TraceFromGin(c)})
+	c.JSON(http.StatusOK, Envelope{Code: apperr.CodeOK, Message: apperr.MessageOK, Data: data, TraceID: logging.TraceFromContext(c.Request.Context())})
 }
 
 // OKPage 写出统一分页信封。
@@ -102,14 +82,9 @@ func OKPageWithFacets(c *gin.Context, list any, total int64, page, size int, fac
 
 // Fail 写出错误响应,并按错误分层规则记录内部原因。
 func Fail(c *gin.Context, err error) {
-	ae, ok := apperr.As(err)
-	if !ok {
-		ae = apperr.ErrUnhandledFailure.WithCause(err)
-	} else {
-		ae = apperr.AsAppError(err)
-	}
+	ae := apperr.AsAppError(err)
 	logging.ErrorContext(c.Request.Context(), "request failed", ae.LogString(), slog.String("error_code", ae.UserCode()))
-	c.JSON(http.StatusOK, Envelope{Code: ae.UserCode(), Message: ae.UserMessage(), TraceID: TraceFromGin(c)})
+	c.JSON(http.StatusOK, Envelope{Code: ae.UserCode(), Message: ae.UserMessage(), TraceID: logging.TraceFromContext(c.Request.Context())})
 }
 
 // NoRoute 将未注册路径收敛为统一错误信封,避免 Gin 默认 404 空响应。
@@ -117,9 +92,9 @@ func NoRoute(c *gin.Context) {
 	Fail(c, apperr.ErrNotFound)
 }
 
-// isSafeTraceID 限制上游 trace_id 为短可见标识,避免日志污染。
-func isSafeTraceID(traceID string) bool {
-	if len(traceID) == 0 || len(traceID) > 128 {
+// ValidTraceID 限制上游编号为可写入审计列的短标识。
+func ValidTraceID(traceID string) bool {
+	if len(traceID) == 0 || len(traceID) > 64 {
 		return false
 	}
 	for _, r := range traceID {

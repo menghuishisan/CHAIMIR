@@ -16,7 +16,7 @@ import (
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
-	"chaimir/internal/platform/response"
+
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/ws"
@@ -321,7 +321,7 @@ func (s *Service) CreateSandbox(ctx context.Context, req contracts.SandboxCreate
 		return s.GetSandbox(ctx, input.TenantID, existingID)
 	}
 	s.scheduleSandboxStart(ctx, created.TenantID, created.ID)
-	s.broadcastProgress(ctx, input.TenantID, created.ID, SandboxPhaseAllocating, SandboxStatusCreating, response.TraceFromContext(ctx))
+	s.broadcastProgress(ctx, input.TenantID, created.ID, SandboxPhaseAllocating, SandboxStatusCreating, logging.TraceFromContext(ctx))
 	return accepted, nil
 }
 
@@ -330,7 +330,7 @@ func (s *Service) validateSandboxSharedAccounts(ctx context.Context, tenantID in
 	if len(accountIDs) == 0 {
 		return nil
 	}
-	accounts, err := s.identity.BatchGetAccounts(ctx, accountIDs)
+	accounts, err := s.identity.BatchGetAccounts(ctx, tenantID, accountIDs)
 	if err != nil {
 		return apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
 	}
@@ -436,7 +436,7 @@ func (s *Service) resolveSandboxCreateDependencies(ctx context.Context, tx TxSto
 	if err != nil {
 		return resolvedSandboxCreateDependencies{}, err
 	}
-	if _, err := tx.EnsureTenantQuota(ctx, s.defaultTenantQuota(input.TenantID)); err != nil {
+	if err := tx.EnsureTenantQuota(ctx, s.defaultTenantQuota(input.TenantID)); err != nil {
 		return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxQuotaInvalid.WithCause(err)
 	}
 	quota, err := tx.GetTenantQuotaForUpdate(ctx, input.TenantID)
@@ -669,7 +669,7 @@ func (s *Service) Stats(ctx context.Context, tenantID int64) (contracts.SandboxQ
 	var quota TenantQuota
 	var active int64
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		if _, err := tx.EnsureTenantQuota(ctx, s.defaultTenantQuota(tenantID)); err != nil {
+		if err := tx.EnsureTenantQuota(ctx, s.defaultTenantQuota(tenantID)); err != nil {
 			return apperr.ErrSandboxQuotaInvalid.WithCause(err)
 		}
 		var err error
@@ -704,8 +704,7 @@ func (s *Service) EnsureTenantQuota(ctx context.Context, tenantID int64) error {
 		return err
 	}
 	return s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.EnsureTenantQuota(ctx, quota)
-		if err != nil {
+		if err := tx.EnsureTenantQuota(ctx, quota); err != nil {
 			return apperr.ErrSandboxQuotaPersistFailed.WithCause(err)
 		}
 		return nil
