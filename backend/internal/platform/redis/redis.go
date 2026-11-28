@@ -26,6 +26,15 @@ end
 return n
 `)
 
+// Redis 7 没有只递减已有正计数的原生命令；同一脚本避免过期检查与退款竞争。
+var refundCounterScript = goredis.NewScript(`
+local value = redis.call("GET", KEYS[1])
+if not value then return 0 end
+local count = tonumber(value)
+if count and count <= 0 then return 0 end
+return redis.call("DECR", KEYS[1])
+`)
+
 // New 创建 Redis 客户端并用配置化超时 Ping,缓存依赖不可用时启动失败。
 func New(ctx context.Context, cfg config.RedisConfig) (*Client, error) {
 	if cfg.PingTimeoutSeconds <= 0 {
@@ -95,7 +104,7 @@ func (c *Client) IncrWithTTL(ctx context.Context, key string, ttl time.Duration)
 	return n, nil
 }
 
-// Decr 自减计数,用于外部动作失败后回滚已占用的限额窗口。
+// Decr 退还仍有效的正计数，保留原 TTL；过期或已归零的窗口不重建、不变负。
 func (c *Client) Decr(ctx context.Context, key string) (int64, error) {
 	if c == nil || c.rdb == nil {
 		return 0, fmt.Errorf("redis 客户端未初始化")
@@ -103,7 +112,7 @@ func (c *Client) Decr(ctx context.Context, key string) (int64, error) {
 	if key == "" {
 		return 0, fmt.Errorf("redis Decr 参数非法")
 	}
-	n, err := c.rdb.Decr(ctx, key).Result()
+	n, err := refundCounterScript.Run(ctx, c.rdb, []string{key}).Int64()
 	if err != nil {
 		return 0, fmt.Errorf("redis Decr 失败: %w", err)
 	}

@@ -252,9 +252,6 @@ func runTx(ctx context.Context, pool *pgxpool.Pool, fn TxFunc) error {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
-			return fmt.Errorf("提交事务失败: %w", errors.Join(err, fmt.Errorf("回滚失败: %w", rollbackErr)))
-		}
 		return fmt.Errorf("提交事务失败: %w", err)
 	}
 	return nil

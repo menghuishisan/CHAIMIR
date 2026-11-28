@@ -14,7 +14,7 @@ func (s *Service) ListCategories(ctx context.Context) ([]CategoryDTO, error) {
 		return nil, err
 	}
 	var items []Category
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.TenantReadTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		items, err = tx.ListCategories(ctx, id.TenantID)
 		return err

@@ -1451,12 +1451,19 @@ func (q *Queries) LockSimSessionActionSequence(ctx context.Context, arg LockSimS
 }
 
 const mergeSimValidationReport = `-- name: MergeSimValidationReport :one
-UPDATE sim_package_review
-SET preview_report = preview_report || $1,
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.preview_lease_until
+    FROM sim_package_review AS owned
+    WHERE owned.id = $2 AND owned.package_id = $3 AND owned.result = 1
+      AND owned.preview_lease_token = $4
+    FOR UPDATE OF owned
+)
+UPDATE sim_package_review AS t
+SET preview_report = t.preview_report || $1,
     updated_at = now(), preview_lease_token = '', preview_lease_until = NULL
-WHERE id = $2 AND package_id = $3 AND result = 1
-  AND preview_lease_token = $4 AND preview_lease_until > now()
-RETURNING id, package_id, submitter_id, preview_report, reviewer_id, result, comment, created_at, updated_at
+FROM current_lease l
+WHERE t.id = l.id AND l.preview_lease_until > clock_timestamp()
+RETURNING t.id, t.package_id, t.submitter_id, t.preview_report, t.reviewer_id, t.result, t.comment, t.created_at, t.updated_at
 `
 
 type MergeSimValidationReportParams struct {
@@ -1501,10 +1508,17 @@ func (q *Queries) MergeSimValidationReport(ctx context.Context, arg MergeSimVali
 }
 
 const releaseSimPreviewLease = `-- name: ReleaseSimPreviewLease :execrows
-UPDATE sim_package_review
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.preview_lease_until
+    FROM sim_package_review AS owned
+    WHERE owned.id = $1 AND owned.package_id = $2 AND owned.result = 1
+      AND owned.preview_lease_token = $3
+    FOR UPDATE OF owned
+)
+UPDATE sim_package_review AS t
 SET preview_lease_token = '', preview_lease_until = NULL, updated_at = now()
-WHERE id = $1 AND package_id = $2 AND result = 1
-  AND preview_lease_token = $3 AND preview_lease_until > now()
+FROM current_lease l
+WHERE t.id = l.id AND l.preview_lease_until > clock_timestamp()
 `
 
 type ReleaseSimPreviewLeaseParams struct {
@@ -1523,10 +1537,18 @@ func (q *Queries) ReleaseSimPreviewLease(ctx context.Context, arg ReleaseSimPrev
 }
 
 const renewSimPreviewLease = `-- name: RenewSimPreviewLease :execrows
-UPDATE sim_package_review
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.preview_lease_until
+    FROM sim_package_review AS owned
+    WHERE owned.id = $2 AND owned.package_id = $3
+      AND owned.result = 1 AND owned.preview_lease_token = $4
+    FOR UPDATE OF owned
+)
+UPDATE sim_package_review AS r
 SET preview_lease_until = $1::timestamptz, updated_at = now()
-WHERE id = $2 AND package_id = $3 AND result = 1
-  AND preview_lease_token = $4 AND preview_lease_until > now()
+FROM current_lease l
+WHERE r.id = l.id AND l.preview_lease_until > clock_timestamp()
+  AND $1::timestamptz > clock_timestamp()
 `
 
 type RenewSimPreviewLeaseParams struct {

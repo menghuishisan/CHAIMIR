@@ -95,16 +95,30 @@ WHERE outbox.id = candidates.id
 RETURNING outbox.id, outbox.tenant_id, outbox.deploy_mode, outbox.trace_id, outbox.provisioned_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until;
 
 -- name: MarkTenantProvisionOutboxPublished :one
-UPDATE tenant_provision_outbox
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM tenant_provision_outbox AS owned
+    WHERE owned.id = sqlc.arg(id) AND owned.status = 2 AND owned.lease_token = sqlc.arg(lease_token)
+    FOR UPDATE OF owned
+)
+UPDATE tenant_provision_outbox AS t
 SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE id = sqlc.arg(id) AND status = 2 AND lease_token = sqlc.arg(lease_token) AND lease_until > now()
-RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.deploy_mode, t.trace_id, t.provisioned_at, t.status, t.retry_count, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until;
 
 -- name: MarkTenantProvisionOutboxFailed :one
-UPDATE tenant_provision_outbox
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM tenant_provision_outbox AS owned
+    WHERE owned.id = sqlc.arg(id) AND owned.status = 2 AND owned.lease_token = sqlc.arg(lease_token)
+    FOR UPDATE OF owned
+)
+UPDATE tenant_provision_outbox AS t
 SET status = 4, last_error = sqlc.arg(last_error), updated_at = now(), lease_token = '', lease_until = NULL
-WHERE id = sqlc.arg(id) AND status = 2 AND lease_token = sqlc.arg(lease_token) AND lease_until > now()
-RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.deploy_mode, t.trace_id, t.provisioned_at, t.status, t.retry_count, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until;
 
 -- name: UpdateTenantConfig :one
 UPDATE tenant

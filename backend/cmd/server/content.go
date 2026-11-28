@@ -2,7 +2,6 @@
 package main
 
 import (
-	"fmt"
 	"time"
 
 	"chaimir/internal/contracts"
@@ -33,15 +32,6 @@ type ContentModuleDeps struct {
 
 // RegisterContentModule 构造题库 store/service 并注册 HTTP 路由。
 func RegisterContentModule(deps ContentModuleDeps) (*content.Service, error) {
-	if deps.Router == nil {
-		return nil, fmt.Errorf("content module 缺少 HTTP router")
-	}
-	if deps.Database == nil {
-		return nil, fmt.Errorf("content module 缺少 database")
-	}
-	if deps.Storage == nil {
-		return nil, fmt.Errorf("content module 缺少统一对象存储")
-	}
 	store := content.NewStore(deps.Database)
 	svc, err := content.NewService(content.ServiceDeps{
 		CleanupTimeout:            time.Duration(deps.Upload.CleanupTimeoutSeconds) * time.Second,

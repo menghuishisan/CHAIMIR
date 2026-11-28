@@ -51,7 +51,7 @@ func (s *Service) ImportTemplate(targetType int16, format string) (ImportTemplat
 		}
 		return ImportTemplateFile{FileName: filePrefix + ".csv", ContentType: "text/csv; charset=utf-8", Content: content}, nil
 	case importTemplateFormatXLSX:
-		content, err := encodeImportXLSX(records)
+		content, err := encodeNamedXLSX(importSheetAccounts, records)
 		if err != nil {
 			return ImportTemplateFile{}, err
 		}
@@ -89,10 +89,16 @@ func encodeImportCSV(records [][]string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// encodeImportXLSX 使用成熟 Excel 库生成真实 xlsx 模板。
-func encodeImportXLSX(records [][]string) ([]byte, error) {
+// encodeNamedXLSX 使用指定工作表名生成账号与组织导入模板。
+func encodeNamedXLSX(sheetName string, records [][]string) (content []byte, err error) {
 	workbook := excelize.NewFile()
-	if err := workbook.SetSheetName("Sheet1", importSheetAccounts); err != nil {
+	defer func() {
+		if closeErr := workbook.Close(); closeErr != nil {
+			content = nil
+			err = apperr.ErrInternal.WithCause(errors.Join(err, closeErr))
+		}
+	}()
+	if err := workbook.SetSheetName("Sheet1", sheetName); err != nil {
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
 	for rowIndex, record := range records {
@@ -101,16 +107,13 @@ func encodeImportXLSX(records [][]string) ([]byte, error) {
 			if err != nil {
 				return nil, apperr.ErrInternal.WithCause(err)
 			}
-			if err := workbook.SetCellValue(importSheetAccounts, cell, value); err != nil {
+			if err := workbook.SetCellValue(sheetName, cell, value); err != nil {
 				return nil, apperr.ErrInternal.WithCause(err)
 			}
 		}
 	}
 	var buf bytes.Buffer
 	if err := workbook.Write(&buf); err != nil {
-		return nil, apperr.ErrInternal.WithCause(err)
-	}
-	if err := workbook.Close(); err != nil {
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
 	return buf.Bytes(), nil
@@ -245,15 +248,8 @@ func (s *Service) CommitAccountImport(ctx context.Context, req ImportCommitReque
 					return err
 				}
 				if passwordHash == "" {
-					code, err := crypto.RandomToken(16)
+					code, err := s.createActivationCodeInTx(ctx, rowTx, id.TenantID, accountID, id.AccountID)
 					if err != nil {
-						return err
-					}
-					hash, err := s.hashSecret(code)
-					if err != nil {
-						return err
-					}
-					if _, err := rowTx.CreateActivationCode(ctx, CreateActivationInput{ID: s.ids.Generate(), TenantID: id.TenantID, AccountID: accountID, CodeHash: hash, ExpireAt: s.activationExpireAt(), CreatedBy: id.AccountID}); err != nil {
 						return err
 					}
 					// 激活码明文只在本次响应返回,落库只保存哈希,后续无法从数据库恢复明文。
@@ -313,18 +309,7 @@ func (s *Service) CommitAccountImport(ctx context.Context, req ImportCommitReque
 		if err != nil {
 			return err
 		}
-		return tx.WriteAudit(ctx, WriteAuditInput{
-			ID:         s.ids.Generate(),
-			TenantID:   entry.TenantID,
-			ActorID:    entry.ActorID,
-			ActorRole:  entry.ActorRole,
-			Action:     entry.Action,
-			TargetType: entry.TargetType,
-			TargetID:   entry.TargetID,
-			Detail:     []byte(entry.Detail),
-			IP:         entry.IP,
-			TraceID:    entry.TraceID,
-		})
+		return s.auditWriter.writeInTx(ctx, tx, entry)
 	}); err != nil {
 		return AccountImportCommitResponse{}, apperr.AsAppError(err)
 	}
@@ -420,115 +405,105 @@ func accountImportOrgExists(ctx context.Context, tx TxStore, tenantID int64, row
 	return false, err
 }
 
-// parseImportFile 按统一上传安全原语识别 CSV/XLSX,再进入对应解析器。
+// parseImportFile 把已验证的表格记录转换为账号导入行。
 func (s *Service) parseImportFile(ctx context.Context, raw []byte, fileName, contentType string, targetType int16) ([]importRow, []ImportRowResult, error) {
+	records, err := s.readImportFile(ctx, raw, fileName, contentType, importSheetAccounts)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.parseImportRecords(records, targetType)
+}
+
+// readImportFile 共用账号与组织导入的文件边界、扫描及格式读取。
+func (s *Service) readImportFile(ctx context.Context, raw []byte, fileName, contentType, sheet string) ([][]string, error) {
 	if filepath.Base(fileName) != fileName || strings.TrimSpace(fileName) == "" {
-		return nil, nil, apperr.ErrIdentityImportUnsupportedFile
+		return nil, apperr.ErrIdentityImportUnsupportedFile
 	}
 	switch upload.CheckSize(int64(len(raw)), s.uploadCfg.ImportMaxBytes) {
 	case upload.SizeEmpty:
-		return nil, nil, apperr.ErrIdentityImportContentInvalid
+		return nil, apperr.ErrIdentityImportContentInvalid
 	case upload.SizeTooLarge:
-		return nil, nil, apperr.ErrIdentityImportFileTooLarge
+		return nil, apperr.ErrIdentityImportFileTooLarge
 	}
 	if err := upload.VerifyScan(ctx, s.scanner, upload.ScanPolicy{Required: s.uploadCfg.VirusScanRequired}, upload.ScanRequest{FileName: fileName, Content: raw}); err != nil {
-		return nil, nil, apperr.ErrIdentityImportUnsupportedFile.WithCause(err)
+		return nil, apperr.ErrIdentityImportUnsupportedFile.WithCause(err)
 	}
+	var records [][]string
+	var err error
 	switch upload.CSVOrXLSXKind(fileName, contentType, raw) {
 	case upload.KindCSV:
-		return s.parseImportCSV(raw, targetType, s.cfg.ImportMaxRows)
+		records, err = readImportCSV(raw, s.cfg.ImportMaxRows)
 	case upload.KindXLSX:
-		return s.parseImportXLSX(raw, targetType, s.cfg.ImportMaxRows)
+		records, err = readImportXLSX(ctx, raw, sheet, s.cfg.ImportMaxRows)
 	default:
-		return nil, nil, apperr.ErrIdentityImportUnsupportedFile
+		return nil, apperr.ErrIdentityImportUnsupportedFile
 	}
+	if err != nil {
+		return nil, err
+	}
+	if len(records) < 2 {
+		return nil, apperr.ErrIdentityImportEmpty
+	}
+	return records, nil
 }
 
-// parseImportCSV 解析账号导入 CSV,首行必须为表头。
-func (s *Service) parseImportCSV(raw []byte, targetType int16, maxRows int) ([]importRow, []ImportRowResult, error) {
-	reader := csv.NewReader(strings.NewReader(string(raw)))
+func readImportCSV(raw []byte, maxRows int) ([][]string, error) {
+	reader := csv.NewReader(bytes.NewReader(raw))
 	reader.TrimLeadingSpace = true
 	records := make([][]string, 0, min(maxRows+2, 128))
 	for {
 		record, err := reader.Read()
 		if errors.Is(err, io.EOF) {
-			break
+			return records, nil
 		}
 		if err != nil {
-			return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid
+			return nil, apperr.ErrIdentityImportCSVFormatInvalid
 		}
 		records = append(records, record)
 		if len(records) > maxRows+1 {
-			return nil, nil, apperr.ErrIdentityImportTooManyRows
+			return nil, apperr.ErrIdentityImportTooManyRows
 		}
 	}
-	if len(records) < 2 {
-		return nil, nil, apperr.ErrIdentityImportEmpty
-	}
-	return s.parseImportRecords(records, targetType)
 }
 
-// parseImportXLSX 解析账号导入 Excel,只读取模板工作表或首个工作表。
-func (s *Service) parseImportXLSX(raw []byte, targetType int16, maxRows int) ([]importRow, []ImportRowResult, error) {
+func readImportXLSX(ctx context.Context, raw []byte, sheet string, maxRows int) (records [][]string, err error) {
 	workbook, err := excelize.OpenReader(bytes.NewReader(raw))
 	if err != nil {
-		return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
+		return nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
 	}
-	sheet := importSheetAccounts
+	defer func() {
+		if closeErr := workbook.Close(); closeErr != nil {
+			records = nil
+			err = apperr.ErrInternal.WithCause(errors.Join(err, closeErr))
+		}
+	}()
 	if index, err := workbook.GetSheetIndex(sheet); err != nil || index < 0 {
 		sheets := workbook.GetSheetList()
 		if len(sheets) == 0 {
-			if closeErr := workbook.Close(); closeErr != nil {
-				return nil, nil, apperr.ErrInternal.WithCause(closeErr)
-			}
-			return nil, nil, apperr.ErrIdentityImportEmpty
+			return nil, apperr.ErrIdentityImportEmpty
 		}
 		sheet = sheets[0]
 	}
-	rowsIter, err := workbook.Rows(sheet)
+	rows, err := workbook.Rows(sheet)
 	if err != nil {
-		if closeErr := workbook.Close(); closeErr != nil {
-			return nil, nil, apperr.ErrInternal.WithCause(closeErr)
-		}
-		return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
+		return nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
 	}
-	resourcesClosed := false
-	closeResources := func() error {
-		if resourcesClosed {
-			return nil
-		}
-		resourcesClosed = true
-		if closeErr := rowsIter.Close(); closeErr != nil {
-			slog.Warn("账号导入工作簿行迭代器关闭失败", slog.String("error", logging.SanitizeError(closeErr.Error())))
-		}
-		return workbook.Close()
-	}
-	defer func() {
-		if closeErr := closeResources(); closeErr != nil {
-			slog.Warn("账号导入工作簿关闭失败", slog.String("error", logging.SanitizeError(closeErr.Error())))
-		}
-	}()
-	records := make([][]string, 0, min(maxRows+2, 128))
-	for rowsIter.Next() {
-		record, err := rowsIter.Columns()
+	defer logging.CloseContext(ctx, "导入工作簿行迭代器关闭失败", rows)
+	records = make([][]string, 0, min(maxRows+2, 128))
+	for rows.Next() {
+		record, err := rows.Columns()
 		if err != nil {
-			return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
+			return nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
 		}
 		records = append(records, record)
 		if len(records) > maxRows+1 {
-			return nil, nil, apperr.ErrIdentityImportTooManyRows
+			return nil, apperr.ErrIdentityImportTooManyRows
 		}
 	}
-	if err := rowsIter.Error(); err != nil {
-		return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
+	if err := rows.Error(); err != nil {
+		return nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
 	}
-	if err := closeResources(); err != nil {
-		return nil, nil, apperr.ErrInternal.WithCause(err)
-	}
-	if len(records) < 2 {
-		return nil, nil, apperr.ErrIdentityImportEmpty
-	}
-	return s.parseImportRecords(records, targetType)
+	return records, nil
 }
 
 // parseImportRecords 把 CSV/XLSX 的二维记录统一转换为导入行和用户向行级错误。

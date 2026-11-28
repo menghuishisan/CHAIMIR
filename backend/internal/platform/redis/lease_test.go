@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,6 +15,147 @@ import (
 	miniserver "github.com/alicebob/miniredis/v2/server"
 	goredis "github.com/redis/go-redis/v9"
 )
+
+type leaseReplyHook struct {
+	process func(context.Context, goredis.Cmder, goredis.ProcessHook) error
+}
+
+func (h leaseReplyHook) DialHook(next goredis.DialHook) goredis.DialHook { return next }
+func (h leaseReplyHook) ProcessPipelineHook(next goredis.ProcessPipelineHook) goredis.ProcessPipelineHook {
+	return next
+}
+func (h leaseReplyHook) ProcessHook(next goredis.ProcessHook) goredis.ProcessHook {
+	return func(ctx context.Context, cmd goredis.Cmder) error { return h.process(ctx, cmd, next) }
+}
+
+func TestLeaseRejectsLateConfirmation(t *testing.T) {
+	for _, confirmation := range []int32{1, 2} {
+		t.Run(strconv.Itoa(int(confirmation)), func(t *testing.T) {
+			server := miniredis.RunT(t)
+			client := leaseClient(t, server)
+			ttl := 90 * time.Millisecond
+			var confirmations atomic.Int32
+			client.rdb.AddHook(leaseReplyHook{process: func(ctx context.Context, cmd goredis.Cmder, next goredis.ProcessHook) error {
+				err := next(ctx, cmd)
+				if err == nil && strings.HasPrefix(cmd.Name(), "eval") && confirmations.Add(1) == confirmation {
+					// Redis 已执行成功，响应在传输途中超过确认窗口；此时另一持有者已接管。
+					server.FastForward(ttl * 2)
+					server.Set("execution", "successor-token")
+					server.SetTTL("execution", time.Second)
+					time.Sleep(ttl * 2)
+				}
+				return err
+			}})
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			called := false
+			executionErr := errors.New("execution interrupted")
+			err := client.WithLease(ctx, "execution", ttl, func(ctx context.Context) error {
+				called = true
+				if confirmation == 1 {
+					return nil
+				}
+				<-ctx.Done()
+				return errors.Join(executionErr, context.Cause(ctx))
+			})
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Errorf("late confirmation extended execution authority: called=%v err=%v", called, err)
+			}
+			if confirmation == 1 && called {
+				t.Error("execution started after initial lease confirmation expired")
+			}
+			if confirmation == 2 && !errors.Is(err, executionErr) {
+				t.Errorf("renewal lost execution error: %v", err)
+			}
+			value, getErr := server.Get("execution")
+			if getErr != nil || value != "successor-token" {
+				t.Fatalf("late owner damaged successor: value=%q error=%v", value, getErr)
+			}
+		})
+	}
+}
+
+func TestLeaseRenewsWithinRemainingInitialWindow(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := leaseClient(t, server)
+	ttl := 600 * time.Millisecond
+	var confirmations atomic.Int32
+	var initialDeadline time.Time
+	renewed := make(chan struct{}, 1)
+	client.rdb.AddHook(leaseReplyHook{process: func(ctx context.Context, cmd goredis.Cmder, next goredis.ProcessHook) error {
+		started := time.Now()
+		err := next(ctx, cmd)
+		if err != nil || !strings.HasPrefix(cmd.Name(), "eval") {
+			return err
+		}
+		switch confirmations.Add(1) {
+		case 1:
+			initialDeadline = started.Add(ttl)
+			time.Sleep(ttl * 2 / 3)
+		case 2:
+			deadline, ok := ctx.Deadline()
+			if !ok || deadline.After(initialDeadline) || !started.Before(initialDeadline) {
+				t.Errorf("first renewal restarted the acquisition window: started=%v deadline=%v initial=%v", started, deadline, initialDeadline)
+			}
+			renewed <- struct{}{}
+		}
+		return nil
+	}})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := client.WithLease(ctx, "execution", ttl, func(ctx context.Context) error {
+		select {
+		case <-renewed:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLeaseAcquisitionUsesBoundedNativeIO(t *testing.T) {
+	server := miniredis.RunT(t)
+	host, portText, err := net.SplitHostPort(server.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := New(context.Background(), config.RedisConfig{Host: host, Port: port, PingTimeoutSeconds: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	warmup, err := client.ObtainLease(context.Background(), "warmup", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := warmup.Release(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	server.Server().SetPreHook(func(_ *miniserver.Peer, command string, args ...string) bool {
+		if strings.HasPrefix(strings.ToLower(command), "eval") && len(args) > 2 && args[2] == "execution" {
+			time.Sleep(500 * time.Millisecond)
+		}
+		return false
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	started := time.Now()
+	called := false
+	err = client.WithLease(ctx, "execution", 100*time.Millisecond, func(context.Context) error { called = true; return nil })
+	if err == nil || called || time.Since(started) >= 400*time.Millisecond {
+		t.Fatalf("native acquisition exceeded lease budget: called=%v elapsed=%v error=%v", called, time.Since(started), err)
+	}
+}
 
 func leaseClient(t *testing.T, server *miniredis.Miniredis) *Client {
 	t.Helper()
@@ -23,6 +166,34 @@ func leaseClient(t *testing.T, server *miniredis.Miniredis) *Client {
 		}
 	})
 	return client
+}
+
+func TestRateRefundDoesNotRecreateExpiredCounter(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := leaseClient(t, server)
+	ctx := context.Background()
+	if count, err := client.IncrWithTTL(ctx, "daily", time.Second); err != nil || count != 1 {
+		t.Fatalf("reserve=%d error=%v", count, err)
+	}
+	server.FastForward(2 * time.Second)
+	if count, err := client.Decr(ctx, "daily"); err != nil || count != 0 {
+		t.Fatalf("refund=%d error=%v", count, err)
+	}
+	if server.Exists("daily") {
+		t.Fatal("refund recreated an expired counter")
+	}
+	if count, err := client.IncrWithTTL(ctx, "daily", time.Second); err != nil || count != 1 {
+		t.Fatalf("next reservation=%d error=%v", count, err)
+	}
+	if _, err := client.Decr(ctx, "daily"); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := client.Decr(ctx, "daily"); err != nil || count != 0 {
+		t.Fatalf("double refund=%d error=%v", count, err)
+	}
+	if server.TTL("daily") <= 0 {
+		t.Fatal("refund removed active counter expiry")
+	}
 }
 
 func TestLeaseExcludesOtherClientsAndReleasesAfterWork(t *testing.T) {

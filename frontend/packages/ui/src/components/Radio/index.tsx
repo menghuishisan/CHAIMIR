@@ -26,18 +26,22 @@ export const RadioGroup = forwardRef<ElementRef<typeof RadioGroupPrimitive.Root>
 export interface RadioItemProps extends ComponentPropsWithoutRef<typeof RadioGroupPrimitive.Item> {
   /** 选项文字:传入后整行可点 */
   label?: string
+  onDark?: boolean
 }
 
 /** 单选项:圆形指示器,选中时中心出现玉色圆点 */
 export const RadioItem = forwardRef<ElementRef<typeof RadioGroupPrimitive.Item>, RadioItemProps>(
-  function RadioItem({ className, label, disabled, ...rest }, ref) {
+  function RadioItem({ className, label, disabled, onDark = false, ...rest }, ref) {
     const circle = (
       <RadioGroupPrimitive.Item
         ref={ref}
         disabled={disabled}
         className={cn(
           // hover 边框转主色作可点暗示;选中态边框已是主色,叠加无视觉冲突
-          'hit-target relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-line-control bg-surface transition-colors duration-fast hover:border-primary data-[state=checked]:border-primary focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none',
+          'hit-target relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors duration-fast focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none',
+          onDark
+            ? 'border-dark-control bg-dark-elevated hover:border-accent data-[state=checked]:border-accent'
+            : 'border-line-control bg-surface hover:border-primary data-[state=checked]:border-primary',
           // 无 label 时禁用态在圆圈上弱化;有 label 时由外层 label 统一弱化
           !label && 'disabled:opacity-50',
           !label && className
@@ -45,7 +49,7 @@ export const RadioItem = forwardRef<ElementRef<typeof RadioGroupPrimitive.Item>,
         {...rest}
       >
         <RadioGroupPrimitive.Indicator className="flex items-center justify-center">
-          <span className="h-2 w-2 rounded-full bg-primary" />
+          <span className={cn('h-2 w-2 rounded-full', onDark ? 'bg-accent' : 'bg-primary')} />
         </RadioGroupPrimitive.Indicator>
       </RadioGroupPrimitive.Item>
     )
@@ -61,7 +65,9 @@ export const RadioItem = forwardRef<ElementRef<typeof RadioGroupPrimitive.Item>,
         )}
       >
         {circle}
-        <span className="select-none text-base text-ink">{label}</span>
+        <span className={cn('select-none text-base', onDark ? 'text-on-dark' : 'text-ink')}>
+          {label}
+        </span>
       </label>
     )
   }

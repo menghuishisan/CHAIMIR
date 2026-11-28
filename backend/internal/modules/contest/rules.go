@@ -18,6 +18,7 @@ import (
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/netx"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/question"
 )
 
 var errVulnForkInvalid = apperr.New(apperr.CodeContestVulnPrevalidateFailed, "请配置完整历史状态、固定链身份及工作区私有连接后重试")
@@ -78,6 +79,34 @@ func contestContentTypeAllowed(mode, contentType int16) bool {
 	default:
 		return false
 	}
+}
+
+func validateContestContent(mode int16, item contracts.ContentItemSnapshot) (*question.Definition, error) {
+	if !contestContentTypeAllowed(mode, item.Type) {
+		return nil, apperr.ErrContestProblemInvalid.WithCause(fmt.Errorf("内容类型与赛制不匹配 mode=%d content_type=%d", mode, item.Type))
+	}
+	if item.Type != contentTypeTheoryQuestion {
+		return nil, nil
+	}
+	definition, err := question.Decode(item.Body, false)
+	if err != nil {
+		return nil, apperr.ErrContestProblemInvalid.WithCause(err)
+	}
+	if !definition.Automatic() {
+		return nil, apperr.ErrContestProblemInvalid
+	}
+	return &definition, nil
+}
+
+func validateContestTheoryRequest(req SubmitRequest, definition question.Definition) error {
+	answer, exists := req.ContentRef["student_answer"]
+	if !exists || len(req.ContentRef) != 1 || strings.TrimSpace(req.SandboxRef) != "" {
+		return apperr.ErrContestSubmissionInvalid
+	}
+	if _, err := definition.Normalize(answer, true); err != nil {
+		return apperr.ErrContestSubmissionInvalid.WithCause(err)
+	}
+	return nil
 }
 
 func validateContestTransition(current, next int16) error {

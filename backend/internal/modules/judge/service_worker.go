@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/background"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/timex"
@@ -37,18 +38,19 @@ type JudgeExecutionResult struct {
 
 // RunWorkerOnce 领取一批排队任务并发布此前积压的终态事件。
 func (s *Service) RunWorkerOnce(ctx context.Context) error {
-	if err := s.publishPendingOutbox(ctx); err != nil {
-		return err
+	failures := s.publishPendingOutbox(ctx)
+	if err := ctx.Err(); err != nil {
+		return errors.Join(failures, err)
 	}
 	limit := s.cfg.WorkerBatchSize
 	if limit <= 0 {
-		return apperr.ErrJudgeTaskPersistFailed
+		return errors.Join(failures, apperr.ErrJudgeTaskPersistFailed)
 	}
 	var expired []JudgeTask
 	var tasks []JudgeTask
 	leaseToken, err := pkgcrypto.RandomToken(48)
 	if err != nil {
-		return apperr.ErrJudgeTaskPersistFailed.WithCause(err)
+		return errors.Join(failures, apperr.ErrJudgeTaskPersistFailed.WithCause(err))
 	}
 	now := time.Now()
 	leaseUntil := now.Add(time.Duration(s.cfg.TaskLeaseDurationMs) * time.Millisecond)
@@ -71,7 +73,7 @@ func (s *Service) RunWorkerOnce(ctx context.Context) error {
 		}
 		return nil
 	}); err != nil {
-		return err
+		return errors.Join(failures, err)
 	}
 	for _, task := range expired {
 		s.publishProgress(ctx, task.TenantID, task.ID, task.Status, ProgressStageFailed, "判题任务执行失败")
@@ -79,9 +81,10 @@ func (s *Service) RunWorkerOnce(ctx context.Context) error {
 	for _, task := range tasks {
 		if err := s.processTask(ctx, task); err != nil {
 			logging.ErrorContext(ctx, "judge task processing failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", task.TenantID), slog.Int64("task_id", task.ID))
+			failures = errors.Join(failures, err)
 		}
 	}
-	return s.publishPendingOutbox(ctx)
+	return errors.Join(failures, s.publishPendingOutbox(ctx))
 }
 
 // processTask 执行单个判题任务,失败时按任务重试策略回队列或落失败终态。
@@ -110,56 +113,20 @@ func (s *Service) processTask(ctx context.Context, task JudgeTask) error {
 	return s.completeTask(ctx, task, result)
 }
 
-// executeTaskWithLease 在整个不可信代码执行期间续租,避免任务超过初始租约后被并发重复执行。
+// executeTaskWithLease 在执行期间续租，返回前等待续租退出。
 func (s *Service) executeTaskWithLease(ctx context.Context, task JudgeTask, leaseDuration time.Duration) (JudgeExecutionResult, bool, error) {
-	executionCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	done := make(chan struct{})
-	lost := make(chan struct{}, 1)
-	go s.renewJudgeTaskLeaseUntilDone(executionCtx, task, leaseDuration, done, lost, cancel)
-	result, err := s.executeTask(executionCtx, task)
-	close(done)
-	select {
-	case <-lost:
-		return JudgeExecutionResult{}, true, nil
-	default:
-		return result, false, err
+	var result JudgeExecutionResult
+	lost, err := background.WithRenewal(ctx, leaseDuration, func(ctx context.Context) (bool, error) {
+		return s.renewJudgeTaskLease(ctx, task, leaseDuration)
+	}, func(ctx context.Context) error {
+		var err error
+		result, err = s.executeTask(ctx, task)
+		return err
+	})
+	if lost {
+		logging.ErrorContext(ctx, "judge task lease renewal failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", task.TenantID), slog.Int64("task_id", task.ID))
 	}
-}
-
-// renewJudgeTaskLeaseUntilDone 按租约三分之一且最长 30 秒的周期续租;CAS 失败即取消执行。
-func (s *Service) renewJudgeTaskLeaseUntilDone(ctx context.Context, task JudgeTask, leaseDuration time.Duration, done <-chan struct{}, lost chan<- struct{}, cancel context.CancelFunc) {
-	interval := leaseDuration / 3
-	if interval > 30*time.Second {
-		interval = 30 * time.Second
-	}
-	if interval < time.Second {
-		interval = time.Second
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-done:
-			return
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			renewed, err := s.renewJudgeTaskLease(ctx, task, leaseDuration)
-			if err == nil && renewed {
-				continue
-			}
-			if err != nil {
-				logging.ErrorContext(ctx, "judge task lease renewal failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", task.TenantID), slog.Int64("task_id", task.ID))
-			}
-			select {
-			case lost <- struct{}{}:
-			default:
-			}
-			cancel()
-			return
-		}
-	}
+	return result, lost, err
 }
 
 // renewJudgeTaskLease 仅允许当前持有者延长仍有效的判题任务租约。
@@ -397,17 +364,24 @@ func (s *Service) waitSandboxReady(ctx context.Context, task JudgeTask, sandboxI
 	if timeout <= 0 {
 		return apperr.ErrJudgeTimeout
 	}
-	deadline := timex.Now().Add(timeout)
 	interval := time.Duration(s.cfg.SandboxReadyPollIntervalMs) * time.Millisecond
 	if interval <= 0 {
 		return apperr.ErrJudgeWorkerFailed
 	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	waitError := func(err error) error {
+		if ctx.Err() == nil && errors.Is(waitCtx.Err(), context.DeadlineExceeded) {
+			return apperr.ErrJudgeTimeout.WithCause(err)
+		}
+		return apperr.ErrJudgeWorkerFailed.WithCause(err)
+	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
-		info, err := s.sandbox.GetSandbox(ctx, task.TenantID, sandboxID)
-		if err != nil {
-			return apperr.ErrJudgeWorkerFailed.WithCause(err)
+		info, err := s.sandbox.GetSandbox(waitCtx, task.TenantID, sandboxID)
+		if err != nil || waitCtx.Err() != nil {
+			return waitError(errors.Join(err, waitCtx.Err()))
 		}
 		if info.Status == contracts.SandboxStatusFailed || info.Status == contracts.SandboxStatusDestroyed {
 			return apperr.ErrJudgeWorkerFailed
@@ -416,12 +390,9 @@ func (s *Service) waitSandboxReady(ctx context.Context, task JudgeTask, sandboxI
 		if (info.Status == contracts.SandboxStatusReady || info.Status == contracts.SandboxStatusRunning || info.Status == contracts.SandboxStatusIdle) && phaseReady {
 			return nil
 		}
-		if timex.Now().After(deadline) {
-			return apperr.ErrJudgeTimeout
-		}
 		select {
-		case <-ctx.Done():
-			return apperr.ErrJudgeWorkerFailed.WithCause(ctx.Err())
+		case <-waitCtx.Done():
+			return waitError(waitCtx.Err())
 		case <-ticker.C:
 		}
 	}
@@ -636,25 +607,27 @@ func (s *Service) publishPendingOutbox(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
+	var failures error
 	for _, item := range items {
-		if err := s.bus.Publish(ctx, item.Subject, json.RawMessage(item.Payload)); err != nil {
-			s.recordOutboxPublishFailure(ctx, item, err)
-			continue
+		err := s.bus.Publish(ctx, item.Subject, json.RawMessage(item.Payload))
+		if err == nil {
+			err = s.markOutboxPublished(ctx, item)
 		}
-		if err := s.markOutboxPublished(ctx, item); err != nil {
-			s.recordOutboxPublishFailure(ctx, item, err)
-			continue
+		if err != nil {
+			failures = errors.Join(failures, s.recordOutboxPublishFailure(ctx, item, err))
 		}
 	}
-	return nil
+	return failures
 }
 
 // recordOutboxPublishFailure 记录发布失败状态,失败标记本身也必须进入结构化日志。
-func (s *Service) recordOutboxPublishFailure(ctx context.Context, item JudgeEventOutbox, cause error) {
+func (s *Service) recordOutboxPublishFailure(ctx context.Context, item JudgeEventOutbox, cause error) error {
 	logging.ErrorContext(ctx, "judge outbox publish failed", apperr.AsAppError(cause).LogString(), slog.Int64("tenant_id", item.TenantID), slog.Int64("task_id", item.TaskID), slog.Int64("outbox_id", item.ID), slog.String("subject", item.Subject))
-	if err := s.markOutboxFailed(ctx, item, cause); err != nil {
-		logging.ErrorContext(ctx, "judge outbox failure mark failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", item.TenantID), slog.Int64("task_id", item.TaskID), slog.Int64("outbox_id", item.ID), slog.String("subject", item.Subject))
+	markErr := s.markOutboxFailed(ctx, item, cause)
+	if markErr != nil {
+		logging.ErrorContext(ctx, "judge outbox failure mark failed", apperr.AsAppError(markErr).LogString(), slog.Int64("tenant_id", item.TenantID), slog.Int64("task_id", item.TaskID), slog.Int64("outbox_id", item.ID), slog.String("subject", item.Subject))
 	}
+	return apperr.ErrJudgeEventPublishFailed.WithCause(errors.Join(cause, markErr))
 }
 
 // resultDetailsJSONBytes 统计结果详情 JSON 大小,复用平台 JSON 边界而不是手写估算。

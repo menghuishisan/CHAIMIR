@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/background"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/pagex"
@@ -355,19 +356,19 @@ func (s *Service) authorizedBattleReplay(ctx context.Context, organizerTenantID,
 
 // RunMatchmakerOnce 执行一次待对局认领和启动,供统一 background runner 调用。
 func (s *Service) RunMatchmakerOnce(ctx context.Context) error {
-	firstErr := s.reconcileBattleMatches(ctx)
-	if firstErr != nil {
-		logging.ErrorContext(ctx, "battle match terminal reconciliation failed", apperr.AsAppError(firstErr).LogString())
+	failures := s.reconcileBattleMatches(ctx)
+	if failures != nil {
+		logging.ErrorContext(ctx, "battle match terminal reconciliation failed", apperr.AsAppError(failures).LogString())
 	}
 	maxAttempts, ok := intx.Int32(s.cfg.MatchmakerMaxAttempts)
 	if !ok || maxAttempts <= 0 {
-		return apperr.ErrContestBattleMatchFailed
+		return errors.Join(failures, apperr.ErrContestBattleMatchFailed)
 	}
 	var exhausted []BattleMatch
 	var matches []BattleMatch
 	leaseToken, err := pkgcrypto.RandomToken(48)
 	if err != nil {
-		return apperr.ErrContestBattleMatchFailed.WithCause(err)
+		return errors.Join(failures, apperr.ErrContestBattleMatchFailed.WithCause(err))
 	}
 	leaseUntil := time.Now().Add(time.Duration(s.cfg.MatchmakerLeaseDurationMs) * time.Millisecond)
 	staleBefore := time.Now()
@@ -380,26 +381,22 @@ func (s *Service) RunMatchmakerOnce(ctx context.Context) error {
 		matches, err = tx.ClaimPendingBattleMatches(ctx, s.cfg.MatchmakerBatchSize, maxAttempts, staleBefore, leaseUntil, leaseToken)
 		return err
 	}); err != nil {
-		return errors.Join(firstErr, err)
+		return errors.Join(failures, err)
 	}
 	for _, match := range exhausted {
 		if err := s.finalizeBattleMatch(ctx, match); err != nil {
 			wrapped := apperr.ErrContestSandboxUnavailable.WithCause(err)
 			logging.ErrorContext(ctx, "battle match exhausted resource cleanup failed", wrapped.LogString(), slog.Int64("tenant_id", match.TenantID), slog.Int64("match_id", match.ID))
-			if firstErr == nil {
-				firstErr = wrapped
-			}
+			failures = errors.Join(failures, wrapped)
 		}
 	}
 	for _, match := range matches {
 		if err := s.executeBattleMatch(ctx, match); err != nil {
 			logging.ErrorContext(ctx, "battle match start failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", match.TenantID), slog.Int64("match_id", match.ID))
-			if firstErr == nil {
-				firstErr = err
-			}
+			failures = errors.Join(failures, err)
 		}
 	}
-	return firstErr
+	return failures
 }
 
 // reconcileBattleMatches 补偿尚未结算和终态交付未完成的对局,仍只通过 M3 contract 读取判题结果。
@@ -409,7 +406,7 @@ func (s *Service) reconcileBattleMatches(ctx context.Context) error {
 	}
 	matchedBefore := timex.Now()
 	afterID := int64(0)
-	var firstErr error
+	var failures error
 	for {
 		var matches []BattleMatch
 		if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
@@ -417,19 +414,17 @@ func (s *Service) reconcileBattleMatches(ctx context.Context) error {
 			matches, err = tx.ListBattleMatchesToReconcile(ctx, s.cfg.MatchmakerBatchSize, afterID, matchedBefore)
 			return err
 		}); err != nil {
-			return errors.Join(firstErr, err)
+			return errors.Join(failures, err)
 		}
 		for _, match := range matches {
 			afterID = match.ID
 			if err := s.reconcileBattleMatch(ctx, match); err != nil {
 				logging.ErrorContext(ctx, "battle match terminal reconciliation item failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", match.TenantID), slog.Int64("match_id", match.ID), slog.String("judge_task_ref", match.JudgeTaskRef))
-				if firstErr == nil {
-					firstErr = err
-				}
+				failures = errors.Join(failures, err)
 			}
 		}
 		if len(matches) < s.cfg.MatchmakerBatchSize {
-			return firstErr
+			return failures
 		}
 	}
 }
@@ -460,7 +455,7 @@ func (s *Service) reconcileBattleMatch(ctx context.Context, match BattleMatch) e
 	}
 }
 
-// executeBattleMatch 在整个启动阶段续租,失去租约后取消外部调用且不触碰新 worker 的资源。
+// executeBattleMatch 在启动期间续租，失去租约不触碰新 worker 的状态或资源。
 func (s *Service) executeBattleMatch(ctx context.Context, match BattleMatch) error {
 	leaseDuration := time.Duration(s.cfg.MatchmakerLeaseDurationMs) * time.Millisecond
 	if leaseDuration < 3*time.Second {
@@ -474,56 +469,16 @@ func (s *Service) executeBattleMatch(ctx context.Context, match BattleMatch) err
 		slog.Default().LogAttrs(ctx, slog.LevelWarn, "battle match start lease lost before execution", logging.AttrsFromContext(ctx, slog.Int64("tenant_id", match.TenantID), slog.Int64("match_id", match.ID))...)
 		return nil
 	}
-	executionCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	done := make(chan struct{})
-	lost := make(chan struct{}, 1)
-	go s.renewBattleMatchStartLeaseUntilDone(executionCtx, match, leaseDuration, done, lost, cancel)
-	err = s.executeBattleMatchWithLease(executionCtx, match)
-	close(done)
-	select {
-	case <-lost:
+	lost, err := background.WithRenewal(ctx, leaseDuration, func(ctx context.Context) (bool, error) {
+		return s.renewBattleMatchStartLease(ctx, match, leaseDuration)
+	}, func(ctx context.Context) error {
+		return s.executeBattleMatchWithLease(ctx, match)
+	})
+	if lost {
+		logging.ErrorContext(ctx, "battle match start lease renewal failed", err.Error(), slog.Int64("tenant_id", match.TenantID), slog.Int64("match_id", match.ID))
 		return nil
-	default:
-		return err
 	}
-}
-
-// renewBattleMatchStartLeaseUntilDone 按租约三分之一且最长 30 秒的周期续租。
-func (s *Service) renewBattleMatchStartLeaseUntilDone(ctx context.Context, match BattleMatch, leaseDuration time.Duration, done <-chan struct{}, lost chan<- struct{}, cancel context.CancelFunc) {
-	interval := leaseDuration / 3
-	if interval > 30*time.Second {
-		interval = 30 * time.Second
-	}
-	if interval < time.Second {
-		interval = time.Second
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-done:
-			return
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			renewed, err := s.renewBattleMatchStartLease(ctx, match, leaseDuration)
-			if err == nil && renewed {
-				continue
-			}
-			if err != nil {
-				logging.ErrorContext(ctx, "battle match start lease renewal failed", err.Error(), slog.Int64("tenant_id", match.TenantID), slog.Int64("match_id", match.ID))
-			} else {
-				slog.Default().LogAttrs(ctx, slog.LevelWarn, "battle match start lease lost", logging.AttrsFromContext(ctx, slog.Int64("tenant_id", match.TenantID), slog.Int64("match_id", match.ID))...)
-			}
-			select {
-			case lost <- struct{}{}:
-			default:
-			}
-			cancel()
-			return
-		}
-	}
+	return err
 }
 
 // renewBattleMatchStartLease 仅允许当前持有者延长仍有效的对局启动租约。

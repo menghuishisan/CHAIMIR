@@ -2,7 +2,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -39,16 +38,7 @@ type SimModuleDeps struct {
 }
 
 // RegisterSimModule 构造仿真 store/service、注册 HTTP/WS 路由并启动隔离预览任务。
-func RegisterSimModule(ctx context.Context, deps SimModuleDeps) (*sim.Service, error) {
-	if deps.Router == nil {
-		return nil, fmt.Errorf("sim module 缺少 HTTP router")
-	}
-	if deps.Database == nil {
-		return nil, fmt.Errorf("sim module 缺少 database")
-	}
-	if deps.Storage == nil {
-		return nil, fmt.Errorf("sim module 缺少统一对象存储")
-	}
+func RegisterSimModule(tasks *background.Runner, deps SimModuleDeps) (*sim.Service, error) {
 	store := sim.NewStore(deps.Database)
 	fanout, ok := deps.EventBus.(eventbus.FanoutBus)
 	if !ok {
@@ -77,7 +67,7 @@ func RegisterSimModule(ctx context.Context, deps SimModuleDeps) (*sim.Service, e
 		return nil, err
 	}
 	// 隔离预览产生扩展包上架所需的确定性检查和 Worker 预览。
-	if err := background.Start(ctx,
+	if err := tasks.Start(
 		background.Task{
 			Name:     "sim.package_preview",
 			Interval: time.Duration(deps.SimBackend.PreviewPollIntervalSeconds) * time.Second,

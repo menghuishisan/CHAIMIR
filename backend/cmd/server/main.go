@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"chaimir/internal/modules/sandbox"
 	"chaimir/internal/modules/sim"
 	"chaimir/internal/platform/auth"
+	"chaimir/internal/platform/background"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/eventbus"
@@ -58,8 +60,21 @@ func run() (err error) {
 	if err != nil {
 		return err
 	}
+	tasks := background.New(ctx)
+	var server *http.Server
+	var requests *httpx.DrainingHandler
 	defer func() {
 		stop()
+		if closeErr := infra.wsHub.CloseAll("server_shutdown"); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("WebSocket 连接关闭失败: %w", closeErr))
+		}
+		if server != nil {
+			if closeErr := server.Close(); closeErr != nil {
+				err = errors.Join(err, fmt.Errorf("HTTP 连接关闭失败: %w", closeErr))
+			}
+			requests.Drain()
+		}
+		tasks.Wait()
 		err = errors.Join(err, infra.close())
 	}()
 
@@ -67,13 +82,14 @@ func run() (err error) {
 	if err := router.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
 		return fmt.Errorf("HTTP trusted proxies 配置非法: %w", err)
 	}
-	if err := assembleModules(ctx, router.Group(""), cfg, infra); err != nil {
+	if err := assembleModules(tasks, router.Group(""), cfg, infra); err != nil {
 		return err
 	}
 
-	server := &http.Server{
+	requests = httpx.NewDrainingHandler(router)
+	server = &http.Server{
 		Addr:              fmt.Sprintf("%s:%d", cfg.Server.Addr, cfg.Server.Port),
-		Handler:           router,
+		Handler:           requests,
 		ReadHeaderTimeout: time.Duration(cfg.Server.ReadHeaderTimeoutSeconds) * time.Second,
 		ReadTimeout:       time.Duration(cfg.Server.ReadTimeoutSeconds) * time.Second,
 		WriteTimeout:      time.Duration(cfg.Server.WriteTimeoutSeconds) * time.Second,
@@ -93,9 +109,7 @@ func run() (err error) {
 	select {
 	case <-ctx.Done():
 		infra.beginDraining()
-		drainTimer := time.NewTimer(time.Duration(cfg.Server.EndpointDrainSeconds) * time.Second)
-		<-drainTimer.C
-		drainTimer.Stop()
+		<-time.After(time.Duration(cfg.Server.EndpointDrainSeconds) * time.Second)
 		var shutdownErrs []error
 		if err := infra.wsHub.CloseAll("server_draining"); err != nil {
 			shutdownErrs = append(shutdownErrs, fmt.Errorf("WebSocket 连接关闭失败: %w", err))
@@ -117,21 +131,20 @@ func run() (err error) {
 type infrastructure struct {
 	database *db.DB
 	redis    *redis.Client
-	bus      eventbus.Bus
+	bus      eventbus.ManagedBus
 	storage  *storage.Storage
 	files    storage.Service
 	k8s      *platformk8s.Client
 	auth     *auth.Manager
 	wsHub    *ws.Hub
+	sandbox  io.Closer
 	ids      snowflake.Generator
 	draining atomic.Bool
 }
 
 // beginDraining 标记当前副本正在下线,让 readiness 先于 HTTP 关闭失效。
 func (i *infrastructure) beginDraining() {
-	if i != nil {
-		i.draining.Store(true)
-	}
+	i.draining.Store(true)
 }
 
 func newInfrastructure(ctx context.Context, cfg *config.Config) (_ *infrastructure, err error) {
@@ -182,6 +195,14 @@ func newInfrastructure(ctx context.Context, cfg *config.Config) (_ *infrastructu
 func (i *infrastructure) close() error {
 	var err error
 	if i.bus != nil {
+		i.bus.StopConsumers()
+	}
+	if i.sandbox != nil {
+		if closeErr := i.sandbox.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("等待沙箱后台任务失败: %w", closeErr))
+		}
+	}
+	if i.bus != nil {
 		if closeErr := i.bus.Close(); closeErr != nil {
 			err = errors.Join(err, fmt.Errorf("关闭事件总线失败: %w", closeErr))
 		}
@@ -216,23 +237,16 @@ func newRouter(cfg *config.Config, infra *infrastructure) *gin.Engine {
 // maxMultipartBodyBytes 返回所有已注册 multipart 路由允许的最大请求体。
 // 业务 handler 仍逐项校验自己的文件额度；此处只确保 Gin 解析前存在硬上限。
 func maxMultipartBodyBytes(cfg *config.Config) int64 {
-	limits := []int64{
+	// 为 multipart 边界和非文件字段预留开销，避免误拒绝额度内的文件。
+	return max(
 		cfg.Upload.ImportMaxBytes,
 		cfg.Upload.ContentAttachmentMaxBytes,
 		cfg.Upload.ExperimentReportMaxBytes,
 		cfg.Upload.CourseMaterialMaxBytes,
 		cfg.Upload.TenantLogoMaxBytes,
 		cfg.Upload.CourseCoverMaxBytes,
-		cfg.Upload.SimBundleMaxBytes + cfg.Upload.SimBundleMetadataMaxBytes,
-	}
-	maxBytes := limits[0]
-	for _, limit := range limits[1:] {
-		if limit > maxBytes {
-			maxBytes = limit
-		}
-	}
-	// 为 multipart 边界和非文件字段预留固定且很小的开销，避免业务额度被编码开销误拒绝。
-	return maxBytes + 1<<20
+		cfg.Upload.SimBundleMaxBytes+cfg.Upload.SimBundleMetadataMaxBytes,
+	) + 1<<20
 }
 
 // 探针用 HTTP 状态码向 kubelet 和网关报告结果。
@@ -253,7 +267,7 @@ func readinessProbe(cfg *config.Config, infra *infrastructure) gin.HandlerFunc {
 		{"kubernetes", func(i *infrastructure, ctx context.Context) error { return i.k8s.Healthz(ctx) }},
 	}
 	return func(c *gin.Context) {
-		if infra != nil && infra.draining.Load() {
+		if infra.draining.Load() {
 			c.String(http.StatusServiceUnavailable, "not ready")
 			return
 		}
@@ -292,7 +306,7 @@ func readinessProbe(cfg *config.Config, infra *infrastructure) gin.HandlerFunc {
 }
 
 // assembleModules 按地基、引擎、业务、聚合顺序装配 11 个模块和基础层路由。
-func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config, infra *infrastructure) error {
+func assembleModules(tasks *background.Runner, router gin.IRouter, cfg *config.Config, infra *infrastructure) error {
 	identitySvc, err := RegisterIdentityModule(IdentityModuleDeps{
 		Router:      router,
 		Database:    infra.database,
@@ -319,7 +333,7 @@ func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config
 	if err != nil {
 		return err
 	}
-	sandboxSvc, err := RegisterSandboxModule(ctx, SandboxModuleDeps{
+	sandboxSvc, err := RegisterSandboxModule(tasks, SandboxModuleDeps{
 		Router:       router,
 		Database:     infra.database,
 		IDs:          infra.ids,
@@ -336,10 +350,11 @@ func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config
 	if err != nil {
 		return err
 	}
-	if err := StartIdentityBackgroundTasks(ctx, cfg.Identity, identitySvc); err != nil {
+	infra.sandbox = sandboxSvc
+	if err := StartIdentityBackgroundTasks(tasks, cfg.Identity, identitySvc); err != nil {
 		return err
 	}
-	judgeSvc, err := RegisterJudgeModule(ctx, JudgeModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Judge, AuthCfg: cfg.Auth, Storage: infra.storage, Sandbox: sandboxSvc, Content: contentSvc, Audit: auditWriter, EventBus: infra.bus, WSHub: infra.wsHub, Auth: infra.auth, Roles: identitySvc})
+	judgeSvc, err := RegisterJudgeModule(tasks, JudgeModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Judge, AuthCfg: cfg.Auth, Storage: infra.storage, Sandbox: sandboxSvc, Content: contentSvc, Audit: auditWriter, EventBus: infra.bus, WSHub: infra.wsHub, Auth: infra.auth, Roles: identitySvc})
 	if err != nil {
 		return err
 	}
@@ -347,30 +362,30 @@ func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config
 	if err != nil {
 		return fmt.Errorf("装配 M4 stdio-json 后端计算能力失败: %w", err)
 	}
-	simSvc, err := RegisterSimModule(ctx, SimModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Upload: cfg.Upload, FileService: infra.files, SimBackend: cfg.SimBackend, Storage: infra.storage, Audit: auditWriter, WSHub: infra.wsHub, Auth: infra.auth, Roles: identitySvc, EventBus: infra.bus, BackendAdapters: stdioJSONAdapters})
+	simSvc, err := RegisterSimModule(tasks, SimModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Upload: cfg.Upload, FileService: infra.files, SimBackend: cfg.SimBackend, Storage: infra.storage, Audit: auditWriter, WSHub: infra.wsHub, Auth: infra.auth, Roles: identitySvc, EventBus: infra.bus, BackendAdapters: stdioJSONAdapters})
 	if err != nil {
 		return err
 	}
-	experimentSvc, err := RegisterExperimentModule(ctx, ExperimentModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Experiment, Content: contentSvc, ContentClone: contentSvc, Sandbox: sandboxSvc, SandboxClone: sandboxSvc, Judge: judgeSvc, Sim: simSvc, Audit: auditWriter, EventBus: infra.bus, Storage: infra.storage, Upload: cfg.Upload, FileService: infra.files, Auth: infra.auth, Roles: identitySvc})
+	experimentSvc, err := RegisterExperimentModule(tasks, ExperimentModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Experiment, Content: contentSvc, ContentClone: contentSvc, Sandbox: sandboxSvc, SandboxClone: sandboxSvc, Judge: judgeSvc, Sim: simSvc, Audit: auditWriter, EventBus: infra.bus, Storage: infra.storage, Upload: cfg.Upload, FileService: infra.files, Auth: infra.auth, Roles: identitySvc})
 	if err != nil {
 		return err
 	}
-	teachingSvc, err := RegisterTeachingModule(ctx, TeachingModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Teaching, Upload: cfg.Upload, FileService: infra.files, Content: contentSvc, ContentClone: contentSvc, ExperimentClone: experimentSvc, Sim: simSvc, Judge: judgeSvc, Transfer: transferSvc, Storage: infra.storage, Audit: auditWriter, EventBus: infra.bus, Auth: infra.auth, Roles: identitySvc})
+	teachingSvc, err := RegisterTeachingModule(tasks, TeachingModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Teaching, Upload: cfg.Upload, FileService: infra.files, Content: contentSvc, ContentClone: contentSvc, ExperimentClone: experimentSvc, Sim: simSvc, Judge: judgeSvc, Transfer: transferSvc, Storage: infra.storage, Audit: auditWriter, EventBus: infra.bus, Auth: infra.auth, Roles: identitySvc})
 	if err != nil {
 		return err
 	}
-	contestSvc, err := RegisterContestModule(ctx, ContestModuleDeps{CleanupTimeout: time.Duration(cfg.Upload.CleanupTimeoutSeconds) * time.Second, Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Contest, AuthConfig: cfg.Auth, FileService: infra.files, Storage: infra.storage, Content: contentSvc, ContentImport: contentSvc, Sandbox: sandboxSvc, Judge: judgeSvc, Fingerprint: judgeSvc, Audit: auditWriter, EventBus: infra.bus, WSHub: infra.wsHub, Auth: infra.auth, Roles: identitySvc})
+	contestSvc, err := RegisterContestModule(tasks, ContestModuleDeps{CleanupTimeout: time.Duration(cfg.Upload.CleanupTimeoutSeconds) * time.Second, Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Contest, AuthConfig: cfg.Auth, FileService: infra.files, Storage: infra.storage, Content: contentSvc, ContentImport: contentSvc, Sandbox: sandboxSvc, Judge: judgeSvc, Fingerprint: judgeSvc, Audit: auditWriter, EventBus: infra.bus, WSHub: infra.wsHub, Auth: infra.auth, Roles: identitySvc})
 	if err != nil {
 		return err
 	}
-	if _, err := RegisterNotifyModule(ctx, NotifyModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Redis: infra.redis, Hub: infra.wsHub, Config: cfg.Notify, EventBus: infra.bus, Auth: infra.auth, Roles: identitySvc, Contests: contestSvc, Experiments: experimentSvc, Audit: auditWriter}); err != nil {
+	if _, err := RegisterNotifyModule(tasks, NotifyModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Redis: infra.redis, Hub: infra.wsHub, Config: cfg.Notify, EventBus: infra.bus, Auth: infra.auth, Roles: identitySvc, Contests: contestSvc, Experiments: experimentSvc, Audit: auditWriter}); err != nil {
 		return err
 	}
-	gradeSvc, err := RegisterGradeModule(ctx, GradeModuleDeps{CleanupTimeout: time.Duration(cfg.Upload.CleanupTimeoutSeconds) * time.Second, Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Teaching: teachingSvc, EventBus: infra.bus, Redis: infra.redis, Storage: infra.storage, FileService: infra.files, Config: cfg.Grade, Auth: infra.auth, Roles: identitySvc})
+	gradeSvc, err := RegisterGradeModule(tasks, GradeModuleDeps{CleanupTimeout: time.Duration(cfg.Upload.CleanupTimeoutSeconds) * time.Second, Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Teaching: teachingSvc, EventBus: infra.bus, Redis: infra.redis, Storage: infra.storage, FileService: infra.files, Config: cfg.Grade, Auth: infra.auth, Roles: identitySvc})
 	if err != nil {
 		return err
 	}
-	if _, err := RegisterAdminModule(ctx, AdminModuleDeps{CleanupTimeout: time.Duration(cfg.Upload.CleanupTimeoutSeconds) * time.Second, Metrics: []contracts.AlertMetricReader{identitySvc, sandboxSvc, judgeSvc, transferSvc, gradeSvc}, Recipients: identitySvc, Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Identity: identitySvc, Stats: identitySvc, AuditRead: identitySvc, Teaching: teachingSvc, Sandbox: sandboxSvc, Experiment: experimentSvc, Contest: contestSvc, EventBus: infra.bus, Monitoring: cfg.Monitoring, Config: cfg.Admin, FileService: infra.files, Transfer: transferSvc, Storage: infra.storage, Auth: infra.auth, Roles: identitySvc}); err != nil {
+	if _, err := RegisterAdminModule(tasks, AdminModuleDeps{CleanupTimeout: time.Duration(cfg.Upload.CleanupTimeoutSeconds) * time.Second, Metrics: []contracts.AlertMetricReader{identitySvc, sandboxSvc, judgeSvc, transferSvc, gradeSvc}, Recipients: identitySvc, Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Identity: identitySvc, Stats: identitySvc, AuditRead: identitySvc, Teaching: teachingSvc, Sandbox: sandboxSvc, Experiment: experimentSvc, Contest: contestSvc, EventBus: infra.bus, Monitoring: cfg.Monitoring, Config: cfg.Admin, FileService: infra.files, Transfer: transferSvc, Storage: infra.storage, Auth: infra.auth, Roles: identitySvc}); err != nil {
 		return err
 	}
 	return nil

@@ -21,18 +21,7 @@ func (w *AuditWriter) Write(ctx context.Context, e platformaudit.Entry) error {
 		return fmt.Errorf("identity audit writer 未初始化")
 	}
 	write := func(ctx context.Context, tx TxStore) error {
-		return tx.WriteAudit(ctx, WriteAuditInput{
-			ID:         w.ids.Generate(),
-			TenantID:   e.TenantID,
-			ActorID:    e.ActorID,
-			ActorRole:  e.ActorRole,
-			Action:     e.Action,
-			TargetType: e.TargetType,
-			TargetID:   e.TargetID,
-			Detail:     []byte(e.Detail),
-			IP:         e.IP,
-			TraceID:    e.TraceID,
-		})
+		return w.writeInTx(ctx, tx, e)
 	}
 	if e.TenantID > 0 {
 		joined, err := w.store.TenantTxIfPresent(ctx, e.TenantID, write)
@@ -52,4 +41,20 @@ func (w *AuditWriter) Write(ctx context.Context, e platformaudit.Entry) error {
 		return nil
 	}
 	return w.store.PlatformTx(ctx, write)
+}
+
+// writeInTx 共用审计字段映射,沿用调用方已持有的事务或导入保存点。
+func (w *AuditWriter) writeInTx(ctx context.Context, tx TxStore, e platformaudit.Entry) error {
+	return tx.WriteAudit(ctx, WriteAuditInput{
+		ID:         w.ids.Generate(),
+		TenantID:   e.TenantID,
+		ActorID:    e.ActorID,
+		ActorRole:  e.ActorRole,
+		Action:     e.Action,
+		TargetType: e.TargetType,
+		TargetID:   e.TargetID,
+		Detail:     []byte(e.Detail),
+		IP:         e.IP,
+		TraceID:    e.TraceID,
+	})
 }

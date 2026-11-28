@@ -482,22 +482,16 @@ func (h *Hub) RetainScopeSessions(tenantID int64, scope string, accountIDs []int
 		allowed[accountID] = struct{}{}
 	}
 	h.mu.RLock()
-	var connections []*Conn
+	connections := make(map[*Conn]SessionKey)
 	for session, conn := range h.sessions {
 		if session.TenantID == tenantID && session.Scope == scope {
 			if _, ok := allowed[session.AccountID]; !ok {
-				connections = append(connections, conn)
+				connections[conn] = session
 			}
 		}
 	}
 	h.mu.RUnlock()
-	var failures []error
-	for _, conn := range connections {
-		if err := conn.closeWithControl(websocket.ClosePolicyViolation, "session_revoked"); err != nil {
-			failures = append(failures, err)
-		}
-	}
-	return errors.Join(failures...)
+	return closeConnections(connections, websocket.ClosePolicyViolation, "session_revoked")
 }
 
 // CloseAll 在服务进入 draining 状态时关闭全部 WebSocket 连接,让客户端重新连接到仍然就绪的副本。
@@ -520,12 +514,23 @@ func (h *Hub) CloseAll(reason string) error {
 		}
 	}
 	h.mu.RUnlock()
+	return closeConnections(connections, websocket.CloseGoingAway, reason)
+}
+
+func closeConnections(connections map[*Conn]SessionKey, code int, reason string) error {
+	var pending sync.WaitGroup
+	var mu sync.Mutex
 	var failures []error
 	for conn, session := range connections {
-		if err := conn.closeWithControl(websocket.CloseGoingAway, reason); err != nil {
-			failures = append(failures, fmt.Errorf("关闭 WebSocket 连接失败: tenant_id=%d account_id=%d scope=%s: %w", session.TenantID, session.AccountID, session.Scope, err))
-		}
+		pending.Go(func() {
+			if err := conn.closeWithControl(code, reason); err != nil {
+				mu.Lock()
+				failures = append(failures, fmt.Errorf("关闭 WebSocket 连接失败: tenant_id=%d account_id=%d scope=%s: %w", session.TenantID, session.AccountID, session.Scope, err))
+				mu.Unlock()
+			}
+		})
 	}
+	pending.Wait()
 	return errors.Join(failures...)
 }
 

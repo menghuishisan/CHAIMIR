@@ -5,14 +5,36 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, now(), now(), NULL
 RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, status, is_leaderboard_push_pending, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at;
 
 -- name: CompleteAutoArchiveContest :execrows
-UPDATE contest AS c
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.archive_lease_until
+    FROM contest AS owned
+    WHERE owned.tenant_id = sqlc.arg(tenant_id) AND owned.id = sqlc.arg(contest_id) AND owned.status = 5
+      AND owned.archive_lease_token = sqlc.arg(lease_token)
+      AND NOT EXISTS (
+          SELECT 1 FROM battle_match m
+          WHERE m.tenant_id = owned.tenant_id AND m.contest_id = owned.id AND m.status IN (1, 2)
+      )
+    FOR UPDATE OF owned
+)
+UPDATE contest AS t
 SET status = 6, archive_lease_token = '', archive_lease_until = NULL, updated_at = now()
-WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.id = sqlc.arg(contest_id) AND c.status = 5
-  AND c.archive_lease_token = sqlc.arg(lease_token) AND c.archive_lease_until > now()
-  AND NOT EXISTS (
-      SELECT 1 FROM battle_match m
-      WHERE m.tenant_id = c.tenant_id AND m.contest_id = c.id AND m.status IN (1, 2)
-  );
+FROM current_lease l
+WHERE t.id = l.id AND l.archive_lease_until > clock_timestamp();
+
+-- name: RenewContestArchiveLease :execrows
+-- 先取得行锁再读实时时钟；UPDATE 等锁前计算的有效性不能用于续租。
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.archive_lease_until
+    FROM contest AS owned
+    WHERE owned.tenant_id = sqlc.arg(tenant_id) AND owned.id = sqlc.arg(contest_id) AND owned.status = 5
+      AND owned.archive_lease_token = sqlc.arg(lease_token)
+    FOR UPDATE OF owned
+)
+UPDATE contest AS c
+SET archive_lease_until = sqlc.arg(lease_until)::timestamptz
+FROM current_lease l
+WHERE c.id = l.id AND l.archive_lease_until > clock_timestamp()
+  AND sqlc.arg(lease_until)::timestamptz > clock_timestamp();
 
 -- name: ClaimManualArchiveContest :one
 -- 已结束竞赛的人工归档和自动归档共用同一租约栅栏,避免并发生成不同最终快照。
@@ -570,31 +592,49 @@ WHERE tenant_id = $1 AND id = $2 AND status IN (3, 4) AND finalized_at IS NULL
   AND (lease_token = '' OR lease_until <= now());
 
 -- name: CompleteBattleMatchFinalization :execrows
-UPDATE battle_match
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM battle_match AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status IN (3, 4) AND owned.finalized_at IS NULL
+      AND owned.lease_token = $3
+    FOR UPDATE OF owned
+)
+UPDATE battle_match AS t
 SET finalized_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status IN (3, 4) AND finalized_at IS NULL
-  AND lease_token = $3 AND lease_until > now();
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp();
 
 -- name: StartBattleMatch :one
-UPDATE battle_match AS m
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM battle_match AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $5
+    FOR UPDATE OF owned
+)
+UPDATE battle_match AS t
 SET sandbox_ref = $3,
     judge_task_ref = $4,
     status = 2,
     lease_token = '',
     lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $5 AND lease_until > now()
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count, finalized_at;
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.contest_id, t.problem_id, t.entry_a_id, t.entry_b_id, t.source_ref, t.scope_ref, t.sandbox_ref, t.judge_task_ref, t.result, t.score_delta, t.replay_ref, t.status, t.matched_at, t.finished_at, t.lease_token, t.lease_until, t.attempt_count, t.finalized_at;
 
 -- name: RenewBattleMatchStartLease :execrows
 -- 启动沙箱和提交判题期间仅由当前 token 续租,避免长时准备被其他 worker 重领。
-UPDATE battle_match
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM battle_match AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2
+      AND COALESCE(owned.judge_task_ref, '') = '' AND owned.lease_token = $3
+    FOR UPDATE OF owned
+)
+UPDATE battle_match AS m
 SET lease_until = sqlc.arg(lease_until)::timestamptz
-WHERE tenant_id = $1
-  AND id = $2
-  AND status = 2
-  AND COALESCE(judge_task_ref, '') = ''
-  AND lease_token = $3
-  AND lease_until > now();
+FROM current_lease l
+WHERE m.id = l.id AND l.lease_until > clock_timestamp()
+  AND sqlc.arg(lease_until)::timestamptz > clock_timestamp();
 
 -- name: ListBattleMatchesForTeam :many
 -- 师生同一查询按视角过滤:传 team_id 只回该队参与的对局(学生视角),
@@ -735,11 +775,18 @@ WHERE m.tenant_id = $1 AND m.id = $2 AND m.status = 2 AND m.judge_task_ref = $4
 RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count, m.finalized_at;
 
 -- name: FailBattleMatchStart :one
-UPDATE battle_match AS m
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM battle_match AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $3
+      AND COALESCE(owned.judge_task_ref, '') = ''
+    FOR UPDATE OF owned
+)
+UPDATE battle_match AS t
 SET status = 4, finished_at = now(), lease_token = '', lease_until = NULL
-WHERE m.tenant_id = $1 AND m.id = $2 AND m.status = 2 AND m.lease_token = $3 AND m.lease_until > now()
-  AND COALESCE(m.judge_task_ref, '') = ''
-RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count, m.finalized_at;
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.contest_id, t.problem_id, t.entry_a_id, t.entry_b_id, t.source_ref, t.scope_ref, t.sandbox_ref, t.judge_task_ref, t.result, t.score_delta, t.replay_ref, t.status, t.matched_at, t.finished_at, t.lease_token, t.lease_until, t.attempt_count, t.finalized_at;
 
 -- name: FailBattleMatchByJudgeTask :one
 UPDATE battle_match AS m

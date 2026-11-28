@@ -3,6 +3,7 @@ package teaching
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -626,23 +627,26 @@ func (s *Service) RunJudgeOutboxOnce(ctx context.Context, tenantID int64) error 
 	}); err != nil {
 		return apperr.ErrTeachingJudgeOutboxInvalid.WithCause(err)
 	}
+	var failures error
 	for _, item := range outboxes {
 		_, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: item.TenantID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, SubmitterTenantID: item.TenantID, SubmitterID: item.StudentID, SourceRef: item.SourceRef, SourceOwnerID: item.SourceOwnerID, SourceCourseID: item.SourceCourseID, SourceScope: item.SourceScope, SandboxMode: contracts.JudgeSandboxModeFresh, ExtraInput: item.ExtraInput, Priority: 5})
 		if err != nil {
-			if retryErr := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
+			retryErr := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
 				_, retryErr := tx.RetryJudgeOutbox(ctx, item.TenantID, item.ID, maxAttempts, safeStoredError(ctx, err), item.LeaseToken)
 				return retryErr
-			}); retryErr != nil {
-				return apperr.ErrTeachingJudgeOutboxInvalid.WithCause(retryErr)
-			}
+			})
+			failures = errors.Join(failures, err, retryErr)
 			continue
 		}
 		if err := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
 			_, err := tx.CompleteJudgeOutbox(ctx, item.TenantID, item.ID, item.LeaseToken)
 			return err
 		}); err != nil {
-			return apperr.ErrTeachingJudgeOutboxInvalid.WithCause(err)
+			failures = errors.Join(failures, err)
 		}
+	}
+	if failures != nil {
+		return apperr.ErrTeachingJudgeOutboxInvalid.WithCause(failures)
 	}
 	return nil
 }
@@ -766,13 +770,7 @@ func aggregateCompletedAutoScore(outboxes []JudgeOutbox) (int32, bool) {
 // refreshAssignmentUsageRefs 按作业来源替换 M5 内容引用集合,由 M5 幂等维护 usage_count。
 func (s *Service) refreshAssignmentUsageRefs(ctx context.Context, tenantID int64, assignment Assignment, items []AssignmentItem) error {
 	refs := make([]contracts.ContentItemRef, 0, len(items))
-	seen := map[string]struct{}{}
 	for _, item := range items {
-		key := strings.TrimSpace(item.ItemCode) + "\x00" + strings.TrimSpace(item.ItemVersion)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
 		refs = append(refs, contracts.ContentItemRef{ItemCode: item.ItemCode, ItemVersion: item.ItemVersion})
 	}
 	sourceRef := fmt.Sprintf("teaching:%d:assignment:%s", assignment.CreatedAt.Year(), ids.Format(assignment.ID))

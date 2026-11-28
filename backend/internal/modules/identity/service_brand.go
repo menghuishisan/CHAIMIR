@@ -53,7 +53,6 @@ func (s *Service) UploadTenantLogo(ctx context.Context, req TenantLogoUploadRequ
 		NestedResourceIDs: []string{ids.Format(s.ids.Generate())},
 		FileName:          req.FileName,
 		ContentType:       req.ContentType,
-		Size:              int64(len(req.Content)),
 		MaxBytes:          s.uploadCfg.TenantLogoMaxBytes,
 		ExpectedBucket:    s.objects.BucketAttach(),
 		AllowedFileName:   true,

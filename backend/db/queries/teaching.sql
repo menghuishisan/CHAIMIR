@@ -517,22 +517,36 @@ WHERE id IN (
 RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: CompleteJudgeOutbox :one
-UPDATE submission_judge_outbox
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until, owned.status
+    FROM submission_judge_outbox AS owned
+    WHERE (owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $3)
+       OR (owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 3)
+    FOR UPDATE OF owned
+)
+UPDATE submission_judge_outbox AS t
 SET status = 3,
-    last_error = CASE WHEN status = 2 THEN NULL ELSE last_error END,
+    last_error = CASE WHEN t.status = 2 THEN NULL ELSE t.last_error END,
     updated_at = now(),
     lease_token = '',
     lease_until = NULL
-WHERE (tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now())
-   OR (tenant_id = $1 AND id = $2 AND status = 3)
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
+FROM current_lease l
+WHERE t.id = l.id AND (l.lease_until > clock_timestamp() OR l.status = 3)
+RETURNING t.id, t.tenant_id, t.submission_id, t.assignment_item_id, t.assignment_id, t.source_owner_id, t.source_course_id, t.source_scope, t.student_id, t.item_code, t.item_version, t.extra_input, t.source_ref, t.status, t.retry_count, t.last_error, t.score, t.completed_at, t.created_at, t.updated_at, t.lease_token, t.lease_until;
 
 -- name: RetryJudgeOutbox :one
-UPDATE submission_judge_outbox
-SET status = CASE WHEN retry_count >= @max_attempts THEN 4 ELSE 1 END,
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM submission_judge_outbox AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $4
+    FOR UPDATE OF owned
+)
+UPDATE submission_judge_outbox AS t
+SET status = CASE WHEN t.retry_count >= @max_attempts THEN 4 ELSE 1 END,
     last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.submission_id, t.assignment_item_id, t.assignment_id, t.source_owner_id, t.source_course_id, t.source_scope, t.student_id, t.item_code, t.item_version, t.extra_input, t.source_ref, t.status, t.retry_count, t.last_error, t.score, t.completed_at, t.created_at, t.updated_at, t.lease_token, t.lease_until;
 
 -- name: ExhaustExpiredJudgeOutbox :execrows
 UPDATE submission_judge_outbox
@@ -798,17 +812,31 @@ WHERE outbox.id = candidates.id
 RETURNING outbox.id, outbox.revision, outbox.lock_revision, outbox.tenant_id, outbox.course_id, outbox.student_id, outbox.trace_id, outbox.event_updated_at, outbox.status, outbox.retry_count, outbox.next_attempt_at, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until;
 
 -- name: MarkTeachingGradeEventOutboxPublished :one
-UPDATE teaching_grade_event_outbox
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM teaching_grade_event_outbox AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $3
+    FOR UPDATE OF owned
+)
+UPDATE teaching_grade_event_outbox AS t
 SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
-RETURNING id, revision, lock_revision, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until;
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.revision, t.lock_revision, t.tenant_id, t.course_id, t.student_id, t.trace_id, t.event_updated_at, t.status, t.retry_count, t.next_attempt_at, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until;
 
 -- name: MarkTeachingGradeEventOutboxFailed :one
-UPDATE teaching_grade_event_outbox
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM teaching_grade_event_outbox AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $4
+    FOR UPDATE OF owned
+)
+UPDATE teaching_grade_event_outbox AS t
 SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL,
     next_attempt_at = now() + LEAST(interval '1 hour', power(2::numeric, LEAST(retry_count, 10)) * interval '1 second')
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, revision, lock_revision, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until;
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.revision, t.lock_revision, t.tenant_id, t.course_id, t.student_id, t.trace_id, t.event_updated_at, t.status, t.retry_count, t.next_attempt_at, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until;
 
 -- name: TeachingStats :one
 SELECT

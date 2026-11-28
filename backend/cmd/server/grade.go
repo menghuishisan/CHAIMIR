@@ -2,8 +2,6 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"time"
 
 	"chaimir/internal/contracts"
@@ -39,16 +37,7 @@ type GradeModuleDeps struct {
 }
 
 // RegisterGradeModule 构造成绩中心 store/service,注册路由、事件订阅和 outbox worker。
-func RegisterGradeModule(ctx context.Context, deps GradeModuleDeps) (*grade.Service, error) {
-	if ctx == nil {
-		return nil, fmt.Errorf("grade module 缺少后台任务 context")
-	}
-	if deps.Router == nil {
-		return nil, fmt.Errorf("grade module 缺少 HTTP router")
-	}
-	if deps.Database == nil {
-		return nil, fmt.Errorf("grade module 缺少 database")
-	}
+func RegisterGradeModule(tasks *background.Runner, deps GradeModuleDeps) (*grade.Service, error) {
 	store := grade.NewStore(deps.Database)
 	svc, err := grade.NewService(grade.ServiceDeps{
 		CleanupTimeout: deps.CleanupTimeout,
@@ -72,7 +61,7 @@ func RegisterGradeModule(ctx context.Context, deps GradeModuleDeps) (*grade.Serv
 	if _, err := grade.SubscribeEvents(deps.EventBus, svc); err != nil {
 		return nil, err
 	}
-	if err := background.Start(ctx,
+	if err := tasks.Start(
 		background.Task{
 			Name:     "grade.outbox",
 			Interval: time.Duration(deps.Config.LockOutboxPollMs) * time.Millisecond,

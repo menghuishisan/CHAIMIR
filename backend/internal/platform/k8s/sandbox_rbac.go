@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"chaimir/pkg/logging"
@@ -56,27 +57,31 @@ func NewSandboxRBACProvisioner(client kubernetes.Interface, serviceAccountNamesp
 
 // Run 启动基于 informer 的声明式修复循环,直到上下文取消。
 func (p *SandboxRBACProvisioner) Run(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
 	listWatch := cache.NewFilteredListWatchFromClient(p.client.CoreV1().RESTClient(), "namespaces", "", func(options *metav1.ListOptions) {
 		options.LabelSelector = labels.Set{"app.kubernetes.io/part-of": "chaimir", "chaimir.io/managed-by": sandboxManagedByLabel}.AsSelector().String()
 	})
 	informer := cache.NewSharedInformer(listWatch, &corev1.Namespace{}, p.resyncPeriod)
 	queue := workqueue.NewTypedRateLimitingQueue(workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Second, time.Minute))
-	defer queue.ShutDown()
+	var workers sync.WaitGroup
+	defer func() {
+		cancel()
+		queue.ShutDown()
+		workers.Wait()
+	}()
 	if _, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(obj interface{}) { p.enqueueNamespace(queue, obj) },
 		UpdateFunc: func(_, obj interface{}) { p.enqueueNamespace(queue, obj) },
 	}); err != nil {
 		return fmt.Errorf("注册动态命名空间事件处理器失败: %w", err)
 	}
-	go informer.Run(ctx.Done())
-	go func() {
-		<-ctx.Done()
-		queue.ShutDown()
-	}()
+	workers.Go(func() { informer.RunWithContext(ctx) })
+	stop := context.AfterFunc(ctx, queue.ShutDown)
+	defer stop()
 	if !cache.WaitForCacheSync(ctx.Done(), informer.HasSynced) {
-		return fmt.Errorf("等待动态命名空间 informer 同步失败")
+		return fmt.Errorf("等待动态命名空间 informer 同步失败: %w", ctx.Err())
 	}
-	for p.processNext(ctx, queue) {
+	for ctx.Err() == nil && p.processNext(ctx, queue) {
 	}
 	return nil
 }

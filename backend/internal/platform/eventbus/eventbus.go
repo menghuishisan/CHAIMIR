@@ -2,14 +2,12 @@
 package eventbus
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,7 +29,14 @@ type Bus interface {
 	Publish(ctx context.Context, subject string, payload any) error
 	// Subscribe 以主题和稳定队列标识注册持久订阅。
 	Subscribe(subject, queue string, handler Handler) (Subscription, error)
-	// Close 关闭底层连接并返回释放失败。
+}
+
+// ManagedBus 由组合根管理消费、业务收尾与连接的关闭顺序。
+type ManagedBus interface {
+	Bus
+	// StopConsumers 停止并等待全部消费，保留连接供业务收尾发布；清理错误由 Close 汇总。
+	StopConsumers()
+	// Close 等待消费退出后关闭连接，返回消费及连接释放失败。
 	Close() error
 }
 
@@ -53,25 +58,31 @@ type Subscription interface {
 }
 
 type natsBus struct {
-	conn   *nats.Conn
-	js     jetstream.JetStream
-	cfg    deliveryConfig
-	ctx    context.Context
-	cancel context.CancelFunc
-	mu     sync.Mutex
-	closed bool
-	subs   []Subscription
+	conn      *nats.Conn
+	js        jetstream.JetStream
+	cfg       deliveryConfig
+	ctx       context.Context
+	cancel    context.CancelFunc
+	mu        sync.Mutex
+	stopping  bool
+	subs      []Subscription
+	stopOnce  sync.Once
+	stopErr   error
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // durableSubscription 仅停止当前进程消费,保留broker端durable与确认进度。
 type durableSubscription struct {
 	consume jetstream.ConsumeContext
+	done    <-chan struct{}
 	cancel  context.CancelFunc
 	once    sync.Once
 }
 
 type fanoutSubscription struct {
 	consume      jetstream.ConsumeContext
+	done         <-chan struct{}
 	cancel       context.CancelFunc
 	js           jetstream.JetStream
 	stream       string
@@ -86,6 +97,7 @@ func (s *fanoutSubscription) Unsubscribe() error {
 	s.once.Do(func() {
 		s.cancel()
 		s.consume.Stop()
+		<-s.done
 		ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
 		defer cancel()
 		s.err = s.js.DeleteConsumer(ctx, s.stream, s.consumerName)
@@ -98,12 +110,16 @@ func (s *fanoutSubscription) Unsubscribe() error {
 
 // Unsubscribe 取消本地处理,不删除consumer或尚未确认的事件。
 func (s *durableSubscription) Unsubscribe() error {
-	s.once.Do(func() { s.cancel(); s.consume.Stop() })
+	s.once.Do(func() {
+		s.cancel()
+		s.consume.Stop()
+		<-s.done
+	})
 	return nil
 }
 
 // New 连接NATS并建立唯一持久流;不可用或配置冲突时启动失败。
-func New(cfg config.NATSConfig) (Bus, error) {
+func New(cfg config.NATSConfig) (ManagedBus, error) {
 	if strings.TrimSpace(cfg.URL) == "" || cfg.ReconnectWaitSeconds <= 0 || cfg.RequestTimeoutMs <= 0 || cfg.ConsumerAckWaitSeconds <= 0 || cfg.ConsumerRetryMax <= 0 || cfg.ConsumerRetryDelayMs <= 0 ||
 		cfg.StreamMaxBytes <= 0 || cfg.StreamMaxAgeSeconds <= 0 || cfg.DeadLetterMaxBytes <= 0 || cfg.StreamReplicas < 1 || cfg.StreamReplicas > 5 ||
 		strings.TrimSpace(cfg.StreamName) == "" || len(cfg.StreamSubjects) == 0 || !concreteSubject(cfg.DeadLetterPrefix) {
@@ -190,8 +206,8 @@ func (b *natsBus) Subscribe(subject, queue string, handler Handler) (Subscriptio
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.closed {
-		return nil, fmt.Errorf("事件总线已关闭")
+	if b.stopping {
+		return nil, fmt.Errorf("事件总线已停止接收订阅")
 	}
 	name := durableName(subject, queue)
 	requestCtx, requestCancel := b.requestContext(b.ctx)
@@ -212,7 +228,7 @@ func (b *natsBus) Subscribe(subject, queue string, handler Handler) (Subscriptio
 		cancel()
 		return nil, fmt.Errorf("订阅持久事件 %s/%s 失败: %w", subject, queue, err)
 	}
-	sub := &durableSubscription{consume: consume, cancel: cancel}
+	sub := &durableSubscription{consume: consume, done: consume.Closed(), cancel: cancel}
 	b.subs = append(b.subs, sub)
 	return sub, nil
 }
@@ -231,8 +247,8 @@ func (b *natsBus) SubscribeFanout(subject string, handler Handler) (Subscription
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.closed {
-		return nil, fmt.Errorf("事件总线已关闭")
+	if b.stopping {
+		return nil, fmt.Errorf("事件总线已停止接收订阅")
 	}
 	requestCtx, requestCancel := b.requestContext(b.ctx)
 	consumer, err := b.js.CreateConsumer(requestCtx, b.cfg.stream, jetstream.ConsumerConfig{
@@ -265,36 +281,51 @@ func (b *natsBus) SubscribeFanout(subject string, handler Handler) (Subscription
 		return nil, errors.Join(failures...)
 	}
 	wrapped := &fanoutSubscription{
-		consume: consume, cancel: cancel, js: b.js, stream: b.cfg.stream,
+		consume: consume, done: consume.Closed(), cancel: cancel, js: b.js, stream: b.cfg.stream,
 		consumerName: info.Name, timeout: b.cfg.requestTimeout,
 	}
 	b.subs = append(b.subs, wrapped)
 	return wrapped, nil
 }
 
-// Close 取消当前处理并关闭连接,未确认消息仍由broker保留重投。
+// StopConsumers 取消并等待全部处理器，连接保持可发布以完成业务收尾。
+func (b *natsBus) StopConsumers() {
+	if b == nil || b.conn == nil {
+		return
+	}
+	b.stopOnce.Do(func() {
+		b.mu.Lock()
+		b.stopping = true
+		b.mu.Unlock()
+		b.cancel()
+		var tasks sync.WaitGroup
+		failures := make([]error, len(b.subs))
+		for i, sub := range b.subs {
+			tasks.Go(func() {
+				if err := sub.Unsubscribe(); err != nil {
+					failures[i] = fmt.Errorf("停止事件订阅失败: %w", err)
+				}
+			})
+		}
+		tasks.Wait()
+		b.stopErr = errors.Join(failures...)
+	})
+}
+
+// Close 等待消费结束并释放连接，未确认消息保留重投。
 func (b *natsBus) Close() error {
 	if b == nil || b.conn == nil {
 		return nil
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.closed {
-		return nil
-	}
-	b.closed = true
-	b.cancel()
-	var closeErr error
-	for _, sub := range b.subs {
-		if err := sub.Unsubscribe(); err != nil {
-			closeErr = errors.Join(closeErr, fmt.Errorf("停止持久订阅失败: %w", err))
+	b.closeOnce.Do(func() {
+		b.StopConsumers()
+		b.closeErr = b.stopErr
+		if err := b.conn.FlushTimeout(b.cfg.requestTimeout); err != nil {
+			b.closeErr = errors.Join(b.closeErr, fmt.Errorf("刷新事件总线连接失败: %w", err))
 		}
-	}
-	if err := b.conn.FlushTimeout(b.cfg.requestTimeout); err != nil {
-		closeErr = errors.Join(closeErr, fmt.Errorf("刷新事件总线连接失败: %w", err))
-	}
-	b.conn.Close()
-	return closeErr
+		b.conn.Close()
+	})
+	return b.closeErr
 }
 
 // durableName 在不同副本/重启间保持同一主题与队列的唯一消费身份。
@@ -335,10 +366,8 @@ func marshalEventPayload(ctx context.Context, payload any) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	var obj map[string]any
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	if err := decoder.Decode(&obj); err != nil {
+	obj, err := jsonx.ObjectMapStrict(raw)
+	if err != nil {
 		return nil, err
 	}
 	if _, ok := obj["tenant_id"]; !ok {
@@ -368,25 +397,14 @@ func eventContext(ctx context.Context, data []byte) (context.Context, error) {
 		ctx = logging.WithAttrs(ctx, slog.String("trace_id", traceID), slog.Int64("tenant_id", 0), slog.String("operation_scope", "event_metadata_validation"))
 		return ctx, fmt.Errorf("事件载荷缺少真实 tenant_id 或 trace_id")
 	}
-	if meta.TraceID != "" {
-		ctx = response.WithTrace(ctx, meta.TraceID)
-	}
-	attrs := []slog.Attr{}
-	if meta.TraceID != "" {
-		attrs = append(attrs, slog.String("trace_id", meta.TraceID))
-	}
-	if meta.TenantID >= 0 {
-		attrs = append(attrs, slog.Int64("tenant_id", meta.TenantID))
-	}
-	return logging.WithAttrs(ctx, attrs...), nil
+	ctx = response.WithTrace(ctx, meta.TraceID)
+	return logging.WithAttrs(ctx, slog.String("trace_id", meta.TraceID), slog.Int64("tenant_id", meta.TenantID)), nil
 }
 
 // extractEventMetadata 只从真实存在的事件字段提取排障上下文,不为缺失字段制造默认值。
 func extractEventMetadata(data []byte) (eventMetadata, bool) {
-	var obj map[string]any
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.UseNumber()
-	if err := decoder.Decode(&obj); err != nil {
+	obj, err := jsonx.ObjectMapStrict(data)
+	if err != nil {
 		return eventMetadata{}, false
 	}
 	tenantValue, hasTenant := obj["tenant_id"]
@@ -400,20 +418,6 @@ func extractEventMetadata(data []byte) (eventMetadata, bool) {
 
 // numericTenantID 处理 JSON 解码后的数字形态,只用于验证事件字段真实存在且可解析。
 func numericTenantID(v any) (int64, bool) {
-	switch n := v.(type) {
-	case float64:
-		return int64(n), n == float64(int64(n))
-	case int64:
-		return n, true
-	case int:
-		return int64(n), true
-	case json.Number:
-		out, err := n.Int64()
-		return out, err == nil
-	case string:
-		out, err := strconv.ParseInt(n, 10, 64)
-		return out, err == nil
-	default:
-		return 0, false
-	}
+	tenantID := jsonx.Int64FromAny(v, -1)
+	return tenantID, tenantID >= 0
 }

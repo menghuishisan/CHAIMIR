@@ -177,25 +177,47 @@ FROM sim_package_review
 WHERE ($1::smallint = 0 OR result = $1);
 
 -- name: MergeSimValidationReport :one
-UPDATE sim_package_review
-SET preview_report = preview_report || sqlc.arg(preview_report),
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.preview_lease_until
+    FROM sim_package_review AS owned
+    WHERE owned.id = sqlc.arg(review_id) AND owned.package_id = sqlc.arg(package_id) AND owned.result = 1
+      AND owned.preview_lease_token = sqlc.arg(lease_token)
+    FOR UPDATE OF owned
+)
+UPDATE sim_package_review AS t
+SET preview_report = t.preview_report || sqlc.arg(preview_report),
     updated_at = now(), preview_lease_token = '', preview_lease_until = NULL
-WHERE id = sqlc.arg(review_id) AND package_id = sqlc.arg(package_id) AND result = 1
-  AND preview_lease_token = sqlc.arg(lease_token) AND preview_lease_until > now()
-RETURNING id, package_id, submitter_id, preview_report, reviewer_id, result, comment, created_at, updated_at;
+FROM current_lease l
+WHERE t.id = l.id AND l.preview_lease_until > clock_timestamp()
+RETURNING t.id, t.package_id, t.submitter_id, t.preview_report, t.reviewer_id, t.result, t.comment, t.created_at, t.updated_at;
 
 -- name: ReleaseSimPreviewLease :execrows
 -- 基础设施异常不等同于包校验失败:释放仍由本 worker 持有的租约,交给下一轮重试。
-UPDATE sim_package_review
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.preview_lease_until
+    FROM sim_package_review AS owned
+    WHERE owned.id = sqlc.arg(review_id) AND owned.package_id = sqlc.arg(package_id) AND owned.result = 1
+      AND owned.preview_lease_token = sqlc.arg(lease_token)
+    FOR UPDATE OF owned
+)
+UPDATE sim_package_review AS t
 SET preview_lease_token = '', preview_lease_until = NULL, updated_at = now()
-WHERE id = sqlc.arg(review_id) AND package_id = sqlc.arg(package_id) AND result = 1
-  AND preview_lease_token = sqlc.arg(lease_token) AND preview_lease_until > now();
+FROM current_lease l
+WHERE t.id = l.id AND l.preview_lease_until > clock_timestamp();
 
 -- name: RenewSimPreviewLease :execrows
-UPDATE sim_package_review
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.preview_lease_until
+    FROM sim_package_review AS owned
+    WHERE owned.id = sqlc.arg(review_id) AND owned.package_id = sqlc.arg(package_id)
+      AND owned.result = 1 AND owned.preview_lease_token = sqlc.arg(lease_token)
+    FOR UPDATE OF owned
+)
+UPDATE sim_package_review AS r
 SET preview_lease_until = sqlc.arg(lease_until)::timestamptz, updated_at = now()
-WHERE id = sqlc.arg(review_id) AND package_id = sqlc.arg(package_id) AND result = 1
-  AND preview_lease_token = sqlc.arg(lease_token) AND preview_lease_until > now();
+FROM current_lease l
+WHERE r.id = l.id AND l.preview_lease_until > clock_timestamp()
+  AND sqlc.arg(lease_until)::timestamptz > clock_timestamp();
 
 -- name: ExhaustSimPreviewAttempts :many
 -- worker 在最后一次预览中崩溃时没有机会写报告;租约过期后由下一轮收敛为明确的终态门禁。

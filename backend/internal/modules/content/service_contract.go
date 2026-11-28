@@ -147,9 +147,9 @@ func (s *Service) SystemImportContent(ctx context.Context, req contracts.Content
 	if err != nil {
 		return contracts.ContentItemSnapshot{}, err
 	}
-	body, err := jsonx.CloneObjectStrict(httpReq.Body)
+	body, err := s.prepareContentBody(httpReq.Body, tenantID)
 	if err != nil {
-		return contracts.ContentItemSnapshot{}, apperr.ErrContentBodyInvalid.WithCause(err)
+		return contracts.ContentItemSnapshot{}, err
 	}
 	item := ItemWithBody{Item: Item{ID: s.ids.Generate(), TenantID: tenantID, Code: httpReq.Code, Version: httpReq.Version, Type: httpReq.Type, Title: httpReq.Title, CategoryID: httpReq.CategoryID.Int64(), Difficulty: httpReq.Difficulty, Tags: httpReq.Tags, KnowledgePoints: httpReq.KnowledgePoints, AuthorID: httpReq.AuthorID.Int64(), AuthorType: httpReq.AuthorType, Visibility: httpReq.Visibility, Status: StatusDraft}, Body: body, SensitiveFields: httpReq.SensitiveFields}
 	if httpReq.AutoPublish {

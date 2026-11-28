@@ -2,8 +2,6 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"time"
 
 	"chaimir/internal/contracts"
@@ -43,16 +41,7 @@ type ExperimentModuleDeps struct {
 }
 
 // RegisterExperimentModule 构造实验 store/service,注册路由、事件和生命周期后台任务。
-func RegisterExperimentModule(ctx context.Context, deps ExperimentModuleDeps) (*experiment.Service, error) {
-	if ctx == nil {
-		return nil, fmt.Errorf("experiment module 缺少后台任务 context")
-	}
-	if deps.Router == nil {
-		return nil, fmt.Errorf("experiment module 缺少 HTTP router")
-	}
-	if deps.Database == nil {
-		return nil, fmt.Errorf("experiment module 缺少 database")
-	}
+func RegisterExperimentModule(tasks *background.Runner, deps ExperimentModuleDeps) (*experiment.Service, error) {
 	store := experiment.NewStore(deps.Database)
 	svc, err := experiment.NewService(experiment.ServiceDeps{
 		CleanupTimeout:   time.Duration(deps.Upload.CleanupTimeoutSeconds) * time.Second,
@@ -83,7 +72,7 @@ func RegisterExperimentModule(ctx context.Context, deps ExperimentModuleDeps) (*
 	if _, err := experiment.SubscribeEvents(deps.EventBus, svc); err != nil {
 		return nil, err
 	}
-	if err := background.Start(ctx,
+	if err := tasks.Start(
 		background.Task{
 			Name:     "experiment.event_outbox",
 			Interval: time.Duration(deps.Config.EventOutboxPollMs) * time.Millisecond,

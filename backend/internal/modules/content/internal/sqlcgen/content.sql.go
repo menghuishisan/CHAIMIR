@@ -516,19 +516,20 @@ func (q *Queries) GetActiveContentCategory(ctx context.Context, arg GetActiveCon
 	return id, err
 }
 
-const getContentItemByID = `-- name: GetContentItemByID :one
+const getContentItemForUpdate = `-- name: GetContentItemForUpdate :one
 SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
 FROM content_item
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+FOR UPDATE
 `
 
-type GetContentItemByIDParams struct {
+type GetContentItemForUpdateParams struct {
 	TenantID int64 `json:"tenant_id"`
 	ID       int64 `json:"id"`
 }
 
-func (q *Queries) GetContentItemByID(ctx context.Context, arg GetContentItemByIDParams) (ContentItem, error) {
-	row := q.db.QueryRow(ctx, getContentItemByID, arg.TenantID, arg.ID)
+func (q *Queries) GetContentItemForUpdate(ctx context.Context, arg GetContentItemForUpdateParams) (ContentItem, error) {
+	row := q.db.QueryRow(ctx, getContentItemForUpdate, arg.TenantID, arg.ID)
 	var i ContentItem
 	err := row.Scan(
 		&i.ID,
@@ -719,6 +720,7 @@ const getPublishedContentItemForUsage = `-- name: GetPublishedContentItemForUsag
 SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
 FROM content_item
 WHERE code = $1 AND version = $2 AND tenant_id = $3 AND status = 2 AND deleted_at IS NULL
+FOR UPDATE
 `
 
 type GetPublishedContentItemForUsageParams struct {
@@ -1124,6 +1126,33 @@ SELECT pg_advisory_xact_lock(hashtextextended('content.category', $1::bigint))
 func (q *Queries) LockContentCategoryScope(ctx context.Context, dollar_1 int64) error {
 	_, err := q.db.Exec(ctx, lockContentCategoryScope, dollar_1)
 	return err
+}
+
+const lockContentUsageScope = `-- name: LockContentUsageScope :exec
+SELECT pg_advisory_xact_lock(hashtextextended('content.usage', $1::bigint))
+`
+
+func (q *Queries) LockContentUsageScope(ctx context.Context, dollar_1 int64) error {
+	_, err := q.db.Exec(ctx, lockContentUsageScope, dollar_1)
+	return err
+}
+
+const lockPaper = `-- name: LockPaper :one
+SELECT id FROM paper
+WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+FOR UPDATE
+`
+
+type LockPaperParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) LockPaper(ctx context.Context, arg LockPaperParams) (int64, error) {
+	row := q.db.QueryRow(ctx, lockPaper, arg.TenantID, arg.ID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const publishContentItem = `-- name: PublishContentItem :one

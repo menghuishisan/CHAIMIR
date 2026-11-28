@@ -2,8 +2,6 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"time"
 
 	"chaimir/internal/contracts"
@@ -39,16 +37,7 @@ type JudgeModuleDeps struct {
 }
 
 // RegisterJudgeModule 构造评测 store/service,注册路由并启动队列 worker。
-func RegisterJudgeModule(ctx context.Context, deps JudgeModuleDeps) (*judge.Service, error) {
-	if ctx == nil {
-		return nil, fmt.Errorf("judge module 缺少后台任务 context")
-	}
-	if deps.Router == nil {
-		return nil, fmt.Errorf("judge module 缺少 HTTP router")
-	}
-	if deps.Database == nil {
-		return nil, fmt.Errorf("judge module 缺少 database")
-	}
+func RegisterJudgeModule(tasks *background.Runner, deps JudgeModuleDeps) (*judge.Service, error) {
 	store := judge.NewStore(deps.Database)
 	svc, err := judge.NewService(judge.ServiceDeps{
 		Store:    store,
@@ -72,7 +61,7 @@ func RegisterJudgeModule(ctx context.Context, deps JudgeModuleDeps) (*judge.Serv
 	if err := judge.RegisterEventSubscriptions(deps.EventBus, svc); err != nil {
 		return nil, err
 	}
-	if err := background.Start(ctx,
+	if err := tasks.Start(
 		background.Task{
 			Name:     "judge.worker",
 			Interval: time.Duration(deps.Config.QueuePollIntervalMs) * time.Millisecond,

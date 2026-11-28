@@ -3,6 +3,7 @@ package identity
 
 import (
 	"context"
+	"slices"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/pagex"
@@ -12,25 +13,30 @@ import (
 
 // GetAccount 读取账号摘要,供审计、鉴权和聚合只读调用。
 func (s *Service) GetAccount(ctx context.Context, accountID int64) (contracts.AccountInfo, error) {
-	var account Account
-	if err := s.accountReadTx(ctx, func(ctx context.Context, tx TxStore) error {
-		row, err := tx.GetAccount(ctx, accountID)
-		if err != nil {
-			return err
-		}
-		if err := ensureAccountVisibleInContext(ctx, row.TenantID); err != nil {
-			return err
-		}
-		account = row
-		return nil
-	}); err != nil {
-		return contracts.AccountInfo{}, mapIdentityLookupError(err)
+	account, err := s.readAccount(ctx, accountID)
+	if err != nil {
+		return contracts.AccountInfo{}, err
 	}
 	phone, err := s.decryptPhone(account.PhoneEnc)
 	if err != nil {
 		return contracts.AccountInfo{}, apperr.ErrInternal.WithCause(err)
 	}
 	return ToContractAccount(account, phone), nil
+}
+
+func (s *Service) readAccount(ctx context.Context, accountID int64) (Account, error) {
+	var account Account
+	if err := s.accountReadTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		account, err = tx.GetAccount(ctx, accountID)
+		if err != nil {
+			return err
+		}
+		return ensureAccountVisibleInContext(ctx, account.TenantID)
+	}); err != nil {
+		return Account{}, mapIdentityLookupError(err)
+	}
+	return account, nil
 }
 
 // BatchGetAccounts 批量读取账号摘要,避免高层模块形成 N+1 查询。
@@ -99,17 +105,11 @@ func (s *Service) HasRole(ctx context.Context, accountID int64, role string) (bo
 	if !ok {
 		return false, nil
 	}
-	info, err := s.GetAccount(ctx, accountID)
+	account, err := s.readAccount(ctx, accountID)
 	if err != nil {
 		return false, err
 	}
-	for _, got := range info.Roles {
-		n, ok := contracts.RoleNumber(got)
-		if ok && n == want {
-			return true, nil
-		}
-	}
-	return false, nil
+	return slices.Contains(account.Roles, want), nil
 }
 
 // ListTenants 读取租户列表供聚合层只读使用。

@@ -53,62 +53,61 @@ func (s *Service) PauseSandbox(ctx context.Context, req contracts.SandboxControl
 	if !acquired {
 		return apperr.ErrSandboxStateInvalid
 	}
-	leaseCtx, stopLease := s.maintainResourceLease(ctx, sb)
 	defer func() {
-		resultErr = errors.Join(resultErr, stopLease())
 		if resultErr == nil {
 			return
 		}
 		resultErr = errors.Join(resultErr, s.queueFailedPause(ctx, sb, resultErr, false))
 	}()
-	ctx = leaseCtx
-	plan, err := cleanupPlanForSandbox(sb)
-	if err != nil {
-		return err
-	}
-	archiveCtx, cancelArchive := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
-	err = s.orchestrator.PrepareWorkspaceArchive(archiveCtx, plan)
-	cancelArchive()
-	if err != nil {
-		return apperr.ErrSandboxFilePersistFailed.WithCause(err)
-	}
-	if _, err := s.saveSandboxFiles(ctx, sb); err != nil {
-		return err
-	}
-	if err := s.orchestrator.StopSandboxCompute(ctx, sb); err != nil {
-		return apperr.ErrSandboxRecycleFailed.WithCause(err)
-	}
-	if sb.SnapshotEnabled && sb.SnapshotExpireAt.After(timex.Now()) {
-		retention := time.Until(sb.SnapshotExpireAt)
-		snapshotCtx, cancel := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
-		result, err := s.orchestrator.CreateSnapshot(snapshotCtx, plan, retention)
-		cancel()
+	if err := s.withResourceLease(ctx, sb, func(ctx context.Context) error {
+		plan, err := cleanupPlanForSandbox(sb)
 		if err != nil {
-			return apperr.ErrSandboxRecycleFailed.WithCause(err)
-		}
-		if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-			if _, err := tx.UpdateSandboxSnapshot(ctx, tenantID, sandboxID, sb.resourceLeaseToken, result.Ref, result.Domains, timex.Now(), sb.SnapshotExpireAt); err != nil {
-				return apperr.ErrSandboxStatePersistFailed.WithCause(err)
-			}
-			detail, err := jsonBytes(map[string]any{"snapshot_ref": result.Ref, "snapshot_domains": result.Domains})
-			if err != nil {
-				return apperr.ErrSandboxStatePersistFailed.WithCause(err)
-			}
-			if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), tenantID, sandboxID, EventTypePhaseChange, detail); err != nil {
-				return apperr.ErrSandboxStatePersistFailed.WithCause(err)
-			}
-			return nil
-		}); err != nil {
 			return err
 		}
-		sb.SnapshotRef = result.Ref
-		sb.SnapshotDomains = result.Domains
-	}
-	if err := s.orchestrator.StopComputeKeepSnapshot(ctx, sb); err != nil {
-		return apperr.ErrSandboxRecycleFailed.WithCause(err)
-	}
-	if err := stopLease(); err != nil {
-		return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+		archiveCtx, cancelArchive := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+		err = s.orchestrator.PrepareWorkspaceArchive(archiveCtx, plan)
+		cancelArchive()
+		if err != nil {
+			return apperr.ErrSandboxFilePersistFailed.WithCause(err)
+		}
+		if _, err := s.saveSandboxFiles(ctx, sb); err != nil {
+			return err
+		}
+		if err := s.orchestrator.StopSandboxCompute(ctx, sb); err != nil {
+			return apperr.ErrSandboxRecycleFailed.WithCause(err)
+		}
+		if sb.SnapshotEnabled && sb.SnapshotExpireAt.After(timex.Now()) {
+			retention := time.Until(sb.SnapshotExpireAt)
+			snapshotCtx, cancel := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+			result, err := s.orchestrator.CreateSnapshot(snapshotCtx, plan, retention)
+			cancel()
+			if err != nil {
+				return apperr.ErrSandboxRecycleFailed.WithCause(err)
+			}
+			if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+				if _, err := tx.UpdateSandboxSnapshot(ctx, tenantID, sandboxID, sb.resourceLeaseToken, result.Ref, result.Domains, timex.Now(), sb.SnapshotExpireAt); err != nil {
+					return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+				}
+				detail, err := jsonBytes(map[string]any{"snapshot_ref": result.Ref, "snapshot_domains": result.Domains})
+				if err != nil {
+					return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+				}
+				if err := tx.CreateSandboxEvent(ctx, s.ids.Generate(), tenantID, sandboxID, EventTypePhaseChange, detail); err != nil {
+					return apperr.ErrSandboxStatePersistFailed.WithCause(err)
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			sb.SnapshotRef = result.Ref
+			sb.SnapshotDomains = result.Domains
+		}
+		if err := s.orchestrator.StopComputeKeepSnapshot(ctx, sb); err != nil {
+			return apperr.ErrSandboxRecycleFailed.WithCause(err)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	ctx, cancelPersist := asyncPersistenceContext(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
 	defer cancelPersist()

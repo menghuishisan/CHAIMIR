@@ -2,8 +2,6 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"time"
 
 	"chaimir/internal/modules/identity"
@@ -34,21 +32,6 @@ type IdentityModuleDeps struct {
 
 // RegisterIdentityModule 构造身份模块 store/service 并注册 HTTP 路由。
 func RegisterIdentityModule(deps IdentityModuleDeps) (*identity.Service, error) {
-	if deps.Router == nil {
-		return nil, fmt.Errorf("identity module 缺少 HTTP router")
-	}
-	if deps.Database == nil {
-		return nil, fmt.Errorf("identity module 缺少 database")
-	}
-	if deps.Auth == nil {
-		return nil, fmt.Errorf("identity module 缺少 auth manager")
-	}
-	if deps.EventBus == nil {
-		return nil, fmt.Errorf("identity module 缺少事件总线")
-	}
-	if deps.Storage == nil {
-		return nil, fmt.Errorf("identity module 缺少统一对象存储")
-	}
 	store := identity.NewStore(deps.Database)
 	smsSender, err := identity.NewSMSSender(deps.Config.SMS)
 	if err != nil {
@@ -79,11 +62,8 @@ func RegisterIdentityModule(deps IdentityModuleDeps) (*identity.Service, error) 
 }
 
 // StartIdentityBackgroundTasks 在 M2 注册租户开通事件订阅后启动 outbox。
-func StartIdentityBackgroundTasks(ctx context.Context, cfg config.IdentityConfig, svc *identity.Service) error {
-	if svc == nil {
-		return fmt.Errorf("identity 后台任务缺少 service")
-	}
-	return background.Start(ctx, background.Task{
+func StartIdentityBackgroundTasks(tasks *background.Runner, cfg config.IdentityConfig, svc *identity.Service) error {
+	return tasks.Start(background.Task{
 		Name:     "identity.tenant_provision_outbox",
 		Interval: time.Duration(cfg.TenantProvisionOutboxPollMs) * time.Millisecond,
 		Run:      svc.RunTenantProvisionOutboxOnce,

@@ -42,8 +42,8 @@ func (s *Service) waitSandboxReady(ctx context.Context, tenantID, sandboxID int6
 	defer ticker.Stop()
 	for {
 		info, err := s.sandbox.GetSandbox(waitCtx, tenantID, sandboxID)
-		if err != nil {
-			return apperr.ErrContestSandboxUnavailable.WithCause(err)
+		if err != nil || waitCtx.Err() != nil {
+			return apperr.ErrContestSandboxUnavailable.WithCause(errors.Join(err, waitCtx.Err()))
 		}
 		if info.Status == contracts.SandboxStatusFailed || info.Status == contracts.SandboxStatusDestroyed {
 			return apperr.ErrContestSandboxUnavailable

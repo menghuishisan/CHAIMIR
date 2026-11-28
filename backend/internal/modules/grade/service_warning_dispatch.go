@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"math"
 	"strconv"
 	"strings"
@@ -23,6 +22,9 @@ import (
 
 // runWarningNotificationsOnce 使用原M11任务预算领取预警通知;过期租约可重新领取。
 func (s *Service) runWarningNotificationsOnce(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	limit, ok := intx.Int32(s.cfg.LockOutboxBatchSize)
 	if !ok || limit <= 0 || s.cfg.LockOutboxStaleMs <= 0 {
 		return apperr.ErrGradeEventPublishFailed
@@ -39,16 +41,18 @@ func (s *Service) runWarningNotificationsOnce(ctx context.Context) error {
 		return err
 	})
 	if err != nil {
-		return apperr.ErrGradeEventPublishFailed.WithCause(err)
+		return errors.Join(apperr.ErrGradeEventPublishFailed.WithCause(err), ctx.Err())
 	}
 	var result error
 	for _, item := range items {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(result, err)
+		}
 		if err := s.publishWarningNotification(ctx, item); err != nil {
-			logging.ErrorContext(response.WithTrace(ctx, item.TraceID), "grade warning dispatch failed", apperr.ErrGradeEventPublishFailed.WithCause(err).LogString(), slog.String("trace_id", item.TraceID), slog.Int64("tenant_id", item.TenantID), slog.Int64("warning_id", item.ID))
-			result = errors.Join(result, err)
+			result = errors.Join(result, fmt.Errorf("投递学业预警失败 tenant_id=%d warning_id=%d: %w", item.TenantID, item.ID, err))
 		}
 	}
-	return result
+	return errors.Join(result, ctx.Err())
 }
 
 // publishWarningNotification 发布原预警事件,投递或确认失败均保留持久记录供重试。

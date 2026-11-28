@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/upload"
@@ -100,6 +102,33 @@ func currentServiceTenant(ctx context.Context) (int64, error) {
 		return 0, apperr.ErrServiceUnauthorized
 	}
 	return id.TenantID, nil
+}
+
+func (s *Service) prepareContentBody(body map[string]any, tenantID int64) (map[string]any, error) {
+	cloned, err := jsonx.CloneObjectStrict(body)
+	if err != nil {
+		return nil, apperr.ErrContentBodyInvalid.WithCause(err)
+	}
+	_, err = storage.RewriteObjectRefs(cloned, func(ref storage.ObjectRef) (string, error) {
+		if err := s.validateBodyObjectRef(ref, tenantID); err != nil {
+			return "", err
+		}
+		return storage.ObjectRefString(ref.Bucket, ref.Key)
+	})
+	if err != nil {
+		return nil, apperr.ErrContentBodyInvalid.WithCause(err)
+	}
+	return cloned, nil
+}
+
+func (s *Service) validateBodyObjectRef(ref storage.ObjectRef, tenantID int64) error {
+	if ref.Bucket != s.storage.BucketAttach() && ref.Bucket != s.codeBucket {
+		return apperr.ErrContentBodyInvalid
+	}
+	if !strings.HasPrefix(ref.Key, ids.Format(tenantID)+"/") && !strings.HasPrefix(ref.Key, "0/") {
+		return apperr.ErrContentBodyInvalid
+	}
+	return nil
 }
 
 // mapContentReadError 将数据库未命中归一为内容不存在。

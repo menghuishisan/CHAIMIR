@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/xml"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -35,15 +37,15 @@ type casServiceResponse struct {
 }
 
 // UpsertSSOConfig 保存 CAS/LDAP 配置,校验外部端点避免 SSRF 和明文 LDAP。
-func (s *Service) UpsertSSOConfig(ctx context.Context, req SSOConfigRequest) (SSOConfig, error) {
+func (s *Service) UpsertSSOConfig(ctx context.Context, req SSOConfigRequest) (SSOConfigDTO, error) {
 	id, err := requireTenantRole(ctx, s, contracts.RoleSchoolAdmin)
 	if err != nil {
-		return SSOConfig{}, err
+		return SSOConfigDTO{}, err
 	}
 	if err := s.validateSSOConfig(req); err != nil {
-		return SSOConfig{}, err
+		return SSOConfigDTO{}, err
 	}
-	var out SSOConfig
+	var out SSOConfigDTO
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		if _, err := tx.GetTenantForUpdate(ctx, id.TenantID); err != nil {
 			return err
@@ -73,13 +75,13 @@ func (s *Service) UpsertSSOConfig(ctx context.Context, req SSOConfigRequest) (SS
 		if err != nil {
 			return err
 		}
-		out = row
-		return s.auditTenantOperation(ctx, id, "tenant.sso.update", "identity.sso_config", out.ID, map[string]any{"type": req.Type, "enabled": req.Enabled})
-	}); err != nil {
-		if _, ok := apperr.As(err); ok {
-			return SSOConfig{}, err
+		out, err = ToSSOConfigDTO(row)
+		if err != nil {
+			return err
 		}
-		return SSOConfig{}, apperr.ErrInternal.WithCause(err)
+		return s.auditTenantOperation(ctx, id, "tenant.sso.update", "identity.sso_config", row.ID, map[string]any{"type": req.Type, "enabled": req.Enabled})
+	}); err != nil {
+		return SSOConfigDTO{}, apperr.AsAppError(err)
 	}
 	return out, nil
 }
@@ -240,7 +242,7 @@ func resolveBindPassword(config, stored map[string]any) (map[string]any, bool, e
 }
 
 // validateLDAPCredentials 通过 LDAPS 目录验证用户密码并读取名单匹配字段。
-func (s *Service) validateLDAPCredentials(ctx context.Context, cfg SSOConfig, username, password string) (string, error) {
+func (s *Service) validateLDAPCredentials(ctx context.Context, cfg SSOConfig, username, password string) (value string, resultErr error) {
 	data, err := s.ldapConfigFromJSON(cfg.Config)
 	if err != nil {
 		return "", err
@@ -250,15 +252,38 @@ func (s *Service) validateLDAPCredentials(ctx context.Context, cfg SSOConfig, us
 	if err != nil {
 		return "", err
 	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.SSONetworkTimeoutSeconds)*time.Second)
+	defer cancel()
+	defer func() {
+		if err := ctx.Err(); err != nil {
+			value = ""
+			resultErr = apperr.ErrIdentityInvalidCredentials.WithCause(errors.Join(resultErr, err))
+		}
+	}()
 	resolvedURL, serverName, err := netx.PrivateResolvedURL(ctx, data.URL, "636")
 	if err != nil {
 		return "", apperr.ErrIdentityLDAPServerInsecure.WithCause(err)
 	}
-	conn, err := ldap.DialURL(resolvedURL, ldap.DialWithTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12, ServerName: serverName}))
+	endpoint, err := url.Parse(resolvedURL)
+	if err != nil {
+		return "", apperr.ErrIdentityLDAPServerInsecure.WithCause(err)
+	}
+	dialer := tls.Dialer{NetDialer: &net.Dialer{}, Config: &tls.Config{MinVersion: tls.VersionTLS12, ServerName: serverName}}
+	socket, err := dialer.DialContext(ctx, "tcp", endpoint.Host)
 	if err != nil {
 		return "", apperr.ErrIdentityInvalidCredentials.WithCause(err)
 	}
+	conn := ldap.NewConn(socket, true)
+	conn.Start()
+	conn.SetTimeout(time.Duration(s.cfg.SSONetworkTimeoutSeconds) * time.Second)
 	defer logging.CloseContext(ctx, "关闭 LDAP 连接失败", conn)
+	// 直接打断底层读写，避免等待 LDAP 请求或关闭过程才能响应取消。
+	stop := context.AfterFunc(ctx, func() {
+		if err := socket.SetDeadline(time.Now()); err != nil {
+			logging.ErrorContext(ctx, "取消 LDAP 连接失败", err.Error())
+		}
+	})
+	defer stop()
 	// 先使用学校配置的服务账号绑定,只用于目录查询,不代表本系统登录成功。
 	if err := conn.Bind(data.BindDN, data.BindPassword); err != nil {
 		return "", apperr.ErrIdentityInvalidCredentials.WithCause(err)
@@ -329,7 +354,7 @@ func (s *Service) ldapConfigFromJSON(raw []byte) (ldapConfig, error) {
 	cfg := ldapConfig{
 		URL:            strings.TrimSpace(jsonx.StringField(revealed, "url")),
 		BindDN:         strings.TrimSpace(jsonx.StringField(revealed, "bind_dn")),
-		BindPassword:   strings.TrimSpace(jsonx.StringField(revealed, "bind_password")),
+		BindPassword:   jsonx.StringField(revealed, "bind_password"),
 		BaseDN:         strings.TrimSpace(jsonx.StringField(revealed, "base_dn")),
 		UserFilter:     strings.TrimSpace(jsonx.StringField(revealed, "user_filter")),
 		MatchAttribute: strings.TrimSpace(jsonx.StringField(revealed, "match_attribute")),
@@ -354,7 +379,7 @@ func (s *Service) loadEnabledSSOConfig(ctx context.Context, tenantCode string, t
 		}
 		return EnsureTenantCanLogin(t, timex.Now())
 	}); err != nil {
-		return 0, SSOConfig{}, apperr.ErrIdentitySSONotEnabled
+		return 0, SSOConfig{}, apperr.ErrIdentitySSONotEnabled.WithCause(err)
 	}
 	var cfg SSOConfig
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
@@ -365,7 +390,7 @@ func (s *Service) loadEnabledSSOConfig(ctx context.Context, tenantCode string, t
 		cfg = row
 		return nil
 	}); err != nil || !cfg.Enabled {
-		return 0, SSOConfig{}, apperr.ErrIdentitySSONotEnabled
+		return 0, SSOConfig{}, apperr.ErrIdentitySSONotEnabled.WithCause(err)
 	}
 	return tenantID, cfg, nil
 }

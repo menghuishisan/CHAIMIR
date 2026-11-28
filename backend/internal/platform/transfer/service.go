@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/background"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/storage"
@@ -17,6 +18,9 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// ErrTaskNotClaimable 表示原子领取未取得租约，调用方可读取权威任务状态对账。
+var ErrTaskNotClaimable = errors.New("导入导出任务当前不可领取")
 
 // Service 是统一导入导出中心对模块和 HTTP 层暴露的生产服务。
 type Service struct {
@@ -157,7 +161,7 @@ func (s *Service) ClaimTask(ctx context.Context, tenantID, taskID int64) (Task, 
 }
 
 // RunWithLease 在模块 worker 处理长任务期间续租,失去租约时取消执行上下文。
-func (s *Service) RunWithLease(ctx context.Context, task Task, run func(context.Context) error) (resultErr error) {
+func (s *Service) RunWithLease(ctx context.Context, task Task, run func(context.Context) error) error {
 	if task.TenantID < 0 || task.TaskID <= 0 || task.Status != StatusRunning || strings.TrimSpace(task.LeaseToken) == "" || run == nil {
 		return apperr.ErrTransferTaskInvalid
 	}
@@ -173,60 +177,13 @@ func (s *Service) RunWithLease(ctx context.Context, task Task, run func(context.
 		return fmt.Errorf("导入导出任务租约已失效")
 	}
 
-	workCtx, cancelWork := context.WithCancel(ctx)
-	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
-	stop := make(chan struct{})
-	heartbeatDone := make(chan struct{})
-	leaseLost := make(chan error, 1)
-	go func() {
-		defer close(heartbeatDone)
-		interval := leaseDuration / 3
-		if interval > 30*time.Second {
-			interval = 30 * time.Second
-		}
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-heartbeatCtx.Done():
-				return
-			case <-ticker.C:
-				renewed, err := s.renewTaskLease(heartbeatCtx, task, leaseDuration)
-				select {
-				case <-stop:
-					return
-				default:
-				}
-				if err == nil && renewed {
-					continue
-				}
-				if err == nil {
-					err = fmt.Errorf("租约已过期或被其他 worker 接管")
-				}
-				leaseLost <- fmt.Errorf("续租导入导出任务失败: %w", err)
-				cancelWork()
-				return
-			}
-		}
-	}()
-
-	defer func() {
-		close(stop)
-		cancelHeartbeat()
-		<-heartbeatDone
-		cancelWork()
-		select {
-		case err := <-leaseLost:
-			resultErr = errors.Join(err, resultErr)
-		default:
-			if resultErr == nil {
-				resultErr = ctx.Err()
-			}
-		}
-	}()
-	return run(workCtx)
+	lost, err := background.WithRenewal(ctx, leaseDuration, func(ctx context.Context) (bool, error) {
+		return s.renewTaskLease(ctx, task, leaseDuration)
+	}, run)
+	if lost {
+		return fmt.Errorf("续租导入导出任务失败: %w", err)
+	}
+	return err
 }
 
 // renewTaskLease 延长仍有效且由当前任务 token 持有的租约。

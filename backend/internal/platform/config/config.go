@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"chaimir/internal/platform/jsonx"
+
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
@@ -1594,7 +1596,7 @@ func readPlatformImageAttestations(key string, errs *[]string) []PlatformImageAt
 		return nil
 	}
 	var out []PlatformImageAttestation
-	if err := decodeStrictJSON(raw, &out); err != nil {
+	if err := jsonx.DecodeStrictKnownFields([]byte(raw), &out); err != nil {
 		*errs = append(*errs, fmt.Sprintf("环境变量 %s 需为严格的镜像证明 JSON 数组: %v", key, err))
 		return nil
 	}
@@ -1613,7 +1615,7 @@ func readSandboxTolerations(key string, errs *[]string) []SandboxToleration {
 		return nil
 	}
 	var out []SandboxToleration
-	if err := decodeStrictJSON(raw, &out); err != nil {
+	if err := jsonx.DecodeStrictKnownFields([]byte(raw), &out); err != nil {
 		*errs = append(*errs, fmt.Sprintf("环境变量 %s 需为严格的 Kubernetes toleration JSON 数组: %v", key, err))
 		return nil
 	}

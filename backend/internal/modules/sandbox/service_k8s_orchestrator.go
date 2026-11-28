@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -148,8 +149,7 @@ func (o *K8sOrchestrator) CreateSnapshot(ctx context.Context, plan CreateSandbox
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeDurationSeconds(o.cfg.ReadyTimeoutSeconds))
 		defer cancel()
 		for _, snapshot := range created {
-			uid := snapshot.GetUID()
-			if err := client.Delete(cleanupCtx, snapshot.GetName(), metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}}); err != nil && !apierrors.IsNotFound(err) {
+			if err := deleteCreatedSnapshot(cleanupCtx, client, snapshot); err != nil {
 				resultErr = errors.Join(resultErr, fmt.Errorf("清理未完成快照 %s 失败: %w", snapshot.GetName(), err))
 			}
 		}
@@ -171,28 +171,68 @@ func (o *K8sOrchestrator) CreateSnapshot(ctx context.Context, plan CreateSandbox
 	return SnapshotResult{Ref: plan.Sandbox.Namespace + "/" + snapshotGroupName(plan.Sandbox), Domains: domains}, nil
 }
 
+func deleteCreatedSnapshot(ctx context.Context, client dynamic.ResourceInterface, accepted *unstructured.Unstructured) error {
+	current, err := client.Get(ctx, accepted.GetName(), metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if current.GetUID() != accepted.GetUID() {
+		return fmt.Errorf("VolumeSnapshot %s 已被替换，拒绝补偿删除", accepted.GetName())
+	}
+	if err := verifyVolumeSnapshot(current, accepted); err != nil {
+		return err
+	}
+	options, err := resourceDeleteOptions(current)
+	if err != nil {
+		return err
+	}
+	if err := client.Delete(ctx, current.GetName(), options); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	return nil
+}
+
 func (o *K8sOrchestrator) cleanupSupersededSnapshots(ctx context.Context, sb Sandbox) error {
 	if err := validateSnapshotRefForNamespace(sb); err != nil {
 		return err
 	}
 	gvr := schema.GroupVersionResource{Group: "snapshot.storage.k8s.io", Version: "v1", Resource: "volumesnapshots"}
 	client := o.client.Dynamic().Resource(gvr).Namespace(sb.Namespace)
-	snapshots, err := client.List(ctx, metav1.ListOptions{LabelSelector: "app=chaimir,module=sandbox,chaimir.io/sandbox-id=" + ids.Format(sb.ID)})
+	managed := sandboxManagedLabels(sb)
+	snapshots, err := client.List(ctx, metav1.ListOptions{LabelSelector: labels.Set(managed).AsSelector().String()})
 	if err != nil {
 		return fmt.Errorf("列出旧快照失败: %w", err)
 	}
-	for _, snapshot := range snapshots.Items {
-		labels := snapshot.GetLabels()
-		domain := labels["chaimir.io/volume"]
-		if labels["app"] != "chaimir" || labels["module"] != "sandbox" || labels["chaimir.io/sandbox-id"] != ids.Format(sb.ID) || domain == "" {
+	type deletion struct {
+		name    string
+		options metav1.DeleteOptions
+	}
+	var targets []deletion
+	for index := range snapshots.Items {
+		snapshot := &snapshots.Items[index]
+		domain := snapshot.GetLabels()["chaimir.io/volume"]
+		desired := &metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: snapshot.GetName(), Namespace: sb.Namespace, Labels: managed}}
+		if platformk8s.VerifyManagedLabels(snapshot, desired) != nil || domain == "" {
 			continue
 		}
 		if snapshot.GetName() == volumeSnapshotName(sb, domain) {
 			continue
 		}
-		uid := snapshot.GetUID()
-		if err := client.Delete(ctx, snapshot.GetName(), metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}}); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("删除旧快照 %s 失败: %w", snapshot.GetName(), err)
+		if err := platformk8s.VerifyManagedResource(snapshot, desired); err != nil {
+			return err
+		}
+		options, err := resourceDeleteOptions(snapshot)
+		if err != nil {
+			return err
+		}
+		targets = append(targets, deletion{name: snapshot.GetName(), options: options})
+	}
+	for _, target := range targets {
+		if err := client.Delete(ctx, target.name, target.options); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("删除旧快照 %s 失败: %w", target.name, err)
 		}
 	}
 	return nil
@@ -2180,24 +2220,22 @@ func volumeSnapshotObject(sb Sandbox, domain, name string, retention time.Durati
 	if strings.TrimSpace(snapshotClassName) != "" {
 		spec["volumeSnapshotClassName"] = strings.TrimSpace(snapshotClassName)
 	}
-	return &unstructured.Unstructured{Object: map[string]any{
+	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "snapshot.storage.k8s.io/v1",
 		"kind":       "VolumeSnapshot",
 		"metadata": map[string]any{
 			"name":      name,
 			"namespace": sb.Namespace,
-			"labels": map[string]any{
-				"app":                   "chaimir",
-				"module":                "sandbox",
-				"chaimir.io/sandbox-id": ids.Format(sb.ID),
-				"chaimir.io/volume":     domain,
-			},
 			"annotations": map[string]any{
 				"chaimir.io/retention-seconds": fmt.Sprintf("%.0f", retention.Seconds()),
 			},
 		},
 		"spec": spec,
 	}}
+	managed := sandboxManagedLabels(sb)
+	managed["chaimir.io/volume"] = domain
+	obj.SetLabels(managed)
+	return obj
 }
 
 // snapshotGroupName 返回沙箱快照组引用名,具体卷域快照由同一前缀派生。

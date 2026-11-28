@@ -27,7 +27,7 @@ func (s *Service) CloneItem(ctx context.Context, actor auditActorSnapshot, itemI
 		return ItemSnapshotDTO{}, err
 	}
 	var source ItemWithBody
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.TenantReadTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		source, err = tx.GetVisibleItemWithBodyByID(ctx, id.TenantID, itemID)
 		return err
@@ -101,14 +101,11 @@ func (s *Service) cloneBodyAttachments(ctx context.Context, body map[string]any,
 	var copied []storage.ObjectRef
 	refs := make(map[storage.ObjectRef]string)
 	_, err = storage.RewriteObjectRefs(cloned, func(ref storage.ObjectRef) (string, error) {
-		if ref.Bucket != s.storage.BucketAttach() && (s.codeBucket == "" || ref.Bucket != s.codeBucket) {
-			return "", apperr.ErrContentCloneInvalid
+		if err := s.validateBodyObjectRef(ref, sourceTenantID); err != nil {
+			return "", apperr.ErrContentCloneInvalid.WithCause(err)
 		}
 		if strings.HasPrefix(ref.Key, "0/") {
 			return storage.ObjectRefString(ref.Bucket, ref.Key)
-		}
-		if !strings.HasPrefix(ref.Key, ids.Format(sourceTenantID)+"/") {
-			return "", apperr.ErrContentCloneInvalid
 		}
 		if target, ok := refs[ref]; ok {
 			return target, nil

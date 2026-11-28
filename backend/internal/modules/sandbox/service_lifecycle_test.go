@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"chaimir/internal/platform/response"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/config"
@@ -337,6 +339,127 @@ func TestRecycleOutboxWireRetainsLifecycleScope(t *testing.T) {
 			if publishFailure && (tx.published != 0 || tx.failed != 1) || !publishFailure && (tx.published != 1 || tx.failed != 0) {
 				t.Fatalf("incorrect delivery state: published=%d failed=%d", tx.published, tx.failed)
 			}
+		})
+	}
+}
+
+type outboxErrorBatch struct {
+	Store
+	TxStore
+	t                       *testing.T
+	items                   []SandboxRecycleOutbox
+	claimErr                error
+	publishErr              map[int64]error
+	markErr                 map[int64]error
+	published, failed, sent []int64
+}
+
+func (b *outboxErrorBatch) PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error {
+	return fn(ctx, b)
+}
+
+func (b *outboxErrorBatch) ClaimPendingSandboxRecycleOutbox(_ context.Context, _ int32, _ int32, _, _ time.Time) ([]SandboxRecycleOutbox, error) {
+	return b.items, b.claimErr
+}
+
+func (b *outboxErrorBatch) checkLease(tenantID, id int64, token string) {
+	b.t.Helper()
+	item := b.items[id-1]
+	if tenantID != item.TenantID || token != item.LeaseToken {
+		b.t.Fatalf("outbox identity changed: tenant=%d id=%d lease=%q", tenantID, id, token)
+	}
+}
+
+func (b *outboxErrorBatch) MarkSandboxRecycleOutboxPublished(_ context.Context, tenantID, id int64, token string) (SandboxRecycleOutbox, error) {
+	b.checkLease(tenantID, id, token)
+	b.published = append(b.published, id)
+	return SandboxRecycleOutbox{}, b.markErr[id]
+}
+
+func (b *outboxErrorBatch) MarkSandboxRecycleOutboxFailed(_ context.Context, tenantID, id int64, reason, token string) (SandboxRecycleOutbox, error) {
+	b.checkLease(tenantID, id, token)
+	if cause := b.publishErr[id]; cause == nil || reason != cause.Error() {
+		b.t.Fatalf("wrong persisted failure for id %d: %q", id, reason)
+	}
+	b.failed = append(b.failed, id)
+	return SandboxRecycleOutbox{}, b.markErr[id]
+}
+
+type outboxErrorBus struct {
+	eventbus.Bus
+	batch *outboxErrorBatch
+}
+
+func (bus outboxErrorBus) Publish(ctx context.Context, subject string, payload any) error {
+	b := bus.batch
+	event, ok := payload.(contracts.SandboxRecycledEvent)
+	if !ok || subject != contracts.SubjectSandboxRecycled {
+		b.t.Fatalf("unexpected event subject=%s payload=%T", subject, payload)
+	}
+	item := b.items[len(b.sent)]
+	expected := contracts.SandboxRecycledEvent{TenantID: item.TenantID, TraceID: item.TraceID, SandboxID: item.SandboxID, SourceRef: item.SourceRef, ScopeRef: item.ScopeRef, Reason: item.Reason, RecycledAt: item.RecycledAt}
+	if event != expected || response.TraceFromContext(ctx) != item.TraceID {
+		b.t.Fatalf("outbox payload or trace changed: got=%+v want=%+v", event, expected)
+	}
+	b.sent = append(b.sent, item.ID)
+	return b.publishErr[item.ID]
+}
+
+func TestOutboxBatchPreservesEveryFailure(t *testing.T) {
+	for _, mode := range []string{"empty", "success", "publish", "published-mark", "failure-mark", "claim"} {
+		t.Run(mode, func(t *testing.T) {
+			first, second := errors.New("publish first"), errors.New("publish second")
+			markFirst, markSecond := errors.New("mark first"), errors.New("mark second")
+			b := &outboxErrorBatch{t: t, publishErr: map[int64]error{}, markErr: map[int64]error{}}
+			at := time.Date(2026, 11, 28, 0, 0, 0, 0, time.UTC)
+			for id := int64(1); id <= 3; id++ {
+				b.items = append(b.items, SandboxRecycleOutbox{ID: id, TenantID: id + 10, TraceID: fmt.Sprint("outbox-", id), LeaseToken: fmt.Sprint("lease-", id), SandboxID: id + 20, SourceRef: fmt.Sprint("source:", id), ScopeRef: fmt.Sprint("scope:", id), Reason: "expired", RecycledAt: at})
+			}
+			var expected []error
+			switch mode {
+			case "empty":
+				b.items = nil
+			case "publish", "failure-mark":
+				b.publishErr[1], b.publishErr[2] = first, second
+				expected = append(expected, first, second)
+				if mode == "failure-mark" {
+					b.markErr[1], b.markErr[2] = markFirst, markSecond
+					expected = append(expected, markFirst, markSecond)
+				}
+			case "published-mark":
+				b.markErr[1], b.markErr[2] = markFirst, markSecond
+				expected = append(expected, markFirst, markSecond)
+			case "claim":
+				b.claimErr = first
+				expected = append(expected, first)
+			}
+
+			svc := &Service{store: b, bus: outboxErrorBus{batch: b}, cfg: config.SandboxConfig{RecycleOutboxBatchSize: 3, RecycleOutboxStaleMs: 1000, RecycleOutboxMaxAttempts: 5}}
+			err := svc.RunSandboxRecycleOutboxOnce(context.Background())
+			for _, cause := range expected {
+				if !errors.Is(err, cause) {
+					t.Errorf("lost outbox cause %q: %v", cause, err)
+				}
+			}
+			if len(expected) == 0 && err != nil || len(expected) > 0 && !errors.Is(err, apperr.ErrSandboxRecycleEventPublishFailed) {
+				t.Errorf("wrong worker result: %v", err)
+			}
+			wantSent := len(b.items)
+			if mode == "claim" {
+				wantSent = 0
+			}
+			if len(b.sent) != wantSent || len(b.published)+len(b.failed) != wantSent {
+				t.Errorf("batch stopped or acknowledgement duplicated: sent=%v published=%v failed=%v", b.sent, b.published, b.failed)
+			}
+			for _, id := range b.published {
+				if b.publishErr[id] != nil {
+					t.Errorf("failed publish acknowledged as success: id=%d", id)
+				}
+			}
+			if mode != "claim" && len(b.failed) != len(b.publishErr) {
+				t.Errorf("missing failed acknowledgements: %v", b.failed)
+			}
+
 		})
 	}
 }

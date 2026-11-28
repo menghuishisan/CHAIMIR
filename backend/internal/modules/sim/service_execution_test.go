@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +25,7 @@ import (
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/snowflake"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gorilla/websocket"
@@ -36,6 +38,68 @@ import (
 )
 
 type executionLockFunc func(context.Context, string, time.Duration, func(context.Context) error) error
+
+type previewRenewalBoundaryStore struct {
+	Store
+	TxStore
+	entered chan struct{}
+	release chan struct{}
+	runDone chan struct{}
+	calls   atomic.Int32
+}
+
+func (s *previewRenewalBoundaryStore) PlatformTx(ctx context.Context, fn func(context.Context, TxStore) error) error {
+	return fn(ctx, s)
+}
+
+func (s *previewRenewalBoundaryStore) RenewPreviewLease(ctx context.Context, _, _ int64, _ string, _ time.Time) (bool, error) {
+	if s.calls.Add(1) == 1 {
+		return true, nil
+	}
+	close(s.entered)
+	<-s.release
+	return false, ctx.Err()
+}
+
+func (s *previewRenewalBoundaryStore) ReleasePreviewLease(context.Context, int64, int64, string) (int64, error) {
+	<-s.runDone
+	return 1, nil
+}
+
+func TestPreviewExecutionJoinsRenewal(t *testing.T) {
+	store := &previewRenewalBoundaryStore{entered: make(chan struct{}), release: make(chan struct{}), runDone: make(chan struct{})}
+	svc := &Service{store: store, previewMaxAttempts: 2}
+	var runOnce, renewOnce sync.Once
+	unblockRun := func() { runOnce.Do(func() { close(store.runDone) }) }
+	unblockRenew := func() { renewOnce.Do(func() { close(store.release) }) }
+	returned := make(chan struct{})
+	done := make(chan error, 1)
+	t.Cleanup(func() { unblockRun(); unblockRenew(); <-returned })
+	go func() {
+		defer close(returned)
+		done <- svc.previewPackageWithLease(context.Background(), Package{ID: 2}, 3*time.Second)
+	}()
+	select {
+	case <-store.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("renewal did not start")
+	}
+	unblockRun()
+	select {
+	case err := <-done:
+		t.Fatalf("preview returned with renewal still active: %v", err)
+	case <-time.After(40 * time.Millisecond):
+	}
+	unblockRenew()
+	select {
+	case err := <-done:
+		if !errors.Is(err, apperr.ErrSimBackendComputeUnavailable) {
+			t.Fatalf("preview failure lost: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("preview did not return after renewal stopped")
+	}
+}
 
 func validateTeachingFrame(view map[string]any, scaleLimit map[string]any) error {
 	if err := validateRuntimeProtocol("TeachingFrame", view); err != nil {
@@ -1013,4 +1077,230 @@ func TestSessionChangesCloseStreamsAcrossReplicasUsingCurrentState(t *testing.T)
 	}
 	assertOpen(reader)
 	assertClosed(formerMember)
+}
+
+type previewBatchStore struct {
+	Store
+	TxStore
+	t                                       *testing.T
+	packages                                []Package
+	claimErr                                error
+	onClaim                                 func()
+	onMerge                                 func()
+	renew                                   func(context.Context, int64) (bool, error)
+	renewErrors, releaseErrors, mergeErrors map[int64]error
+	renewed, released, merged               []int64
+	reports                                 map[int64]ValidationReport
+	claims                                  int
+}
+
+func (s *previewBatchStore) PlatformTx(ctx context.Context, fn func(context.Context, TxStore) error) error {
+	return fn(ctx, s)
+}
+func (s *previewBatchStore) ExhaustPreviewAttempts(_ context.Context, attempts int32, _ time.Time, report ValidationReport) ([]Review, error) {
+	if attempts != 2 || report.WorkerPreview.Status != validationFailed {
+		s.t.Fatal("preview changed exhaustion policy")
+	}
+	return nil, nil
+}
+func (s *previewBatchStore) ClaimPackagesForPreview(_ context.Context, batch, maxAttempts int32, before, until time.Time, token string) ([]Package, error) {
+	if batch != 6 || maxAttempts != 2 || until.Sub(before) > 3*time.Second || token == "" {
+		s.t.Fatal("preview changed claim parameters")
+	}
+	s.claims++
+	for i := range s.packages {
+		s.packages[i].PreviewLeaseToken = token
+	}
+	if s.onClaim != nil {
+		s.onClaim()
+	}
+	return s.packages, s.claimErr
+}
+func (s *previewBatchStore) checkLease(reviewID, id int64, token string) {
+	if reviewID != id+100 || token == "" || s.packages[id-1].PreviewLeaseToken != token {
+		s.t.Fatal("preview changed its review or lease identity")
+	}
+}
+func (s *previewBatchStore) RenewPreviewLease(ctx context.Context, reviewID, id int64, token string, _ time.Time) (bool, error) {
+	s.checkLease(reviewID, id, token)
+	s.renewed = append(s.renewed, id)
+	if s.renew != nil {
+		return s.renew(ctx, id)
+	}
+	return true, s.renewErrors[id]
+}
+func (s *previewBatchStore) ReleasePreviewLease(_ context.Context, reviewID, id int64, token string) (int64, error) {
+	s.checkLease(reviewID, id, token)
+	s.released = append(s.released, id)
+	return 1, s.releaseErrors[id]
+}
+func (s *previewBatchStore) MergeValidationReport(_ context.Context, reviewID, id int64, token string, report ValidationReport) (Review, error) {
+	s.checkLease(reviewID, id, token)
+	if err := s.mergeErrors[id]; err != nil {
+		return Review{}, err
+	}
+	s.merged = append(s.merged, id)
+	s.reports[id] = report
+	if s.onMerge != nil {
+		s.onMerge()
+	}
+	return Review{ID: reviewID, PackageID: id, PreviewReport: report}, nil
+}
+
+type previewBatchBackend struct {
+	BackendAdapter
+	t        *testing.T
+	result   PreviewResult
+	failures map[int64]error
+	called   []int64
+	preview  func(context.Context) (PreviewResult, error)
+}
+
+func (b *previewBatchBackend) Preview(ctx context.Context, pkg Package, runID int64, bundle *ExecutionBundle, frames int) (PreviewResult, error) {
+	if runID <= 0 || bundle != nil || frames != 1 || response.TraceFromContext(ctx) != "preview-batch" {
+		b.t.Fatal("preview changed native execution inputs or trace")
+	}
+	b.called = append(b.called, pkg.ID)
+	if b.preview != nil {
+		return b.preview(ctx)
+	}
+	result := b.result
+	if pkg.ID == 6 {
+		result.DeterminismPassed = false
+		result.Detail = "algorithm differs"
+	}
+	return result, b.failures[pkg.ID]
+}
+
+func newPreviewFailureBatch(t *testing.T) (*Service, *previewBatchStore, *previewBatchBackend) {
+	t.Helper()
+	store := &previewBatchStore{t: t, reports: map[int64]ValidationReport{}}
+	for id := int64(1); id <= 6; id++ {
+		store.packages = append(store.packages, Package{ID: id, Code: fmt.Sprintf("preview-%d", id), Version: "1.0.0", BackendAdapter: "fixed-image", PreviewReviewID: id + 100, PreviewAttemptCount: 1, ScaleLimit: map[string]any{"nodes": 8, "max_tick": 8, "max_events": 8}})
+	}
+	raw, err := os.ReadFile("testdata/runtime_protocol.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct{ Snapshot map[string]any }
+	if err := json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	frame := BackendSnapshot{Tick: 0, State: fixture.Snapshot["state"].(map[string]any), View: fixture.Snapshot["view"].(map[string]any), InteractionAvailability: fixture.Snapshot["interactionAvailability"].(map[string]any), CheckpointResults: fixture.Snapshot["checkpointResults"].(map[string]any)}
+	backend := &previewBatchBackend{t: t, result: PreviewResult{DeterminismPassed: true, Frames: []BackendSnapshot{frame}}}
+	ids, err := snowflake.NewNode(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Service{store: store, ids: ids, backends: BackendRegistry{"fixed-image": backend}, packageRunnerCode: "package-runner", previewBatchSize: 6, previewLeaseDurationMs: 3000, previewMaxAttempts: 2, previewFrameCount: 1}, store, backend
+}
+
+func TestPreviewBatchRetainsFailuresAndCancellation(t *testing.T) {
+	for _, mode := range []string{"success and rejected algorithm", "independent failures", "claim failure", "empty", "cancel before claim", "cancel claimed batch", "cancel empty claim", "claim failure and cancel", "cancel during report"} {
+		t.Run(mode, func(t *testing.T) {
+			service, store, backend := newPreviewFailureBatch(t)
+			ctx, cancel := context.WithCancel(response.WithTrace(context.Background(), "preview-batch"))
+			defer cancel()
+			causes := []error{errors.New("initial lease failure"), errors.New("preview execution failure"), errors.New("lease release failure"), errors.New("report write failure")}
+			wantRenewed := []int64{1, 2, 3, 4, 5, 6}
+			wantCalled := []int64{1, 2, 3, 4, 5, 6}
+			wantMerged := []int64{1, 2, 3, 4, 5, 6}
+			var wantReleased []int64
+			var wantErrors []error
+			wantClaims := 1
+			switch mode {
+			case "independent failures":
+				store.renewErrors = map[int64]error{1: causes[0]}
+				backend.failures = map[int64]error{2: causes[1]}
+				store.releaseErrors = map[int64]error{2: causes[2]}
+				store.mergeErrors = map[int64]error{3: causes[3]}
+				store.packages[3].BackendAdapter = "missing"
+				store.packages[3].PreviewAttemptCount = 2
+				wantErrors = append(causes, apperr.ErrSimBackendComputeUnavailable)
+				wantCalled = []int64{2, 3, 5, 6}
+				wantMerged = []int64{4, 5, 6}
+				wantReleased = []int64{2}
+			case "claim failure":
+				store.claimErr = causes[0]
+				wantErrors = causes[:1]
+				wantRenewed = nil
+				wantCalled = nil
+				wantMerged = nil
+			case "empty":
+				store.packages = nil
+				wantRenewed = nil
+				wantCalled = nil
+				wantMerged = nil
+			case "cancel before claim":
+				cancel()
+				wantErrors = []error{context.Canceled}
+				wantRenewed = nil
+				wantCalled = nil
+				wantMerged = nil
+				wantClaims = 0
+			case "cancel claimed batch", "cancel empty claim", "claim failure and cancel":
+				store.onClaim = cancel
+				wantErrors = []error{context.Canceled}
+				wantRenewed = nil
+				wantCalled = nil
+				wantMerged = nil
+				if mode == "cancel empty claim" {
+					store.packages = nil
+				}
+				if mode == "claim failure and cancel" {
+					store.claimErr = causes[0]
+					wantErrors = append(wantErrors, causes[0])
+				}
+			case "cancel during report":
+				store.onMerge = cancel
+				wantErrors = []error{context.Canceled}
+				wantRenewed = []int64{1}
+				wantCalled = []int64{1}
+				wantMerged = []int64{1}
+			}
+			err := service.RunPackagePreviewOnce(ctx)
+			if len(wantErrors) == 0 && err != nil {
+				t.Fatal(err)
+			}
+			for _, cause := range wantErrors {
+				if !errors.Is(err, cause) {
+					t.Errorf("error=%v missing %v", err, cause)
+				}
+			}
+			if !reflect.DeepEqual(store.renewed, wantRenewed) || !reflect.DeepEqual(backend.called, wantCalled) || !reflect.DeepEqual(store.merged, wantMerged) || !reflect.DeepEqual(store.released, wantReleased) || store.claims != wantClaims {
+				t.Fatalf("renewed=%v executed=%v reports=%v released=%v claims=%d", store.renewed, backend.called, store.merged, store.released, store.claims)
+			}
+			if report, ok := store.reports[6]; ok && (report.DeterminismCheck.Status != validationFailed || report.WorkerPreview.Status != validationPassed || len(report.PreviewFrames) == 0) {
+				t.Fatal("rejected algorithm lost its successfully completed preview report")
+			}
+			if report, ok := store.reports[4]; ok && mode == "independent failures" && (report.DeterminismCheck.Status != validationFailed || report.WorkerPreview.Status != validationFailed) {
+				t.Fatal("exhausted preview did not retain its terminal report")
+			}
+		})
+	}
+}
+
+func TestPreviewLeaseLossRetainsExecutionFailure(t *testing.T) {
+	service, store, backend := newPreviewFailureBatch(t)
+	store.packages = store.packages[:1]
+	store.packages[0].PreviewLeaseToken = "owned-lease"
+	renewErr, executeErr, releaseErr := errors.New("active lease renewal failed"), errors.New("preview interrupted"), errors.New("failure recovery write failed")
+	store.renew = func(context.Context, int64) (bool, error) {
+		if len(store.renewed) == 1 {
+			return true, nil
+		}
+		return false, renewErr
+	}
+	store.releaseErrors = map[int64]error{1: releaseErr}
+	backend.preview = func(ctx context.Context) (PreviewResult, error) { <-ctx.Done(); return PreviewResult{}, executeErr }
+	ctx := response.WithTrace(context.Background(), "preview-batch")
+	err := service.previewPackageWithLease(ctx, store.packages[0], 3*time.Second)
+	for _, cause := range []error{renewErr, executeErr, releaseErr} {
+		if !errors.Is(err, cause) {
+			t.Errorf("error=%v missing %v", err, cause)
+		}
+	}
+	if len(store.renewed) != 2 || !reflect.DeepEqual(backend.called, []int64{1}) || !reflect.DeepEqual(store.released, []int64{1}) || len(store.merged) != 0 {
+		t.Fatalf("lost lease changed retry or report boundaries: renewed=%v executed=%v released=%v merged=%v", store.renewed, backend.called, store.released, store.merged)
+	}
 }

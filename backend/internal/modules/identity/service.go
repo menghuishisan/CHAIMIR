@@ -31,9 +31,6 @@ const (
 
 // baseRoleNumber 将 identity 基础身份映射为跨模块 RBAC 数字契约,只在 service 边界适配。
 func baseRoleNumber(baseIdentity int16) (int16, error) {
-	if err := ValidateBaseIdentity(baseIdentity); err != nil {
-		return 0, err
-	}
 	switch baseIdentity {
 	case BaseIdentityTeacher:
 		return contracts.RoleNumTeacher, nil
@@ -171,11 +168,6 @@ func (s *Service) AuditWriter() *AuditWriter {
 // refreshExpireAt 计算 Refresh Token 过期时间。
 func (s *Service) refreshExpireAt() time.Time {
 	return timex.Now().Add(time.Duration(s.authCfg.RefreshTTLDay) * 24 * time.Hour)
-}
-
-// importMaxBytes 返回统一上传配置中的导入文件大小上限,配置缺失应在启动装配阶段失败。
-func (s *Service) importMaxBytes() int64 {
-	return s.uploadCfg.ImportMaxBytes
 }
 
 // hashSecret 使用统一 HMAC 密钥哈希不透明凭证。

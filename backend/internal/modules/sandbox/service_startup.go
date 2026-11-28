@@ -15,9 +15,17 @@ import (
 )
 
 func (s *Service) scheduleSandboxStart(ctx context.Context, tenantID, sandboxID int64) {
+	s.asyncMu.Lock()
+	defer s.asyncMu.Unlock()
+	if s.closing {
+		return
+	}
+	s.asyncTasks.Add(1)
 	traceCtx := context.WithoutCancel(ctx)
 	go func() {
-		if err := s.startSandbox(traceCtx, tenantID, sandboxID); err != nil {
+		var err error
+		defer func() { s.finishAsync(err) }()
+		if err = s.startSandbox(traceCtx, tenantID, sandboxID); err != nil {
 			logging.ErrorContext(traceCtx, "sandbox startup failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", tenantID), slog.Int64("sandbox_id", sandboxID))
 		}
 	}()
@@ -46,7 +54,7 @@ func (s *Service) startSandbox(ctx context.Context, tenantID, sandboxID int64) (
 	stage := "start"
 	defer func() {
 		if failure != nil {
-			s.markStartupFailed(ctx, plan.Sandbox, stage, failure)
+			failure = errors.Join(failure, s.markStartupFailed(ctx, plan.Sandbox, stage, failure))
 		}
 	}()
 	prepared, err := s.planForExistingSandbox(ctx, current)
@@ -193,7 +201,7 @@ func sandboxNeedsInitialization(plan CreateSandboxPlan) bool {
 	return len(plan.InitChainSteps) > 0 || strings.TrimSpace(plan.Sandbox.InitCodeRef) != "" || strings.TrimSpace(plan.Sandbox.InitScriptRef) != ""
 }
 
-func (s *Service) markStartupFailed(ctx context.Context, sb Sandbox, stage string, cause error, expectedStatuses ...int16) {
+func (s *Service) markStartupFailed(ctx context.Context, sb Sandbox, stage string, cause error, expectedStatuses ...int16) error {
 	persistCtx, cancel := asyncPersistenceContext(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
 	defer cancel()
 	shouldBroadcast := false
@@ -231,21 +239,23 @@ func (s *Service) markStartupFailed(ctx context.Context, sb Sandbox, stage strin
 		return nil
 	}); err != nil {
 		logging.ErrorContext(persistCtx, "sandbox startup failure mark failed", apperr.AsAppError(errors.Join(cause, err)).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID), slog.String("stage", stage))
-		return
+		return err
 	}
 	if !shouldBroadcast {
-		return
+		return nil
 	}
 	s.broadcastProgress(persistCtx, sb.TenantID, sb.ID, broadcastPhase, SandboxStatusFailed, response.TraceFromContext(ctx))
-	if err := s.bus.Publish(persistCtx, contracts.SubjectSandboxFailed, contracts.SandboxFailedEvent{
+	err := s.bus.Publish(persistCtx, contracts.SubjectSandboxFailed, contracts.SandboxFailedEvent{
 		TenantID:  sb.TenantID,
 		TraceID:   response.TraceFromContext(ctx),
 		SandboxID: sb.ID,
 		SourceRef: sb.SourceRef,
 		ScopeRef:  sb.ScopeRef,
 		FailedAt:  timex.Now(),
-	}); err != nil {
+	})
+	if err != nil {
 		logging.ErrorContext(persistCtx, "sandbox failure event publish failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID), slog.String("source_ref", sb.SourceRef), slog.String("scope_ref", sb.ScopeRef))
 	}
 	logging.ErrorContext(persistCtx, "sandbox startup failed", apperr.AsAppError(cause).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID), slog.String("stage", stage))
+	return err
 }

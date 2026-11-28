@@ -3,6 +3,7 @@ package teaching
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -14,6 +15,9 @@ import (
 
 // AdvanceCourseStatusesOnce 推进到期课程，再投递已经提交的结课回收请求。
 func (s *Service) AdvanceCourseStatusesOnce(ctx context.Context, now time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if now.IsZero() {
 		now = timex.Now()
 	}
@@ -21,12 +25,13 @@ func (s *Service) AdvanceCourseStatusesOnce(ctx context.Context, now time.Time) 
 	if !ok || limit <= 0 {
 		return fmt.Errorf("课程生命周期批大小无效")
 	}
-	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+	err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		return tx.AdvanceCourseStatuses(ctx, now, limit)
-	}); err != nil {
-		return fmt.Errorf("推进课程生命周期失败: %w", err)
+	})
+	if err != nil {
+		err = fmt.Errorf("推进课程生命周期失败: %w", err)
 	}
-	return s.RunCourseEndedEventsOnce(ctx)
+	return errors.Join(err, s.RunCourseEndedEventsOnce(ctx))
 }
 
 // RunCourseEndedEventsOnce 在短事务内逐条发送待发请求；消息确认后的提交失败允许重投。
@@ -36,6 +41,9 @@ func (s *Service) RunCourseEndedEventsOnce(ctx context.Context) error {
 		return fmt.Errorf("课程生命周期批大小无效")
 	}
 	for i := int32(0); i < limit; i++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		var event contracts.TeachingCourseEndedEvent
 		if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 			var err error
@@ -52,11 +60,11 @@ func (s *Service) RunCourseEndedEventsOnce(ctx context.Context) error {
 			}
 			return tx.MarkCourseEndedEventPublished(ctx, event.TenantID, event.CourseID)
 		}); err != nil {
-			return fmt.Errorf("投递课程回收事件失败: tenant_id=%d course_id=%d: %w", event.TenantID, event.CourseID, err)
+			return errors.Join(fmt.Errorf("投递课程回收事件失败: tenant_id=%d course_id=%d: %w", event.TenantID, event.CourseID, err), ctx.Err())
 		}
 		if event.CourseID == 0 {
 			break
 		}
 	}
-	return nil
+	return ctx.Err()
 }

@@ -274,14 +274,21 @@ func (q *Queries) ClaimPendingBattleMatchesAcrossTenants(ctx context.Context, ar
 }
 
 const completeAutoArchiveContest = `-- name: CompleteAutoArchiveContest :execrows
-UPDATE contest AS c
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.archive_lease_until
+    FROM contest AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 5
+      AND owned.archive_lease_token = $3
+      AND NOT EXISTS (
+          SELECT 1 FROM battle_match m
+          WHERE m.tenant_id = owned.tenant_id AND m.contest_id = owned.id AND m.status IN (1, 2)
+      )
+    FOR UPDATE OF owned
+)
+UPDATE contest AS t
 SET status = 6, archive_lease_token = '', archive_lease_until = NULL, updated_at = now()
-WHERE c.tenant_id = $1 AND c.id = $2 AND c.status = 5
-  AND c.archive_lease_token = $3 AND c.archive_lease_until > now()
-  AND NOT EXISTS (
-      SELECT 1 FROM battle_match m
-      WHERE m.tenant_id = c.tenant_id AND m.contest_id = c.id AND m.status IN (1, 2)
-  )
+FROM current_lease l
+WHERE t.id = l.id AND l.archive_lease_until > clock_timestamp()
 `
 
 type CompleteAutoArchiveContestParams struct {
@@ -299,10 +306,17 @@ func (q *Queries) CompleteAutoArchiveContest(ctx context.Context, arg CompleteAu
 }
 
 const completeBattleMatchFinalization = `-- name: CompleteBattleMatchFinalization :execrows
-UPDATE battle_match
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM battle_match AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status IN (3, 4) AND owned.finalized_at IS NULL
+      AND owned.lease_token = $3
+    FOR UPDATE OF owned
+)
+UPDATE battle_match AS t
 SET finalized_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status IN (3, 4) AND finalized_at IS NULL
-  AND lease_token = $3 AND lease_until > now()
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
 `
 
 type CompleteBattleMatchFinalizationParams struct {
@@ -1214,11 +1228,18 @@ func (q *Queries) FailBattleMatchByJudgeTask(ctx context.Context, arg FailBattle
 }
 
 const failBattleMatchStart = `-- name: FailBattleMatchStart :one
-UPDATE battle_match AS m
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM battle_match AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $3
+      AND COALESCE(owned.judge_task_ref, '') = ''
+    FOR UPDATE OF owned
+)
+UPDATE battle_match AS t
 SET status = 4, finished_at = now(), lease_token = '', lease_until = NULL
-WHERE m.tenant_id = $1 AND m.id = $2 AND m.status = 2 AND m.lease_token = $3 AND m.lease_until > now()
-  AND COALESCE(m.judge_task_ref, '') = ''
-RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count, m.finalized_at
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.contest_id, t.problem_id, t.entry_a_id, t.entry_b_id, t.source_ref, t.scope_ref, t.sandbox_ref, t.judge_task_ref, t.result, t.score_delta, t.replay_ref, t.status, t.matched_at, t.finished_at, t.lease_token, t.lease_until, t.attempt_count, t.finalized_at
 `
 
 type FailBattleMatchStartParams struct {
@@ -3716,14 +3737,18 @@ func (q *Queries) RefreshContestRanks(ctx context.Context, arg RefreshContestRan
 }
 
 const renewBattleMatchStartLease = `-- name: RenewBattleMatchStartLease :execrows
-UPDATE battle_match
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM battle_match AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2
+      AND COALESCE(owned.judge_task_ref, '') = '' AND owned.lease_token = $3
+    FOR UPDATE OF owned
+)
+UPDATE battle_match AS m
 SET lease_until = $4::timestamptz
-WHERE tenant_id = $1
-  AND id = $2
-  AND status = 2
-  AND COALESCE(judge_task_ref, '') = ''
-  AND lease_token = $3
-  AND lease_until > now()
+FROM current_lease l
+WHERE m.id = l.id AND l.lease_until > clock_timestamp()
+  AND $4::timestamptz > clock_timestamp()
 `
 
 type RenewBattleMatchStartLeaseParams struct {
@@ -3740,6 +3765,42 @@ func (q *Queries) RenewBattleMatchStartLease(ctx context.Context, arg RenewBattl
 		arg.ID,
 		arg.LeaseToken,
 		arg.LeaseUntil,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const renewContestArchiveLease = `-- name: RenewContestArchiveLease :execrows
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.archive_lease_until
+    FROM contest AS owned
+    WHERE owned.tenant_id = $2 AND owned.id = $3 AND owned.status = 5
+      AND owned.archive_lease_token = $4
+    FOR UPDATE OF owned
+)
+UPDATE contest AS c
+SET archive_lease_until = $1::timestamptz
+FROM current_lease l
+WHERE c.id = l.id AND l.archive_lease_until > clock_timestamp()
+  AND $1::timestamptz > clock_timestamp()
+`
+
+type RenewContestArchiveLeaseParams struct {
+	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
+	TenantID   int64              `json:"tenant_id"`
+	ContestID  int64              `json:"contest_id"`
+	LeaseToken string             `json:"lease_token"`
+}
+
+// 先取得行锁再读实时时钟；UPDATE 等锁前计算的有效性不能用于续租。
+func (q *Queries) RenewContestArchiveLease(ctx context.Context, arg RenewContestArchiveLeaseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renewContestArchiveLease,
+		arg.LeaseUntil,
+		arg.TenantID,
+		arg.ContestID,
+		arg.LeaseToken,
 	)
 	if err != nil {
 		return 0, err
@@ -3859,14 +3920,21 @@ func (q *Queries) SetVulnProblemPrevalidate(ctx context.Context, arg SetVulnProb
 }
 
 const startBattleMatch = `-- name: StartBattleMatch :one
-UPDATE battle_match AS m
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM battle_match AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $5
+    FOR UPDATE OF owned
+)
+UPDATE battle_match AS t
 SET sandbox_ref = $3,
     judge_task_ref = $4,
     status = 2,
     lease_token = '',
     lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $5 AND lease_until > now()
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count, finalized_at
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.contest_id, t.problem_id, t.entry_a_id, t.entry_b_id, t.source_ref, t.scope_ref, t.sandbox_ref, t.judge_task_ref, t.result, t.score_delta, t.replay_ref, t.status, t.matched_at, t.finished_at, t.lease_token, t.lease_until, t.attempt_count, t.finalized_at
 `
 
 type StartBattleMatchParams struct {

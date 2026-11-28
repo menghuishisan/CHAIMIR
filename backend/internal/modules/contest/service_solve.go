@@ -281,14 +281,27 @@ func (s *Service) SubmitSolve(ctx context.Context, contestID, problemID int64, r
 	if err != nil {
 		return SubmissionDTO{}, apperr.ErrContestContentUnavailable.WithCause(err)
 	}
+	theory, err := validateContestContent(contest.Mode, face)
+	if err != nil {
+		return SubmissionDTO{}, err
+	}
+	if theory != nil {
+		if err := validateContestTheoryRequest(req, *theory); err != nil {
+			return SubmissionDTO{}, err
+		}
+	}
 	submitKey := strings.TrimSpace(jsonx.StringFromAny(face.Body["submit_key"]))
 	input, err := s.judge.GetJudgeInputRequirements(ctx, organizerTenantID, problem.ItemCode, problem.ItemVersion, contracts.JudgeInputContext{AccessProfile: contracts.SandboxAccessContestSolve})
 	if err != nil {
 		return SubmissionDTO{}, apperr.ErrContestJudgeUnavailable.WithCause(err)
 	}
 	needsSandbox := input.RequiresCode || input.SandboxMode == contracts.JudgeSandboxModeReuse
-	if err := validateContestSolveRequest(req, submitKey, needsSandbox); err != nil {
-		return SubmissionDTO{}, apperr.ErrContestSubmissionInvalid
+	if theory != nil {
+		if needsSandbox {
+			return SubmissionDTO{}, apperr.ErrContestProblemInvalid
+		}
+	} else if err := validateContestSolveRequest(req, submitKey, needsSandbox); err != nil {
+		return SubmissionDTO{}, err
 	}
 	var savedCode contracts.SandboxWorkspaceSave
 	var targetSandboxRef, sandboxSourceRef string

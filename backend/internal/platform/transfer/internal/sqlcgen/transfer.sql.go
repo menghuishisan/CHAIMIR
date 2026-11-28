@@ -93,7 +93,16 @@ func (q *Queries) ClaimTransferTask(ctx context.Context, arg ClaimTransferTaskPa
 }
 
 const completeTransferTask = `-- name: CompleteTransferTask :one
-UPDATE transfer_task
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM transfer_task AS owned
+    WHERE owned.tenant_id = $7
+      AND owned.id = $8
+      AND owned.status = 'running'
+      AND owned.lease_token = $9
+    FOR UPDATE OF owned
+)
+UPDATE transfer_task AS t
 SET status = 'succeeded',
     last_error = '',
     artifact_ref = $1,
@@ -105,15 +114,12 @@ SET status = 'succeeded',
     next_attempt_after = NULL,
     lease_token = '',
     lease_until = NULL
-WHERE tenant_id = $7
-  AND id = $8
-  AND status = 'running'
-  AND lease_token = $9
-  AND lease_until > $5::timestamptz
-RETURNING id, tenant_id, account_id, channel, subject, status, content_type, file_name,
-          attempt_count, max_attempts, last_error, artifact_ref, artifact_size,
-          artifact_content_type, artifact_file_name, created_at, updated_at,
-          completed_at, next_attempt_after, lease_token, lease_until
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.account_id, t.channel, t.subject, t.status, t.content_type, t.file_name,
+          t.attempt_count, t.max_attempts, t.last_error, t.artifact_ref, t.artifact_size,
+          t.artifact_content_type, t.artifact_file_name, t.created_at, t.updated_at,
+          t.completed_at, t.next_attempt_after, t.lease_token, t.lease_until
 `
 
 type CompleteTransferTaskParams struct {
@@ -347,7 +353,16 @@ func (q *Queries) CreateTransferTask(ctx context.Context, arg CreateTransferTask
 }
 
 const failTransferTask = `-- name: FailTransferTask :one
-UPDATE transfer_task
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM transfer_task AS owned
+    WHERE owned.tenant_id = $5
+      AND owned.id = $6
+      AND owned.status = 'running'
+      AND owned.lease_token = $7
+    FOR UPDATE OF owned
+)
+UPDATE transfer_task AS t
 SET status = CASE WHEN attempt_count < max_attempts THEN 'retrying' ELSE 'failed' END,
     last_error = $1,
     updated_at = $2::timestamptz,
@@ -355,15 +370,12 @@ SET status = CASE WHEN attempt_count < max_attempts THEN 'retrying' ELSE 'failed
     next_attempt_after = CASE WHEN attempt_count < max_attempts THEN $4::timestamptz ELSE NULL END,
     lease_token = '',
     lease_until = NULL
-WHERE tenant_id = $5
-  AND id = $6
-  AND status = 'running'
-  AND lease_token = $7
-  AND lease_until > $2::timestamptz
-RETURNING id, tenant_id, account_id, channel, subject, status, content_type, file_name,
-          attempt_count, max_attempts, last_error, artifact_ref, artifact_size,
-          artifact_content_type, artifact_file_name, created_at, updated_at,
-          completed_at, next_attempt_after, lease_token, lease_until
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.account_id, t.channel, t.subject, t.status, t.content_type, t.file_name,
+          t.attempt_count, t.max_attempts, t.last_error, t.artifact_ref, t.artifact_size,
+          t.artifact_content_type, t.artifact_file_name, t.created_at, t.updated_at,
+          t.completed_at, t.next_attempt_after, t.lease_token, t.lease_until
 `
 
 type FailTransferTaskParams struct {
@@ -529,13 +541,18 @@ func (q *Queries) ListTransferTasks(ctx context.Context, arg ListTransferTasksPa
 }
 
 const renewTransferTaskLease = `-- name: RenewTransferTaskLease :execrows
-UPDATE transfer_task
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM transfer_task AS owned
+    WHERE owned.tenant_id = $2 AND owned.id = $3
+      AND owned.status = 'running' AND owned.lease_token = $4
+    FOR UPDATE OF owned
+)
+UPDATE transfer_task AS t
 SET lease_until = $1::timestamptz
-WHERE tenant_id = $2
-  AND id = $3
-  AND status = 'running'
-  AND lease_token = $4
-  AND lease_until > now()
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+  AND $1::timestamptz > clock_timestamp()
 `
 
 type RenewTransferTaskLeaseParams struct {

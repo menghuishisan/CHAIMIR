@@ -1849,8 +1849,15 @@ func (q *Queries) LockInstanceCreation(ctx context.Context, lockKey int64) error
 }
 
 const markExperimentEventOutboxFailed = `-- name: MarkExperimentEventOutboxFailed :one
-UPDATE experiment_event_outbox SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now() RETURNING id, tenant_id, experiment_id, aggregate_id, event_revision, subject, payload, trace_id, occurred_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM experiment_event_outbox AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $4
+    FOR UPDATE OF owned
+)
+UPDATE experiment_event_outbox AS t SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp() RETURNING t.id, t.tenant_id, t.experiment_id, t.aggregate_id, t.event_revision, t.subject, t.payload, t.trace_id, t.occurred_at, t.status, t.retry_count, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until
 `
 
 type MarkExperimentEventOutboxFailedParams struct {
@@ -1890,8 +1897,15 @@ func (q *Queries) MarkExperimentEventOutboxFailed(ctx context.Context, arg MarkE
 }
 
 const markExperimentEventOutboxPublished = `-- name: MarkExperimentEventOutboxPublished :one
-UPDATE experiment_event_outbox SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now() RETURNING id, tenant_id, experiment_id, aggregate_id, event_revision, subject, payload, trace_id, occurred_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM experiment_event_outbox AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $3
+    FOR UPDATE OF owned
+)
+UPDATE experiment_event_outbox AS t SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp() RETURNING t.id, t.tenant_id, t.experiment_id, t.aggregate_id, t.event_revision, t.subject, t.payload, t.trace_id, t.occurred_at, t.status, t.retry_count, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until
 `
 
 type MarkExperimentEventOutboxPublishedParams struct {

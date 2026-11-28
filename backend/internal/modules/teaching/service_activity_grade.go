@@ -696,6 +696,9 @@ func (s *Service) ExportGrades(ctx context.Context, courseID int64) (transfer.Ta
 
 // RunGradeExportOnce 执行一次 M6 成绩导出请求扫描，供统一 background runner 调用。
 func (s *Service) RunGradeExportOnce(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	limit, ok := intx.Int32(s.cfg.GradeExportWorkerBatchSize)
 	if !ok || limit <= 0 {
 		return apperr.ErrTeachingGradeExportFailed
@@ -706,21 +709,28 @@ func (s *Service) RunGradeExportOnce(ctx context.Context) error {
 		requests, err = tx.ListDueCourseGradeExportRequests(ctx, timex.Now(), limit)
 		return err
 	}); err != nil {
-		return apperr.ErrTeachingGradeExportFailed.WithCause(err)
+		return errors.Join(apperr.ErrTeachingGradeExportFailed.WithCause(err), ctx.Err())
 	}
+	var failures error
 	for _, req := range requests {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(failures, err)
+		}
 		if err := s.runGradeExportRequest(ctx, req); err != nil {
-			logging.ErrorContext(ctx, "teaching grade export worker item failed", err.Error(), slog.Int64("tenant_id", req.TenantID), slog.Int64("course_id", req.CourseID), slog.Int64("transfer_task_id", req.TransferTaskID))
+			failures = errors.Join(failures, fmt.Errorf("导出课程成绩失败 tenant_id=%d course_id=%d task_id=%d: %w", req.TenantID, req.CourseID, req.TransferTaskID, err))
 		}
 	}
-	return nil
+	return errors.Join(failures, ctx.Err())
 }
 
 // runGradeExportRequest claims one request's transfer task and produces its XLSX artifact.
 func (s *Service) runGradeExportRequest(ctx context.Context, req CourseGradeExportRequest) error {
 	task, err := s.transfers.ClaimTask(ctx, req.TenantID, req.TransferTaskID)
-	if err != nil {
+	if errors.Is(err, transfer.ErrTaskNotClaimable) {
 		return s.reconcileGradeExportRequest(ctx, req)
+	}
+	if err != nil {
+		return errors.Join(err, s.deferGradeExportRequest(ctx, req, timex.Now().Add(time.Duration(s.cfg.GradeExportWorkerPollMs)*time.Millisecond)))
 	}
 	var data []byte
 	var plan storage.UploadPlan
@@ -735,7 +745,7 @@ func (s *Service) runGradeExportRequest(ctx context.Context, req CourseGradeExpo
 		if err != nil {
 			return err
 		}
-		plan, err = s.files.PlanUpload(workCtx, storage.PlanUploadRequest{TenantID: req.TenantID, AccountID: req.AccountID, Module: "transfer", ResourceType: string(transfer.ChannelExport), ResourceID: ids.Format(task.TaskID), FileName: artifactFileName, ContentType: upload.XLSXContentType, Size: int64(len(data)), ExpectedBucket: s.storage.BucketReport(), AllowedFileName: true, Content: data, KindValidator: func(fileName, contentType string, content []byte) bool {
+		plan, err = s.files.PlanUpload(workCtx, storage.PlanUploadRequest{TenantID: req.TenantID, AccountID: req.AccountID, Module: "transfer", ResourceType: string(transfer.ChannelExport), ResourceID: ids.Format(task.TaskID), FileName: artifactFileName, ContentType: upload.XLSXContentType, ExpectedBucket: s.storage.BucketReport(), AllowedFileName: true, Content: data, KindValidator: func(fileName, contentType string, content []byte) bool {
 			return upload.CSVOrXLSXKind(fileName, contentType, content) == upload.KindXLSX
 		}})
 		if err != nil {
@@ -948,16 +958,14 @@ func (s *Service) RunTeachingGradeEventOutboxOnce(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	var firstErr error
+	var failures error
 	for _, item := range items {
 		if err := s.publishGradeEventOutboxItem(ctx, item); err != nil {
 			logging.ErrorContext(ctx, "teaching grade outbox publish failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("course_id", item.CourseID), slog.Int64("student_id", item.StudentID), slog.Int64("outbox_id", item.ID))
-			if firstErr == nil {
-				firstErr = err
-			}
+			failures = errors.Join(failures, err)
 		}
 	}
-	return firstErr
+	return failures
 }
 
 // publishGradeEventOutboxItem 发布单条成绩事件并按结果回写 outbox 状态。
@@ -968,8 +976,8 @@ func (s *Service) publishGradeEventOutboxItem(ctx context.Context, item Teaching
 	eventCtx := response.WithTrace(ctx, item.TraceID)
 	payload := contracts.TeachingGradeUpdatedEvent{Revision: item.Revision, LockRevision: item.LockRevision, TenantID: item.TenantID, TraceID: item.TraceID, CourseID: item.CourseID, StudentID: item.StudentID, UpdatedAt: item.EventUpdatedAt}
 	if err := s.bus.Publish(eventCtx, contracts.SubjectTeachingGradeUpdated, payload); err != nil {
-		s.recordTeachingGradeEventOutboxFailure(eventCtx, item, err)
-		return apperr.ErrTeachingGradeEventPublishFailed.WithCause(err)
+		markErr := s.recordTeachingGradeEventOutboxFailure(eventCtx, item, err)
+		return apperr.ErrTeachingGradeEventPublishFailed.WithCause(errors.Join(err, markErr))
 	}
 	return s.markTeachingGradeEventOutboxPublished(eventCtx, item)
 }
@@ -986,13 +994,11 @@ func (s *Service) markTeachingGradeEventOutboxPublished(ctx context.Context, ite
 }
 
 // recordTeachingGradeEventOutboxFailure 记录成绩事件发布失败并等待后台重试。
-func (s *Service) recordTeachingGradeEventOutboxFailure(ctx context.Context, item TeachingGradeEventOutbox, cause error) {
-	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+func (s *Service) recordTeachingGradeEventOutboxFailure(ctx context.Context, item TeachingGradeEventOutbox, cause error) error {
+	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		_, err := tx.MarkTeachingGradeEventOutboxFailed(ctx, item.TenantID, item.ID, logging.SanitizeError(cause.Error()), item.LeaseToken)
 		return err
-	}); err != nil {
-		logging.ErrorContext(ctx, "teaching grade event outbox failure mark failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("course_id", item.CourseID), slog.Int64("student_id", item.StudentID), slog.Int64("outbox_id", item.ID))
-	}
+	})
 }
 
 // drainTeachingGradeEventOutboxBestEffort 在请求提交后尽快投递,失败交给后台任务补偿。

@@ -2614,10 +2614,17 @@ func (q *Queries) MarkSMSCodeUsed(ctx context.Context, arg MarkSMSCodeUsedParams
 }
 
 const markTenantProvisionOutboxFailed = `-- name: MarkTenantProvisionOutboxFailed :one
-UPDATE tenant_provision_outbox
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM tenant_provision_outbox AS owned
+    WHERE owned.id = $2 AND owned.status = 2 AND owned.lease_token = $3
+    FOR UPDATE OF owned
+)
+UPDATE tenant_provision_outbox AS t
 SET status = 4, last_error = $1, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
-RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.deploy_mode, t.trace_id, t.provisioned_at, t.status, t.retry_count, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until
 `
 
 type MarkTenantProvisionOutboxFailedParams struct {
@@ -2647,10 +2654,17 @@ func (q *Queries) MarkTenantProvisionOutboxFailed(ctx context.Context, arg MarkT
 }
 
 const markTenantProvisionOutboxPublished = `-- name: MarkTenantProvisionOutboxPublished :one
-UPDATE tenant_provision_outbox
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM tenant_provision_outbox AS owned
+    WHERE owned.id = $1 AND owned.status = 2 AND owned.lease_token = $2
+    FOR UPDATE OF owned
+)
+UPDATE tenant_provision_outbox AS t
 SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE id = $1 AND status = 2 AND lease_token = $2 AND lease_until > now()
-RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.deploy_mode, t.trace_id, t.provisioned_at, t.status, t.retry_count, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until
 `
 
 type MarkTenantProvisionOutboxPublishedParams struct {

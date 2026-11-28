@@ -129,6 +129,7 @@ type TxStore interface {
 	ClaimManualArchiveContest(context.Context, int64, int64, time.Time, time.Time, string) (ContestArchiveClaim, error)
 	ClaimAutoArchiveContests(context.Context, int, time.Time, time.Time, string) ([]ContestArchiveClaim, error)
 	CompleteAutoArchiveContest(context.Context, int64, int64, string) (int64, error)
+	RenewContestArchiveLease(context.Context, int64, int64, string, time.Time) (bool, error)
 }
 
 // BattleReplayRow 是回放时间窗查询的内部行,包含服务端计算所需的队伍视角。
@@ -1350,7 +1351,13 @@ func (tx *txStore) ClaimAutoArchiveContests(ctx context.Context, limit int, stal
 	return out, nil
 }
 
-// CompleteAutoArchiveContest 仅允许仍持有领取更新时间的 worker 完成归档,防止过期 worker 覆盖新 worker。
+// RenewContestArchiveLease 延长当前仍有效的归档租约；事务提交前持有赛事行锁。
+func (tx *txStore) RenewContestArchiveLease(ctx context.Context, tenantID, contestID int64, leaseToken string, leaseUntil time.Time) (bool, error) {
+	affected, err := tx.q.RenewContestArchiveLease(ctx, sqlcgen.RenewContestArchiveLeaseParams{TenantID: tenantID, ContestID: contestID, LeaseToken: leaseToken, LeaseUntil: timex.RequiredTimestamptz(leaseUntil)})
+	return affected == 1, err
+}
+
+// CompleteAutoArchiveContest 仅允许仍持有有效租约的 worker 完成归档。
 func (tx *txStore) CompleteAutoArchiveContest(ctx context.Context, tenantID, contestID int64, leaseToken string) (int64, error) {
 	return tx.q.CompleteAutoArchiveContest(ctx, sqlcgen.CompleteAutoArchiveContestParams{TenantID: tenantID, ContestID: contestID, LeaseToken: leaseToken})
 }

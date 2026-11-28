@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -26,6 +27,41 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 )
+
+// DrainingHandler 跟踪已受理的 HTTP 处理器，关闭连接后仍等待业务收尾。
+type DrainingHandler struct {
+	next     http.Handler
+	mu       sync.Mutex
+	stopping bool
+	requests sync.WaitGroup
+}
+
+// NewDrainingHandler 包装已装配的 handler，保留原生请求与响应接口。
+func NewDrainingHandler(next http.Handler) *DrainingHandler {
+	return &DrainingHandler{next: next}
+}
+
+// ServeHTTP 登记已受理请求，Drain 开始后的迟到请求返回 503。
+func (h *DrainingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.mu.Lock()
+	if h.stopping {
+		h.mu.Unlock()
+		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+		return
+	}
+	h.requests.Add(1)
+	h.mu.Unlock()
+	defer h.requests.Done()
+	h.next.ServeHTTP(w, r)
+}
+
+// Drain 停止登记并等待全部处理器及收尾；调用方须先关闭 HTTP 和 WebSocket 连接。
+func (h *DrainingHandler) Drain() {
+	h.mu.Lock()
+	h.stopping = true
+	h.mu.Unlock()
+	h.requests.Wait()
+}
 
 // AuditContextMiddleware 记录客户端 IP，供审计条目使用。
 func AuditContextMiddleware() gin.HandlerFunc {
@@ -198,6 +234,7 @@ func SanitizeForwardHeaders(header http.Header) {
 		"X-Forwarded-For",
 		"X-Forwarded-Host",
 		"X-Forwarded-Proto",
+		"X-Forwarded-Prefix",
 		"X-Real-IP",
 		auth.ServiceNameHeader,
 		auth.ServiceTenantHeader,

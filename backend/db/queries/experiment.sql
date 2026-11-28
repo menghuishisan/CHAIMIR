@@ -434,9 +434,23 @@ SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_
 FROM candidates WHERE outbox.id = candidates.id RETURNING outbox.*;
 
 -- name: MarkExperimentEventOutboxPublished :one
-UPDATE experiment_event_outbox SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now() RETURNING *;
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM experiment_event_outbox AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $3
+    FOR UPDATE OF owned
+)
+UPDATE experiment_event_outbox AS t SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp() RETURNING t.*;
 
 -- name: MarkExperimentEventOutboxFailed :one
-UPDATE experiment_event_outbox SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now() RETURNING *;
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM experiment_event_outbox AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $4
+    FOR UPDATE OF owned
+)
+UPDATE experiment_event_outbox AS t SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp() RETURNING t.*;

@@ -1653,10 +1653,17 @@ func (q *Queries) LockSemesterCurrentScope(ctx context.Context, lockKey int64) e
 }
 
 const markGradeLockOutboxFailed = `-- name: MarkGradeLockOutboxFailed :one
-UPDATE grade_lock_outbox
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM grade_lock_outbox AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $4
+    FOR UPDATE OF owned
+)
+UPDATE grade_lock_outbox AS t
 SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, revision, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.revision, t.tenant_id, t.review_id, t.course_id, t.locked, t.reason, t.trace_id, t.status, t.retry_count, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until
 `
 
 type MarkGradeLockOutboxFailedParams struct {
@@ -1695,10 +1702,17 @@ func (q *Queries) MarkGradeLockOutboxFailed(ctx context.Context, arg MarkGradeLo
 }
 
 const markGradeLockOutboxPublished = `-- name: MarkGradeLockOutboxPublished :one
-UPDATE grade_lock_outbox
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM grade_lock_outbox AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $3
+    FOR UPDATE OF owned
+)
+UPDATE grade_lock_outbox AS t
 SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
-RETURNING id, revision, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.revision, t.tenant_id, t.review_id, t.course_id, t.locked, t.reason, t.trace_id, t.status, t.retry_count, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until
 `
 
 type MarkGradeLockOutboxPublishedParams struct {
@@ -1731,10 +1745,17 @@ func (q *Queries) MarkGradeLockOutboxPublished(ctx context.Context, arg MarkGrad
 }
 
 const markGradeWarningNotificationFailed = `-- name: MarkGradeWarningNotificationFailed :execrows
-UPDATE academic_warning
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.notify_lease_until
+    FROM academic_warning AS owned
+    WHERE owned.tenant_id=$1 AND owned.id=$2 AND owned.notify_status=2 AND owned.notify_lease_token=$3
+    FOR UPDATE OF owned
+)
+UPDATE academic_warning AS t
 SET notify_status=4, notify_last_error=$4, notify_lease_token='', notify_lease_until=NULL,
     notify_next_attempt_at=$5::timestamptz
-WHERE tenant_id=$1 AND id=$2 AND notify_status=2 AND notify_lease_token=$3 AND notify_lease_until > now()
+FROM current_lease l
+WHERE t.id = l.id AND l.notify_lease_until > clock_timestamp()
 `
 
 type MarkGradeWarningNotificationFailedParams struct {
@@ -1760,9 +1781,16 @@ func (q *Queries) MarkGradeWarningNotificationFailed(ctx context.Context, arg Ma
 }
 
 const markGradeWarningNotificationPublished = `-- name: MarkGradeWarningNotificationPublished :execrows
-UPDATE academic_warning
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.notify_lease_until
+    FROM academic_warning AS owned
+    WHERE owned.tenant_id=$1 AND owned.id=$2 AND owned.notify_status=2 AND owned.notify_lease_token=$3
+    FOR UPDATE OF owned
+)
+UPDATE academic_warning AS t
 SET notify_status=3, notify_last_error=NULL, notify_lease_token='', notify_lease_until=NULL
-WHERE tenant_id=$1 AND id=$2 AND notify_status=2 AND notify_lease_token=$3 AND notify_lease_until > now()
+FROM current_lease l
+WHERE t.id = l.id AND l.notify_lease_until > clock_timestamp()
 `
 
 type MarkGradeWarningNotificationPublishedParams struct {

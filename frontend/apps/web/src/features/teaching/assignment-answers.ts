@@ -1,6 +1,9 @@
 // 作业题面与结构化答案的统一读写规则,供学生作答和教师批改复用。
 import type { AssignmentItem, TheoryAnswer } from '@chaimir/api-client'
 
+import { isTheoryAnswerEmpty as isAnswerEmpty } from '../../utils/theoryAnswers'
+export { isAnswerEmpty }
+
 export type AssignmentAnswers = Record<string, TheoryAnswer>
 
 /** isAssignmentAnswer 校验恢复记录,保留布尔值与按位置组织的答案数组。 */
@@ -12,26 +15,10 @@ export function isAssignmentAnswer(value: unknown): value is TheoryAnswer {
   )
 }
 
-/** isAnswerEmpty 判断是否实际作答,判断题的 false 是有效答案。 */
-export function isAnswerEmpty(value: TheoryAnswer | undefined): boolean {
-  if (value === undefined) return true
-  if (typeof value === 'boolean') return false
-  if (Array.isArray(value)) return value.every((entry) => entry.trim() === '')
-  return value.trim() === ''
-}
-
 /** itemStatement 只读取理论题约定的题干字段。 */
 export function itemStatement(item: AssignmentItem): string | undefined {
   const statement = item.body?.statement
   return typeof statement === 'string' && statement.trim() !== '' ? statement : undefined
-}
-
-/** itemChoices 只读取理论题约定的选项。 */
-export function itemChoices(item: AssignmentItem): string[] {
-  const options = item.body?.options
-  return Array.isArray(options) && options.every((entry) => typeof entry === 'string')
-    ? options
-    : []
 }
 
 /** draftAnswers 恢复当前作业的答案,过滤不属于当前题目的键。 */

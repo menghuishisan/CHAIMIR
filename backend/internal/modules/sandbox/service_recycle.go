@@ -9,6 +9,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
+	"chaimir/internal/platform/background"
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
@@ -31,9 +32,15 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 	if err := s.recoverPendingSandboxStarts(ctx, batchSize); err != nil {
 		failures = append(failures, err)
 	}
+	if err := ctx.Err(); err != nil {
+		return errors.Join(append(failures, err)...)
+	}
 	if err := s.cleanupExpiredRuntimeSelftests(ctx); err != nil {
 		logging.ErrorContext(ctx, "expired runtime selftest cleanup failed", err.Error())
 		failures = append(failures, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return errors.Join(append(failures, err)...)
 	}
 	readyDeadline := timex.Now().Add(-time.Duration(s.cfg.ReadyIdleTimeoutSeconds) * time.Second)
 	var candidates []Sandbox
@@ -51,10 +58,16 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 		return errors.Join(append(failures, err)...)
 	}
 	for _, candidate := range candidates {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(append(failures, err)...)
+		}
 		if err := s.recycleOne(ctx, candidate, "scheduled"); err != nil {
 			logging.ErrorContext(ctx, "sandbox scheduled recycle failed", err.Error(), slog.Int64("tenant_id", candidate.TenantID), slog.Int64("sandbox_id", candidate.ID))
 			failures = append(failures, err)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return errors.Join(append(failures, err)...)
 	}
 	var snapshots []Sandbox
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
@@ -68,12 +81,15 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 		return errors.Join(append(failures, err)...)
 	}
 	for _, snapshot := range snapshots {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(append(failures, err)...)
+		}
 		if err := s.cleanupExpiredSnapshot(ctx, snapshot); err != nil {
 			logging.ErrorContext(ctx, "sandbox snapshot cleanup failed", err.Error(), slog.Int64("tenant_id", snapshot.TenantID), slog.Int64("sandbox_id", snapshot.ID), slog.String("namespace", snapshot.Namespace))
 			failures = append(failures, err)
 		}
 	}
-	return errors.Join(failures...)
+	return errors.Join(append(failures, ctx.Err())...)
 }
 
 func (s *Service) recoverPendingSandboxStarts(ctx context.Context, limit int32) error {
@@ -88,6 +104,9 @@ func (s *Service) recoverPendingSandboxStarts(ctx context.Context, limit int32) 
 	}
 	var failures []error
 	for _, sb := range pending {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(append(failures, err)...)
+		}
 		if sb.Phase != SandboxPhaseInitializing && sb.Status != SandboxStatusCreating {
 			err := fmt.Errorf("暂停操作未在预算内确认完成: %w", context.DeadlineExceeded)
 			failures = append(failures, errors.Join(err, s.queueFailedPause(ctx, sb, err, true)))
@@ -95,8 +114,7 @@ func (s *Service) recoverPendingSandboxStarts(ctx context.Context, limit int32) 
 		}
 		if sb.Phase == SandboxPhaseInitializing {
 			err := fmt.Errorf("资源操作未在预算内确认完成，不能自动重放: %w", context.DeadlineExceeded)
-			s.markStartupFailed(ctx, sb, "init", err, sb.Status)
-			failures = append(failures, err)
+			failures = append(failures, errors.Join(err, s.markStartupFailed(ctx, sb, "init", err, sb.Status)))
 			continue
 		}
 		s.scheduleSandboxStart(ctx, sb.TenantID, sb.ID)
@@ -122,20 +140,13 @@ func (s *Service) cleanupExpiredSnapshot(ctx context.Context, snapshot Sandbox) 
 		return nil
 	}
 
-	leaseCtx, stopLease := s.maintainResourceLease(ctx, claimed)
-	cleanupCtx, cancelCleanup := context.WithTimeout(leaseCtx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
-	err := s.orchestrator.DestroySandboxResources(cleanupCtx, claimed)
-	cancelCleanup()
+	err := s.withResourceLease(ctx, claimed, func(ctx context.Context) error {
+		cleanupCtx, cancel := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+		defer cancel()
+		return s.orchestrator.DestroySandboxResources(cleanupCtx, claimed)
+	})
 	if err != nil {
-		if leaseErr := stopLease(); leaseErr != nil {
-			err = errors.Join(err, leaseErr)
-		}
-		s.markCleanupFailed(ctx, claimed, err)
-		return apperr.ErrSandboxSnapshotCleanupFailed.WithCause(err)
-	}
-	if err := stopLease(); err != nil {
-		s.markCleanupFailed(ctx, claimed, err)
-		return apperr.ErrSandboxSnapshotCleanupFailed.WithCause(err)
+		return apperr.ErrSandboxSnapshotCleanupFailed.WithCause(errors.Join(err, s.markCleanupFailed(ctx, claimed, err)))
 	}
 
 	persistCtx, cancelPersist := asyncPersistenceContext(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
@@ -153,8 +164,7 @@ func (s *Service) cleanupExpiredSnapshot(ctx context.Context, snapshot Sandbox) 
 		return nil
 	})
 	if err != nil {
-		s.markCleanupFailed(ctx, claimed, err)
-		return apperr.ErrSandboxSnapshotCleanupFailed.WithCause(err)
+		return apperr.ErrSandboxSnapshotCleanupFailed.WithCause(errors.Join(err, s.markCleanupFailed(ctx, claimed, err)))
 	}
 	return nil
 }
@@ -177,21 +187,13 @@ func (s *Service) recycleOne(ctx context.Context, sb Sandbox, reason string) err
 		return nil
 	}
 	sb = locked
-	leaseCtx, stopLease := s.maintainResourceLease(ctx, sb)
-	if err := s.recycleResources(leaseCtx, sb, shouldPersistBeforeRecycle(sb)); err != nil {
-		if leaseErr := stopLease(); leaseErr != nil {
-			err = errors.Join(err, leaseErr)
-		}
-		s.markCleanupFailed(ctx, sb, err)
-		return apperr.ErrSandboxRecycleFailed.WithCause(err)
-	}
-	if err := stopLease(); err != nil {
-		s.markCleanupFailed(ctx, sb, err)
-		return apperr.ErrSandboxRecycleFailed.WithCause(err)
+	if err := s.withResourceLease(ctx, sb, func(ctx context.Context) error {
+		return s.recycleResources(ctx, sb, shouldPersistBeforeRecycle(sb))
+	}); err != nil {
+		return apperr.ErrSandboxRecycleFailed.WithCause(errors.Join(err, s.markCleanupFailed(ctx, sb, err)))
 	}
 	if err := s.completeRecycle(ctx, sb, reason); err != nil {
-		s.markCleanupFailed(ctx, sb, err)
-		return err
+		return errors.Join(err, s.markCleanupFailed(ctx, sb, err))
 	}
 	s.broadcastProgress(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusDestroyed, response.TraceFromContext(ctx))
 	s.drainSandboxRecycleOutboxBestEffort(ctx)
@@ -306,24 +308,22 @@ func (s *Service) RunSandboxRecycleOutboxOnce(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	var firstErr error
+	var failures error
 	for _, item := range items {
 		if err := s.publishSandboxRecycleOutboxItem(ctx, item); err != nil {
 			logging.ErrorContext(ctx, "sandbox recycle outbox publish failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("sandbox_id", item.SandboxID), slog.Int64("outbox_id", item.ID))
-			if firstErr == nil {
-				firstErr = err
-			}
+			failures = errors.Join(failures, err)
 		}
 	}
-	return firstErr
+	return failures
 }
 
 func (s *Service) publishSandboxRecycleOutboxItem(ctx context.Context, item SandboxRecycleOutbox) error {
 	eventCtx := response.WithTrace(ctx, item.TraceID)
 	payload := contracts.SandboxRecycledEvent{TenantID: item.TenantID, TraceID: item.TraceID, SandboxID: item.SandboxID, SourceRef: item.SourceRef, ScopeRef: item.ScopeRef, Reason: item.Reason, RecycledAt: item.RecycledAt}
 	if err := s.bus.Publish(eventCtx, contracts.SubjectSandboxRecycled, payload); err != nil {
-		s.recordSandboxRecycleOutboxFailure(eventCtx, item, err)
-		return apperr.ErrSandboxRecycleEventPublishFailed.WithCause(err)
+		markErr := s.recordSandboxRecycleOutboxFailure(eventCtx, item, err)
+		return apperr.ErrSandboxRecycleEventPublishFailed.WithCause(errors.Join(err, markErr))
 	}
 	return s.markSandboxRecycleOutboxPublished(eventCtx, item)
 }
@@ -338,13 +338,11 @@ func (s *Service) markSandboxRecycleOutboxPublished(ctx context.Context, item Sa
 	})
 }
 
-func (s *Service) recordSandboxRecycleOutboxFailure(ctx context.Context, item SandboxRecycleOutbox, cause error) {
-	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+func (s *Service) recordSandboxRecycleOutboxFailure(ctx context.Context, item SandboxRecycleOutbox, cause error) error {
+	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		_, err := tx.MarkSandboxRecycleOutboxFailed(ctx, item.TenantID, item.ID, logging.SanitizeError(cause.Error()), item.LeaseToken)
 		return err
-	}); err != nil {
-		logging.ErrorContext(ctx, "sandbox recycle outbox failure mark failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("sandbox_id", item.SandboxID), slog.Int64("outbox_id", item.ID))
-	}
+	})
 }
 
 func (s *Service) drainSandboxRecycleOutboxBestEffort(ctx context.Context) {
@@ -389,43 +387,13 @@ func (s *Service) lockRecycle(ctx context.Context, sb Sandbox) (Sandbox, bool, e
 	return claimed, acquired, nil
 }
 
-func (s *Service) maintainResourceLease(ctx context.Context, sb Sandbox) (context.Context, func() error) {
+func (s *Service) withResourceLease(ctx context.Context, sb Sandbox, run func(context.Context) error) error {
 	leaseDuration := s.resourceLeaseDuration()
-	interval := leaseDuration / 3
-	if interval <= 0 {
-		interval = leaseDuration
-	}
-	leaseCtx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	var leaseErr error
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-leaseCtx.Done():
-				return
-			case <-ticker.C:
-				renewCtx, cancelRenew := context.WithTimeout(leaseCtx, leaseDuration)
-				leaseErr = s.renewSandboxResourceLease(renewCtx, sb, leaseDuration)
-				cancelRenew()
-				// 停止循环会取消正在续租的调用，该取消不表示执行权丢失。
-				if errors.Is(leaseErr, context.Canceled) && leaseCtx.Err() != nil {
-					leaseErr = nil
-				}
-				if leaseErr != nil {
-					cancel()
-					return
-				}
-			}
-		}
-	}()
-	return leaseCtx, func() error {
-		cancel()
-		<-done
-		return leaseErr
-	}
+	_, err := background.WithRenewal(ctx, leaseDuration, func(ctx context.Context) (bool, error) {
+		err := s.renewSandboxResourceLease(ctx, sb, leaseDuration)
+		return err == nil, err
+	}, run)
+	return err
 }
 
 func (s *Service) resourceLeaseDuration() time.Duration {
@@ -450,7 +418,7 @@ func (s *Service) renewSandboxResourceLease(ctx context.Context, sb Sandbox, lea
 	return nil
 }
 
-func (s *Service) markCleanupFailed(ctx context.Context, sb Sandbox, cause error) {
+func (s *Service) markCleanupFailed(ctx context.Context, sb Sandbox, cause error) error {
 	stage := "recycle"
 	if sb.Status == SandboxStatusDestroyed {
 		stage = "snapshot_cleanup"
@@ -458,7 +426,7 @@ func (s *Service) markCleanupFailed(ctx context.Context, sb Sandbox, cause error
 	detail, err := jsonBytes(map[string]any{"stage": stage, "error": logging.SanitizeError(cause.Error())})
 	if err != nil {
 		logging.ErrorContext(ctx, "sandbox recycle failure detail encode failed", err.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
-		return
+		return err
 	}
 	persistCtx, cancel := asyncPersistenceContext(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
 	defer cancel()
@@ -473,14 +441,15 @@ func (s *Service) markCleanupFailed(ctx context.Context, sb Sandbox, cause error
 	})
 	if err != nil {
 		logging.ErrorContext(persistCtx, "sandbox recycle failure mark failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
-		return
+		return err
 	}
 	if !released {
-		return
+		return nil
 	}
 	if sb.Status == SandboxStatusRecycling {
 		s.broadcastProgress(ctx, sb.TenantID, sb.ID, sb.Phase, SandboxStatusRecycling, response.TraceFromContext(ctx))
 	}
+	return nil
 }
 
 // RecycleByScopeRef 按生命周期作用域级联回收沙箱。

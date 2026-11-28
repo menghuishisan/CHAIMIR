@@ -107,8 +107,12 @@ type Service struct {
 	bus           eventbus.Bus
 	wsHub         *ws.Hub
 	capabilities  map[string]ChainCapability
-	saveMu        sync.Mutex
+	asyncMu       sync.Mutex
 	saveTimers    map[int64]*time.Timer
+	asyncTasks    sync.WaitGroup
+	closing       bool
+	closeOnce     sync.Once
+	closeErr      error
 }
 
 // resolvedSandboxCreateDependencies 是创建或发布前校验沙箱模板时解析出的 M2 能力快照。
@@ -172,6 +176,29 @@ func NewService(deps ServiceDeps) (*Service, error) {
 		capabilities:  capabilities,
 		saveTimers:    map[int64]*time.Timer{},
 	}, nil
+}
+
+// Close 停止登记异步任务，立即触发待保存内容并等待已受理工作及补偿完成。
+func (s *Service) Close() error {
+	s.closeOnce.Do(func() {
+		s.asyncMu.Lock()
+		s.closing = true
+		for _, timer := range s.saveTimers {
+			timer.Reset(0)
+		}
+		s.asyncMu.Unlock()
+		s.asyncTasks.Wait()
+	})
+	return s.closeErr
+}
+
+func (s *Service) finishAsync(err error) {
+	s.asyncMu.Lock()
+	if s.closing && err != nil {
+		s.closeErr = errors.Join(s.closeErr, err)
+	}
+	s.asyncMu.Unlock()
+	s.asyncTasks.Done()
 }
 
 // ValidateSandboxTemplate 校验教师/业务模块声明的实验环境能解析到当前可调度的运行时、镜像和工具。

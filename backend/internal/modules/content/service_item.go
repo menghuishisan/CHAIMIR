@@ -5,7 +5,6 @@ import (
 	"context"
 	"strings"
 
-	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/pkg/apperr"
 )
@@ -20,7 +19,7 @@ func (s *Service) ListItems(ctx context.Context, filter ItemListFilter) ([]ItemD
 	filter.Page, filter.Size = pagex.Normalize(filter.Page, filter.Size)
 	var items []Item
 	var total int64
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.TenantReadTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		items, total, err = tx.ListItems(ctx, id.TenantID, filter)
 		return err
@@ -44,9 +43,9 @@ func (s *Service) CreateItem(ctx context.Context, actor auditActorSnapshot, req 
 	if err != nil {
 		return ItemSnapshotDTO{}, err
 	}
-	body, err := jsonx.CloneObjectStrict(req.Body)
+	body, err := s.prepareContentBody(req.Body, id.TenantID)
 	if err != nil {
-		return ItemSnapshotDTO{}, apperr.ErrContentBodyInvalid.WithCause(err)
+		return ItemSnapshotDTO{}, err
 	}
 	if err := actor.validate(id); err != nil {
 		return ItemSnapshotDTO{}, err
@@ -106,7 +105,7 @@ func (s *Service) GetSharedItemFace(ctx context.Context, itemID int64) (ItemSnap
 		return ItemSnapshotDTO{}, apperr.ErrContentSharedNotFound
 	}
 	var item ItemWithBody
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.TenantReadTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		item, err = tx.GetVisibleItemWithBodyByID(ctx, id.TenantID, itemID)
 		return err
@@ -178,9 +177,9 @@ func (s *Service) UpdateDraftItem(ctx context.Context, actor auditActorSnapshot,
 		current.Tags = req.Tags
 		current.KnowledgePoints = req.KnowledgePoints
 		current.Visibility = req.Visibility
-		body, err := jsonx.CloneObjectStrict(req.Body)
+		body, err := s.prepareContentBody(req.Body, id.TenantID)
 		if err != nil {
-			return apperr.ErrContentBodyInvalid.WithCause(err)
+			return err
 		}
 		current.Body = body
 		current.SensitiveFields = req.SensitiveFields
@@ -205,8 +204,8 @@ func (s *Service) UpdateDraftItem(ctx context.Context, actor auditActorSnapshot,
 
 // PublishItem 发布草稿内容。
 func (s *Service) PublishItem(ctx context.Context, actor auditActorSnapshot, itemID int64) (ItemDTO, error) {
-	return s.itemStatusTransition(ctx, actor, itemID, "content.publish", func(ctx context.Context, tx TxStore, tenantID, id int64) (Item, error) {
-		item, err := tx.GetItemWithBodyByID(ctx, tenantID, id)
+	return s.itemStatusTransition(ctx, actor, itemID, "content.publish", func(ctx context.Context, tx TxStore, current Item) (Item, error) {
+		item, err := tx.GetItemWithBodyByID(ctx, current.TenantID, current.ID)
 		if err != nil {
 			return Item{}, mapContentReadError(err)
 		}
@@ -218,34 +217,30 @@ func (s *Service) PublishItem(ctx context.Context, actor auditActorSnapshot, ite
 				return Item{}, err
 			}
 		}
-		return tx.PublishItem(ctx, tenantID, id)
+		return tx.PublishItem(ctx, current.TenantID, current.ID)
 	})
 }
 
 // DeprecateItem 弃用已发布内容。
 func (s *Service) DeprecateItem(ctx context.Context, actor auditActorSnapshot, itemID int64) (ItemDTO, error) {
-	return s.itemStatusTransition(ctx, actor, itemID, "content.deprecate", func(ctx context.Context, tx TxStore, tenantID, id int64) (Item, error) {
-		return tx.DeprecateItem(ctx, tenantID, id)
+	return s.itemStatusTransition(ctx, actor, itemID, "content.deprecate", func(ctx context.Context, tx TxStore, current Item) (Item, error) {
+		return tx.DeprecateItem(ctx, current.TenantID, current.ID)
 	})
 }
 
 // DeleteItem 删除无引用草稿。
 func (s *Service) DeleteItem(ctx context.Context, actor auditActorSnapshot, itemID int64) error {
-	_, err := s.itemStatusTransition(ctx, actor, itemID, "content.delete", func(ctx context.Context, tx TxStore, tenantID, id int64) (Item, error) {
-		item, err := tx.GetItemByID(ctx, tenantID, id)
-		if err != nil {
-			return Item{}, mapContentReadError(err)
-		}
-		if item.UsageCount > 0 {
+	_, err := s.itemStatusTransition(ctx, actor, itemID, "content.delete", func(ctx context.Context, tx TxStore, current Item) (Item, error) {
+		if current.UsageCount > 0 {
 			return Item{}, apperr.ErrContentDeleteBlocked
 		}
-		return tx.DeleteDraftItem(ctx, tenantID, id)
+		return tx.DeleteDraftItem(ctx, current.TenantID, current.ID)
 	})
 	return err
 }
 
 // itemStatusTransition 执行需要作者归属校验的状态流转。
-func (s *Service) itemStatusTransition(ctx context.Context, actor auditActorSnapshot, itemID int64, action string, fn func(context.Context, TxStore, int64, int64) (Item, error)) (ItemDTO, error) {
+func (s *Service) itemStatusTransition(ctx context.Context, actor auditActorSnapshot, itemID int64, action string, fn func(context.Context, TxStore, Item) (Item, error)) (ItemDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return ItemDTO{}, err
@@ -255,14 +250,14 @@ func (s *Service) itemStatusTransition(ctx context.Context, actor auditActorSnap
 	}
 	var out Item
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		current, err := tx.GetItemByID(ctx, id.TenantID, itemID)
+		current, err := tx.GetItemForUpdate(ctx, id.TenantID, itemID)
 		if err != nil {
 			return mapContentReadError(err)
 		}
 		if current.AuthorID != id.AccountID {
 			return apperr.ErrContentForbidden
 		}
-		out, err = fn(ctx, tx, id.TenantID, itemID)
+		out, err = fn(ctx, tx, current)
 		if err != nil {
 			return mapContentMutationError(err)
 		}
@@ -283,7 +278,7 @@ func (s *Service) ListVersions(ctx context.Context, code string) ([]ItemDTO, err
 		return nil, apperr.ErrContentQueryInvalid
 	}
 	var items []Item
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.TenantReadTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		items, err = tx.ListVersions(ctx, id.TenantID, code)
 		return err
@@ -331,6 +326,10 @@ func (s *Service) CreateNewVersion(ctx context.Context, actor auditActorSnapshot
 			source.Visibility = VisibilityTenant
 		}
 		source.UsageCount = 0
+		source.Body, err = s.prepareContentBody(source.Body, id.TenantID)
+		if err != nil {
+			return err
+		}
 		source.VersionHash, err = versionHash(source.Item, source.Body, source.SensitiveFields)
 		if err != nil {
 			return apperr.ErrContentBodyInvalid.WithCause(err)
@@ -371,7 +370,7 @@ func (s *Service) setItemVisibility(ctx context.Context, actor auditActorSnapsho
 	}
 	var out Item
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		current, err := tx.GetItemByID(ctx, id.TenantID, itemID)
+		current, err := tx.GetItemForUpdate(ctx, id.TenantID, itemID)
 		if err != nil {
 			return mapContentReadError(err)
 		}
@@ -408,7 +407,7 @@ func (s *Service) ListShared(ctx context.Context, filter ItemListFilter) ([]Item
 	var items []Item
 	var total int64
 	var byType pagex.FacetGroup
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.TenantReadTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		items, total, err = tx.ListItems(ctx, id.TenantID, filter)
 		if err != nil {
@@ -433,7 +432,7 @@ func (s *Service) getItemWithBody(ctx context.Context, tenantID int64, code, ver
 		return ItemWithBody{}, apperr.ErrContentQueryInvalid
 	}
 	var item ItemWithBody
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.TenantReadTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		item, err = tx.GetItemWithBodyByRef(ctx, tenantID, code, version)
 		return err

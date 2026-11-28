@@ -2,8 +2,6 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"time"
 
 	"chaimir/internal/contracts"
@@ -38,16 +36,7 @@ type NotifyModuleDeps struct {
 }
 
 // RegisterNotifyModule 构造通知 store/service,注册路由和事件订阅。
-func RegisterNotifyModule(ctx context.Context, deps NotifyModuleDeps) (*notify.Service, error) {
-	if ctx == nil {
-		return nil, fmt.Errorf("notify module 缺少后台任务 context")
-	}
-	if deps.Router == nil {
-		return nil, fmt.Errorf("notify module 缺少 HTTP router")
-	}
-	if deps.Database == nil {
-		return nil, fmt.Errorf("notify module 缺少 database")
-	}
+func RegisterNotifyModule(tasks *background.Runner, deps NotifyModuleDeps) (*notify.Service, error) {
 	store := notify.NewStore(deps.Database)
 	svc, err := notify.NewService(notify.ServiceDeps{Store: store, IDs: deps.IDs, Redis: deps.Redis, Hub: deps.Hub, Roles: deps.Roles, Contests: deps.Contests, Experiments: deps.Experiments, Audit: deps.Audit, Config: deps.Config})
 	if err != nil {
@@ -59,7 +48,7 @@ func RegisterNotifyModule(ctx context.Context, deps NotifyModuleDeps) (*notify.S
 	if _, err := notify.SubscribeEvents(deps.EventBus, svc); err != nil {
 		return nil, err
 	}
-	if err := background.Start(ctx,
+	if err := tasks.Start(
 		background.Task{
 			Name:     "notify.cleanup",
 			Interval: time.Duration(deps.Config.CleanupIntervalSeconds) * time.Second,

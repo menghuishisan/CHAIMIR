@@ -30,10 +30,17 @@ type HTTPSMSSender struct {
 
 // NewSMSSender 根据统一配置创建短信发送器,启动期显式校验 HTTP 出站客户端边界。
 func NewSMSSender(cfg config.SMSConfig) (SMSSender, error) {
+	if !strings.EqualFold(strings.TrimSpace(cfg.Provider), "http") {
+		return nil, fmt.Errorf("不支持的短信服务商配置: %s", cfg.Provider)
+	}
+	if strings.TrimSpace(cfg.Token) == "" || strings.TrimSpace(cfg.LoginTemplate) == "" || strings.TrimSpace(cfg.ResetTemplate) == "" || strings.TrimSpace(cfg.ChangeTemplate) == "" {
+		return nil, fmt.Errorf("短信 HTTP 网关凭据和模板配置不完整")
+	}
 	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
 	var (
-		client *http.Client
-		err    error
+		client   *http.Client
+		endpoint string
+		err      error
 	)
 	switch strings.ToLower(strings.TrimSpace(cfg.EndpointScope)) {
 	case "public":
@@ -51,47 +58,19 @@ func NewSMSSender(cfg config.SMSConfig) (SMSSender, error) {
 	}
 	switch strings.ToLower(strings.TrimSpace(cfg.EndpointScope)) {
 	case "public":
-		if _, err := netx.ValidatePublicHTTPURL(cfg.Endpoint); err != nil {
-			return nil, fmt.Errorf("短信 HTTP 网关地址不安全: %w", err)
-		}
+		endpoint, err = netx.ValidatePublicHTTPURL(cfg.Endpoint)
 	case "cluster":
-		if _, err := netx.ValidateClusterHTTPURL(cfg.Endpoint); err != nil {
-			return nil, fmt.Errorf("短信 HTTP 网关地址不安全: %w", err)
-		}
+		endpoint, err = netx.ValidateClusterHTTPURL(cfg.Endpoint)
 	}
+	if err != nil {
+		return nil, fmt.Errorf("短信 HTTP 网关地址不安全: %w", err)
+	}
+	cfg.Endpoint = endpoint
 	return &HTTPSMSSender{cfg: cfg, client: client}, nil
 }
 
 // Send 按配置发送验证码,仅支持受控 HTTP 短信代理网关。
 func (s *HTTPSMSSender) Send(ctx context.Context, phone string, scene int16, code string) error {
-	switch strings.ToLower(strings.TrimSpace(s.cfg.Provider)) {
-	case "http":
-		return s.sendHTTP(ctx, phone, scene, code)
-	default:
-		return fmt.Errorf("不支持的短信服务商配置: %s", s.cfg.Provider)
-	}
-}
-
-// sendHTTP 调用统一短信代理网关,避免模块直接耦合具体厂商 SDK。
-func (s *HTTPSMSSender) sendHTTP(ctx context.Context, phone string, scene int16, code string) error {
-	if strings.TrimSpace(s.cfg.Endpoint) == "" || strings.TrimSpace(s.cfg.Token) == "" {
-		return fmt.Errorf("短信 HTTP 网关配置不完整")
-	}
-	var (
-		endpoint string
-		err      error
-	)
-	switch strings.ToLower(strings.TrimSpace(s.cfg.EndpointScope)) {
-	case "public":
-		endpoint, err = netx.ValidatePublicHTTPURL(s.cfg.Endpoint)
-	case "cluster":
-		endpoint, err = netx.ValidateClusterHTTPURL(s.cfg.Endpoint)
-	default:
-		err = fmt.Errorf("短信 HTTP 网关端点范围不支持: %s", s.cfg.EndpointScope)
-	}
-	if err != nil {
-		return fmt.Errorf("短信 HTTP 网关地址不安全: %w", err)
-	}
 	template := s.template(scene)
 	if template == "" {
 		return fmt.Errorf("短信模板配置不完整")
@@ -104,7 +83,7 @@ func (s *HTTPSMSSender) sendHTTP(ctx context.Context, phone string, scene int16,
 	if err != nil {
 		return fmt.Errorf("序列化短信请求失败: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.cfg.Endpoint, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("创建短信请求失败: %w", err)
 	}

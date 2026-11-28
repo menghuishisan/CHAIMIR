@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -39,6 +38,13 @@ func (s *Service) createLockOutbox(ctx context.Context, tx TxStore, review Revie
 
 // RunOutboxesOnce 投递M11成绩锁事件与预警通知,共用原后台任务和配置预算。
 func (s *Service) RunOutboxesOnce(ctx context.Context) error {
+	return errors.Join(s.runLockOutboxOnce(ctx), s.runWarningNotificationsOnce(ctx))
+}
+
+func (s *Service) runLockOutboxOnce(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	limit, ok := intx.Int32(s.cfg.LockOutboxBatchSize)
 	if !ok || limit <= 0 {
 		return apperr.ErrGradeEventPublishFailed
@@ -66,18 +72,18 @@ func (s *Service) RunOutboxesOnce(ctx context.Context) error {
 		}
 		return nil
 	}); err != nil {
-		return err
+		return errors.Join(err, ctx.Err())
 	}
-	var firstErr error
+	var failures error
 	for _, item := range items {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(failures, err)
+		}
 		if err := s.publishLockOutboxItem(ctx, item); err != nil {
-			logging.ErrorContext(response.WithTrace(ctx, item.TraceID), "grade lock outbox publish failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", item.TenantID), slog.Int64("review_id", item.ReviewID), slog.Int64("outbox_id", item.ID))
-			if firstErr == nil {
-				firstErr = err
-			}
+			failures = errors.Join(failures, fmt.Errorf("投递成绩锁事件失败 tenant_id=%d review_id=%d outbox_id=%d: %w", item.TenantID, item.ReviewID, item.ID, err))
 		}
 	}
-	return errors.Join(firstErr, s.runWarningNotificationsOnce(ctx))
+	return errors.Join(failures, ctx.Err())
 }
 
 // publishLockOutboxItem 发布单条锁定事件并按结果回写 outbox 状态。

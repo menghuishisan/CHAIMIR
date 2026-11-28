@@ -51,7 +51,6 @@ func (s *Service) UploadCourseCover(ctx context.Context, req CourseCoverUploadRe
 		NestedResourceIDs: []string{ids.Format(id.AccountID), ids.Format(s.ids.Generate())},
 		FileName:          fileName,
 		ContentType:       contentType,
-		Size:              int64(len(req.Content)),
 		MaxBytes:          s.coverMaxBytes,
 		ExpectedBucket:    s.storage.BucketAttach(),
 		AllowedFileName:   true,

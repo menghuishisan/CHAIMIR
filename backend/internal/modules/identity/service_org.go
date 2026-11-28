@@ -2,14 +2,9 @@
 package identity
 
 import (
-	"bytes"
 	"context"
-	"encoding/csv"
-	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -26,7 +21,6 @@ import (
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/pagex"
-	"github.com/xuri/excelize/v2"
 )
 
 // orgImportRow 表示组织导入 CSV 的单行解析结果。
@@ -507,18 +501,7 @@ func (s *Service) CommitOrgImportByAdmin(ctx context.Context, req ImportCommitRe
 		if err != nil {
 			return err
 		}
-		return tx.WriteAudit(ctx, WriteAuditInput{
-			ID:         s.ids.Generate(),
-			TenantID:   entry.TenantID,
-			ActorID:    entry.ActorID,
-			ActorRole:  entry.ActorRole,
-			Action:     entry.Action,
-			TargetType: entry.TargetType,
-			TargetID:   entry.TargetID,
-			Detail:     []byte(entry.Detail),
-			IP:         entry.IP,
-			TraceID:    entry.TraceID,
-		})
+		return s.auditWriter.writeInTx(ctx, tx, entry)
 	}); err != nil {
 		return AccountImportCommitResponse{}, apperr.AsAppError(err)
 	}
@@ -567,131 +550,18 @@ func (s *Service) ArchiveClassesByAdmin(ctx context.Context, req ArchiveClassesR
 		if err != nil {
 			return err
 		}
-		return tx.WriteAudit(ctx, WriteAuditInput{
-			ID:         s.ids.Generate(),
-			TenantID:   entry.TenantID,
-			ActorID:    entry.ActorID,
-			ActorRole:  entry.ActorRole,
-			Action:     entry.Action,
-			TargetType: entry.TargetType,
-			TargetID:   entry.TargetID,
-			Detail:     []byte(entry.Detail),
-			IP:         entry.IP,
-			TraceID:    entry.TraceID,
-		})
+		return s.auditWriter.writeInTx(ctx, tx, entry)
 	}); err != nil {
 		return apperr.AsAppError(err)
 	}
 	return nil
 }
 
-// parseOrgImportFile 按统一上传安全原语识别 CSV/XLSX,再进入对应解析器。
+// parseOrgImportFile 把已验证的表格记录转换为组织导入行。
 func (s *Service) parseOrgImportFile(ctx context.Context, raw []byte, fileName, contentType string) ([]orgImportRow, []ImportRowResult, error) {
-	if filepath.Base(fileName) != fileName || strings.TrimSpace(fileName) == "" {
-		return nil, nil, apperr.ErrIdentityImportUnsupportedFile
-	}
-	switch upload.CheckSize(int64(len(raw)), s.uploadCfg.ImportMaxBytes) {
-	case upload.SizeEmpty:
-		return nil, nil, apperr.ErrIdentityImportContentInvalid
-	case upload.SizeTooLarge:
-		return nil, nil, apperr.ErrIdentityImportFileTooLarge
-	}
-	if err := upload.VerifyScan(ctx, s.scanner, upload.ScanPolicy{Required: s.uploadCfg.VirusScanRequired}, upload.ScanRequest{FileName: fileName, Content: raw}); err != nil {
-		return nil, nil, apperr.ErrIdentityImportUnsupportedFile.WithCause(err)
-	}
-	switch upload.CSVOrXLSXKind(fileName, contentType, raw) {
-	case upload.KindCSV:
-		return parseOrgImportCSV(raw, s.cfg.ImportMaxRows)
-	case upload.KindXLSX:
-		return parseOrgImportXLSX(raw, s.cfg.ImportMaxRows)
-	default:
-		return nil, nil, apperr.ErrIdentityImportUnsupportedFile
-	}
-}
-
-// parseOrgImportCSV 解析组织导入 CSV,表头后每行格式为 kind,name,code_or_parent_id,enrollment_year。
-func parseOrgImportCSV(raw []byte, maxRows int) ([]orgImportRow, []ImportRowResult, error) {
-	reader := csv.NewReader(strings.NewReader(string(raw)))
-	reader.TrimLeadingSpace = true
-	records := make([][]string, 0, min(maxRows+2, 128))
-	for {
-		record, err := reader.Read()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid
-		}
-		records = append(records, record)
-		if len(records) > maxRows+1 {
-			return nil, nil, apperr.ErrIdentityImportTooManyRows
-		}
-	}
-	if len(records) < 2 {
-		return nil, nil, apperr.ErrIdentityImportEmpty
-	}
-	return parseOrgImportRecords(records)
-}
-
-// parseOrgImportXLSX 解析组织导入 Excel,只读取模板工作表或首个工作表。
-func parseOrgImportXLSX(raw []byte, maxRows int) ([]orgImportRow, []ImportRowResult, error) {
-	workbook, err := excelize.OpenReader(bytes.NewReader(raw))
+	records, err := s.readImportFile(ctx, raw, fileName, contentType, importSheetOrg)
 	if err != nil {
-		return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
-	}
-	sheet := importSheetOrg
-	if index, err := workbook.GetSheetIndex(sheet); err != nil || index < 0 {
-		sheets := workbook.GetSheetList()
-		if len(sheets) == 0 {
-			if closeErr := workbook.Close(); closeErr != nil {
-				return nil, nil, apperr.ErrInternal.WithCause(closeErr)
-			}
-			return nil, nil, apperr.ErrIdentityImportEmpty
-		}
-		sheet = sheets[0]
-	}
-	rowsIter, err := workbook.Rows(sheet)
-	if err != nil {
-		if closeErr := workbook.Close(); closeErr != nil {
-			return nil, nil, apperr.ErrInternal.WithCause(closeErr)
-		}
-		return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
-	}
-	resourcesClosed := false
-	closeResources := func() error {
-		if resourcesClosed {
-			return nil
-		}
-		resourcesClosed = true
-		if closeErr := rowsIter.Close(); closeErr != nil {
-			slog.Warn("组织导入工作簿行迭代器关闭失败", slog.String("error", logging.SanitizeError(closeErr.Error())))
-		}
-		return workbook.Close()
-	}
-	defer func() {
-		if closeErr := closeResources(); closeErr != nil {
-			slog.Warn("组织导入工作簿关闭失败", slog.String("error", logging.SanitizeError(closeErr.Error())))
-		}
-	}()
-	records := make([][]string, 0, min(maxRows+2, 128))
-	for rowsIter.Next() {
-		record, err := rowsIter.Columns()
-		if err != nil {
-			return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
-		}
-		records = append(records, record)
-		if len(records) > maxRows+1 {
-			return nil, nil, apperr.ErrIdentityImportTooManyRows
-		}
-	}
-	if err := rowsIter.Error(); err != nil {
-		return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
-	}
-	if err := closeResources(); err != nil {
-		return nil, nil, apperr.ErrInternal.WithCause(err)
-	}
-	if len(records) < 2 {
-		return nil, nil, apperr.ErrIdentityImportEmpty
+		return nil, nil, err
 	}
 	return parseOrgImportRecords(records)
 }
@@ -750,33 +620,6 @@ func parseOrgImportRecords(records [][]string) ([]orgImportRow, []ImportRowResul
 		results = append(results, result)
 	}
 	return rows, results, nil
-}
-
-// encodeNamedXLSX 使用指定工作表名生成真实 xlsx 模板。
-func encodeNamedXLSX(sheetName string, records [][]string) ([]byte, error) {
-	workbook := excelize.NewFile()
-	if err := workbook.SetSheetName("Sheet1", sheetName); err != nil {
-		return nil, apperr.ErrInternal.WithCause(err)
-	}
-	for rowIndex, record := range records {
-		for colIndex, value := range record {
-			cell, err := excelize.CoordinatesToCellName(colIndex+1, rowIndex+1)
-			if err != nil {
-				return nil, apperr.ErrInternal.WithCause(err)
-			}
-			if err := workbook.SetCellValue(sheetName, cell, value); err != nil {
-				return nil, apperr.ErrInternal.WithCause(err)
-			}
-		}
-	}
-	var buf bytes.Buffer
-	if err := workbook.Write(&buf); err != nil {
-		return nil, apperr.ErrInternal.WithCause(err)
-	}
-	if err := workbook.Close(); err != nil {
-		return nil, apperr.ErrInternal.WithCause(err)
-	}
-	return buf.Bytes(), nil
 }
 
 // PromoteClassesByAdmin 将管理员明确选择的班级和学生档案更新到目标学年。
@@ -870,18 +713,7 @@ func (s *Service) writeTenantAuditInTx(ctx context.Context, tx TxStore, id tenan
 	if err != nil {
 		return err
 	}
-	return tx.WriteAudit(ctx, WriteAuditInput{
-		ID:         s.ids.Generate(),
-		TenantID:   entry.TenantID,
-		ActorID:    entry.ActorID,
-		ActorRole:  entry.ActorRole,
-		Action:     entry.Action,
-		TargetType: entry.TargetType,
-		TargetID:   entry.TargetID,
-		Detail:     []byte(entry.Detail),
-		IP:         entry.IP,
-		TraceID:    entry.TraceID,
-	})
+	return s.auditWriter.writeInTx(ctx, tx, entry)
 }
 
 // validateMajorParent 校验专业所属院系属于当前租户,补足普通外键无法表达的租户一致性。

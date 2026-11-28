@@ -19,6 +19,7 @@ import (
 type Store interface {
 	CloneTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
 	TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
+	TenantReadTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
 	UsageTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
 }
 
@@ -26,7 +27,7 @@ type Store interface {
 type TxStore interface {
 	CreateItem(ctx context.Context, item ItemWithBody) (ItemWithBody, error)
 	UpdateDraftItem(ctx context.Context, item ItemWithBody) (ItemWithBody, error)
-	GetItemByID(ctx context.Context, tenantID, id int64) (Item, error)
+	GetItemForUpdate(ctx context.Context, tenantID, id int64) (Item, error)
 	GetItemWithBodyByID(ctx context.Context, tenantID, id int64) (ItemWithBody, error)
 	GetVisibleItemWithBodyByID(ctx context.Context, tenantID, id int64) (ItemWithBody, error)
 	GetItemWithBodyByRef(ctx context.Context, tenantID int64, code, version string) (ItemWithBody, error)
@@ -86,18 +87,30 @@ func (s *store) TenantTx(ctx context.Context, tenantID int64, fn func(context.Co
 	})
 }
 
-// UsageTx 仅为引用集合写入复用调用方的同租户普通事务。
+// TenantReadTx 只执行 M5 读取，借用同数据库、同租户普通事务或独立开启读取事务。
+func (s *store) TenantReadTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error {
+	return s.database.WithTenantReadTxID(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
+	})
+}
+
+// UsageTx 串行化本租户引用写入，并复用调用方的同租户普通事务。
 func (s *store) UsageTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error {
 	if s == nil || s.database == nil {
 		return fmt.Errorf("content store 未初始化")
 	}
-	joined, err := s.database.WithTenantTxIfPresent(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
-	})
+	run := func(ctx context.Context, tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		if err := q.LockContentUsageScope(ctx, tenantID); err != nil {
+			return err
+		}
+		return fn(ctx, &txStore{q: q})
+	}
+	joined, err := s.database.WithTenantTxIfPresent(ctx, tenantID, run)
 	if err != nil || joined {
 		return err
 	}
-	return s.TenantTx(ctx, tenantID, fn)
+	return s.database.WithTenantTxID(ctx, tenantID, run)
 }
 
 // isNoRows 统一识别未命中错误,让 service 不直接依赖 pgx。
@@ -148,9 +161,9 @@ func (s *txStore) UpdateDraftItem(ctx context.Context, item ItemWithBody) (ItemW
 	return ItemWithBody{Item: itemFromRow(row), Body: item.Body, SensitiveFields: item.SensitiveFields}, nil
 }
 
-// GetItemByID 按 ID 查询内容外壳。
-func (s *txStore) GetItemByID(ctx context.Context, tenantID, id int64) (Item, error) {
-	row, err := s.q.GetContentItemByID(ctx, sqlcgen.GetContentItemByIDParams{TenantID: tenantID, ID: id})
+// GetItemForUpdate 锁定本租户内容外壳，供同事务内校验和变更。
+func (s *txStore) GetItemForUpdate(ctx context.Context, tenantID, id int64) (Item, error) {
+	row, err := s.q.GetContentItemForUpdate(ctx, sqlcgen.GetContentItemForUpdateParams{TenantID: tenantID, ID: id})
 	if err != nil {
 		return Item{}, err
 	}
@@ -394,8 +407,11 @@ func (s *txStore) CreatePaper(ctx context.Context, paper Paper) (Paper, error) {
 	return paperFromRow(row)
 }
 
-// ReplacePaperItems 覆盖试卷题目集合。
+// ReplacePaperItems 锁定父试卷后整体替换题目集合，避免并发删除遗漏尚未提交的新行。
 func (s *txStore) ReplacePaperItems(ctx context.Context, tenantID, paperID int64, items []PaperItem) ([]PaperItem, error) {
+	if _, err := s.q.LockPaper(ctx, sqlcgen.LockPaperParams{TenantID: tenantID, ID: paperID}); err != nil {
+		return nil, mapPaperError(err)
+	}
 	if err := s.q.DeletePaperItems(ctx, sqlcgen.DeletePaperItemsParams{TenantID: tenantID, PaperID: paperID}); err != nil {
 		return nil, err
 	}

@@ -71,45 +71,26 @@ func BuildDownloadGrant(req DownloadGrantRequest) (DownloadGrant, error) {
 	if req.ResourceTenantID < 0 || (req.ResourceTenantID == 0 && !req.AllowPlatformScope) {
 		return DownloadGrant{}, fmt.Errorf("下载授权缺少资源 tenant_id")
 	}
-	if req.AccountID <= 0 {
-		return DownloadGrant{}, fmt.Errorf("下载授权缺少 account_id")
-	}
-	if strings.TrimSpace(req.Module) == "" || strings.TrimSpace(req.ResourceType) == "" || strings.TrimSpace(req.ResourceID) == "" {
-		return DownloadGrant{}, fmt.Errorf("下载授权缺少资源边界")
-	}
-	mode := normalizeDownloadMode(req.Mode)
-	if mode == "" {
-		return DownloadGrant{}, fmt.Errorf("下载授权 mode 非法")
-	}
-	if req.ExpiresAt.IsZero() || !req.ExpiresAt.After(timex.Now()) {
-		return DownloadGrant{}, fmt.Errorf("下载授权过期时间非法")
-	}
-
 	objectRef, err := ParseObjectRef(req.ObjectRef)
 	if err != nil {
 		return DownloadGrant{}, err
 	}
 
-	// 统一要求对象 key 落在完整资源前缀下,阻断同租户同类型资源之间的对象引用复用。
-	expectedPrefix, err := ObjectKey(req.ResourceTenantID, req.Module, req.ResourceType, req.ResourceID)
-	if err != nil {
-		return DownloadGrant{}, err
-	}
-	if objectRef.Key != expectedPrefix && !strings.HasPrefix(objectRef.Key, expectedPrefix+"/") {
-		return DownloadGrant{}, fmt.Errorf("对象引用不属于当前租户资源前缀")
-	}
-
-	return DownloadGrant{
+	grant := DownloadGrant{
 		TenantID:         req.TenantID,
 		ResourceTenantID: req.ResourceTenantID,
 		AccountID:        req.AccountID,
 		Module:           req.Module,
 		ResourceType:     req.ResourceType,
 		ResourceID:       req.ResourceID,
-		Mode:             mode,
+		Mode:             normalizeDownloadMode(req.Mode),
 		Object:           objectRef,
 		ExpiresAt:        req.ExpiresAt.UTC(),
-	}, nil
+	}
+	if err := validateDownloadGrant(grant, timex.Now()); err != nil {
+		return DownloadGrant{}, err
+	}
+	return grant, nil
 }
 
 // SignDownloadGrantToken 把受控下载授权编码并签名为短时令牌,供统一文件服务下载入口校验。
@@ -182,7 +163,7 @@ func verifyDownloadGrantTokenAt(token string, signingKey string, now time.Time) 
 		return DownloadGrant{}, fmt.Errorf("解码下载授权负载失败: %w", err)
 	}
 	var tokenPayload downloadGrantTokenPayload
-	if err := decodeDownloadGrantTokenPayload(payload, &tokenPayload); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(payload, &tokenPayload); err != nil {
 		return DownloadGrant{}, fmt.Errorf("解析下载授权负载失败: %w", err)
 	}
 	grant, err := tokenPayload.downloadGrant()
@@ -251,11 +232,6 @@ func (payload downloadGrantTokenPayload) downloadGrant() (DownloadGrant, error) 
 	}, nil
 }
 
-// decodeDownloadGrantTokenPayload 严格解码签名负载,拒绝未知字段和尾随内容。
-func decodeDownloadGrantTokenPayload(data []byte, dst *downloadGrantTokenPayload) error {
-	return jsonx.DecodeStrictKnownFields(data, dst)
-}
-
 // validateDownloadGrant 在签发和验签两端统一执行授权边界校验,避免令牌内容绕过对象前缀限制。
 func validateDownloadGrant(grant DownloadGrant, now time.Time) error {
 	if grant.TenantID < 0 {
@@ -270,7 +246,7 @@ func validateDownloadGrant(grant DownloadGrant, now time.Time) error {
 	if strings.TrimSpace(grant.Module) == "" || strings.TrimSpace(grant.ResourceType) == "" || strings.TrimSpace(grant.ResourceID) == "" {
 		return fmt.Errorf("下载授权缺少资源边界")
 	}
-	if normalizeDownloadMode(grant.Mode) == "" {
+	if grant.Mode != DownloadModeDownload && grant.Mode != DownloadModeStream {
 		return fmt.Errorf("下载授权 mode 非法")
 	}
 	if grant.ExpiresAt.IsZero() || !grant.ExpiresAt.UTC().After(now) {

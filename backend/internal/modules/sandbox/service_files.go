@@ -584,20 +584,28 @@ func (s *Service) scheduleDebouncedSave(ctx context.Context, tenantID, sandboxID
 		return
 	}
 	traceAttrs := logging.AttrsFromContext(ctx)
-	s.saveMu.Lock()
+	s.asyncMu.Lock()
+	defer s.asyncMu.Unlock()
+	if s.closing {
+		return
+	}
 	if timer := s.saveTimers[sandboxID]; timer != nil {
 		timer.Stop()
+		s.asyncTasks.Done()
 	}
+	s.asyncTasks.Add(1)
 	saveBase := logging.WithAttrs(context.WithoutCancel(ctx), traceAttrs...)
 	var timer *time.Timer
 	timer = time.AfterFunc(delay, func() {
-		s.saveMu.Lock()
+		s.asyncMu.Lock()
 		if s.saveTimers[sandboxID] != timer {
-			s.saveMu.Unlock()
+			s.asyncMu.Unlock()
 			return
 		}
 		delete(s.saveTimers, sandboxID)
-		s.saveMu.Unlock()
+		s.asyncMu.Unlock()
+		var err error
+		defer func() { s.finishAsync(err) }()
 		saveCtx, cancel := context.WithTimeout(saveBase, timeDurationSeconds(s.cfg.ExecTimeoutSeconds))
 		defer cancel()
 		sb, _, err := s.sandboxRuntime(saveCtx, tenantID, sandboxID)
@@ -607,14 +615,15 @@ func (s *Service) scheduleDebouncedSave(ctx context.Context, tenantID, sandboxID
 			_, err = s.persistSandboxFiles(saveCtx, sb)
 		}
 		if err != nil {
-			s.recordDebouncedSaveFailure(saveCtx, tenantID, sandboxID, err)
+			err = errors.Join(err, s.recordDebouncedSaveFailure(saveCtx, tenantID, sandboxID, err))
 		}
 	})
 	s.saveTimers[sandboxID] = timer
-	s.saveMu.Unlock()
 }
 
-func (s *Service) recordDebouncedSaveFailure(ctx context.Context, tenantID, sandboxID int64, cause error) {
+func (s *Service) recordDebouncedSaveFailure(ctx context.Context, tenantID, sandboxID int64, cause error) error {
+	ctx, cancel := asyncPersistenceContext(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+	defer cancel()
 	logging.ErrorContext(ctx, "sandbox debounced file save failed", apperr.AsAppError(cause).LogString(), slog.Int64("tenant_id", tenantID), slog.Int64("sandbox_id", sandboxID))
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		detail, err := jsonBytes(map[string]any{"stage": "debounced_file_save", "error": logging.SanitizeError(cause.Error())})
@@ -627,14 +636,17 @@ func (s *Service) recordDebouncedSaveFailure(ctx context.Context, tenantID, sand
 		return nil
 	}); err != nil {
 		logging.ErrorContext(ctx, "sandbox debounced file save event failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", tenantID), slog.Int64("sandbox_id", sandboxID))
+		return err
 	}
+	return nil
 }
 
 func (s *Service) cancelDebouncedSave(sandboxID int64) {
-	s.saveMu.Lock()
-	defer s.saveMu.Unlock()
+	s.asyncMu.Lock()
+	defer s.asyncMu.Unlock()
 	if timer := s.saveTimers[sandboxID]; timer != nil {
 		timer.Stop()
 		delete(s.saveTimers, sandboxID)
+		s.asyncTasks.Done()
 	}
 }

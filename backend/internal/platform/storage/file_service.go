@@ -33,7 +33,6 @@ type PlanUploadRequest struct {
 	NestedResourceIDs  []string
 	FileName           string
 	ContentType        string
-	Size               int64
 	MaxBytes           int64
 	ExpectedBucket     string
 	AllowedFileName    bool
@@ -122,7 +121,8 @@ func (s Service) PlanUpload(ctx context.Context, req PlanUploadRequest) (UploadP
 	if err != nil {
 		return UploadPlan{}, fmt.Errorf("%w: %w", upload.ErrInvalidFile, err)
 	}
-	switch upload.CheckSize(req.Size, req.MaxBytes) {
+	size := int64(len(req.Content))
+	switch upload.CheckSize(size, req.MaxBytes) {
 	case upload.SizeEmpty:
 		return UploadPlan{}, fmt.Errorf("%w: 上传文件不能为空", upload.ErrInvalidFile)
 	case upload.SizeTooLarge:
@@ -172,7 +172,7 @@ func (s Service) PlanUpload(ctx context.Context, req PlanUploadRequest) (UploadP
 		Bucket:            bucket,
 		Key:               key,
 		ObjectRef:         objectRef,
-		Size:              req.Size,
+		Size:              size,
 		DownloadExpiresAt: expiresAt,
 	}, nil
 }

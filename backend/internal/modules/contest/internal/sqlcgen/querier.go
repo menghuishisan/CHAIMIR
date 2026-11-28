@@ -125,6 +125,8 @@ type Querier interface {
 	RefreshContestRanks(ctx context.Context, arg RefreshContestRanksParams) error
 	// 启动沙箱和提交判题期间仅由当前 token 续租,避免长时准备被其他 worker 重领。
 	RenewBattleMatchStartLease(ctx context.Context, arg RenewBattleMatchStartLeaseParams) (int64, error)
+	// 先取得行锁再读实时时钟；UPDATE 等锁前计算的有效性不能用于续租。
+	RenewContestArchiveLease(ctx context.Context, arg RenewContestArchiveLeaseParams) (int64, error)
 	RevokeContestAccessGrantsForSandbox(ctx context.Context, arg RevokeContestAccessGrantsForSandboxParams) error
 	SetContestStatus(ctx context.Context, arg SetContestStatusParams) (Contest, error)
 	SetVulnProblemPrevalidate(ctx context.Context, arg SetVulnProblemPrevalidateParams) (VulnProblem, error)

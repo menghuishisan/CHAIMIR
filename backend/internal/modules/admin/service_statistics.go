@@ -3,6 +3,8 @@ package admin
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/timex"
@@ -46,23 +48,30 @@ func (s *Service) SchoolStatistics(ctx context.Context, fromDate, toDate string)
 
 // RunStatisticsSnapshotOnce 生成当天平台与租户统计快照。
 func (s *Service) RunStatisticsSnapshotOnce(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	statDate := timex.DateOrEmpty(timex.Now())
 	tenants, err := s.identity.ListTenants(ctx)
 	if err != nil {
-		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
+		return errors.Join(apperr.ErrAdminStatisticsInvalid.WithCause(err), ctx.Err())
 	}
+	var failures error
 	if err := s.snapshotGlobalStats(ctx, statDate, tenants); err != nil {
-		return err
+		failures = fmt.Errorf("生成平台统计快照失败: %w", err)
 	}
 	for _, item := range tenants {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(failures, err)
+		}
 		if item.TenantID <= 0 {
 			continue
 		}
 		if err := s.snapshotTenantStats(ctx, item.TenantID, statDate); err != nil {
-			return err
+			failures = errors.Join(failures, fmt.Errorf("生成学校统计快照失败 tenant_id=%d: %w", item.TenantID, err))
 		}
 	}
-	return nil
+	return errors.Join(failures, ctx.Err())
 }
 
 // snapshotGlobalStats 聚合平台级只读指标并写入 M9 自有统计快照。

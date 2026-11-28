@@ -307,25 +307,7 @@ func AuthorizePlatformOrAnyRole(c *gin.Context, identity contracts.IdentityServi
 	if id.IsPlatform {
 		return true
 	}
-	if identity == nil {
-		response.Fail(c, apperr.ErrForbidden)
-		c.Abort()
-		return false
-	}
-	for _, role := range roles {
-		has, err := identity.HasRole(c.Request.Context(), id.AccountID, role)
-		if err != nil {
-			response.Fail(c, apperr.ErrForbidden.WithCause(err))
-			c.Abort()
-			return false
-		}
-		if has {
-			return true
-		}
-	}
-	response.Fail(c, apperr.ErrForbidden)
-	c.Abort()
-	return false
+	return authorizeAccountRoles(c, identity, id.AccountID, roles)
 }
 
 // AuthorizeTenantAnyRole 执行租户角色校验,并拒绝平台身份绕过租户范围。
@@ -341,13 +323,17 @@ func AuthorizeTenantAnyRole(c *gin.Context, identity contracts.IdentityService, 
 		c.Abort()
 		return false
 	}
+	return authorizeAccountRoles(c, identity, id.AccountID, roles)
+}
+
+func authorizeAccountRoles(c *gin.Context, identity contracts.IdentityService, accountID int64, roles []string) bool {
 	if identity == nil {
 		response.Fail(c, apperr.ErrForbidden)
 		c.Abort()
 		return false
 	}
 	for _, role := range roles {
-		has, err := identity.HasRole(c.Request.Context(), id.AccountID, role)
+		has, err := identity.HasRole(c.Request.Context(), accountID, role)
 		if err != nil {
 			response.Fail(c, apperr.ErrForbidden.WithCause(err))
 			c.Abort()

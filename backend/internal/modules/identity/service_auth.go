@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -17,7 +16,6 @@ import (
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
-	"chaimir/pkg/logging"
 )
 
 // LoginPlatform 校验平台管理员凭证并签发平台级 Token。
@@ -44,8 +42,7 @@ func (s *Service) LoginPlatform(ctx context.Context, req LoginPlatformRequest, d
 	if err != nil || !ok {
 		return LoginResponse{}, apperr.ErrIdentityInvalidCredentials
 	}
-	var refresh, access string
-	var session PlatformAuthSession
+	var out LoginResponse
 	// 平台登录也执行单端语义:先吊销旧会话,再保存新 Refresh 哈希。
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		if err := tx.LockPlatformAdmin(ctx, admin.ID); err != nil {
@@ -65,28 +62,7 @@ func (s *Service) LoginPlatform(ctx context.Context, req LoginPlatformRequest, d
 		if err := tx.RevokePlatformSessions(ctx, admin.ID); err != nil {
 			return err
 		}
-		token, err := crypto.RandomToken(48)
-		if err != nil {
-			return err
-		}
-		hash, err := s.hashSecret(token)
-		if err != nil {
-			return err
-		}
-		row, err := tx.CreatePlatformAuthSession(ctx, CreatePlatformSessionInput{
-			ID:               s.ids.Generate(),
-			PlatformAdminID:  admin.ID,
-			RefreshTokenHash: hash,
-			DeviceInfo:       device,
-			IP:               ip,
-			ExpireAt:         s.refreshExpireAt(),
-		})
-		if err != nil {
-			return err
-		}
-		refresh = token
-		session = row
-		access, err = s.auth.IssueAccess(0, admin.ID, session.ID, true)
+		out, err = s.createPlatformSession(ctx, tx, admin.ID, device, ip)
 		if err != nil {
 			return err
 		}
@@ -94,7 +70,8 @@ func (s *Service) LoginPlatform(ctx context.Context, req LoginPlatformRequest, d
 	}); err != nil {
 		return LoginResponse{}, apperr.AsAppError(err)
 	}
-	return LoginResponse{AccessToken: access, RefreshToken: refresh, Account: &AccountDTO{ID: ids.ID(admin.ID), Name: admin.Name, Roles: []int16{contracts.RoleNumPlatformAdmin}, Status: admin.Status}}, nil
+	out.Account = &AccountDTO{ID: ids.ID(admin.ID), Name: admin.Name, Roles: []int16{contracts.RoleNumPlatformAdmin}, Status: admin.Status}
+	return out, nil
 }
 
 // LoginPhone 用手机号密码登录,一号多校时返回租户选择列表。
@@ -486,19 +463,19 @@ func (s *Service) finishPasswordLogin(ctx context.Context, tenantID, accountID i
 		}
 		return LoginResponse{}, apperr.ErrIdentityInvalidCredentials
 	}
-	if clearErr := s.clearPasswordFailure(ctx, account); clearErr != nil {
-		logging.ErrorContext(ctx, "清理密码失败次数失败", clearErr.Error(), slog.Int64("tenant_id", account.TenantID), slog.Int64("account_id", account.ID))
-	}
 	return s.issueTenantLogin(ctx, account, device, ip)
 }
 
-// issueTenantLogin 吊销旧会话后签发新的租户 Token 对。
+// issueTenantLogin 将密码登录的失败计数清理、会话替换和审计同事务提交。
 func (s *Service) issueTenantLogin(ctx context.Context, account Account, device, ip string) (LoginResponse, error) {
 	var out LoginResponse
 	if err := s.store.TenantTx(ctx, account.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		out, err = s.issueTenantLoginInTx(ctx, tx, account, device, ip)
-		return err
+		if err != nil {
+			return err
+		}
+		return tx.ClearPasswordFailure(ctx, account.ID, account.TenantID)
 	}); err != nil {
 		return LoginResponse{}, apperr.AsAppError(err)
 	}
@@ -534,11 +511,25 @@ func (s *Service) issueTenantLoginInTx(ctx context.Context, tx TxStore, account 
 	if err := tx.RevokeAccountSessions(ctx, account.TenantID, account.ID); err != nil {
 		return LoginResponse{}, err
 	}
-	refresh, err := crypto.RandomToken(48)
+	out, err := s.createTenantSession(ctx, tx, account, device, ip)
 	if err != nil {
 		return LoginResponse{}, err
 	}
-	hash, err := s.hashSecret(refresh)
+	phonePlain, err := s.decryptPhone(account.PhoneEnc)
+	if err != nil {
+		return LoginResponse{}, err
+	}
+	if err := s.auditLogin(ctx, account.TenantID, account.ID, audit.ActorRoleFromAccount(ToContractAccount(account, phonePlain))); err != nil {
+		return LoginResponse{}, err
+	}
+	dto := ToAccountDTO(account, phonePlain)
+	out.Account = &dto
+	return out, nil
+}
+
+// createTenantSession 为登录与刷新准备同事务提交的租户会话和凭据。
+func (s *Service) createTenantSession(ctx context.Context, tx TxStore, account Account, device, ip string) (LoginResponse, error) {
+	refresh, hash, err := s.newRefreshToken()
 	if err != nil {
 		return LoginResponse{}, err
 	}
@@ -553,14 +544,36 @@ func (s *Service) issueTenantLoginInTx(ctx context.Context, tx TxStore, account 
 	if err != nil {
 		return LoginResponse{}, err
 	}
-	phonePlain, err := s.decryptPhone(account.PhoneEnc)
+	return LoginResponse{AccessToken: access, RefreshToken: refresh, MustChangePwd: account.MustChangePwd}, nil
+}
+
+// createPlatformSession 为登录与刷新准备同事务提交的平台会话和凭据。
+func (s *Service) createPlatformSession(ctx context.Context, tx TxStore, adminID int64, device, ip string) (LoginResponse, error) {
+	refresh, hash, err := s.newRefreshToken()
 	if err != nil {
 		return LoginResponse{}, err
 	}
-	if err := s.auditLogin(ctx, account.TenantID, account.ID, audit.ActorRoleFromAccount(ToContractAccount(account, phonePlain))); err != nil {
+	session, err := tx.CreatePlatformAuthSession(ctx, CreatePlatformSessionInput{
+		ID: s.ids.Generate(), PlatformAdminID: adminID,
+		RefreshTokenHash: hash, DeviceInfo: device, IP: ip, ExpireAt: s.refreshExpireAt(),
+	})
+	if err != nil {
 		return LoginResponse{}, err
 	}
-	return LoginResponse{AccessToken: access, RefreshToken: refresh, MustChangePwd: account.MustChangePwd, Account: ptrAccountDTO(ToAccountDTO(account, phonePlain))}, nil
+	access, err := s.auth.IssueAccess(0, adminID, session.ID, true)
+	if err != nil {
+		return LoginResponse{}, err
+	}
+	return LoginResponse{AccessToken: access, RefreshToken: refresh}, nil
+}
+
+func (s *Service) newRefreshToken() (token, hash string, err error) {
+	token, err = crypto.RandomToken(48)
+	if err != nil {
+		return "", "", err
+	}
+	hash, err = s.hashSecret(token)
+	return token, hash, err
 }
 
 // refreshTenantSession 轮转租户 Refresh 会话并签发新 Token。
@@ -568,9 +581,7 @@ func (s *Service) refreshTenantSession(ctx context.Context, old AuthSession, dev
 	if !tenantAllowedForDeployment(old.TenantID, s.deploy) {
 		return LoginResponse{}, apperr.ErrIdentitySessionInvalid
 	}
-	var refresh string
-	var session AuthSession
-	var account Account
+	var out LoginResponse
 	var replay bool
 	if err := s.store.TenantTx(ctx, old.TenantID, func(ctx context.Context, tx TxStore) error {
 		if err := tx.LockAccount(ctx, old.TenantID, old.AccountID); err != nil {
@@ -606,33 +617,11 @@ func (s *Service) refreshTenantSession(ctx context.Context, old AuthSession, dev
 		if err != nil {
 			return err
 		}
-		account = a
-		if err := EnsureAccountCanLogin(account, timex.Now()); err != nil {
+		if err := EnsureAccountCanLogin(a, timex.Now()); err != nil {
 			return err
 		}
-		token, err := crypto.RandomToken(48)
-		if err != nil {
-			return err
-		}
-		hash, err := s.hashSecret(token)
-		if err != nil {
-			return err
-		}
-		row, err := tx.CreateAuthSession(ctx, CreateSessionInput{
-			ID:               s.ids.Generate(),
-			TenantID:         old.TenantID,
-			AccountID:        old.AccountID,
-			RefreshTokenHash: hash,
-			DeviceInfo:       device,
-			IP:               ip,
-			ExpireAt:         s.refreshExpireAt(),
-		})
-		if err != nil {
-			return err
-		}
-		refresh = token
-		session = row
-		return nil
+		out, err = s.createTenantSession(ctx, tx, a, device, ip)
+		return err
 	}); err != nil {
 		if isNoRows(err) {
 			return LoginResponse{}, apperr.ErrIdentitySessionInvalid
@@ -642,11 +631,7 @@ func (s *Service) refreshTenantSession(ctx context.Context, old AuthSession, dev
 	if replay {
 		return LoginResponse{}, apperr.ErrIdentitySessionInvalid
 	}
-	access, err := s.auth.IssueAccess(account.TenantID, account.ID, session.ID, false)
-	if err != nil {
-		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
-	}
-	return LoginResponse{AccessToken: access, RefreshToken: refresh, MustChangePwd: account.MustChangePwd}, nil
+	return out, nil
 }
 
 // refreshPlatformSession 轮转平台管理员 Refresh 会话并签发新 Token。
@@ -654,8 +639,7 @@ func (s *Service) refreshPlatformSession(ctx context.Context, old PlatformAuthSe
 	if !s.deploy.PlatformEnabled {
 		return LoginResponse{}, apperr.ErrIdentitySessionInvalid
 	}
-	var refresh string
-	var session PlatformAuthSession
+	var out LoginResponse
 	var replay bool
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		if err := tx.LockPlatformAdmin(ctx, old.PlatformAdminID); err != nil {
@@ -686,21 +670,8 @@ func (s *Service) refreshPlatformSession(ctx context.Context, old PlatformAuthSe
 		if admin.Status != TenantStatusActive {
 			return apperr.ErrIdentityAccountDisabled
 		}
-		token, err := crypto.RandomToken(48)
-		if err != nil {
-			return err
-		}
-		hash, err := s.hashSecret(token)
-		if err != nil {
-			return err
-		}
-		row, err := tx.CreatePlatformAuthSession(ctx, CreatePlatformSessionInput{ID: s.ids.Generate(), PlatformAdminID: old.PlatformAdminID, RefreshTokenHash: hash, DeviceInfo: device, IP: ip, ExpireAt: s.refreshExpireAt()})
-		if err != nil {
-			return err
-		}
-		refresh = token
-		session = row
-		return nil
+		out, err = s.createPlatformSession(ctx, tx, admin.ID, device, ip)
+		return err
 	}); err != nil {
 		if isNoRows(err) {
 			return LoginResponse{}, apperr.ErrIdentitySessionInvalid
@@ -710,11 +681,7 @@ func (s *Service) refreshPlatformSession(ctx context.Context, old PlatformAuthSe
 	if replay {
 		return LoginResponse{}, apperr.ErrIdentitySessionInvalid
 	}
-	access, err := s.auth.IssueAccess(0, old.PlatformAdminID, session.ID, true)
-	if err != nil {
-		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
-	}
-	return LoginResponse{AccessToken: access, RefreshToken: refresh}, nil
+	return out, nil
 }
 
 // handleTenantRefreshReplay 处理租户 Refresh 重放或过期命中,吊销账号会话并写入统一审计表。
@@ -754,18 +721,6 @@ func (s *Service) recordPasswordFailure(ctx context.Context, account Account) er
 		}
 		return s.auditLoginFailure(ctx, account, "password")
 	})
-}
-
-// clearPasswordFailure 清理成功登录后的失败计数。
-func (s *Service) clearPasswordFailure(ctx context.Context, account Account) error {
-	return s.store.TenantTx(ctx, account.TenantID, func(ctx context.Context, tx TxStore) error {
-		return tx.ClearPasswordFailure(ctx, account.ID, account.TenantID)
-	})
-}
-
-// ptrAccountDTO 返回账号 DTO 指针。
-func ptrAccountDTO(dto AccountDTO) *AccountDTO {
-	return &dto
 }
 
 // auditLogin 构造登录审计条目,仅在业务明确调用时写入。

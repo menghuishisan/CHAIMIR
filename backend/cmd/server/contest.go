@@ -46,19 +46,7 @@ type ContestModuleDeps struct {
 }
 
 // RegisterContestModule 构造竞赛 store/service,注册路由、事件和撮合后台任务。
-func RegisterContestModule(ctx context.Context, deps ContestModuleDeps) (*contest.Service, error) {
-	if ctx == nil {
-		return nil, fmt.Errorf("contest module 缺少后台任务 context")
-	}
-	if deps.Router == nil {
-		return nil, fmt.Errorf("contest module 缺少 HTTP router")
-	}
-	if deps.Database == nil {
-		return nil, fmt.Errorf("contest module 缺少 database")
-	}
-	if deps.Storage == nil {
-		return nil, fmt.Errorf("contest module 缺少共享对象存储")
-	}
+func RegisterContestModule(tasks *background.Runner, deps ContestModuleDeps) (*contest.Service, error) {
 	store := contest.NewStore(deps.Database)
 	key, err := base64.StdEncoding.DecodeString(deps.AuthConfig.EncryptionKey)
 	if err != nil {
@@ -97,7 +85,7 @@ func RegisterContestModule(ctx context.Context, deps ContestModuleDeps) (*contes
 		return nil, err
 	}
 	// 赛事状态推进与自动归档共用轮询间隔。
-	if err := background.Start(ctx,
+	if err := tasks.Start(
 		background.Task{
 			Name:     "contest.leaderboard",
 			Interval: time.Duration(deps.Config.MatchmakerPollIntervalSeconds) * time.Second,

@@ -245,7 +245,7 @@ func (a orgAPI) importOrgPreview(c *gin.Context) {
 		httpx.Write(c, struct{}{}, apperr.ErrIdentityImportContentInvalid.WithCause(err))
 		return
 	}
-	if maxBytes := a.svc.importMaxBytes(); maxBytes > 0 && fileHeader.Size > maxBytes {
+	if maxBytes := a.svc.uploadCfg.ImportMaxBytes; maxBytes > 0 && fileHeader.Size > maxBytes {
 		httpx.Write(c, struct{}{}, apperr.ErrIdentityImportFileTooLarge)
 		return
 	}
@@ -254,7 +254,7 @@ func (a orgAPI) importOrgPreview(c *gin.Context) {
 		httpx.Write(c, struct{}{}, apperr.ErrIdentityImportContentInvalid.WithCause(err))
 		return
 	}
-	content, sizeResult, readErr := upload.ReadBounded(file, a.svc.importMaxBytes())
+	content, sizeResult, readErr := upload.ReadBounded(file, a.svc.uploadCfg.ImportMaxBytes)
 	closeErr := file.Close()
 	if readErr != nil {
 		httpx.Write(c, struct{}{}, apperr.ErrIdentityImportContentInvalid.WithCause(readErr))

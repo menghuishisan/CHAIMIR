@@ -230,32 +230,57 @@ WHERE t.id IN (
 RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: CompleteJudgeTask :one
-UPDATE judge_task
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM judge_task AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $3
+    FOR UPDATE OF owned
+)
+UPDATE judge_task AS t
 SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.judger_id, t.source_ref, t.source_owner_id, t.source_course_id, t.source_scope, t.submitter_id, t.submitter_tenant_id, t.problem_ref, t.code_storage_key, t.code_hash, t.input_snapshot, t.sandbox_mode, t.target_sandbox_ref, t.priority, t.status, t.retry_count, t.max_retries, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until;
 
 -- name: RenewJudgeTaskLease :execrows
 -- 执行期心跳仅允许当前持有者延长未过期租约,避免长时判题被另一 worker 重领。
-UPDATE judge_task
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM judge_task AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $3
+    FOR UPDATE OF owned
+)
+UPDATE judge_task AS t
 SET lease_until = sqlc.arg(lease_until)::timestamptz, updated_at = now()
-WHERE tenant_id = $1
-  AND id = $2
-  AND status = 2
-  AND lease_token = $3
-  AND lease_until > now();
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+  AND sqlc.arg(lease_until)::timestamptz > clock_timestamp();
 
 -- name: RetryJudgeTask :one
-UPDATE judge_task
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM judge_task AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $4
+    FOR UPDATE OF owned
+)
+UPDATE judge_task AS t
 SET status = 1, retry_count = retry_count + 1, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.judger_id, t.source_ref, t.source_owner_id, t.source_course_id, t.source_scope, t.submitter_id, t.submitter_tenant_id, t.problem_ref, t.code_storage_key, t.code_hash, t.input_snapshot, t.sandbox_mode, t.target_sandbox_ref, t.priority, t.status, t.retry_count, t.max_retries, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until;
 
 -- name: FailJudgeTask :one
-UPDATE judge_task
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM judge_task AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $4
+    FOR UPDATE OF owned
+)
+UPDATE judge_task AS t
 SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.judger_id, t.source_ref, t.source_owner_id, t.source_course_id, t.source_scope, t.submitter_id, t.submitter_tenant_id, t.problem_ref, t.code_storage_key, t.code_hash, t.input_snapshot, t.sandbox_mode, t.target_sandbox_ref, t.priority, t.status, t.retry_count, t.max_retries, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until;
 
 -- name: CompleteManualJudgeTask :one
 UPDATE judge_task
@@ -307,19 +332,33 @@ WHERE status = 2
   AND retry_count >= sqlc.arg(max_attempts)::int;
 
 -- name: MarkJudgeOutboxPublished :one
-UPDATE judge_event_outbox
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM judge_event_outbox AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $3
+    FOR UPDATE OF owned
+)
+UPDATE judge_event_outbox AS t
 SET status = 3, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
-RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until;
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.task_id, t.subject, t.payload, t.status, t.retry_count, t.next_attempt_at, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until;
 
 -- name: MarkJudgeOutboxFailed :one
-UPDATE judge_event_outbox
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM judge_event_outbox AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $4
+    FOR UPDATE OF owned
+)
+UPDATE judge_event_outbox AS t
 SET status = 4,
     next_attempt_at = now() + (LEAST(300, power(2, LEAST(retry_count, 8))::int) || ' seconds')::interval,
     last_error = $3,
     updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until;
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.task_id, t.subject, t.payload, t.status, t.retry_count, t.next_attempt_at, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until;
 
 -- name: CreateSubmissionFingerprint :one
 INSERT INTO submission_fingerprint (id, tenant_id, source_ref, problem_ref, submitter_id, submitter_tenant_id, code_hash, sim_vector, created_at)

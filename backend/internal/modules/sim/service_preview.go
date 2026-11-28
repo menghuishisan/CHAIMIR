@@ -5,23 +5,24 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
+	"chaimir/internal/platform/background"
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
-	"chaimir/pkg/logging"
 	"chaimir/pkg/textx"
 )
 
 // RunPackagePreviewOnce 执行一次隔离预览扫描,供统一 background runner 调用。
 //
-// 单个包失败不阻断整批:一个包的缺陷不该让同批其他包一起卡住,失败结论会写回报告
-// 让作者看到原因。只有认领本身失败才向上返回,由 runner 重试。
+// 单包运行失败不阻断其他包；整轮返回执行与回写错误，算法不合格正常写入审核报告。
 func (s *Service) RunPackagePreviewOnce(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	batchSize, ok := intx.Int32(s.previewBatchSize)
 	if !ok || batchSize <= 0 {
 		return apperr.ErrSimPackageQueryFailed
@@ -53,17 +54,21 @@ func (s *Service) RunPackagePreviewOnce(ctx context.Context) error {
 		pending = items
 		return nil
 	}); err != nil {
-		return err
+		return errors.Join(err, ctx.Err())
 	}
+	var resultErr error
 	for _, pkg := range pending {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(resultErr, err)
+		}
 		if err := s.previewPackageWithLease(ctx, pkg, leaseDuration); err != nil {
-			logging.ErrorContext(ctx, "sim package preview failed", err.Error(), slog.Int64("package_id", pkg.ID), slog.String("code", pkg.Code), slog.String("version", pkg.Version))
+			resultErr = errors.Join(resultErr, fmt.Errorf("执行仿真包预览失败 package_id=%d code=%s version=%s: %w", pkg.ID, pkg.Code, pkg.Version, err))
 		}
 	}
-	return nil
+	return errors.Join(resultErr, ctx.Err())
 }
 
-// previewPackageWithLease 验证并持续续租后才启动可能创建长时隔离环境的预览。
+// previewPackageWithLease 确认租约后执行预览，返回前等待续租退出。
 func (s *Service) previewPackageWithLease(ctx context.Context, pkg Package, leaseDuration time.Duration) error {
 	renewed, err := s.renewPreviewLease(ctx, pkg, leaseDuration)
 	if err != nil {
@@ -72,48 +77,12 @@ func (s *Service) previewPackageWithLease(ctx context.Context, pkg Package, leas
 	if !renewed {
 		return nil
 	}
-	executionCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	done := make(chan struct{})
-	lost := make(chan struct{}, 1)
-	go s.renewPreviewLeaseUntilDone(executionCtx, pkg, leaseDuration, done, lost, cancel)
-	err = s.previewPackageOnce(executionCtx, pkg)
-	close(done)
-	select {
-	case <-lost:
-		return nil
-	default:
-		return err
-	}
-}
-
-// renewPreviewLeaseUntilDone 按租约三分之一且最长 30 秒的周期续租。
-func (s *Service) renewPreviewLeaseUntilDone(ctx context.Context, pkg Package, leaseDuration time.Duration, done <-chan struct{}, lost chan<- struct{}, cancel context.CancelFunc) {
-	interval := max(time.Second, min(leaseDuration/3, 30*time.Second))
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-done:
-			return
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			renewed, err := s.renewPreviewLease(ctx, pkg, leaseDuration)
-			if err == nil && renewed {
-				continue
-			}
-			if err != nil {
-				logging.ErrorContext(ctx, "sim package preview lease renewal failed", err.Error(), slog.Int64("package_id", pkg.ID), slog.String("code", pkg.Code), slog.String("version", pkg.Version))
-			}
-			select {
-			case lost <- struct{}{}:
-			default:
-			}
-			cancel()
-			return
-		}
-	}
+	_, err = background.WithRenewal(ctx, leaseDuration, func(ctx context.Context) (bool, error) {
+		return s.renewPreviewLease(ctx, pkg, leaseDuration)
+	}, func(ctx context.Context) error {
+		return s.previewPackageOnce(ctx, pkg)
+	})
+	return err
 }
 
 // renewPreviewLease 仅允许当前令牌延长未过期的预览租约。

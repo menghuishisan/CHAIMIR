@@ -91,16 +91,30 @@ RETURNING id, tenant_id, account_id, channel, subject, status, content_type, fil
           completed_at, next_attempt_after, lease_token, lease_until;
 
 -- name: RenewTransferTaskLease :execrows
-UPDATE transfer_task
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM transfer_task AS owned
+    WHERE owned.tenant_id = sqlc.arg(tenant_id) AND owned.id = sqlc.arg(id)
+      AND owned.status = 'running' AND owned.lease_token = sqlc.arg(lease_token)
+    FOR UPDATE OF owned
+)
+UPDATE transfer_task AS t
 SET lease_until = sqlc.arg(lease_until)::timestamptz
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND id = sqlc.arg(id)
-  AND status = 'running'
-  AND lease_token = sqlc.arg(lease_token)
-  AND lease_until > now();
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+  AND sqlc.arg(lease_until)::timestamptz > clock_timestamp();
 
 -- name: CompleteTransferTask :one
-UPDATE transfer_task
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM transfer_task AS owned
+    WHERE owned.tenant_id = sqlc.arg(tenant_id)
+      AND owned.id = sqlc.arg(id)
+      AND owned.status = 'running'
+      AND owned.lease_token = sqlc.arg(lease_token)
+    FOR UPDATE OF owned
+)
+UPDATE transfer_task AS t
 SET status = 'succeeded',
     last_error = '',
     artifact_ref = sqlc.arg(artifact_ref),
@@ -112,18 +126,24 @@ SET status = 'succeeded',
     next_attempt_after = NULL,
     lease_token = '',
     lease_until = NULL
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND id = sqlc.arg(id)
-  AND status = 'running'
-  AND lease_token = sqlc.arg(lease_token)
-  AND lease_until > sqlc.arg(updated_at)::timestamptz
-RETURNING id, tenant_id, account_id, channel, subject, status, content_type, file_name,
-          attempt_count, max_attempts, last_error, artifact_ref, artifact_size,
-          artifact_content_type, artifact_file_name, created_at, updated_at,
-          completed_at, next_attempt_after, lease_token, lease_until;
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.account_id, t.channel, t.subject, t.status, t.content_type, t.file_name,
+          t.attempt_count, t.max_attempts, t.last_error, t.artifact_ref, t.artifact_size,
+          t.artifact_content_type, t.artifact_file_name, t.created_at, t.updated_at,
+          t.completed_at, t.next_attempt_after, t.lease_token, t.lease_until;
 
 -- name: FailTransferTask :one
-UPDATE transfer_task
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM transfer_task AS owned
+    WHERE owned.tenant_id = sqlc.arg(tenant_id)
+      AND owned.id = sqlc.arg(id)
+      AND owned.status = 'running'
+      AND owned.lease_token = sqlc.arg(lease_token)
+    FOR UPDATE OF owned
+)
+UPDATE transfer_task AS t
 SET status = CASE WHEN attempt_count < max_attempts THEN 'retrying' ELSE 'failed' END,
     last_error = sqlc.arg(last_error),
     updated_at = sqlc.arg(updated_at)::timestamptz,
@@ -131,15 +151,12 @@ SET status = CASE WHEN attempt_count < max_attempts THEN 'retrying' ELSE 'failed
     next_attempt_after = CASE WHEN attempt_count < max_attempts THEN sqlc.arg(next_attempt_after)::timestamptz ELSE NULL END,
     lease_token = '',
     lease_until = NULL
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND id = sqlc.arg(id)
-  AND status = 'running'
-  AND lease_token = sqlc.arg(lease_token)
-  AND lease_until > sqlc.arg(updated_at)::timestamptz
-RETURNING id, tenant_id, account_id, channel, subject, status, content_type, file_name,
-          attempt_count, max_attempts, last_error, artifact_ref, artifact_size,
-          artifact_content_type, artifact_file_name, created_at, updated_at,
-          completed_at, next_attempt_after, lease_token, lease_until;
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.account_id, t.channel, t.subject, t.status, t.content_type, t.file_name,
+          t.attempt_count, t.max_attempts, t.last_error, t.artifact_ref, t.artifact_size,
+          t.artifact_content_type, t.artifact_file_name, t.created_at, t.updated_at,
+          t.completed_at, t.next_attempt_after, t.lease_token, t.lease_until;
 
 -- name: CountFailedTransfers :one
 SELECT count(*)::bigint FROM transfer_task WHERE tenant_id=$1 AND status='failed' AND updated_at BETWEEN $2 AND $3;

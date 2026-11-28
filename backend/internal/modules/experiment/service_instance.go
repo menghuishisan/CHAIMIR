@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"slices"
 	"strings"
@@ -525,6 +526,9 @@ func (s *Service) syncTerminalCheckpointResults(ctx context.Context, tx TxStore,
 
 // RunRecycleOnce 执行一次 M7 后台回收扫描,供统一 background runner 调用。
 func (s *Service) RunRecycleOnce(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	var items []ExperimentInstance
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
@@ -535,14 +539,9 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 		items, err = tx.ClaimRecyclableInstances(ctx, s.cfg.PausedTimeoutSeconds, s.cfg.InstanceIdleTimeoutSeconds, limit)
 		return err
 	}); err != nil {
-		return err
+		return errors.Join(err, ctx.Err())
 	}
-	for _, item := range items {
-		if _, err := s.recycleInstance(ctx, item, "lifecycle_recycle"); err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.recycleInstances(ctx, items, "lifecycle_recycle")
 }
 
 func (s *Service) controlInstance(ctx context.Context, instanceID int64, next int16, beforeSave func(context.Context, *ExperimentInstance) error) (InstanceDTO, error) {
@@ -607,6 +606,19 @@ func (s *Service) saveInstanceControl(ctx context.Context, previous, pending Exp
 		return err
 	})
 	return updated, err
+}
+
+func (s *Service) recycleInstances(ctx context.Context, items []ExperimentInstance, reason string) error {
+	var resultErr error
+	for _, item := range items {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(resultErr, err)
+		}
+		if _, err := s.recycleInstance(ctx, item, reason); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("回收实验实例失败 tenant_id=%d instance_id=%d: %w", item.TenantID, item.ID, err))
+		}
+	}
+	return errors.Join(resultErr, ctx.Err())
 }
 
 // recycleInstance 只将已回收的同一组资源落为终态，避免期间重建或新增阶段被误报为已回收。
@@ -798,18 +810,16 @@ func (s *Service) HandleCourseEnded(ctx context.Context, event contracts.Teachin
 	if event.TenantID <= 0 || event.CourseID <= 0 {
 		return apperr.ErrExperimentInstanceInvalid
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	var items []ExperimentInstance
 	if err := s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		items, err = tx.ListLiveInstancesByCourse(ctx, event.TenantID, event.CourseID)
 		return err
 	}); err != nil {
-		return err
+		return errors.Join(err, ctx.Err())
 	}
-	for _, item := range items {
-		if _, err := s.recycleInstance(ctx, item, "course_ended"); err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.recycleInstances(ctx, items, "course_ended")
 }

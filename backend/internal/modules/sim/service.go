@@ -290,7 +290,7 @@ func (s *Service) prepareBundle(ctx context.Context, tenantID, accountID, packag
 		TenantID: tenantID, AccountID: accountID,
 		Module: simModuleName, ResourceType: simBundleResourceType,
 		ResourceID: ids.Format(packageID), NestedResourceIDs: []string{ids.Format(s.ids.Generate())},
-		FileName: input.FileName, ContentType: input.ContentType, Size: int64(len(input.Data)),
+		FileName: input.FileName, ContentType: input.ContentType,
 		MaxBytes: s.upload.SimBundleMaxBytes, ExpectedBucket: s.storage.BucketCode(),
 		AllowedFileName: true, Content: input.Data, KindValidator: simBundleKind,
 		ScanPolicy: upload.ScanPolicy{Required: s.upload.VirusScanRequired},

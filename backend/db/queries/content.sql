@@ -30,10 +30,11 @@ SET body = $3,
 WHERE tenant_id = $1 AND item_id = $2
 RETURNING item_id, tenant_id, body, sensitive_fields, created_at, updated_at;
 
--- name: GetContentItemByID :one
+-- name: GetContentItemForUpdate :one
 SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
 FROM content_item
-WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL;
+WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+FOR UPDATE;
 
 -- name: GetContentItemWithBodyByRef :one
 SELECT i.id, i.tenant_id, i.code, i.version, i.type, i.title, i.category_id, i.difficulty, i.tags, i.knowledge_points, i.author_id, i.author_type, i.visibility, i.status, i.usage_count, i.version_hash, i.created_at, i.updated_at, i.deleted_at,
@@ -133,11 +134,15 @@ RETURNING id, tenant_id, code, version, type, title, category_id, difficulty, ta
 -- name: GetPublishedContentItemForUsage :one
 SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
 FROM content_item
-WHERE code = $1 AND version = $2 AND tenant_id = $3 AND status = 2 AND deleted_at IS NULL;
+WHERE code = $1 AND version = $2 AND tenant_id = $3 AND status = 2 AND deleted_at IS NULL
+FOR UPDATE;
 
 -- name: DeleteContentUsageRefsBySource :exec
 DELETE FROM content_usage_ref
 WHERE tenant_id = $1 AND source_scope = $2 AND source_ref = $3;
+
+-- name: LockContentUsageScope :exec
+SELECT pg_advisory_xact_lock(hashtextextended('content.usage', $1::bigint));
 
 -- name: ListContentUsageItemIDsBySource :many
 SELECT DISTINCT item_id
@@ -212,6 +217,11 @@ RETURNING id, tenant_id, name, author_id, gen_mode, gen_criteria, created_at, up
 
 -- name: DeletePaperItems :exec
 DELETE FROM paper_item WHERE tenant_id = $1 AND paper_id = $2;
+
+-- name: LockPaper :one
+SELECT id FROM paper
+WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+FOR UPDATE;
 
 -- name: CreatePaperItem :one
 INSERT INTO paper_item (id, tenant_id, paper_id, item_code, item_version, score, seq, created_at)

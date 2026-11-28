@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"chaimir/internal/contracts"
@@ -45,22 +44,7 @@ type TeachingModuleDeps struct {
 }
 
 // RegisterTeachingModule 构造教学 store/service,注册路由、事件和 outbox worker。
-func RegisterTeachingModule(ctx context.Context, deps TeachingModuleDeps) (*teaching.Service, error) {
-	if ctx == nil {
-		return nil, fmt.Errorf("teaching module 缺少后台任务 context")
-	}
-	if deps.Router == nil {
-		return nil, fmt.Errorf("teaching module 缺少 HTTP router")
-	}
-	if deps.Database == nil {
-		return nil, fmt.Errorf("teaching module 缺少 database")
-	}
-	if deps.Transfer == nil {
-		return nil, fmt.Errorf("teaching module 缺少 transfer service")
-	}
-	if deps.Storage == nil {
-		return nil, fmt.Errorf("teaching module 缺少统一对象存储")
-	}
+func RegisterTeachingModule(tasks *background.Runner, deps TeachingModuleDeps) (*teaching.Service, error) {
 	store := teaching.NewStore(deps.Database)
 	svc, err := teaching.NewService(teaching.ServiceDeps{
 		CleanupTimeout:         time.Duration(deps.Upload.CleanupTimeoutSeconds) * time.Second,
@@ -91,7 +75,7 @@ func RegisterTeachingModule(ctx context.Context, deps TeachingModuleDeps) (*teac
 	if _, err := teaching.SubscribeEvents(deps.EventBus, svc); err != nil {
 		return nil, err
 	}
-	if err := background.Start(ctx,
+	if err := tasks.Start(
 		background.Task{
 			Name:     "teaching.judge_outbox",
 			Interval: time.Duration(deps.Config.JudgeOutboxPollIntervalMs) * time.Millisecond,

@@ -190,6 +190,10 @@ func (s *store) ClaimTask(ctx context.Context, task Task) (Task, error) {
 			UpdatedAt:  timex.RequiredTimestamptz(task.UpdatedAt),
 			LeaseUntil: timex.RequiredTimestamptz(task.LeaseUntil),
 		})
+		// 未领取也须等事务成功，不能用未命中掩盖提交失败。
+		if db.IsNoRows(err) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -198,6 +202,9 @@ func (s *store) ClaimTask(ctx context.Context, task Task) (Task, error) {
 	})
 	if err != nil {
 		return Task{}, mapTransitionError(err)
+	}
+	if out.TaskID == 0 {
+		return Task{}, ErrTaskNotClaimable
 	}
 	return out, nil
 }

@@ -20,7 +20,7 @@ func (s *Service) ListPapers(ctx context.Context, page, size int) ([]PaperDTO, i
 	var papers []Paper
 	var total int64
 	var byMode map[string]int64
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.TenantReadTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		papers, total, err = tx.ListPapers(ctx, id.TenantID, page, size)
 		if err != nil {
@@ -84,7 +84,7 @@ func (s *Service) GetPaperDetail(ctx context.Context, paperID int64) (PaperDetai
 		return PaperDetailDTO{}, err
 	}
 	var detail PaperWithItems
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.TenantReadTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		paper, err := tx.GetPaper(ctx, id.TenantID, paperID)
 		if err != nil {
 			return mapPaperError(err)

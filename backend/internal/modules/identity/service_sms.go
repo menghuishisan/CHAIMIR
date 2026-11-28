@@ -5,17 +5,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
+	platformredis "chaimir/internal/platform/redis"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
-	"chaimir/pkg/logging"
 )
 
 // SendSMS 发送短信验证码,执行同号同场景重发间隔和每日上限。
@@ -40,12 +39,12 @@ func (s *Service) SendSMS(ctx context.Context, req SendSMSRequest) error {
 	}
 	// 先写短间隔限频键,避免短信网关慢响应时同一号码被并发刷爆。
 	resendKey := fmt.Sprintf("identity:sms:resend:%s:%s:%d", ids.Format(tenantID), phoneHash, req.Scene)
-	ok, err := s.redis.SetNX(ctx, resendKey, time.Duration(s.cfg.SMSResendSeconds)*time.Second)
+	reservation, err := s.redis.ObtainLease(ctx, resendKey, time.Duration(s.cfg.SMSResendSeconds)*time.Second)
+	if errors.Is(err, platformredis.ErrLeaseHeld) {
+		return apperr.ErrIdentitySMSTooFrequent
+	}
 	if err != nil {
 		return apperr.ErrInternal.WithCause(err)
-	}
-	if !ok {
-		return apperr.ErrIdentitySMSTooFrequent
 	}
 	// 每日上限按手机号哈希统计,日志和 Redis key 都不暴露手机号明文。
 	dayKey := fmt.Sprintf("identity:sms:day:%s:%s:%s", ids.Format(tenantID), phoneHash, timex.Now().Format("20060102"))
@@ -79,20 +78,23 @@ func (s *Service) SendSMS(ctx context.Context, req SendSMSRequest) error {
 	}
 	// 先持久化哈希再发送明文验证码,避免用户收到数据库中不存在的验证码。
 	if err := s.sms.Send(ctx, phone, req.Scene, code); err != nil {
-		s.rollbackSMSRateLimit(ctx, resendKey, dayKey, tenantID)
-		return apperr.ErrInternal.WithCause(err)
+		return apperr.ErrInternal.WithCause(errors.Join(err, s.rollbackSMSRateLimit(ctx, reservation.Release, dayKey)))
 	}
 	return nil
 }
 
-// rollbackSMSRateLimit 回滚短信网关失败占用的限频窗口,不覆盖原始发送错误。
-func (s *Service) rollbackSMSRateLimit(ctx context.Context, resendKey, dayKey string, tenantID int64) {
-	if err := s.redis.Delete(ctx, resendKey); err != nil {
-		logging.ErrorContext(ctx, "回滚短信重发限频失败", err.Error(), slog.Int64("tenant_id", tenantID))
+// rollbackSMSRateLimit 仅退还本次持有的窗口；调用取消后仍在原窗口预算内完成。
+func (s *Service) rollbackSMSRateLimit(ctx context.Context, release func(context.Context) error, dayKey string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(s.cfg.SMSResendSeconds)*time.Second)
+	defer cancel()
+	var failures []error
+	if err := release(ctx); err != nil && !errors.Is(err, platformredis.ErrLeaseNotHeld) {
+		failures = append(failures, fmt.Errorf("回滚短信重发限频失败: %w", err))
 	}
 	if _, err := s.redis.Decr(ctx, dayKey); err != nil {
-		logging.ErrorContext(ctx, "回滚短信每日限额失败", err.Error(), slog.Int64("tenant_id", tenantID))
+		failures = append(failures, fmt.Errorf("回滚短信每日限额失败: %w", err))
 	}
+	return errors.Join(failures...)
 }
 
 // verifySMSCodeInTx 在调用方事务内完成验证码校验和一次性消费。

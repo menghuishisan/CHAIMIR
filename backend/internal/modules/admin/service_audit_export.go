@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -20,7 +19,6 @@ import (
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/transfer"
 	"chaimir/pkg/apperr"
-	"chaimir/pkg/logging"
 )
 
 const auditExportSubject = "admin.audit_export"
@@ -63,6 +61,9 @@ func (s *Service) ExportAuditCSV(ctx context.Context, query contracts.AuditQuery
 
 // RunAuditExportOnce 执行一次 M9 审计导出请求扫描，供统一 background runner 调用。
 func (s *Service) RunAuditExportOnce(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	limit, ok := intx.Int32(s.cfg.AuditExportWorkerBatchSize)
 	if !ok || limit <= 0 {
 		return apperr.ErrAdminAuditExportTaskCreateFailed
@@ -73,21 +74,28 @@ func (s *Service) RunAuditExportOnce(ctx context.Context) error {
 		requests, err = tx.ListDueAuditExportRequests(ctx, timex.Now(), limit)
 		return err
 	}); err != nil {
-		return apperr.ErrAdminAuditExportTaskCreateFailed.WithCause(err)
+		return errors.Join(apperr.ErrAdminAuditExportTaskCreateFailed.WithCause(err), ctx.Err())
 	}
+	var failures error
 	for _, req := range requests {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(failures, err)
+		}
 		if err := s.runAuditExportRequest(ctx, req); err != nil {
-			logging.ErrorContext(ctx, "admin audit export worker item failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", req.TenantID), slog.Int64("transfer_task_id", req.TransferTaskID))
+			failures = errors.Join(failures, fmt.Errorf("导出审计失败 tenant_id=%d task_id=%d: %w", req.TenantID, req.TransferTaskID, err))
 		}
 	}
-	return nil
+	return errors.Join(failures, ctx.Err())
 }
 
 // runAuditExportRequest claims one request's transfer task and generates its CSV artifact.
 func (s *Service) runAuditExportRequest(ctx context.Context, req AuditExportRequest) error {
 	task, err := s.transfers.ClaimTask(ctx, req.TenantID, req.TransferTaskID)
-	if err != nil {
+	if errors.Is(err, transfer.ErrTaskNotClaimable) {
 		return s.reconcileAuditExportRequest(ctx, req)
+	}
+	if err != nil {
+		return errors.Join(err, s.deferAuditExportRequest(ctx, req, timex.Now().Add(time.Duration(s.cfg.AuditExportWorkerPollMs)*time.Millisecond)))
 	}
 	var data []byte
 	var plan storage.UploadPlan
@@ -102,7 +110,7 @@ func (s *Service) runAuditExportRequest(ctx context.Context, req AuditExportRequ
 		if err != nil {
 			return err
 		}
-		plan, err = s.files.PlanUpload(workCtx, storage.PlanUploadRequest{TenantID: req.TenantID, AccountID: req.AccountID, AllowPlatformScope: req.TenantID == 0, Module: "transfer", ResourceType: string(transfer.ChannelExport), ResourceID: ids.Format(task.TaskID), FileName: artifactFileName, ContentType: task.ContentType, Size: int64(len(data)), ExpectedBucket: s.storage.BucketReport(), AllowedFileName: true, Content: data})
+		plan, err = s.files.PlanUpload(workCtx, storage.PlanUploadRequest{TenantID: req.TenantID, AccountID: req.AccountID, AllowPlatformScope: req.TenantID == 0, Module: "transfer", ResourceType: string(transfer.ChannelExport), ResourceID: ids.Format(task.TaskID), FileName: artifactFileName, ContentType: task.ContentType, ExpectedBucket: s.storage.BucketReport(), AllowedFileName: true, Content: data})
 		if err != nil {
 			return err
 		}

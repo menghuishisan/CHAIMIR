@@ -11,6 +11,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/background"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
@@ -218,8 +219,8 @@ func (s *Service) AddProblem(ctx context.Context, contestID int64, req ProblemRe
 	if err != nil {
 		return ProblemDTO{}, apperr.ErrContestContentUnavailable.WithCause(fmt.Errorf("读取赛题内容失败 tenant_id=%d contest_id=%d: %w", id.TenantID, contestID, err))
 	}
-	if !contestContentTypeAllowed(contest.Mode, full.Type) {
-		return ProblemDTO{}, apperr.ErrContestProblemInvalid.WithCause(fmt.Errorf("内容类型与赛制不匹配 tenant_id=%d contest_id=%d mode=%d content_type=%d", id.TenantID, contestID, contest.Mode, full.Type))
+	if _, err := validateContestContent(contest.Mode, full); err != nil {
+		return ProblemDTO{}, err
 	}
 	var compositionSnapshot *contracts.SandboxCompositionSnapshot
 	if rawComposition, declared := full.Body["composition"]; declared {
@@ -456,6 +457,9 @@ func (s *Service) ArchiveContest(ctx context.Context, contestID int64) (ResultSn
 
 // RunAutoArchiveOnce 执行一次竞赛自动收尾扫描,供统一 background runner 调用。
 func (s *Service) RunAutoArchiveOnce(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	var items []ContestArchiveClaim
 	leaseToken, err := pkgcrypto.RandomToken(48)
 	if err != nil {
@@ -468,14 +472,18 @@ func (s *Service) RunAutoArchiveOnce(ctx context.Context) error {
 		items, err = tx.ClaimAutoArchiveContests(ctx, s.cfg.MatchmakerBatchSize, staleBefore, leaseUntil, leaseToken)
 		return err
 	}); err != nil {
-		return err
+		return errors.Join(err, ctx.Err())
 	}
+	var resultErr error
 	for _, item := range items {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(resultErr, err)
+		}
 		if _, err := s.archiveContest(ctx, item, "contest_auto_archive", 0); err != nil {
-			return err
+			resultErr = errors.Join(resultErr, fmt.Errorf("自动归档竞赛失败 tenant_id=%d contest_id=%d: %w", item.TenantID, item.ID, err))
 		}
 	}
-	return nil
+	return errors.Join(resultErr, ctx.Err())
 }
 
 // AdvanceContestStatusesOnce 按赛事时间窗口推进报名、进行中、封榜和结束状态。
@@ -597,22 +605,32 @@ func (s *Service) listAllContestLadder(ctx context.Context, tx TxStore, tenantID
 
 // archiveContest 共用归档收尾；actorID 为零时记录系统任务，否则记录实际教师。
 func (s *Service) archiveContest(ctx context.Context, item ContestArchiveClaim, reason string, actorID int64) (LadderSnapshot, error) {
-	var revokedGrants []ContestAccessGrant
-	if err := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
-		revokedGrants, err = s.revokeContestSandboxGrants(ctx, tx, item.TenantID, item.ID)
-		return err
-	}); err != nil {
+	if err := ctx.Err(); err != nil {
 		return LadderSnapshot{}, err
 	}
-	if err := s.closeRevokedContestSandboxSessions(ctx, item.TenantID, revokedGrants); err != nil {
-		return LadderSnapshot{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
+	leaseDuration := time.Duration(s.cfg.AutoArchiveLeaseDurationMs) * time.Millisecond
+	err := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
+		return renewContestArchiveLease(ctx, tx, item, leaseDuration)
+	})
+	if err != nil {
+		return LadderSnapshot{}, err
 	}
-	if err := s.recycleContestSandboxes(ctx, item.TenantID, item.ID, reason); err != nil {
-		return LadderSnapshot{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
+	_, err = background.WithRenewal(ctx, leaseDuration, func(ctx context.Context) (bool, error) {
+		err := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
+			return renewContestArchiveLease(ctx, tx, item, leaseDuration)
+		})
+		return err == nil, err
+	}, func(ctx context.Context) error {
+		return s.cleanupContestForArchive(ctx, item, reason)
+	})
+	if err != nil {
+		return LadderSnapshot{}, err
 	}
 	var snapshot LadderSnapshot
 	if err := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
+		if err := renewContestArchiveLease(ctx, tx, item, leaseDuration); err != nil {
+			return err
+		}
 		ranks, err := s.listAllContestLadder(ctx, tx, item.TenantID, item.ID)
 		if err != nil {
 			return err
@@ -639,22 +657,58 @@ func (s *Service) archiveContest(ctx context.Context, item ContestArchiveClaim, 
 	return snapshot, nil
 }
 
+func renewContestArchiveLease(ctx context.Context, tx TxStore, item ContestArchiveClaim, duration time.Duration) error {
+	renewed, err := tx.RenewContestArchiveLease(ctx, item.TenantID, item.ID, item.ArchiveLeaseToken, timex.Now().Add(duration))
+	if err != nil {
+		return err
+	}
+	if !renewed {
+		return apperr.ErrContestStateInvalid
+	}
+	return nil
+}
+
+func (s *Service) cleanupContestForArchive(ctx context.Context, item ContestArchiveClaim, reason string) error {
+	var revokedGrants []ContestAccessGrant
+	if err := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		revokedGrants, err = s.revokeContestSandboxGrants(ctx, tx, item.TenantID, item.ID)
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := s.closeRevokedContestSandboxSessions(ctx, item.TenantID, revokedGrants); err != nil {
+		return apperr.ErrContestSandboxUnavailable.WithCause(err)
+	}
+	if err := s.recycleContestSandboxes(ctx, item.TenantID, item.ID, reason); err != nil {
+		return apperr.ErrContestSandboxUnavailable.WithCause(err)
+	}
+	return nil
+}
+
 // recycleContestSandboxes 回收竞赛关联的全部解题与对局环境。
 func (s *Service) recycleContestSandboxes(ctx context.Context, tenantID, contestID int64, reason string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	var scopeRefs []string
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		scopeRefs, err = tx.ListContestSandboxScopeRefsForArchive(ctx, tenantID, contestID)
 		return err
 	}); err != nil {
-		return err
+		return errors.Join(err, ctx.Err())
 	}
+	var resultErr error
 	for _, scopeRef := range scopeRefs {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(resultErr, err)
+		}
 		if err := s.sandbox.RecycleByScopeRef(ctx, contracts.SandboxRecycleRequest{TenantID: tenantID, ScopeRef: scopeRef, SourceRef: scopeRef, Reason: reason}); err != nil {
-			return err
+			resultErr = errors.Join(resultErr, fmt.Errorf("回收竞赛环境失败 scope_ref=%s: %w", scopeRef, err))
 		}
 	}
-	return nil
+	return errors.Join(resultErr, ctx.Err())
 }
 
 // GetSnapshot 按赛事管理范围读取最终榜单快照。
@@ -731,6 +785,13 @@ func (s *Service) transitionContest(ctx context.Context, contestID int64, next i
 	if requireProblems {
 		digests := make([]string, 0, len(problems))
 		for _, problem := range problems {
+			face, err := s.content.GetContentFace(ctx, id.TenantID, contracts.ContentItemRef{ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion})
+			if err != nil {
+				return ContestDTO{}, apperr.ErrContestContentUnavailable.WithCause(err)
+			}
+			if _, err := validateContestContent(item.Mode, face); err != nil {
+				return ContestDTO{}, err
+			}
 			if problem.CompositionSnapshot != nil {
 				digests = append(digests, problem.CompositionDigest)
 			}
@@ -742,12 +803,6 @@ func (s *Service) transitionContest(ctx context.Context, contestID int64, next i
 			if err := s.sandbox.PrepareCompositions(ctx, digests); err != nil {
 				return ContestDTO{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
 			}
-		}
-	}
-	// M5 自有事务在 M8 事务外执行,避免持有应用池连接时再次等待同一连接池。
-	if requireProblems {
-		if err := s.refreshProblemUsageRefs(ctx, item, problems); err != nil {
-			return ContestDTO{}, err
 		}
 	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -763,9 +818,12 @@ func (s *Service) transitionContest(ctx context.Context, contestID int64, next i
 			if err != nil {
 				return err
 			}
-			// 引用登记后再次比对完整题目集合,不以旧赛制或旧快照发布并发改过的草稿。
+			// 事务外准备过的题目必须仍是当前集合，才可登记引用并发布。
 			if current.Mode != item.Mode || !reflect.DeepEqual(problems, latestProblems) {
 				return apperr.ErrContestStateInvalid
+			}
+			if err := s.refreshProblemUsageRefs(ctx, current, latestProblems); err != nil {
+				return err
 			}
 		}
 		if next == ContestStatusRunning {

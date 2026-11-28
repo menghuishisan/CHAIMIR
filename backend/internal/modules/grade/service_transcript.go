@@ -51,7 +51,6 @@ func (s *Service) GenerateTranscript(ctx context.Context, req TranscriptRequest)
 		ResourceID:      summary.StudentID.String(),
 		FileName:        fileName,
 		ContentType:     transcriptPDFContentType,
-		Size:            int64(len(pdf)),
 		MaxBytes:        s.cfg.TranscriptMaxBytes,
 		ExpectedBucket:  s.storage.BucketReport(),
 		AllowedFileName: true,

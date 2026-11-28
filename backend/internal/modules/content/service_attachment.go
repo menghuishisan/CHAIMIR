@@ -40,7 +40,6 @@ func (s *Service) UploadAttachment(ctx context.Context, actor auditActorSnapshot
 		NestedResourceIDs: []string{ids.Format(s.ids.Generate())},
 		FileName:          req.FileName,
 		ContentType:       req.ContentType,
-		Size:              int64(len(req.Content)),
 		MaxBytes:          s.contentAttachmentMaxBytes,
 		ExpectedBucket:    s.storage.BucketAttach(),
 		AllowedFileName:   true,
@@ -77,7 +76,7 @@ func (s *Service) IssueAttachmentDownloadGrant(ctx context.Context, actor auditA
 		return AttachmentDownloadGrantDTO{}, apperr.ErrContentAttachmentInvalid
 	}
 	var item ItemWithBody
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.TenantReadTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var readErr error
 		item, readErr = tx.GetItemWithBodyByID(ctx, id.TenantID, itemID)
 		return readErr

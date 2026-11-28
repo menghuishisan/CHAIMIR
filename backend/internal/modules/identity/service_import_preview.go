@@ -103,6 +103,6 @@ func (s *Service) DiscardImportPreviewByAdmin(ctx context.Context, previewID int
 		if err != nil {
 			return err
 		}
-		return tx.WriteAudit(ctx, WriteAuditInput{ID: s.ids.Generate(), TenantID: entry.TenantID, ActorID: entry.ActorID, ActorRole: entry.ActorRole, Action: entry.Action, TargetType: entry.TargetType, TargetID: entry.TargetID, Detail: []byte(entry.Detail), IP: entry.IP, TraceID: entry.TraceID})
+		return s.auditWriter.writeInTx(ctx, tx, entry)
 	})
 }

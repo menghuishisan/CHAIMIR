@@ -16,6 +16,7 @@ import {
   type ContestRecord,
   type ContestSubmission,
   type LadderRank,
+  type TheoryAnswer,
 } from '@chaimir/api-client'
 import {
   Badge,
@@ -31,6 +32,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { AppStatusScreen } from '../../../../components/AppStatusScreen'
+import { TheoryAnswerControl } from '../../../../components/TheoryAnswerControl'
 import { ResourceError } from '../../../../components/ResourceState'
 import {
   SandboxIdeWorkspace,
@@ -46,6 +48,7 @@ import { readString } from '../../jsonReaders'
 import { formatDateTime } from '../../../../utils/formatters'
 import { battleRoleLabel, contestStatusLabel } from '../../../../utils/labels/contest'
 import { errorDiagnostics, userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { isAutomaticTheoryQuestion, isTheoryAnswerEmpty } from '../../../../utils/theoryAnswers'
 import { CONTEST_LADDER_PREVIEW_SIZE } from '../../queryLimits'
 import { battleEntryRoles, isContestAnswerable, isContestLeaderboardFrozen } from '../../rules'
 
@@ -218,6 +221,7 @@ function ContestWorkbenchSession({
   const [sandboxId, setSandboxId] = useState<string>()
   const [sandboxReady, setSandboxReady] = useState(false)
   const [answer, setAnswer] = useState('')
+  const [theoryAnswer, setTheoryAnswer] = useState<TheoryAnswer>()
   const [role, setRole] = useState<BattleRole | undefined>(() =>
     spec.battleRule === undefined ? undefined : battleEntryRoles(spec.battleRule)[0]
   )
@@ -246,7 +250,9 @@ function ContestWorkbenchSession({
       ? Boolean(sandboxId && sandboxReady)
       : spec.kind === 'answer'
         ? Boolean(spec.submitKey && answer.trim())
-        : false
+        : spec.kind === 'theory'
+          ? !isTheoryAnswerEmpty(theoryAnswer)
+          : false
 
   const ladder = useAsyncResource(
     () =>
@@ -271,9 +277,14 @@ function ContestWorkbenchSession({
     onMessage: (data) => {
       try {
         const frame: unknown = JSON.parse(data)
-        if (!frame || typeof frame !== 'object' || Array.isArray(frame)) throw new Error('榜单推送格式不正确')
+        if (!frame || typeof frame !== 'object' || Array.isArray(frame))
+          throw new Error('榜单推送格式不正确')
         if ('type' in frame && frame.type === 'subscribed') {
-          if (!('topics' in frame) || !Array.isArray(frame.topics) || !frame.topics.includes(contest.leaderboard_topic)) {
+          if (
+            !('topics' in frame) ||
+            !Array.isArray(frame.topics) ||
+            !frame.topics.includes(contest.leaderboard_topic)
+          ) {
             throw new Error('榜单订阅确认与请求主题不一致')
           }
           setLadderFeed('live')
@@ -344,7 +355,11 @@ function ContestWorkbenchSession({
     return perform(async () => {
       submissionRequestRef.current += 1
       const contentRef: Record<string, unknown> =
-        spec.submitKey && answer.trim() !== '' ? { [spec.submitKey]: answer.trim() } : {}
+        spec.kind === 'theory'
+          ? { student_answer: theoryAnswer }
+          : spec.submitKey && answer.trim() !== ''
+            ? { [spec.submitKey]: answer.trim() }
+            : {}
       const result = await api.contest.submitSolve(contest.id, problem.id, {
         content_ref: contentRef,
         sandbox_ref: spec.kind === 'environment' ? sandboxId : undefined,
@@ -512,6 +527,8 @@ function ContestWorkbenchSession({
           answerable={answerable}
           answer={answer}
           onAnswerChange={setAnswer}
+          theoryAnswer={theoryAnswer}
+          onTheoryAnswerChange={setTheoryAnswer}
           onCreateEnv={() => void createEnv()}
           onReadinessChange={setSandboxReady}
         />
@@ -544,7 +561,12 @@ function ContestWorkbenchSession({
             resource={ladder}
             mode={contest.mode}
             live={ladderSocket.status === 'open' && ladderFeed === 'live'}
-            feedError={ladderFeed === 'invalid' ? '榜单自动更新暂不可用，请重新连接。' : ladderSocket.error ?? (ladderSocket.status === 'closed' ? '榜单自动更新已断开。' : undefined)}
+            feedError={
+              ladderFeed === 'invalid'
+                ? '榜单自动更新暂不可用，请重新连接。'
+                : (ladderSocket.error ??
+                  (ladderSocket.status === 'closed' ? '榜单自动更新已断开。' : undefined))
+            }
             onReconnect={ladderSocket.reconnect}
             frozen={isContestLeaderboardFrozen(contest.status)}
           />
@@ -560,6 +582,7 @@ function ContestWorkbenchSession({
               </Badge>
               <span className="font-mono tabular-nums">本题 {problem.score} 分</span>
               {spec.kind === 'answer' && answer.trim() ? <span>答案已填写</span> : null}
+              {spec.kind === 'theory' && submissionReady ? <span>答案已填写</span> : null}
             </span>
             {actionError ? (
               <span className="mt-0.5 text-xs text-on-dark-danger">{actionError}</span>
@@ -574,7 +597,9 @@ function ContestWorkbenchSession({
                 实操环境准备好后即可提交,平台会在提交时保存当前工作区。
               </span>
             ) : null}
-            {answerable && !submissionReady && spec.kind === 'answer' ? (
+            {answerable &&
+            !submissionReady &&
+            (spec.kind === 'answer' || spec.kind === 'theory') ? (
               <span className="mt-0.5 text-xs text-on-dark-sub">填写答案后才能提交。</span>
             ) : null}
           </div>
@@ -590,7 +615,7 @@ function ContestWorkbenchSession({
 }
 
 interface ProblemSpec {
-  kind: 'environment' | 'answer' | 'battle' | 'undeclared'
+  kind: 'environment' | 'answer' | 'theory' | 'battle' | 'undeclared'
   title: string
   scenario: string
   statement: string
@@ -598,6 +623,7 @@ interface ProblemSpec {
   runtimeName: string
   submitKey?: string
   battleRule?: BattleRule
+  theory?: Record<string, unknown>
 }
 
 // 答案键与实操环境独立；学生端不拼装组合或读取私有判题配置。
@@ -614,6 +640,10 @@ function problemSpec(problem: ContestProblem): ProblemSpec {
 
   if (problem.battle_rule !== undefined) {
     return { ...base, kind: 'battle', battleRule: problem.battle_rule }
+  }
+
+  if (isAutomaticTheoryQuestion(face)) {
+    return { ...base, kind: 'theory', hasEnvironment: false, theory: face }
   }
 
   const submitKey = readString(face, 'submit_key').trim()
@@ -696,6 +726,8 @@ interface ProblemStageProps {
   answerable: boolean
   answer: string
   onAnswerChange: (value: string) => void
+  theoryAnswer: TheoryAnswer | undefined
+  onTheoryAnswerChange: (value: TheoryAnswer) => void
   onCreateEnv: () => void
   onReadinessChange: (ready: boolean) => void
 }
@@ -708,6 +740,8 @@ function ProblemStage({
   answerable,
   answer,
   onAnswerChange,
+  theoryAnswer,
+  onTheoryAnswerChange,
   onCreateEnv,
   onReadinessChange,
 }: ProblemStageProps) {
@@ -724,6 +758,22 @@ function ProblemStage({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {spec.kind === 'theory' ? (
+        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
+          <h2 id="contest-theory-answer" className="text-sm font-medium text-on-dark">
+            你的答案
+          </h2>
+          <TheoryAnswerControl
+            id="contest-theory"
+            body={spec.theory}
+            headingId="contest-theory-answer"
+            value={theoryAnswer}
+            onChange={onTheoryAnswerChange}
+            disabled={!answerable || busy}
+            onDark
+          />
+        </div>
+      ) : null}
       {spec.kind === 'answer' ? (
         <div className="flex shrink-0 flex-col gap-3 p-4">
           <label className="flex flex-col gap-1">
@@ -742,7 +792,7 @@ function ProblemStage({
           </p>
         </div>
       ) : null}
-      {spec.hasEnvironment || spec.kind !== 'answer' ? (
+      {spec.hasEnvironment || (spec.kind !== 'answer' && spec.kind !== 'theory') ? (
         sandboxId ? (
           <div className="min-h-0 flex-1">
             <SandboxIdeWorkspace
@@ -902,7 +952,12 @@ function BattlePanel({
         {entryStatus === 'loading' ? (
           <p className="text-xs text-on-dark-sub">正在读取参战历史...</p>
         ) : entryStatus === 'error' ? (
-          <ResourceError onDark message={entryError ?? '参战历史暂时读不到,请稍后重试。'} traceId={entryTraceId} onRetry={onEntryRetry} />
+          <ResourceError
+            onDark
+            message={entryError ?? '参战历史暂时读不到,请稍后重试。'}
+            traceId={entryTraceId}
+            onRetry={onEntryRetry}
+          />
         ) : entryStatus === 'empty' ? (
           <p className="text-xs text-on-dark-sub">还没有提交过参战物。</p>
         ) : (
@@ -972,9 +1027,16 @@ function LadderPanel({ resource, mode, live, feedError, onReconnect, frozen }: L
         ) : null}
       </div>
       {resource.status === 'error' ? (
-        <ResourceError onDark message={resource.error?.message ?? '榜单暂时无法读取，请重试。'} traceId={resource.error?.traceId} onRetry={resource.reload} />
+        <ResourceError
+          onDark
+          message={resource.error?.message ?? '榜单暂时无法读取，请重试。'}
+          traceId={resource.error?.traceId}
+          onRetry={resource.reload}
+        />
       ) : resource.status === 'loading' ? (
-        <p role="status" className="text-xs text-on-dark-sub">正在读取榜单...</p>
+        <p role="status" className="text-xs text-on-dark-sub">
+          正在读取榜单...
+        </p>
       ) : ranks.length === 0 ? (
         <p className="text-xs text-on-dark-sub">还没有队伍上榜。</p>
       ) : (
@@ -999,7 +1061,9 @@ function LadderPanel({ resource, mode, live, feedError, onReconnect, frozen }: L
       {feedError ? (
         <div role="status" className="flex flex-col items-start gap-2">
           <p className="text-xs text-on-dark-sub">{feedError}</p>
-          <Button variant="on-dark" size="sm" onClick={onReconnect}>重新连接</Button>
+          <Button variant="on-dark" size="sm" onClick={onReconnect}>
+            重新连接
+          </Button>
         </div>
       ) : null}
       <p className="text-xs text-on-dark-faint">

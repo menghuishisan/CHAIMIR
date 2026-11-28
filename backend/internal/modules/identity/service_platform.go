@@ -75,7 +75,7 @@ func (s *Service) ApproveApplication(ctx context.Context, appID int64, req Revie
 	if err := ValidatePhone(req.AdminPhone); err != nil {
 		return TenantDTO{}, "", err
 	}
-	var created Tenant
+	var out TenantDTO
 	var activation string
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		// 平台审核在同一事务内创建租户、更新申请、注入新租户 RLS 并开通首个管理员。
@@ -98,6 +98,10 @@ func (s *Service) ApproveApplication(ctx context.Context, appID int64, req Revie
 		if err != nil {
 			return err
 		}
+		out, err = ToTenantDTO(t)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.ApproveTenantApplication(ctx, appID, id.AccountID, tenantID); err != nil {
 			return err
 		}
@@ -110,35 +114,19 @@ func (s *Service) ApproveApplication(ctx context.Context, appID int64, req Revie
 		}
 		// 首管账号创建失败会回滚租户和申请状态,激活码明文只在审核结果中返回一次。
 		activation = code
-		created = t
-		if err := s.enqueueTenantProvision(ctx, tx, created); err != nil {
+		if err := s.enqueueTenantProvision(ctx, tx, t); err != nil {
 			return err
 		}
-		entry, err := audit.BuildEntry(ctx, 0, id.AccountID, contracts.RoleNumPlatformAdmin, "tenant.application.approve", "identity.tenant_application", appID, map[string]any{"tenant_id": created.ID})
+		entry, err := audit.BuildEntry(ctx, 0, id.AccountID, contracts.RoleNumPlatformAdmin, "tenant.application.approve", "identity.tenant_application", appID, map[string]any{"tenant_id": t.ID})
 		if err != nil {
 			return err
 		}
-		return tx.WriteAudit(ctx, WriteAuditInput{
-			ID:         s.ids.Generate(),
-			TenantID:   entry.TenantID,
-			ActorID:    entry.ActorID,
-			ActorRole:  entry.ActorRole,
-			Action:     entry.Action,
-			TargetType: entry.TargetType,
-			TargetID:   entry.TargetID,
-			Detail:     []byte(entry.Detail),
-			IP:         entry.IP,
-			TraceID:    entry.TraceID,
-		})
+		return s.auditWriter.writeInTx(ctx, tx, entry)
 	}); err != nil {
 		return TenantDTO{}, "", apperr.ErrInternal.WithCause(err)
 	}
 	s.drainTenantProvisionOutboxBestEffort(ctx)
-	dto, err := ToTenantDTO(created)
-	if err != nil {
-		return TenantDTO{}, "", err
-	}
-	return dto, activation, nil
+	return out, activation, nil
 }
 
 // RejectApplication 驳回学校入驻申请。
@@ -381,18 +369,7 @@ func (s *Service) BootstrapSchoolTenant(ctx context.Context, cfg config.Bootstra
 		if err != nil {
 			return err
 		}
-		return tx.WriteAudit(ctx, WriteAuditInput{
-			ID:         s.ids.Generate(),
-			TenantID:   entry.TenantID,
-			ActorID:    entry.ActorID,
-			ActorRole:  entry.ActorRole,
-			Action:     entry.Action,
-			TargetType: entry.TargetType,
-			TargetID:   entry.TargetID,
-			Detail:     []byte(entry.Detail),
-			IP:         entry.IP,
-			TraceID:    entry.TraceID,
-		})
+		return s.auditWriter.writeInTx(ctx, tx, entry)
 	}); err != nil {
 		return TenantDTO{}, apperr.AsAppError(err)
 	}
@@ -453,19 +430,8 @@ func (s *Service) createBootstrapAdminInTx(ctx context.Context, tx TxStore, tena
 	if err != nil {
 		return Account{}, "", err
 	}
-	// 激活码明文只返回一次,落库只保存 HMAC 哈希。
-	code, err := crypto.RandomToken(16)
-	if err != nil {
-		return Account{}, "", err
-	}
-	hash, err := s.hashSecret(code)
-	if err != nil {
-		return Account{}, "", err
-	}
-	if _, err := tx.CreateActivationCode(ctx, CreateActivationInput{ID: s.ids.Generate(), TenantID: tenantID, AccountID: accountID, CodeHash: hash, ExpireAt: s.activationExpireAt(), CreatedBy: 0}); err != nil {
-		return Account{}, "", err
-	}
-	return account, code, nil
+	code, err := s.createActivationCodeInTx(ctx, tx, tenantID, accountID, 0)
+	return account, code, err
 }
 
 // ensurePlatformLayerEnabled 校验 SaaS 平台层是否启用,私有化部署所有平台能力都必须关闭。

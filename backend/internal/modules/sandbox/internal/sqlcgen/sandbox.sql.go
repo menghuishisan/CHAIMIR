@@ -309,7 +309,17 @@ func (q *Queries) ClaimSandboxWorkspaceRevision(ctx context.Context, arg ClaimSa
 }
 
 const completeExpiredSandboxSnapshotCleanup = `-- name: CompleteExpiredSandboxSnapshotCleanup :execrows
-UPDATE sandbox
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.resource_lease_until
+    FROM sandbox AS owned
+    WHERE owned.tenant_id = $1
+      AND owned.id = $2
+      AND owned.status = 5
+      AND owned.snapshot_expire_at <= now()
+      AND owned.resource_lease_token = $3
+    FOR UPDATE OF owned
+)
+UPDATE sandbox AS t
 SET snapshot_ref = NULL,
     snapshot_domains = '[]'::jsonb,
     snapshot_created_at = NULL,
@@ -317,12 +327,8 @@ SET snapshot_ref = NULL,
     resource_lease_token = '',
     resource_lease_until = NULL,
     updated_at = now()
-WHERE tenant_id = $1
-  AND id = $2
-  AND status = 5
-  AND snapshot_expire_at <= now()
-  AND resource_lease_token = $3
-  AND resource_lease_until > now()
+FROM current_lease l
+WHERE t.id = l.id AND l.resource_lease_until > clock_timestamp()
 `
 
 type CompleteExpiredSandboxSnapshotCleanupParams struct {
@@ -340,13 +346,19 @@ func (q *Queries) CompleteExpiredSandboxSnapshotCleanup(ctx context.Context, arg
 }
 
 const completeSandboxRecycle = `-- name: CompleteSandboxRecycle :execrows
-UPDATE sandbox
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.resource_lease_until
+    FROM sandbox AS owned
+    WHERE owned.tenant_id = $1
+      AND owned.id = $2
+      AND owned.status IN (4, 6)
+      AND owned.resource_lease_token = $3
+    FOR UPDATE OF owned
+)
+UPDATE sandbox AS t
 SET status = 5, resource_lease_token = '', resource_lease_until = NULL, updated_at = now()
-WHERE tenant_id = $1
-  AND id = $2
-  AND status IN (4, 6)
-  AND resource_lease_token = $3
-  AND resource_lease_until > now()
+FROM current_lease l
+WHERE t.id = l.id AND l.resource_lease_until > clock_timestamp()
 `
 
 type CompleteSandboxRecycleParams struct {
@@ -2049,10 +2061,17 @@ func (q *Queries) MarkSandboxActive(ctx context.Context, arg MarkSandboxActivePa
 }
 
 const markSandboxRecycleOutboxFailed = `-- name: MarkSandboxRecycleOutboxFailed :one
-UPDATE sandbox_recycle_outbox
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM sandbox_recycle_outbox AS owned
+    WHERE owned.tenant_id = $2 AND owned.id = $3 AND owned.status = 2 AND owned.lease_token = $4
+    FOR UPDATE OF owned
+)
+UPDATE sandbox_recycle_outbox AS t
 SET status = 4, last_error = $1, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $2 AND id = $3 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, sandbox_id, source_ref, scope_ref, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.sandbox_id, t.source_ref, t.scope_ref, t.reason, t.trace_id, t.recycled_at, t.status, t.retry_count, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until
 `
 
 type MarkSandboxRecycleOutboxFailedParams struct {
@@ -2091,10 +2110,17 @@ func (q *Queries) MarkSandboxRecycleOutboxFailed(ctx context.Context, arg MarkSa
 }
 
 const markSandboxRecycleOutboxPublished = `-- name: MarkSandboxRecycleOutboxPublished :one
-UPDATE sandbox_recycle_outbox
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM sandbox_recycle_outbox AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2 AND owned.status = 2 AND owned.lease_token = $3
+    FOR UPDATE OF owned
+)
+UPDATE sandbox_recycle_outbox AS t
 SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
-RETURNING id, tenant_id, sandbox_id, source_ref, scope_ref, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.sandbox_id, t.source_ref, t.scope_ref, t.reason, t.trace_id, t.recycled_at, t.status, t.retry_count, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until
 `
 
 type MarkSandboxRecycleOutboxPublishedParams struct {
@@ -2202,13 +2228,17 @@ func (q *Queries) ReleaseSandboxResourceLease(ctx context.Context, arg ReleaseSa
 }
 
 const renewSandboxResourceLease = `-- name: RenewSandboxResourceLease :execrows
-UPDATE sandbox
-SET resource_lease_until = GREATEST(resource_lease_until, now() + $1::bigint * interval '1 second')
-WHERE tenant_id = $2
-  AND id = $3
-  AND status IN (1, 2, 4, 5, 6, 7, 8)
-  AND resource_lease_token = $4
-  AND resource_lease_until > now()
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.resource_lease_until
+    FROM sandbox AS owned
+    WHERE owned.tenant_id = $2 AND owned.id = $3
+      AND owned.status IN (1, 2, 4, 5, 6, 7, 8) AND owned.resource_lease_token = $4
+    FOR UPDATE OF owned
+)
+UPDATE sandbox AS s
+SET resource_lease_until = GREATEST(l.resource_lease_until, clock_timestamp() + $1::bigint * interval '1 second')
+FROM current_lease l
+WHERE s.id = l.id AND l.resource_lease_until > clock_timestamp()
 `
 
 type RenewSandboxResourceLeaseParams struct {
@@ -2668,11 +2698,17 @@ func (q *Queries) UpdateSandboxPhaseStatus(ctx context.Context, arg UpdateSandbo
 }
 
 const updateSandboxSnapshot = `-- name: UpdateSandboxSnapshot :one
-UPDATE sandbox SET snapshot_ref = $3, snapshot_domains = $4, snapshot_created_at = $5, snapshot_expire_at = $6, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-  AND resource_lease_token = $7
-  AND resource_lease_until > now()
-RETURNING id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, recycle_saved, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, resource_lease_token, resource_lease_until, created_at, updated_at
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.resource_lease_until
+    FROM sandbox AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2
+      AND owned.resource_lease_token = $7
+    FOR UPDATE OF owned
+)
+UPDATE sandbox AS t SET snapshot_ref = $3, snapshot_domains = $4, snapshot_created_at = $5, snapshot_expire_at = $6, updated_at = now()
+FROM current_lease l
+WHERE t.id = l.id AND l.resource_lease_until > clock_timestamp()
+RETURNING t.id, t.tenant_id, t.namespace, t.source_ref, t.scope_ref, t.composition_digest, t.composition_snapshot, t.access_profile, t.owner_account_id, t.shared_account_ids, t.phase, t.status, t.keep_alive, t.snapshot_enabled, t.code_storage_key, t.code_hash, t.recycle_saved, t.workspace_revision, t.init_code_ref, t.init_script_ref, t.snapshot_ref, t.snapshot_domains, t.snapshot_created_at, t.snapshot_expire_at, t.keep_alive_until, t.last_active_at, t.expire_at, t.resource_lease_token, t.resource_lease_until, t.created_at, t.updated_at
 `
 
 type UpdateSandboxSnapshotParams struct {

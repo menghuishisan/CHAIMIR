@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/privacy"
 
@@ -80,7 +81,7 @@ func readSimBackendAdapters(key string, errs *[]string) []SimBackendAdapterConfi
 		return nil
 	}
 	var out []SimBackendAdapterConfig
-	if err := decodeStrictJSON(raw, &out); err != nil {
+	if err := jsonx.DecodeStrictKnownFields([]byte(raw), &out); err != nil {
 		*errs = append(*errs, fmt.Sprintf("环境变量 %s 需为严格的后端计算能力 JSON 数组: %v", key, err))
 		return nil
 	}

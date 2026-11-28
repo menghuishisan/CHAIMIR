@@ -13,6 +13,7 @@ import (
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 )
 
 // ListTasks 按租户分页查询判题任务,供教师和学校管理员查看队列与人工评分项。
@@ -237,7 +238,7 @@ func (s *Service) ManualScore(ctx context.Context, tenantID, taskID, scorerID in
 	}
 	s.publishProgress(ctx, tenantID, taskID, JudgeTaskStatusDone, ProgressStageDone, "判题任务已完成")
 	if err := s.publishPendingOutbox(ctx); err != nil {
-		return JudgeTaskDTO{}, err
+		logging.ErrorContext(ctx, "judge manual score outbox drain failed", apperr.AsAppError(err).LogString())
 	}
 	return judgeTaskDTOFromModel(info), nil
 }

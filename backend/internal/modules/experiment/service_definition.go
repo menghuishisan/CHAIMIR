@@ -462,17 +462,10 @@ func (s *Service) validateExperimentComponents(ctx context.Context, item Experim
 // refreshContentUsageRefs 在发布时登记 M5 内容引用,用于删除保护和复用统计。
 func (s *Service) refreshContentUsageRefs(ctx context.Context, item Experiment) error {
 	refs := make([]contracts.ContentItemRef, 0, 1+len(item.Components.Checkpoints))
-	seen := map[string]bool{}
 	if item.TemplateRef != "" {
 		refs = append(refs, contracts.ContentItemRef{ItemCode: item.TemplateRef, ItemVersion: item.TemplateVersion})
-		seen[item.TemplateRef+"\x00"+item.TemplateVersion] = true
 	}
 	for _, cp := range item.Components.Checkpoints {
-		key := cp.ItemCode + "\x00" + cp.ItemVersion
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
 		refs = append(refs, contracts.ContentItemRef{ItemCode: cp.ItemCode, ItemVersion: cp.ItemVersion})
 	}
 	sourceRef := fmt.Sprintf("experiment:%d:definition:%s", item.CreatedAt.Year(), ids.Format(item.ID))

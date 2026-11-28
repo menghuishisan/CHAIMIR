@@ -3,13 +3,10 @@
 // 选项是整行可点的描边行,选中时玉色描边与浅底;填空逐格输入,选择答案不通过换行字符串中转。
 
 import type { AssignmentItem, TheoryAnswer } from '@chaimir/api-client'
-import { Callout, Checkbox, FormField, Input, RadioGroup, RadioItem, Textarea } from '@chaimir/ui'
+import { Callout } from '@chaimir/ui'
+import { TheoryAnswerControl } from '../../../../components/TheoryAnswerControl'
 import { contentDifficultyLabel, theoryQuestionTypeLabel } from '../../../../utils/labels/content'
-import { itemChoices, itemStatement } from '../../assignment-answers'
-
-/** 选项行:卡内强调块,整行可点;选中由控件本身的勾选表达,玉色浅底只是加强(纸面上不用边框圈盒) */
-const OPTION_ROW_CLASS =
-  'w-full rounded-md bg-surface-hover px-3.5 py-3 transition-colors duration-fast hover:bg-primary-soft has-aria-checked:bg-primary-soft'
+import { itemStatement } from '../../assignment-answers'
 
 /** questionAnchorId 是题目卡片的锚点,答题卡与确认弹窗据此跳转 */
 export function questionAnchorId(itemId: string): string {
@@ -73,9 +70,9 @@ export function QuestionCard({ item, seq, value, onChange, onBlur, disabled }: Q
       )}
 
       <div className="mt-5">
-        <AnswerControl
-          item={item}
-          questionType={questionType}
+        <TheoryAnswerControl
+          id={item.id}
+          body={item.body}
           headingId={headingId}
           value={value}
           onChange={onChange}
@@ -85,153 +82,4 @@ export function QuestionCard({ item, seq, value, onChange, onBlur, disabled }: Q
       </div>
     </section>
   )
-}
-
-interface AnswerControlProps extends Omit<QuestionCardProps, 'seq'> {
-  questionType: string
-  headingId: string
-}
-
-/** AnswerControl 按题型给出作答控件;无障碍名称取题目标题 */
-function AnswerControl({
-  item,
-  questionType,
-  headingId,
-  value,
-  onChange,
-  onBlur,
-  disabled,
-}: AnswerControlProps) {
-  const choices = itemChoices(item)
-  const textValue = typeof value === 'string' ? value : ''
-
-  if (
-    (questionType === 'single_choice' || questionType === 'multiple_choice') &&
-    choices.length === 0
-  ) {
-    return <Callout tone="danger">这道题的选项暂未提供,请联系老师确认。</Callout>
-  }
-
-  if (questionType === 'single_choice') {
-    return (
-      <RadioGroup
-        aria-labelledby={headingId}
-        value={textValue}
-        onValueChange={onChange}
-        disabled={disabled}
-      >
-        {choices.map((choice, index) => (
-          <RadioItem
-            key={index}
-            value={choice}
-            label={choice}
-            disabled={disabled}
-            onBlur={onBlur}
-            className={OPTION_ROW_CLASS}
-          />
-        ))}
-      </RadioGroup>
-    )
-  }
-
-  if (questionType === 'multiple_choice') {
-    const selected = Array.isArray(value) ? value : []
-    return (
-      <div role="group" aria-labelledby={headingId} className="flex flex-col gap-2">
-        <p className="text-sm text-ink-sub">可以选多个</p>
-        {choices.map((choice, index) => (
-          <Checkbox
-            key={index}
-            checked={selected.includes(choice)}
-            label={choice}
-            disabled={disabled}
-            onBlur={onBlur}
-            className={OPTION_ROW_CLASS}
-            onCheckedChange={(checked) => {
-              const next = new Set(selected)
-              if (checked) next.add(choice)
-              else next.delete(choice)
-              // 按选项顺序保存,不随点击顺序变化
-              onChange(choices.filter((entry) => next.has(entry)))
-            }}
-          />
-        ))}
-      </div>
-    )
-  }
-
-  if (questionType === 'true_false') {
-    return (
-      <RadioGroup
-        aria-labelledby={headingId}
-        value={typeof value === 'boolean' ? String(value) : ''}
-        onValueChange={(choice) => onChange(choice === 'true')}
-        disabled={disabled}
-        className="grid grid-cols-2 gap-3"
-      >
-        <RadioItem
-          value="true"
-          label="正确"
-          disabled={disabled}
-          onBlur={onBlur}
-          className={OPTION_ROW_CLASS}
-        />
-        <RadioItem
-          value="false"
-          label="错误"
-          disabled={disabled}
-          onBlur={onBlur}
-          className={OPTION_ROW_CLASS}
-        />
-      </RadioGroup>
-    )
-  }
-
-  if (questionType === 'fill_blank') {
-    const blanks = Array.isArray(value)
-      ? value
-      : Array.from({ length: Number(item.body?.blank_count) }, () => '')
-    if (blanks.length === 0) {
-      return <Callout tone="danger">这道题的填空位置暂未提供,请联系老师确认。</Callout>
-    }
-    return (
-      <div className="grid gap-3 sm:grid-cols-2">
-        {blanks.map((blank, index) => (
-          <FormField
-            key={index}
-            label={`第 ${index + 1} 空`}
-            htmlFor={`answer-${item.id}-${index}`}
-          >
-            <Input
-              id={`answer-${item.id}-${index}`}
-              value={blank}
-              disabled={disabled}
-              onChange={(event) =>
-                onChange(
-                  blanks.map((entry, position) => (position === index ? event.target.value : entry))
-                )
-              }
-              onBlur={onBlur}
-            />
-          </FormField>
-        ))}
-      </div>
-    )
-  }
-
-  if (questionType === 'short_answer') {
-    return (
-      <Textarea
-        aria-labelledby={headingId}
-        value={textValue}
-        disabled={disabled}
-        rows={6}
-        placeholder="写下你的解答"
-        onChange={(event) => onChange(event.target.value)}
-        onBlur={onBlur}
-      />
-    )
-  }
-
-  return <Callout tone="danger">题目格式暂不可用,请联系老师确认。</Callout>
 }

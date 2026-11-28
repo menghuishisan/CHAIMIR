@@ -2,7 +2,6 @@
 package main
 
 import (
-	"fmt"
 	"time"
 
 	"chaimir/internal/contracts"
@@ -29,12 +28,6 @@ type TransferDeps struct {
 
 // RegisterTransfer 构造统一导入导出中心 store/service 并注册 HTTP 路由。
 func RegisterTransfer(deps TransferDeps) (*transfer.Service, error) {
-	if deps.Router == nil {
-		return nil, fmt.Errorf("transfer 缺少 HTTP router")
-	}
-	if deps.Database == nil {
-		return nil, fmt.Errorf("transfer 缺少 database")
-	}
 	store := transfer.NewStore(deps.Database)
 	svc, err := transfer.NewService(transfer.ServiceDeps{
 		Store: store,

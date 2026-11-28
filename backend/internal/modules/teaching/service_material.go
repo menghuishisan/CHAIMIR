@@ -65,7 +65,6 @@ func (s *Service) UploadLessonMaterial(ctx context.Context, lessonID int64, req 
 		NestedResourceIDs: []string{ids.Format(s.ids.Generate())},
 		FileName:          req.FileName,
 		ContentType:       contentType,
-		Size:              int64(len(req.Content)),
 		MaxBytes:          s.materialMaxBytes,
 		ExpectedBucket:    s.storage.BucketAttach(),
 		AllowedFileName:   true,

@@ -2,8 +2,6 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"time"
 
 	"chaimir/internal/contracts"
@@ -39,19 +37,7 @@ type SandboxModuleDeps struct {
 }
 
 // RegisterSandboxModule 构造沙箱 store/service/orchestrator,注册路由与后台回收任务。
-func RegisterSandboxModule(ctx context.Context, deps SandboxModuleDeps) (*sandbox.Service, error) {
-	if ctx == nil {
-		return nil, fmt.Errorf("sandbox module 缺少后台任务 context")
-	}
-	if deps.Router == nil {
-		return nil, fmt.Errorf("sandbox module 缺少 HTTP router")
-	}
-	if deps.Database == nil {
-		return nil, fmt.Errorf("sandbox module 缺少 database")
-	}
-	if deps.K8s == nil {
-		return nil, fmt.Errorf("sandbox module 缺少 K8s client")
-	}
+func RegisterSandboxModule(tasks *background.Runner, deps SandboxModuleDeps) (*sandbox.Service, error) {
 	store := sandbox.NewStore(deps.Database)
 	orchestrator := sandbox.NewK8sOrchestrator(deps.K8s, deps.Config)
 	svc, err := sandbox.NewService(sandbox.ServiceDeps{
@@ -75,7 +61,7 @@ func RegisterSandboxModule(ctx context.Context, deps SandboxModuleDeps) (*sandbo
 	if err := sandbox.RegisterEventSubscriptions(deps.EventBus, svc); err != nil {
 		return nil, err
 	}
-	if err := background.Start(ctx,
+	if err := tasks.Start(
 		background.Task{
 			Name:     "sandbox.recycle",
 			Interval: time.Duration(deps.Config.RecyclePollIntervalSeconds) * time.Second,

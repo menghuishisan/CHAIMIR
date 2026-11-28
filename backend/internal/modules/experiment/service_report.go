@@ -69,7 +69,6 @@ func (s *Service) SubmitReport(ctx context.Context, instanceID int64, req Report
 		NestedResourceIDs: []string{ids.Format(id.AccountID)},
 		FileName:          storedFileName,
 		ContentType:       contentType,
-		Size:              int64(len(req.Content)),
 		MaxBytes:          s.reportMaxBytes,
 		ExpectedBucket:    s.storage.BucketReport(),
 		AllowedFileName:   true,

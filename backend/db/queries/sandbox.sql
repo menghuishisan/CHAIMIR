@@ -371,13 +371,17 @@ WHERE tenant_id = sqlc.arg(tenant_id)
 RETURNING *;
 
 -- name: RenewSandboxResourceLease :execrows
-UPDATE sandbox
-SET resource_lease_until = GREATEST(resource_lease_until, now() + sqlc.arg(lease_seconds)::bigint * interval '1 second')
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND id = sqlc.arg(id)
-  AND status IN (1, 2, 4, 5, 6, 7, 8)
-  AND resource_lease_token = sqlc.arg(lease_token)
-  AND resource_lease_until > now();
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.resource_lease_until
+    FROM sandbox AS owned
+    WHERE owned.tenant_id = sqlc.arg(tenant_id) AND owned.id = sqlc.arg(id)
+      AND owned.status IN (1, 2, 4, 5, 6, 7, 8) AND owned.resource_lease_token = sqlc.arg(lease_token)
+    FOR UPDATE OF owned
+)
+UPDATE sandbox AS s
+SET resource_lease_until = GREATEST(l.resource_lease_until, clock_timestamp() + sqlc.arg(lease_seconds)::bigint * interval '1 second')
+FROM current_lease l
+WHERE s.id = l.id AND l.resource_lease_until > clock_timestamp();
 
 -- name: ReleaseSandboxResourceLease :execrows
 UPDATE sandbox
@@ -387,16 +391,32 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND resource_lease_token = sqlc.arg(lease_token);
 
 -- name: CompleteSandboxRecycle :execrows
-UPDATE sandbox
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.resource_lease_until
+    FROM sandbox AS owned
+    WHERE owned.tenant_id = sqlc.arg(tenant_id)
+      AND owned.id = sqlc.arg(id)
+      AND owned.status IN (4, 6)
+      AND owned.resource_lease_token = sqlc.arg(lease_token)
+    FOR UPDATE OF owned
+)
+UPDATE sandbox AS t
 SET status = 5, resource_lease_token = '', resource_lease_until = NULL, updated_at = now()
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND id = sqlc.arg(id)
-  AND status IN (4, 6)
-  AND resource_lease_token = sqlc.arg(lease_token)
-  AND resource_lease_until > now();
+FROM current_lease l
+WHERE t.id = l.id AND l.resource_lease_until > clock_timestamp();
 
 -- name: CompleteExpiredSandboxSnapshotCleanup :execrows
-UPDATE sandbox
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.resource_lease_until
+    FROM sandbox AS owned
+    WHERE owned.tenant_id = sqlc.arg(tenant_id)
+      AND owned.id = sqlc.arg(id)
+      AND owned.status = 5
+      AND owned.snapshot_expire_at <= now()
+      AND owned.resource_lease_token = sqlc.arg(lease_token)
+    FOR UPDATE OF owned
+)
+UPDATE sandbox AS t
 SET snapshot_ref = NULL,
     snapshot_domains = '[]'::jsonb,
     snapshot_created_at = NULL,
@@ -404,12 +424,8 @@ SET snapshot_ref = NULL,
     resource_lease_token = '',
     resource_lease_until = NULL,
     updated_at = now()
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND id = sqlc.arg(id)
-  AND status = 5
-  AND snapshot_expire_at <= now()
-  AND resource_lease_token = sqlc.arg(lease_token)
-  AND resource_lease_until > now();
+FROM current_lease l
+WHERE t.id = l.id AND l.resource_lease_until > clock_timestamp();
 
 -- name: QueueSandboxRecycle :execrows
 UPDATE sandbox
@@ -498,11 +514,17 @@ SELECT s.*
 FROM sandbox s JOIN updated u ON u.id = s.id;
 
 -- name: UpdateSandboxSnapshot :one
-UPDATE sandbox SET snapshot_ref = $3, snapshot_domains = $4, snapshot_created_at = $5, snapshot_expire_at = $6, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-  AND resource_lease_token = sqlc.arg(lease_token)
-  AND resource_lease_until > now()
-RETURNING *;
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.resource_lease_until
+    FROM sandbox AS owned
+    WHERE owned.tenant_id = $1 AND owned.id = $2
+      AND owned.resource_lease_token = sqlc.arg(lease_token)
+    FOR UPDATE OF owned
+)
+UPDATE sandbox AS t SET snapshot_ref = $3, snapshot_domains = $4, snapshot_created_at = $5, snapshot_expire_at = $6, updated_at = now()
+FROM current_lease l
+WHERE t.id = l.id AND l.resource_lease_until > clock_timestamp()
+RETURNING t.*;
 
 -- name: CreateSandboxEvent :one
 INSERT INTO sandbox_event (id, tenant_id, sandbox_id, event_type, detail, created_at)
@@ -536,16 +558,30 @@ WHERE outbox.id = candidates.id
 RETURNING outbox.id, outbox.tenant_id, outbox.sandbox_id, outbox.source_ref, outbox.scope_ref, outbox.reason, outbox.trace_id, outbox.recycled_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until;
 
 -- name: MarkSandboxRecycleOutboxPublished :one
-UPDATE sandbox_recycle_outbox
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM sandbox_recycle_outbox AS owned
+    WHERE owned.tenant_id = sqlc.arg(tenant_id) AND owned.id = sqlc.arg(id) AND owned.status = 2 AND owned.lease_token = sqlc.arg(lease_token)
+    FOR UPDATE OF owned
+)
+UPDATE sandbox_recycle_outbox AS t
 SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id) AND status = 2 AND lease_token = sqlc.arg(lease_token) AND lease_until > now()
-RETURNING *;
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.*;
 
 -- name: MarkSandboxRecycleOutboxFailed :one
-UPDATE sandbox_recycle_outbox
+WITH current_lease AS MATERIALIZED (
+    SELECT owned.id, owned.lease_until
+    FROM sandbox_recycle_outbox AS owned
+    WHERE owned.tenant_id = sqlc.arg(tenant_id) AND owned.id = sqlc.arg(id) AND owned.status = 2 AND owned.lease_token = sqlc.arg(lease_token)
+    FOR UPDATE OF owned
+)
+UPDATE sandbox_recycle_outbox AS t
 SET status = 4, last_error = sqlc.arg(last_error), updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id) AND status = 2 AND lease_token = sqlc.arg(lease_token) AND lease_until > now()
-RETURNING *;
+FROM current_lease l
+WHERE t.id = l.id AND l.lease_until > clock_timestamp()
+RETURNING t.*;
 
 -- name: StatsByTenant :one
 SELECT

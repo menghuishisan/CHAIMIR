@@ -27,7 +27,7 @@ func (s *Service) PrepareContentClone(ctx context.Context, sourceTenantID int64,
 			err = storage.CompensateUpload(ctx, s.cleanupTimeout, err, false, plan.Discard)
 		}
 	}()
-	err = s.store.TenantTx(ctx, sourceTenantID, func(ctx context.Context, tx TxStore) error {
+	err = s.store.TenantReadTx(ctx, sourceTenantID, func(ctx context.Context, tx TxStore) error {
 		for _, ref := range refs {
 			if _, ok := plan.Refs[ref]; ok {
 				continue

@@ -25,7 +25,7 @@ type Querier interface {
 	DeletePaperItems(ctx context.Context, arg DeletePaperItemsParams) error
 	DeprecateContentItem(ctx context.Context, arg DeprecateContentItemParams) (ContentItem, error)
 	GetActiveContentCategory(ctx context.Context, arg GetActiveContentCategoryParams) (int64, error)
-	GetContentItemByID(ctx context.Context, arg GetContentItemByIDParams) (ContentItem, error)
+	GetContentItemForUpdate(ctx context.Context, arg GetContentItemForUpdateParams) (ContentItem, error)
 	GetContentItemWithBodyByID(ctx context.Context, arg GetContentItemWithBodyByIDParams) (GetContentItemWithBodyByIDRow, error)
 	GetContentItemWithBodyByRef(ctx context.Context, arg GetContentItemWithBodyByRefParams) (GetContentItemWithBodyByRefRow, error)
 	GetPaper(ctx context.Context, arg GetPaperParams) (Paper, error)
@@ -38,6 +38,8 @@ type Querier interface {
 	ListPaperItems(ctx context.Context, arg ListPaperItemsParams) ([]PaperItem, error)
 	ListPapers(ctx context.Context, arg ListPapersParams) ([]Paper, error)
 	LockContentCategoryScope(ctx context.Context, dollar_1 int64) error
+	LockContentUsageScope(ctx context.Context, dollar_1 int64) error
+	LockPaper(ctx context.Context, arg LockPaperParams) (int64, error)
 	PublishContentItem(ctx context.Context, arg PublishContentItemParams) (ContentItem, error)
 	RandomPickContentItems(ctx context.Context, arg RandomPickContentItemsParams) ([]ContentItem, error)
 	RefreshContentUsageCount(ctx context.Context, arg RefreshContentUsageCountParams) (ContentItem, error)

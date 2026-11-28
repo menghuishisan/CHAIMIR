@@ -3,7 +3,7 @@ package identity
 
 import (
 	"context"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -159,18 +159,10 @@ func (s *Service) CreateAccountByAdmin(ctx context.Context, req CreateAccountReq
 		}
 		account = row
 		if req.UseActivation {
-			code, err := crypto.RandomToken(16)
+			activationPlain, err = s.createActivationCodeInTx(ctx, tx, id.TenantID, accountID, id.AccountID)
 			if err != nil {
 				return err
 			}
-			hash, err := s.hashSecret(code)
-			if err != nil {
-				return err
-			}
-			if _, err := tx.CreateActivationCode(ctx, CreateActivationInput{ID: s.ids.Generate(), TenantID: id.TenantID, AccountID: accountID, CodeHash: hash, ExpireAt: s.activationExpireAt(), CreatedBy: id.AccountID}); err != nil {
-				return err
-			}
-			activationPlain = code
 		}
 		return s.auditAccount(ctx, id, "account.create", account.ID)
 	}); err != nil {
@@ -417,7 +409,7 @@ func (s *Service) BatchUpdateAccountStatusByAdmin(ctx context.Context, req Batch
 			accountIDs = append(accountIDs, accountID)
 		}
 	}
-	sort.Slice(accountIDs, func(i, j int) bool { return accountIDs[i] < accountIDs[j] })
+	slices.Sort(accountIDs)
 	id, err := requireTenantRole(ctx, s, contracts.RoleSchoolAdmin)
 	if err != nil {
 		return err
@@ -462,18 +454,7 @@ func (s *Service) ListImportBatchesByAdmin(ctx context.Context) ([]ImportBatchDT
 
 // requireTenantRole 校验当前租户账号具备指定角色。
 func requireTenantRole(ctx context.Context, s *Service, role string) (tenant.Identity, error) {
-	id, ok := tenant.FromContext(ctx)
-	if !ok || id.IsPlatform || id.TenantID <= 0 {
-		return tenant.Identity{}, apperr.ErrUnauthorized
-	}
-	has, err := s.HasRole(ctx, id.AccountID, role)
-	if err != nil {
-		return tenant.Identity{}, err
-	}
-	if !has {
-		return tenant.Identity{}, apperr.ErrForbidden
-	}
-	return id, nil
+	return requireTenantAnyRole(ctx, s, role)
 }
 
 // requireTenantAnyRole 校验当前租户账号至少具备一个允许角色。
@@ -496,12 +477,23 @@ func requireTenantAnyRole(ctx context.Context, s *Service, roles ...string) (ten
 
 // hasRoleNumber 判断账号角色快照是否包含目标数字角色,用于状态变更前的服务端约束。
 func hasRoleNumber(roles []int16, want int16) bool {
-	for _, role := range roles {
-		if role == want {
-			return true
-		}
+	return slices.Contains(roles, want)
+}
+
+// createActivationCodeInTx 统一单账号、导入与首管开通的激活码签发,明文只返回一次。
+func (s *Service) createActivationCodeInTx(ctx context.Context, tx TxStore, tenantID, accountID, createdBy int64) (string, error) {
+	code, err := crypto.RandomToken(16)
+	if err != nil {
+		return "", err
 	}
-	return false
+	hash, err := s.hashSecret(code)
+	if err != nil {
+		return "", err
+	}
+	if _, err := tx.CreateActivationCode(ctx, CreateActivationInput{ID: s.ids.Generate(), TenantID: tenantID, AccountID: accountID, CodeHash: hash, ExpireAt: s.activationExpireAt(), CreatedBy: createdBy}); err != nil {
+		return "", err
+	}
+	return code, nil
 }
 
 // auditAccount 写账号管理类审计。

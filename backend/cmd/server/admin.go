@@ -2,8 +2,6 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"time"
 
 	"chaimir/internal/contracts"
@@ -48,22 +46,7 @@ type AdminModuleDeps struct {
 }
 
 // RegisterAdminModule 构造管理后台 store/service 并注册 HTTP 路由。
-func RegisterAdminModule(ctx context.Context, deps AdminModuleDeps) (*admin.Service, error) {
-	if ctx == nil {
-		return nil, fmt.Errorf("admin module 缺少后台任务 context")
-	}
-	if deps.Router == nil {
-		return nil, fmt.Errorf("admin module 缺少 HTTP router")
-	}
-	if deps.Database == nil {
-		return nil, fmt.Errorf("admin module 缺少 database")
-	}
-	if deps.Transfer == nil {
-		return nil, fmt.Errorf("admin module 缺少 transfer service")
-	}
-	if deps.Storage == nil {
-		return nil, fmt.Errorf("admin module 缺少统一对象存储")
-	}
+func RegisterAdminModule(tasks *background.Runner, deps AdminModuleDeps) (*admin.Service, error) {
 	store := admin.NewStore(deps.Database)
 	svc, err := admin.NewService(admin.ServiceDeps{
 		CleanupTimeout: deps.CleanupTimeout,
@@ -94,7 +77,7 @@ func RegisterAdminModule(ctx context.Context, deps AdminModuleDeps) (*admin.Serv
 	if err := admin.RegisterRoutes(deps.Router, svc, deps.Auth, deps.Roles); err != nil {
 		return nil, err
 	}
-	if err := background.Start(ctx,
+	if err := tasks.Start(
 		background.Task{Name: "admin.alerts", Interval: time.Duration(deps.Config.AlertPollSeconds) * time.Second, Run: svc.RunAlertsOnce},
 		background.Task{
 			Name:     "admin.statistics_snapshot",
